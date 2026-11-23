@@ -23,7 +23,23 @@ type darwinManager struct {
 }
 
 func NewManager(home string) Manager {
-	return &darwinManager{home: home}
+	if hasLaunchdGUISession() {
+		return &darwinManager{home: home}
+	}
+	return &detachedManager{
+		home: home,
+		note: "macOS GUI launchd session unavailable (for example over headless SSH); running in detached background mode without autostart",
+	}
+}
+
+func hasLaunchdGUISession() bool {
+	if _, err := exec.LookPath("launchctl"); err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	target := fmt.Sprintf("gui/%d", os.Getuid())
+	return exec.CommandContext(ctx, "launchctl", "print", target).Run() == nil
 }
 
 func (m *darwinManager) ManagedBy() string       { return ManagedLaunchd }
@@ -158,6 +174,9 @@ func (m *darwinManager) Start(ctx context.Context, opts InstallOptions) error {
 	// Always bootout any cached in-memory launchd definition before bootstrapping
 	// so plist updates written by `service install` take effect immediately.
 	_ = m.Stop(ctx)
+	// Clear any prior disabled override (e.g. from System Settings Login Items) so
+	// bootstrap does not fail with EIO (exit status 5).
+	_ = exec.CommandContext(ctx, "launchctl", "enable", m.serviceTarget()).Run()
 
 	var lastOut string
 	var lastErr error

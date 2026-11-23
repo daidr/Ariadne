@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const systemdUnitName = "ariadne.service"
@@ -22,15 +23,30 @@ func NewManager(home string) Manager {
 	if hasSystemdUser() {
 		return &linuxSystemdManager{home: home}
 	}
-	return &detachedManager{home: home}
+	return &detachedManager{
+		home: home,
+		note: "systemd user session unavailable; running in detached background mode without autostart",
+	}
+}
+
+func systemdCommand(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "systemctl", append([]string{"--user"}, args...)...)
+	if os.Getenv("XDG_RUNTIME_DIR") == "" {
+		runtimeDir := fmt.Sprintf("/run/user/%d", os.Getuid())
+		if _, err := os.Stat(filepath.Join(runtimeDir, "bus")); err == nil {
+			cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+runtimeDir)
+		}
+	}
+	return cmd
 }
 
 func hasSystemdUser() bool {
 	if _, err := exec.LookPath("systemctl"); err != nil {
 		return false
 	}
-	cmd := exec.Command("systemctl", "--user", "show-environment")
-	return cmd.Run() == nil
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return systemdCommand(ctx, "show-environment").Run() == nil
 }
 
 func (m *linuxSystemdManager) ManagedBy() string       { return ManagedSystemd }
@@ -65,7 +81,7 @@ func (m *linuxSystemdManager) Info(ctx context.Context) (ServiceInfo, error) {
 		return info, err
 	}
 	info.Installed = true
-	if out, err := exec.CommandContext(ctx, "systemctl", "--user", "is-enabled", systemdUnitName).Output(); err == nil {
+	if out, err := systemdCommand(ctx, "is-enabled", systemdUnitName).Output(); err == nil {
 		info.Autostart = strings.TrimSpace(string(out)) == "enabled"
 	}
 	return info, nil
@@ -115,15 +131,15 @@ func (m *linuxSystemdManager) Install(ctx context.Context, opts InstallOptions) 
 	if err := os.WriteFile(path, []byte(renderSystemdUnit(opts)), 0o644); err != nil {
 		return ServiceInfo{}, err
 	}
-	if out, err := exec.CommandContext(ctx, "systemctl", "--user", "daemon-reload").CombinedOutput(); err != nil {
+	if out, err := systemdCommand(ctx, "daemon-reload").CombinedOutput(); err != nil {
 		return ServiceInfo{}, fmt.Errorf("systemctl daemon-reload: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	if opts.Autostart {
-		if out, err := exec.CommandContext(ctx, "systemctl", "--user", "enable", systemdUnitName).CombinedOutput(); err != nil {
+		if out, err := systemdCommand(ctx, "enable", systemdUnitName).CombinedOutput(); err != nil {
 			return ServiceInfo{}, fmt.Errorf("systemctl enable: %w (%s)", err, strings.TrimSpace(string(out)))
 		}
 	} else {
-		_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", systemdUnitName).Run()
+		_ = systemdCommand(ctx, "disable", systemdUnitName).Run()
 	}
 	info, err := m.Info(ctx)
 	if err == nil && info.Autostart {
@@ -137,11 +153,11 @@ func (m *linuxSystemdManager) Uninstall(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", "--now", systemdUnitName).Run()
+	_ = systemdCommand(ctx, "disable", "--now", systemdUnitName).Run()
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	_ = exec.CommandContext(ctx, "systemctl", "--user", "daemon-reload").Run()
+	_ = systemdCommand(ctx, "daemon-reload").Run()
 	return nil
 }
 
@@ -155,14 +171,14 @@ func (m *linuxSystemdManager) Start(ctx context.Context, opts InstallOptions) er
 			return err
 		}
 	}
-	if out, err := exec.CommandContext(ctx, "systemctl", "--user", "start", systemdUnitName).CombinedOutput(); err != nil {
+	if out, err := systemdCommand(ctx, "start", systemdUnitName).CombinedOutput(); err != nil {
 		return fmt.Errorf("systemctl start: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
 func (m *linuxSystemdManager) Stop(ctx context.Context) error {
-	if out, err := exec.CommandContext(ctx, "systemctl", "--user", "stop", systemdUnitName).CombinedOutput(); err != nil {
+	if out, err := systemdCommand(ctx, "stop", systemdUnitName).CombinedOutput(); err != nil {
 		msg := strings.ToLower(string(out))
 		if strings.Contains(msg, "not loaded") || strings.Contains(msg, "not found") {
 			return nil

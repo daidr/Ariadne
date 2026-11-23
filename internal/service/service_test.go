@@ -366,3 +366,49 @@ func TestControllerWhenIdleTriggersAfterQuietWindow(t *testing.T) {
 		t.Fatal("when-idle did not trigger shutdown after quiet window")
 	}
 }
+
+func TestDetachedManagerLifecycleAndNote(t *testing.T) {
+	home := t.TempDir()
+	note := "headless SSH fallback note"
+	mgr := &detachedManager{home: home, note: note}
+
+	info, err := mgr.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info before install: %v", err)
+	}
+	if info.Installed || info.Autostart || info.SupportsAutostart || info.ManagedBy != ManagedDetached || info.Note != note {
+		t.Fatalf("unexpected initial detached info: %+v", info)
+	}
+
+	if err := mgr.Start(context.Background(), InstallOptions{}); err == nil {
+		t.Fatal("expected error when starting without executable")
+	}
+
+	info, err = mgr.Install(context.Background(), InstallOptions{
+		Executable: "/usr/local/bin/ariadne",
+		Host:       "127.0.0.1",
+		Port:       7428,
+		Autostart:  true,
+	})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if !info.Installed || info.Autostart || info.LogPath != LogPath(home) || info.Note != note {
+		t.Fatalf("unexpected installed detached info: %+v", info)
+	}
+	if stat, err := os.Stat(filepath.Dir(info.LogPath)); err != nil || !stat.IsDir() {
+		t.Fatalf("expected log directory to be created: stat=%v err=%v", stat, err)
+	}
+	cfg, err := readServiceConfig(home)
+	if err != nil || cfg == nil || cfg.Home != home {
+		t.Fatalf("expected stored service config with defaulted home=%q, got %+v err=%v", home, cfg, err)
+	}
+
+	if err := mgr.Uninstall(context.Background()); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+	info, err = mgr.Info(context.Background())
+	if err != nil || info.Installed {
+		t.Fatalf("expected uninstalled after Uninstall, got %+v err=%v", info, err)
+	}
+}
