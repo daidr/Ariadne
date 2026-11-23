@@ -25,6 +25,7 @@ const (
 type args = map[string]any
 type tool struct {
 	spec       sdk.Tool
+	readOnly   bool
 	run        func(context.Context, args) (string, error)
 	call       func(context.Context, args) (string, []any, error)
 	withCallID func(context.Context, string, args) (string, error)
@@ -37,6 +38,12 @@ func specification(name, description string, fields args, required []string, run
 		properties["required"] = required
 	}
 	return tool{spec: sdk.Tool{Name: name, Description: description, Parameters: properties}, run: run}
+}
+
+func readOnlySpec(name, description string, fields args, required []string, run func(context.Context, args) (string, error)) tool {
+	entry := specification(name, description, fields, required, run)
+	entry.readOnly = true
+	return entry
 }
 
 func (turn *turn) readSkill(ctx context.Context, input args) (string, error) {
@@ -182,11 +189,11 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 		turn.readAttachmentTool(),
 		specification("update_todo", "Replace your live checklist. Keep completed items and put next steps in order.",
 			args{"items": arrayOf(args{"type": "object", "properties": args{"label": field("string"), "status": args{"type": "string", "enum": []string{"doing", "next", "waiting", "done"}}, "detail": field("string")}, "required": []string{"label", "status"}})}, []string{"items"}, turn.updateTodo),
-		specification("search_messages", "Search messages and thread titles in the current project.",
+		readOnlySpec("search_messages", "Search messages and thread titles in the current project.",
 			args{"query": field("string")}, []string{"query"}, func(ctx context.Context, input args) (string, error) {
 				return reply(turn.Repository.Search(ctx, conversation.ProjectID, text(input, "query")))
 			}),
-		specification("list_messages", "Read recent messages of this conversation with their IDs.",
+		readOnlySpec("list_messages", "Read recent messages of this conversation with their IDs.",
 			args{"limit": field("integer")}, nil, func(ctx context.Context, input args) (string, error) {
 				return reply(turn.recentMessages(ctx, conversation.ID, input))
 			}),
@@ -200,7 +207,7 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 			}),
 	}
 	if turn.skills != nil && len(turn.skills.List()) > 0 {
-		specs = append(specs, specification("read_skill", "Read a skill or a relative file from its folder.",
+		specs = append(specs, readOnlySpec("read_skill", "Read a skill or a relative file from its folder.",
 			args{"name": field("string"), "file": field("string")}, []string{"name"}, turn.readSkill))
 	}
 	if conversation.Role == "thread" {
@@ -234,7 +241,7 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 				}, []string{"threadId"}, turn.linkThreadNode),
 			specification("message_thread", "Send instructions or relay the user's messages to a thread of this project.",
 				args{"threadId": threadIDField(), "content": field("string"), "userMessages": userMessagesField("content")}, []string{"threadId"}, turn.messageThread),
-			specification("list_threads", "List discussion threads in the current project with their threadId, title, stage and linked nodeId.",
+			readOnlySpec("list_threads", "List discussion threads in the current project with their threadId, title, stage and linked nodeId.",
 				args{}, nil, func(ctx context.Context, _ args) (string, error) {
 					threads, err := turn.Repository.ListThreads(ctx, conversation.ProjectID)
 					var result []args
@@ -290,12 +297,12 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 	}
 	if turn.Workspaces != nil && (project.Source != nil || len(projectReferences) > 0 || ownReferences) {
 		specs = append(specs,
-			specification("list_dir", "List files and directories relative to a source. Pass source to select a named file source.",
+			readOnlySpec("list_dir", "List files and directories relative to a source. Pass source to select a named file source.",
 				args{"path": field("string"), "source": field("string"), "reference": field("string")}, nil, turn.listDirectory),
 			turn.readFileTool(),
-			specification("search", "Search tracked and unignored files for a regular expression. Results include file paths and matching line numbers. Pass source to select a named file source.",
+			readOnlySpec("search", "Search tracked and unignored files for a regular expression. Results include file paths and matching line numbers. Pass source to select a named file source.",
 				args{"path": field("string"), "source": field("string"), "reference": field("string"), "pattern": field("string"), "glob": field("string"), "ignoreCase": field("boolean")}, []string{"pattern"}, turn.searchFiles),
-			specification("find_files", "Find tracked and unignored files by a glob. A pattern without a slash matches names at any depth. Pass source to select a named file source.",
+			readOnlySpec("find_files", "Find tracked and unignored files by a glob. A pattern without a slash matches names at any depth. Pass source to select a named file source.",
 				args{"path": field("string"), "source": field("string"), "reference": field("string"), "pattern": field("string")}, []string{"pattern"}, turn.findFiles),
 		)
 		if conversation.Role == "thread" && (project.Source != nil || ownReferences) {
@@ -513,7 +520,7 @@ func (turn *turn) source(ctx context.Context, input args) (sdk.SourceView, error
 		}
 		view, err := turn.Workspaces.ForThreadSource(ctx, conversation.ProjectID, owner, sourceID)
 		if err == nil && thread.Workspace == nil {
-			turn.instructionsDirty = true
+			turn.instructionsDirty.Store(true)
 		}
 		return view, err
 	}

@@ -104,7 +104,7 @@ func (turn *turn) editFile(ctx context.Context, input args) (string, error) {
 		return "", err
 	}
 	turn.fileTracker().noteFile(turn.conversation.ID, sourceID, path, []byte(edited))
-	turn.instructionsDirty = true
+	turn.instructionsDirty.Store(true)
 	return fmt.Sprintf("Replaced %d occurrence(s) in %s.", total, path) + turn.checkAfterEdit(ctx, thread, workspace, []string{path}), nil
 }
 
@@ -227,7 +227,7 @@ func (turn *turn) applyPatch(ctx context.Context, input args) (string, error) {
 		}
 	}
 	var written, done []string
-	turn.instructionsDirty = true
+	turn.instructionsDirty.Store(true)
 	for _, change := range ordered {
 		if change.after == nil || change.before != nil && *change.before == *change.after {
 			continue

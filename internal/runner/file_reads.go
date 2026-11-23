@@ -22,6 +22,7 @@ func (turn *turn) readFileTool() tool {
 	entry := specification("read_file", "Read numbered lines of a text file up to 1 MiB. Pass source to select a named file source. Use the returned offset for more lines. Give large logs, traces, source maps and generated bundles to a script for a targeted summary. Images are attached to the result.",
 		args{"path": field("string"), "source": field("string"), "reference": field("string"), "offset": field("integer"), "limit": field("integer")},
 		[]string{"path"}, nil)
+	entry.readOnly = true
 	entry.call = turn.readFile
 	return entry
 }

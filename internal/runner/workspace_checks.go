@@ -67,7 +67,7 @@ func (turn *turn) noteWorkspaceCommand(ctx context.Context, input args, kind str
 	if err != nil {
 		return "", err
 	}
-	turn.instructionsDirty = true
+	turn.instructionsDirty.Store(true)
 	if _, err := turn.Workspaces.SetupDone(ctx, thread.ID); err != nil {
 		return "", err
 	}

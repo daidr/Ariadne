@@ -30,6 +30,7 @@ func (turn *turn) readAttachmentTool() tool {
 			"limit":  field("integer"),
 		},
 		[]string{"fileId"}, nil)
+	entry.readOnly = true
 	entry.call = turn.readAttachment
 	return entry
 }
@@ -300,7 +301,7 @@ func (turn *turn) saveAttachment(ctx context.Context, input args) (string, error
 	if err != nil {
 		return "", err
 	}
-	turn.instructionsDirty = true
+	turn.instructionsDirty.Store(true)
 	if writer, ok := workspace.(sdk.WorkspaceBytes); ok {
 		err = writer.WriteBytes(ctx, dest, content.Data)
 	} else {

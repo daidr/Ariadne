@@ -19,7 +19,7 @@ import (
 func (turn *turn) issueTools(tracker *sdk.TrackerCapability, writable bool) []tool {
 	var tools []tool
 	if tracker.List != nil {
-		tools = append(tools, specification("list_issues", "List issues with labels and status. Use read_issue for the body and comments.",
+		tools = append(tools, readOnlySpec("list_issues", "List issues with labels and status. Use read_issue for the body and comments.",
 			args{"state": field("string"), "labels": arrayOf(field("string")), "search": field("string"), "limit": field("integer")}, nil,
 			func(ctx context.Context, input args) (string, error) {
 				state := text(input, "state")
@@ -45,7 +45,7 @@ func (turn *turn) issueTools(tracker *sdk.TrackerCapability, writable bool) []to
 	if tracker.Issue == nil {
 		return tools
 	}
-	tools = append(tools, specification("read_issue", "Read an issue, its state and recent comments.",
+	tools = append(tools, readOnlySpec("read_issue", "Read an issue, its state and recent comments.",
 		args{"number": field("integer")}, []string{"number"}, func(ctx context.Context, input args) (string, error) {
 			number, err := issueNumber(input)
 			if err != nil {

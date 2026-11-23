@@ -161,7 +161,7 @@ func (turn *turn) coordinatorTools() []tool {
 				_, err = turn.Repository.ResumeThread(ctx, thread.ID, turn.conversation.ID)
 				return "Resumed.", err
 			}),
-		specification("read_thread", "Read a thread's latest messages, attachment names and IDs, checklist and status.",
+		readOnlySpec("read_thread", "Read a thread's latest messages, attachment names and IDs, checklist and status.",
 			args{"threadId": threadIDField(), "limit": field("integer")}, []string{"threadId"}, func(ctx context.Context, input args) (string, error) {
 				thread, err := turn.ownThread(ctx, text(input, "threadId"))
 				if err != nil {
