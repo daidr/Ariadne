@@ -359,25 +359,64 @@ function parsePixels(value: string): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
 }
 
-function createSafeAreaProbe(doc: Document): HTMLDivElement | null {
-  if (!doc.body) return null
+interface SafeAreaProbes {
+  topRight: HTMLDivElement
+  bottomLeft: HTMLDivElement
+  read(win: Window): SafeAreaInsets
+  remove(): void
+}
+
+function createProbeElement(doc: Document, extraStyles: readonly string[]): HTMLDivElement {
   const probe = doc.createElement('div')
   probe.setAttribute('aria-hidden', 'true')
   probe.style.cssText = [
     'position:fixed',
     'top:0',
     'left:0',
-    'width:0',
-    'height:0',
+    'box-sizing:content-box',
+    'width:1px',
+    'height:1px',
     'visibility:hidden',
     'pointer-events:none',
-    'padding-top:var(--ariadne-safe-top, env(safe-area-inset-top, 0px))',
-    'padding-right:var(--ariadne-safe-right, env(safe-area-inset-right, 0px))',
-    'padding-bottom:var(--ariadne-safe-bottom, env(safe-area-inset-bottom, 0px))',
-    'padding-left:var(--ariadne-safe-left, env(safe-area-inset-left, 0px))',
+    ...extraStyles,
   ].join(';')
   doc.body.appendChild(probe)
   return probe
+}
+
+/**
+ * Splits safe-area probing across two opposite-corner elements so border-box
+ * ResizeObserver catches asynchronous WebKit inset population after launch as
+ * well as left<->right or top<->bottom swaps where summed padding stays equal.
+ */
+function createSafeAreaProbes(doc: Document): SafeAreaProbes | null {
+  if (!doc.body) return null
+  const topRight = createProbeElement(doc, [
+    'padding-top:var(--ariadne-safe-top, env(safe-area-inset-top, 0px))',
+    'padding-right:var(--ariadne-safe-right, env(safe-area-inset-right, 0px))',
+  ])
+  const bottomLeft = createProbeElement(doc, [
+    'padding-bottom:var(--ariadne-safe-bottom, env(safe-area-inset-bottom, 0px))',
+    'padding-left:var(--ariadne-safe-left, env(safe-area-inset-left, 0px))',
+  ])
+  return {
+    topRight,
+    bottomLeft,
+    read(win) {
+      const tr = win.getComputedStyle(topRight)
+      const bl = win.getComputedStyle(bottomLeft)
+      return {
+        top: parsePixels(tr.paddingTop),
+        right: parsePixels(tr.paddingRight),
+        bottom: parsePixels(bl.paddingBottom),
+        left: parsePixels(bl.paddingLeft),
+      }
+    },
+    remove() {
+      topRight.remove()
+      bottomLeft.remove()
+    },
+  }
 }
 
 /**
@@ -416,9 +455,10 @@ export function usePwaEnvironment() {
 
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     const win = window as WindowWithPwaApis
-    const probe = createSafeAreaProbe(document)
+    const probes = createSafeAreaProbes(document)
 
     let measuring = false
+    let rafId: number | null = null
     const measure = () => {
       if (measuring) return
       measuring = true
@@ -427,12 +467,12 @@ export function usePwaEnvironment() {
         standalone.value = nextStandalone
         syncStandaloneViewport(nextStandalone, document)
 
-        if (probe) {
-          const style = win.getComputedStyle(probe)
-          insets.top = parsePixels(style.paddingTop)
-          insets.right = parsePixels(style.paddingRight)
-          insets.bottom = parsePixels(style.paddingBottom)
-          insets.left = parsePixels(style.paddingLeft)
+        if (probes) {
+          const nextInsets = probes.read(win)
+          insets.top = nextInsets.top
+          insets.right = nextInsets.right
+          insets.bottom = nextInsets.bottom
+          insets.left = nextInsets.left
         }
 
         const foldInput = readNativeFoldInput(win)
@@ -447,11 +487,38 @@ export function usePwaEnvironment() {
       }
     }
 
+    const scheduleMeasure = () => {
+      if (rafId !== null) return
+      if (typeof win.requestAnimationFrame === 'function') {
+        rafId = win.requestAnimationFrame(() => {
+          rafId = null
+          measure()
+        })
+      } else {
+        measure()
+      }
+    }
+
+    const onOrientationChange = () => {
+      measure()
+      scheduleMeasure()
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        measure()
+        scheduleMeasure()
+      }
+    }
+
     const blockStandaloneGestureZoom = (event: Event) => {
       if (standalone.value) event.preventDefault()
     }
 
     measure()
+    // Re-read on the next animation frame because iOS standalone PWAs often populate
+    // env(safe-area-inset-*) asynchronously after first paint or viewport meta updates.
+    scheduleMeasure()
 
     const mediaQueries = [
       win.matchMedia?.('(display-mode: standalone)'),
@@ -468,8 +535,21 @@ export function usePwaEnvironment() {
     postureApi?.addEventListener?.('change', measure)
 
     win.addEventListener('resize', measure, { passive: true })
-    win.addEventListener('orientationchange', measure, { passive: true })
+    win.addEventListener('orientationchange', onOrientationChange, { passive: true })
+    win.addEventListener('pageshow', scheduleMeasure, { passive: true })
+    document.addEventListener('visibilitychange', onVisibilityChange)
     document.addEventListener('gesturestart', blockStandaloneGestureZoom, { passive: false })
+
+    const resizeObserver =
+      probes && typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            measure()
+          })
+        : null
+    if (probes && resizeObserver) {
+      resizeObserver.observe(probes.topRight, { box: 'border-box' })
+      resizeObserver.observe(probes.bottomLeft, { box: 'border-box' })
+    }
 
     const observer =
       typeof MutationObserver !== 'undefined'
@@ -483,15 +563,22 @@ export function usePwaEnvironment() {
     })
 
     onScopeDispose(() => {
+      if (rafId !== null) {
+        win.cancelAnimationFrame?.(rafId)
+        rafId = null
+      }
       for (const query of mediaQueries) {
         query.removeEventListener?.('change', measure)
       }
       postureApi?.removeEventListener?.('change', measure)
       win.removeEventListener('resize', measure)
-      win.removeEventListener('orientationchange', measure)
+      win.removeEventListener('orientationchange', onOrientationChange)
+      win.removeEventListener('pageshow', scheduleMeasure)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       document.removeEventListener('gesturestart', blockStandaloneGestureZoom)
+      resizeObserver?.disconnect()
       observer?.disconnect()
-      probe?.remove()
+      probes?.remove()
     })
   }
 

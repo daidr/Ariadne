@@ -504,4 +504,127 @@ describe('usePwaEnvironment', () => {
     document.dispatchEvent(afterDisposeGesture)
     expect(afterDisposeGesture.defaultPrevented).toBe(false)
   })
+
+  test('activates Duo rail when ResizeObserver reports delayed safe-area insets without window resize', () => {
+    document.documentElement.setAttribute('data-pwa-simulate-standalone', 'true')
+
+    let rightInset = '0px'
+    const originalGetComputedStyle = window.getComputedStyle.bind(window)
+    const computedSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((el) => {
+      const style = originalGetComputedStyle(el)
+      if (el instanceof HTMLElement && el.style.paddingRight.includes('--ariadne-safe-right')) {
+        return new Proxy(style, {
+          get(target, prop) {
+            if (prop === 'paddingRight') return rightInset
+            return Reflect.get(target, prop)
+          },
+        })
+      }
+      return style
+    })
+
+    const observerState: { callback: ResizeObserverCallback | null } = { callback: null }
+    const observed: Element[] = []
+    const disconnect = vi.fn()
+    const OriginalResizeObserver = globalThis.ResizeObserver
+    globalThis.ResizeObserver = class MockResizeObserver {
+      constructor(cb: ResizeObserverCallback) {
+        observerState.callback = cb
+      }
+      observe(target: Element) {
+        observed.push(target)
+      }
+      unobserve() {}
+      disconnect() {
+        disconnect()
+      }
+    } as unknown as typeof ResizeObserver
+
+    const scope = effectScope()
+    try {
+      const env = scope.run(() => usePwaEnvironment())!
+      expect(env.insets.right).toBe(0)
+      expect(env.duoRail.value.active).toBe(false)
+      expect(observed).toHaveLength(2)
+
+      rightInset = '84px'
+      observerState.callback?.([], {} as ResizeObserver)
+
+      expect(env.insets.right).toBe(84)
+      expect(env.duoRail.value.active).toBe(true)
+
+      scope.stop()
+      expect(disconnect).toHaveBeenCalledTimes(1)
+    } finally {
+      scope.stop()
+      computedSpy.mockRestore()
+      globalThis.ResizeObserver = OriginalResizeObserver
+    }
+  })
+
+  test('re-measures safe-area insets on animation frame and pageshow after launch', () => {
+    document.documentElement.setAttribute('data-pwa-simulate-standalone', 'true')
+
+    let rightInset = '0px'
+    const originalGetComputedStyle = window.getComputedStyle.bind(window)
+    const computedSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((el) => {
+      const style = originalGetComputedStyle(el)
+      if (el instanceof HTMLElement && el.style.paddingRight.includes('--ariadne-safe-right')) {
+        return new Proxy(style, {
+          get(target, prop) {
+            if (prop === 'paddingRight') return rightInset
+            return Reflect.get(target, prop)
+          },
+        })
+      }
+      return style
+    })
+
+    const frames = new Map<number, FrameRequestCallback>()
+    let nextFrameId = 1
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      const id = nextFrameId++
+      frames.set(id, cb)
+      return id
+    })
+    const cancelSpy = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+      frames.delete(id)
+    })
+
+    const flushFrames = (time: number) => {
+      const queued = Array.from(frames.values())
+      frames.clear()
+      for (const cb of queued) cb(time)
+    }
+
+    const scope = effectScope()
+    try {
+      const env = scope.run(() => usePwaEnvironment())!
+      expect(env.duoRail.value.active).toBe(false)
+      expect(frames.size).toBe(1)
+
+      rightInset = '84px'
+      flushFrames(16)
+      expect(env.insets.right).toBe(84)
+      expect(env.duoRail.value.active).toBe(true)
+
+      rightInset = '0px'
+      window.dispatchEvent(new Event('pageshow'))
+      expect(frames.size).toBe(1)
+      flushFrames(32)
+      expect(env.insets.right).toBe(0)
+      expect(env.duoRail.value.active).toBe(false)
+
+      window.dispatchEvent(new Event('pageshow'))
+      expect(frames.size).toBe(1)
+      scope.stop()
+      expect(cancelSpy).toHaveBeenCalledTimes(1)
+      expect(frames.size).toBe(0)
+    } finally {
+      scope.stop()
+      computedSpy.mockRestore()
+      rafSpy.mockRestore()
+      cancelSpy.mockRestore()
+    }
+  })
 })
