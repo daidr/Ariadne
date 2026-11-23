@@ -69,7 +69,7 @@ func (turn *turn) researchTool(available []tool, parent *settings.ResolvedModel,
 }
 
 func (turn *turn) research(ctx context.Context, id, question, system string, model *settings.ResolvedModel, specs []sdk.Tool, readable map[string]tool, limits args) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	ctx, cancel := context.WithTimeout(withResearchContext(ctx), 10*time.Minute)
 	defer cancel()
 	provider, ok := turn.Models.Get(model.Provider.Kind)
 	if !ok {
@@ -157,6 +157,7 @@ func (turn *turn) research(ctx context.Context, id, question, system string, mod
 }
 
 func researchRead(ctx context.Context, readable map[string]tool, call sdk.ToolCall, final bool) (string, bool) {
+	ctx = withResearchContext(ctx)
 	entry, ok := readable[call.Name]
 	if final || !ok {
 		return "That tool is unavailable during this research step.", true
