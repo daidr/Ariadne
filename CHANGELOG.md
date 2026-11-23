@@ -1,5 +1,17 @@
 # 更新日志
 
+## 0.1.0-alpha.18 (2026-11-23)
+
+- feat(cli): cross-platform installers, global CLI, service management, and safe restart (#193)
+- feat(web): 为用户发送的消息实现乐观更新与平滑合并 (#210)
+- feat(runner): restore parallel execution for adjacent read-only tool calls (#211)
+- feat(web): 为设置与项目设置弹窗的标签栏添加图标并适配移动端全屏布局 (#209)
+- feat(runner): 补回文件读写状态追踪、重复读去重与检查失败折叠 (#208)
+- feat(runner): restore coordinator look limits, tighten research, and add todo reminders (#207)
+- refactor(web): 移除讨论串次 header 并将操作收拢至更多菜单与底部状态槽 (#206)
+- feat(settings): 协调器在沿用支持低思考强度的模型时默认选用低思考强度 (#203)
+- Merge pull request #200 from daidr/release/alpha
+
 ## 0.1.0-alpha.17 (2026-11-23)
 
 - fix(runner,acp): 校准压缩触发判断、保底重放摘要并回收取消会话的 ACP 用量 (#202)
