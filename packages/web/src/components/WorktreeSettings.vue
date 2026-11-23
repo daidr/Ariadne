@@ -1,12 +1,22 @@
 <script setup lang="ts">
-import { DouAlert, DouButton, DouEmpty, DouPopconfirm, DouSpinner, DouText } from 'dou-ui'
+import {
+  DouAlert,
+  DouButton,
+  DouEmpty,
+  DouPopconfirm,
+  DouShimmer,
+  DouSpinner,
+  DouTag,
+  DouText,
+} from 'dou-ui'
 import { TrashIcon } from '@dou-ui/icons'
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { api, ApiError, type ProjectWorktrees, type StorageSnapshot } from '../api'
 import { formatBytes } from '../bytes'
 import { t, tm } from '../i18n'
+import { stageTone, threadStageLabel } from '../stage'
 import { report } from '../store'
-import StageLabel from './StageLabel.vue'
+import { splitWorktreePaths } from './worktree-path'
 
 // Threads' worktrees on disk, project by project, to see what they take and remove some.
 const projects = ref<ProjectWorktrees[] | null>(null)
@@ -49,6 +59,20 @@ const total = computed(() =>
     : t(props.storage.logical ? 'data.logicalSize' : 'data.allocatedSize', {
         size: formatBytes(props.storage.total),
       }),
+)
+
+const projectGroups = computed(() =>
+  (projects.value ?? []).map((project) => {
+    const { commonDir, relative } = splitWorktreePaths(project.worktrees.map((item) => item.path))
+    return {
+      project,
+      commonDir,
+      items: project.worktrees.map((worktree, index) => ({
+        worktree,
+        displayPath: relative[index] ?? worktree.path,
+      })),
+    }
+  }),
 )
 
 function reclaimable(path: string, showProgress = false) {
@@ -114,42 +138,91 @@ async function remove(projectId: string, worktree: ProjectWorktrees['worktrees']
 <template>
   <section class="worktrees">
     <div class="worktrees-heading">
-      <DouText weight="medium">{{ t('settings.tab.worktrees') }}</DouText>
-      <DouSpinner v-if="!projects || measuring" size="sm" />
-    </div>
-    <DouAlert v-if="error" tone="danger" closable @close="error = null">{{ error }}</DouAlert>
-    <DouEmpty v-if="projects && !projects.length" size="sm" :description="t('worktrees.empty')" />
-    <template v-else-if="projects">
+      <div class="worktrees-heading-title">
+        <DouText weight="medium">{{ t('settings.tab.worktrees') }}</DouText>
+        <DouSpinner v-if="!projects || measuring" size="sm" />
+      </div>
       <DouText
         v-if="total"
         size="sm"
         variant="secondary"
+        class="worktrees-total"
         :title="storage?.logical ? undefined : t('data.allocatedHint')"
       >
         {{ total }}
       </DouText>
-      <section v-for="project in projects" :key="project.id" class="worktrees-project">
+    </div>
+    <DouAlert v-if="error" tone="danger" closable @close="error = null">{{ error }}</DouAlert>
+    <DouEmpty v-if="projects && !projects.length" size="sm" :description="t('worktrees.empty')" />
+    <template v-else-if="projects">
+      <section v-for="group in projectGroups" :key="group.project.id" class="worktrees-project">
         <div class="worktrees-head">
-          <DouText weight="medium" size="sm">{{ project.name }}</DouText>
+          <DouText weight="medium" size="sm">{{ group.project.name }}</DouText>
+          <DouText
+            v-if="group.commonDir"
+            size="sm"
+            variant="tertiary"
+            truncate
+            class="worktrees-dir"
+            :title="group.commonDir"
+          >
+            {{ group.commonDir }}
+          </DouText>
         </div>
-        <DouText v-if="project.error" size="sm" tone="danger">{{ tm(project.error) }}</DouText>
-        <ul class="worktrees-list">
-          <li v-for="worktree in project.worktrees" :key="worktree.path" class="worktree">
-            <div class="worktree-main">
-              <div class="worktree-title">
-                <DouText size="sm" truncate>
-                  {{ worktree.thread?.title ?? t('worktrees.unknown') }}
-                </DouText>
-                <DouText v-if="worktree.orphaned" size="sm" tone="warning" class="worktree-size">
-                  {{ t('worktrees.orphaned') }}
-                </DouText>
-                <DouText v-else-if="worktree.thread?.merged" size="sm" tone="success">
-                  {{ t('worktrees.merged') }}
-                </DouText>
-                <StageLabel v-else-if="worktree.thread" :stage="worktree.thread.stage" />
-              </div>
-              <DouText size="sm" variant="tertiary" truncate :title="worktree.path">
-                {{ worktree.path }}
+        <DouText v-if="group.project.error" size="sm" tone="danger">
+          {{ tm(group.project.error) }}
+        </DouText>
+        <ul v-if="group.items.length" class="worktrees-list">
+          <li
+            v-for="{ worktree, displayPath } in group.items"
+            :key="worktree.path"
+            class="worktree"
+            :class="{ 'worktree--has-size': storage?.worktrees[worktree.path]?.bytes != null }"
+          >
+            <DouText
+              size="sm"
+              weight="medium"
+              truncate
+              class="worktree-title"
+              :title="worktree.thread?.title ?? t('worktrees.unknown')"
+            >
+              {{ worktree.thread?.title ?? t('worktrees.unknown') }}
+            </DouText>
+            <div class="worktree-meta">
+              <DouTag v-if="worktree.orphaned" size="sm" tone="warning" class="worktree-status">
+                {{ t('worktrees.orphaned') }}
+              </DouTag>
+              <DouTag
+                v-else-if="worktree.thread?.merged"
+                size="sm"
+                tone="success"
+                class="worktree-status"
+              >
+                {{ t('worktrees.merged') }}
+              </DouTag>
+              <DouTag
+                v-else-if="worktree.thread"
+                size="sm"
+                :tone="
+                  worktree.thread.stage === 'working' ? 'neutral' : stageTone[worktree.thread.stage]
+                "
+                class="worktree-status"
+              >
+                <DouShimmer v-if="worktree.thread.stage === 'working'">
+                  {{ t('thread.stage.working') }}
+                </DouShimmer>
+                <template v-else>
+                  {{ threadStageLabel(worktree.thread.stage, worktree.thread.pullRequest?.state) }}
+                </template>
+              </DouTag>
+              <DouText
+                size="sm"
+                variant="tertiary"
+                truncate
+                class="worktree-path"
+                :title="worktree.path"
+              >
+                {{ displayPath }}
               </DouText>
             </div>
             <DouText
@@ -161,36 +234,41 @@ async function remove(projectId: string, worktree: ProjectWorktrees['worktrees']
             >
               {{ formatBytes(storage.worktrees[worktree.path]!.bytes!) }}
             </DouText>
-            <DouPopconfirm
-              :title="
-                t(worktree.orphaned ? 'worktrees.removeOrphanConfirm' : 'worktrees.removeConfirm', {
-                  title: worktree.thread?.title ?? worktree.threadId,
-                })
-              "
-              tone="danger"
-              :width="320"
-              :description="
-                worktree.orphaned
-                  ? t('worktrees.removeOrphanDescription', {
-                      space: reclaimable(worktree.path, true),
-                    })
-                  : reclaimable(worktree.path, true)
-              "
-              :confirm-text="t('worktrees.remove')"
-              @update:open="estimateReclaimable(worktree.path, $event)"
-              @confirm="remove(project.id, worktree)"
-            >
-              <DouButton
-                size="sm"
-                variant="ghost"
+            <div class="worktree-action">
+              <DouPopconfirm
+                :title="
+                  t(
+                    worktree.orphaned ? 'worktrees.removeOrphanConfirm' : 'worktrees.removeConfirm',
+                    {
+                      title: worktree.thread?.title ?? worktree.threadId,
+                    },
+                  )
+                "
                 tone="danger"
-                :loading="removing === worktree.path"
-                :aria-label="t('worktrees.remove')"
-                :title="t('worktrees.remove')"
+                :width="320"
+                :description="
+                  worktree.orphaned
+                    ? t('worktrees.removeOrphanDescription', {
+                        space: reclaimable(worktree.path, true),
+                      })
+                    : reclaimable(worktree.path, true)
+                "
+                :confirm-text="t('worktrees.remove')"
+                @update:open="estimateReclaimable(worktree.path, $event)"
+                @confirm="remove(group.project.id, worktree)"
               >
-                <TrashIcon />
-              </DouButton>
-            </DouPopconfirm>
+                <DouButton
+                  size="sm"
+                  variant="ghost"
+                  tone="danger"
+                  :loading="removing === worktree.path"
+                  :aria-label="t('worktrees.remove')"
+                  :title="t('worktrees.remove')"
+                >
+                  <TrashIcon />
+                </DouButton>
+              </DouPopconfirm>
+            </div>
           </li>
         </ul>
       </section>
@@ -203,25 +281,46 @@ async function remove(projectId: string, worktree: ProjectWorktrees['worktrees']
   display: flex;
   flex-direction: column;
   gap: 12px;
+  container-type: inline-size;
 }
 
 .worktrees-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.worktrees-heading-title {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
+.worktrees-total {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .worktrees-project {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .worktrees-head {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.worktrees-dir {
+  display: block;
+  min-width: 0;
+  font-family: var(--dou-font-family-mono);
+  font-size: calc(var(--dou-font-size-sm) - 1px);
 }
 
 .worktrees-list {
@@ -230,36 +329,85 @@ async function remove(projectId: string, worktree: ProjectWorktrees['worktrees']
   margin: 0;
   padding: 0;
   list-style: none;
+  border: 1px solid var(--dou-color-border);
+  border-radius: var(--dou-radius-container);
+  background: var(--dou-color-bg-surface);
+  overflow: hidden;
 }
 
 .worktree {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    'title action'
+    'meta  action';
   align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--dou-color-border-subtle);
+  column-gap: 10px;
+  row-gap: 4px;
+  padding: 10px 12px;
 }
 
-.worktree:last-child {
-  border-bottom: none;
+.worktree--has-size {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    'title size action'
+    'meta  size action';
 }
 
-.worktree-main {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
+.worktree + .worktree {
+  border-top: 1px solid var(--dou-color-border-subtle);
 }
 
 .worktree-title {
+  grid-area: title;
+  display: block;
+  min-width: 0;
+}
+
+.worktree-meta {
+  grid-area: meta;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
-.worktree-size {
+.worktree-status {
   flex: none;
+}
+
+.worktree-path {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--dou-font-family-mono);
+  font-size: calc(var(--dou-font-size-sm) - 1px);
+}
+
+.worktree-size {
+  grid-area: size;
+  justify-self: end;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.worktree-action {
+  grid-area: action;
+  display: flex;
+  align-items: center;
+}
+
+@container (max-width: 459px) {
+  .worktree {
+    column-gap: 8px;
+    padding: 10px;
+  }
+
+  .worktree--has-size {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'title title action'
+      'meta  size  action';
+  }
 }
 </style>
