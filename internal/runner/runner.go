@@ -94,11 +94,14 @@ const (
 	coordinatorLookHintText       = "[Ariadne: you have looked at a lot this turn. Looking further is doing the work yourself, and work is a thread's: put what you found into a brief and open a thread with create_thread (or pass it to the thread that has it with message_thread). Answer yourself only if what you have already answers the user.]"
 	coordinatorLookRefusedText    = "[Ariadne: not run. You have looked as far as a coordinator does in one turn without handing anything to a thread. Open a thread with create_thread and put what you found into its brief, or message the thread that has the work; after that you may look again for the next one.]"
 
-	todoMissingAfter = 3
-	todoStaleAfter   = 10
-	todoMissingHint  = "[Ariadne: you are working without a todo list, so the user cannot see what you are doing or what comes next. Write your steps with update_todo now, before your next step, and keep it current as you go. A rough outline is enough; change it as you learn more.]"
-	todoFinishedHint = "[Ariadne: your todo list is the finished one of earlier work, so the user cannot see what you are doing now. Write the steps of this work with update_todo now, before your next step (keep the earlier ones as done if they still matter), and keep it current as you go. A rough outline is enough; change it as you learn more.]"
-	todoStaleHint    = "[Ariadne: your todo list has not changed for many steps. If it no longer shows where you are, bring it up to date with update_todo: mark finished steps done and the one you are on as doing.]"
+	todoMissingAfter            = 3
+	todoStaleAfter              = 10
+	todoMissingHint             = "[Ariadne: you are working without a todo list, so the user cannot see what you are doing or what comes next. Write your steps with update_todo now, before your next step, and keep it current as you go. A rough outline is enough; change it as you learn more.]"
+	todoFinishedHint            = "[Ariadne: your todo list is the finished one of earlier work, so the user cannot see what you are doing now. Write the steps of this work with update_todo now, before your next step (keep the earlier ones as done if they still matter), and keep it current as you go. A rough outline is enough; change it as you learn more.]"
+	todoStaleHint               = "[Ariadne: your todo list has not changed for many steps. If it no longer shows where you are, bring it up to date with update_todo: mark finished steps done and the one you are on as doing.]"
+	coordinatorTodoMissingHint  = "[Ariadne: you are working without an active work list, so the user cannot see what is underway or waiting. Write your active items (doing, waiting, next) with update_todo now, before your next step, and remove them once finished.]"
+	coordinatorTodoFinishedHint = "[Ariadne: your todo list only contains finished items from earlier work, so the user cannot see what is active now. Replace it with only your current doing, waiting, and next items using update_todo now, removing completed or merged items.]"
+	coordinatorTodoStaleHint    = "[Ariadne: your active work list has not changed for many steps. If it no longer reflects current work, update it with update_todo: remove finished or merged items and keep only active doing, waiting, and next items.]"
 )
 
 type coordinatorLookState struct {
@@ -193,20 +196,31 @@ func (turn *turn) todoHint(ctx context.Context, state *todoHintState) (string, e
 			break
 		}
 	}
-	if len(items) == 0 || (finished && !state.todoThisTurn) {
+	coordinator := turn.conversation.Role == "coordinator"
+	clearedThisTurn := coordinator && len(items) == 0 && state.todoThisTurn
+	if (len(items) == 0 && !clearedThisTurn) || (finished && !state.todoThisTurn) {
 		if state.hintedMissing || state.workSteps < todoMissingAfter {
 			return "", nil
 		}
 		state.hintedMissing = true
 		if len(items) > 0 {
+			if coordinator {
+				return coordinatorTodoFinishedHint, nil
+			}
 			return todoFinishedHint, nil
+		}
+		if coordinator {
+			return coordinatorTodoMissingHint, nil
 		}
 		return todoMissingHint, nil
 	}
-	if state.hintedStale || state.sinceTodo < todoStaleAfter || finished {
+	if state.hintedStale || state.sinceTodo < todoStaleAfter || finished || clearedThisTurn {
 		return "", nil
 	}
 	state.hintedStale = true
+	if coordinator {
+		return coordinatorTodoStaleHint, nil
+	}
 	return todoStaleHint, nil
 }
 

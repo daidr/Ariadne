@@ -59,12 +59,17 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"Do not inspect source code or draft technical proposals directly in the coordinator with read_file, search, find_files, or list_dir",
 		"Use research only for a lightweight, single-point read-only lookup",
 		"discussion threads handle memory requests made in them directly",
+		"Use update_todo as an active work list",
+		"remove completed or merged items on later updates",
 		"Documents do not render Mermaid",
 		"embedded whiteboard code fence",
 	} {
 		if !strings.Contains(coordinatorPrompt, want) {
 			t.Errorf("coordinator prompt missing %q", want)
 		}
+	}
+	if strings.Contains(coordinatorPrompt, "keeping completed steps and listing next steps in order") {
+		t.Error("coordinator prompt should not include thread todo guidance")
 	}
 	if strings.Contains(coordinatorPrompt, "cards that open threads or artifacts") {
 		t.Error("coordinator prompt still claims post_ui supports artifact cards")
@@ -78,6 +83,7 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 	}}
 	threadPrompt := joinSections(threadTurn.sections(ctx, project, nil))
 	for _, want := range []string{
+		"keeping completed steps and listing next steps in order",
 		"[Title](thread:<threadId>)",
 		"[Title](artifact:<artifactId>)",
 		"relevant artifact IDs in artifacts",
@@ -90,6 +96,9 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		if !strings.Contains(threadPrompt, want) {
 			t.Errorf("thread prompt missing %q", want)
 		}
+	}
+	if strings.Contains(threadPrompt, "active work list") || strings.Contains(threadPrompt, "remove completed or merged items") {
+		t.Error("thread prompt should not include coordinator todo guidance")
 	}
 
 	reviewerTurn := &turn{Runner: &Runner{Repository: repo}, conversation: core.ConversationView{
@@ -145,6 +154,16 @@ func TestToolSchemasDocumentPlanSequencingAndReviewEnums(t *testing.T) {
 	}}
 	coordTools := coordinatorTurn.tools(ctx, project)
 
+	coordTodo := findTool(coordTools, "update_todo")
+	for _, want := range []string{"Replace your active work list", "doing, waiting, and next", "Remove completed or merged items", "empty list"} {
+		if !strings.Contains(coordTodo.spec.Description, want) {
+			t.Errorf("coordinator update_todo description missing %q: %q", want, coordTodo.spec.Description)
+		}
+	}
+	if strings.Contains(coordTodo.spec.Description, "Keep completed items") {
+		t.Errorf("coordinator update_todo description should not include thread guidance: %q", coordTodo.spec.Description)
+	}
+
 	updatePlan := findTool(coordTools, "update_plan")
 	if !strings.Contains(updatePlan.spec.Description, "nodeIds in ids") {
 		t.Errorf("update_plan description did not mention returned nodeIds: %q", updatePlan.spec.Description)
@@ -166,6 +185,13 @@ func TestToolSchemasDocumentPlanSequencingAndReviewEnums(t *testing.T) {
 		ID: thread.ID, ProjectID: project.ID, Role: "thread",
 	}}
 	threadTools := threadTurn.tools(ctx, project)
+	threadTodo := findTool(threadTools, "update_todo")
+	if !strings.Contains(threadTodo.spec.Description, "Keep completed items and put next steps in order") {
+		t.Errorf("thread update_todo description missing thread guidance: %q", threadTodo.spec.Description)
+	}
+	if strings.Contains(threadTodo.spec.Description, "active work list") || strings.Contains(threadTodo.spec.Description, "Remove completed or merged items") {
+		t.Errorf("thread update_todo description should not include coordinator guidance: %q", threadTodo.spec.Description)
+	}
 	reportTool := findTool(threadTools, "report")
 	createDocument := findTool(threadTools, "create_document")
 	if !strings.Contains(createDocument.spec.Description, "Documents do not render Mermaid") ||
