@@ -764,10 +764,6 @@ export const zhCN = {
   'mcp.ask.once': '只允许这一次',
   'mcp.ask.yes': '允许',
   'mcp.ask.no': '不要',
-  'error.budgetThread':
-    '这个讨论串已用 {used}k token，到了项目设置里每个讨论串 {limit}k 的上限，已停止。调高上限后重试',
-  'error.budgetProject':
-    '这个项目已用 {used}k token，到了项目设置里 {limit}k 的上限，已停止。调高上限后重试',
   'command.ask.question': '允许运行这条命令一次？',
   'command.ask.rule': '它命中了你的命令规则「{pattern}」',
   'command.ask.yes': '运行',
@@ -925,9 +921,6 @@ export const zhCN = {
     '讨论串每次改完文件后运行，失败时把输出交给它；{placeholder} 会换成改动的文件',
   'projectSettings.env': '命令的环境变量',
   'projectSettings.autopilotMethod': '合并方式',
-  'projectSettings.budgetThread': '每个讨论串最多用（k token）',
-  'projectSettings.budgetProject': '整个项目最多用（k token）',
-  'projectSettings.noCap': '不限',
   'project.export': '导出项目',
   'error.notReviewer': '只有审阅讨论串能给出审阅结论',
   'error.noReviewRound': '现在没有等结论的审阅',

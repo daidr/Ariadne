@@ -73,7 +73,6 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
             instructions: 'Be concise',
             delivery: { mode: 'merge', instructions: '' },
             tools: ['fetch'],
-            budget: { thread: 5000 },
             workspace: {
               retention: 'auto',
               auto: { setup: true, check: false },
@@ -95,7 +94,6 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
             instructions: 'Be concise',
             delivery: { mode: 'merge', instructions: '' },
             tools: ['fetch'],
-            budget: { thread: 5000 },
             workspace: {
               retention: 'auto',
               auto: { setup: true, check: false },
@@ -129,7 +127,6 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
         instructions: 'Be concise',
         delivery: { mode: 'merge', instructions: '' },
         tools: ['fetch'],
-        budget: { thread: 5000, project: null },
         workspace: {
           retention: 'auto',
           auto: { setup: true, check: false },
@@ -408,7 +405,6 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
       instructions: '',
       delivery: { mode: 'merge' as const, instructions: '' },
       tools: [] as string[],
-      budget: { thread: null, project: null },
       workspace: {
         retention: 'auto' as const,
         auto: { setup: false, check: false },

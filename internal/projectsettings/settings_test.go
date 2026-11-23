@@ -23,7 +23,6 @@ func TestSettingsValidationAndDefaults(t *testing.T) {
 		`{"delivery":{"mode":"external","instructions":"  提交到预发布分支  "}}`,
 		`{"delivery":{"mode":"bad"}}`, `{"delivery":{"instructions":5}}`,
 		`{"tools":["fetch","browser","fetch"]}`, `{"tools":["missing"]}`, `{"tools":null}`,
-		`{"budget":{"thread":1000,"project":""}}`, `{"budget":{"thread":"1000"}}`, `{"budget":{"project":999}}`,
 		`{"workspace":{"setup":"  bun install  ","check":" test ","shell":"pwsh","retention":"keep","branchPrefix":"ai/"}}`,
 		`{"workspace":{"setup":"bun install","auto":{"setup":true,"check":false}}}`,
 		`{"workspace":{"retention":"bad"}}`, `{"workspace":{"shell":"bad"}}`, `{"workspace":{"auto":{"setup":5}}}`,
@@ -80,6 +79,28 @@ func TestSettingsValidationAndDefaults(t *testing.T) {
 	}
 	if len(results) != len(cases) {
 		t.Fatalf("results count = %d, want %d", len(results), len(cases))
+	}
+}
+
+func TestLegacyBudgetSettingsIgnored(t *testing.T) {
+	stored, err := Stored(`{"instructions":"keep","budget":{"thread":50000,"project":200000},"review":{"enabled":false}}`)
+	if err != nil {
+		t.Fatalf("Stored with legacy budget failed: %v", err)
+	}
+	if stored.Instructions != "keep" || stored.Review.Enabled {
+		t.Fatalf("unexpected stored settings: %+v", stored)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(`{"instructions":"keep","budget":{"thread":50000,"project":"legacy"}}`), &raw); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := Parse(raw, nil)
+	if err != nil {
+		t.Fatalf("Parse with legacy budget failed: %v", err)
+	}
+	if parsed.Instructions != "keep" {
+		t.Fatalf("unexpected parsed settings: %+v", parsed)
 	}
 }
 

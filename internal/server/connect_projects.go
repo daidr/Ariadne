@@ -907,10 +907,6 @@ func toProtoProjectSettings(settings projectsettings.Settings) *ariadnev1.Projec
 			Instructions: settings.Delivery.Instructions,
 		},
 		Tools: tools,
-		Budget: &ariadnev1.ProjectBudgetSettings{
-			Thread:  settings.Budget.Thread,
-			Project: settings.Budget.Project,
-		},
 		Workspace: &ariadnev1.ProjectWorkspaceSettings{
 			Retention: settings.Workspace.Retention,
 			Auto: &ariadnev1.ProjectWorkspaceAutoSettings{
@@ -948,16 +944,6 @@ func fromProtoProjectSettings(settings *ariadnev1.ProjectSettings) object {
 		tools = append(tools, tool)
 	}
 	out["tools"] = tools
-	if settings.Budget != nil {
-		budget := object{"thread": nil, "project": nil}
-		if settings.Budget.Thread != nil {
-			budget["thread"] = *settings.Budget.Thread
-		}
-		if settings.Budget.Project != nil {
-			budget["project"] = *settings.Budget.Project
-		}
-		out["budget"] = budget
-	}
 	if settings.Workspace != nil {
 		ws := object{
 			"retention":    settings.Workspace.Retention,
