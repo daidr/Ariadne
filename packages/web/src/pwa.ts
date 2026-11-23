@@ -446,10 +446,13 @@ function createProbeElement(doc: Document, extraStyles: readonly string[]): HTML
  */
 function createSafeAreaProbes(doc: Document): SafeAreaProbes | null {
   if (!doc.body) return null
+  // Probe native env(safe-area-inset-right) on padding-left so border-box ResizeObserver
+  // still fires if WebKit populates native right insets asynchronously while
+  // html[data-duo-front-widen] pins --ariadne-safe-right to 84px.
   const topRight = createProbeElement(doc, [
     'padding-top:var(--ariadne-safe-top, env(safe-area-inset-top, 0px))',
     'padding-right:var(--ariadne-safe-right, env(safe-area-inset-right, 0px))',
-    'margin-right:env(safe-area-inset-right, 0px)',
+    'padding-left:var(--ariadne-safe-right-native, env(safe-area-inset-right, 0px))',
   ])
   const bottomLeft = createProbeElement(doc, [
     'padding-bottom:var(--ariadne-safe-bottom, env(safe-area-inset-bottom, 0px))',
@@ -462,7 +465,7 @@ function createSafeAreaProbes(doc: Document): SafeAreaProbes | null {
       const tr = win.getComputedStyle(topRight)
       const bl = win.getComputedStyle(bottomLeft)
       const paddedRight = parsePixels(tr.paddingRight)
-      const envRight = parsePixels(tr.marginRight)
+      const envRight = parsePixels(tr.paddingLeft)
       const widened = Boolean(doc.documentElement.dataset.duoFrontWiden)
       const nativeRight = widened ? envRight : Math.max(paddedRight, envRight)
       return {
@@ -501,14 +504,20 @@ export function usePwaEnvironment() {
   const foldPosture = ref<DevicePostureType>('continuous')
   const foldSegments = ref<ViewportSegmentRect[]>([])
 
-  const duoRail = computed(() =>
-    resolveDuoRightRail({
+  const duoRail = computed<DuoRightRailState>(() => {
+    if (duoFrontWiden.value.active) {
+      return {
+        active: true,
+        compactHeight: duoFrontWiden.value.compactHeight,
+      }
+    }
+    return resolveDuoRightRail({
       standalone: standalone.value,
       insets,
       viewportWidth: viewportWidth.value,
       viewportHeight: viewportHeight.value,
-    }),
-  )
+    })
+  })
 
   const fold = computed<FoldLayoutState>(() =>
     resolveFoldLayout({

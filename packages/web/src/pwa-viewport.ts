@@ -133,6 +133,10 @@ export function resolveDuoFrontWiden(input: DuoFrontWidenInput): DuoFrontWidenSt
     nearly(screenShort, DUO_FRONT_SHORT_SIDE, 2) &&
     nearly(screenLong, DUO_FRONT_LONG_SIDE, 2)
 
+  const portraitUnwidenedWidth = DUO_FRONT_SHORT_SIDE - DUO_FRONT_COLUMN_WIDTH
+  const matchesPortraitWidthForTransition =
+    nearly(cssWidth, DUO_FRONT_SHORT_SIDE, 2) || nearly(cssWidth, portraitUnwidenedWidth, 2)
+
   let matchesOuterDisplay = false
   if (matchesScreen) {
     if (!hasViewport) {
@@ -145,17 +149,30 @@ export function resolveDuoFrontWiden(input: DuoFrontWidenInput): DuoFrontWidenSt
         (cssWidth <= DUO_FRONT_SHORT_SIDE + 4 ||
           (alreadyWidened && nearly(cssWidth, DUO_FRONT_LONG_SIDE, 2)))
     } else {
-      matchesOuterDisplay = cssHeight <= 480
+      // Also allow the portrait -> landscape-secondary transient frame where screen.orientation
+      // flips before innerHeight shrinks from 678pt down to 466pt.
+      matchesOuterDisplay =
+        cssHeight <= 480 ||
+        (alreadyWidened && cssHeight <= 690 && matchesPortraitWidthForTransition)
     }
   } else if (hasViewport) {
     // Fallback when Advanced Fingerprinting Protection spoofs screen.width/height:
     // no other iPhone reports a 382pt or 594pt viewport at Duo's outer-screen height.
-    const heightMatches = isPortrait
-      ? cssHeight > 500 && cssHeight <= 690
-      : cssHeight > 300 && cssHeight <= 480
-    matchesOuterDisplay =
-      heightMatches &&
-      (nearly(cssWidth, unwidenedWidth) || (alreadyWidened && nearly(cssWidth, targetWidth)))
+    if (alreadyWidened) {
+      const knownOuterWidth =
+        nearly(cssWidth, unwidenedWidth) ||
+        nearly(cssWidth, DUO_FRONT_SHORT_SIDE, 2) ||
+        nearly(cssWidth, DUO_FRONT_LONG_SIDE, 2)
+      const validWidenedHeight = isPortrait
+        ? cssHeight <= 690
+        : cssHeight <= 480 || (cssHeight <= 690 && matchesPortraitWidthForTransition)
+      matchesOuterDisplay = knownOuterWidth && validWidenedHeight
+    } else {
+      const heightMatches = isPortrait
+        ? cssHeight > 500 && cssHeight <= 690
+        : cssHeight > 300 && cssHeight <= 480
+      matchesOuterDisplay = heightMatches && nearly(cssWidth, unwidenedWidth)
+    }
   }
 
   if (!matchesOuterDisplay) return INACTIVE_WIDEN

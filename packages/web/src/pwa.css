@@ -8,6 +8,7 @@
 :root {
   --ariadne-safe-top: env(safe-area-inset-top, 0px);
   --ariadne-safe-right: env(safe-area-inset-right, 0px);
+  --ariadne-safe-right-native: env(safe-area-inset-right, 0px);
   --ariadne-safe-bottom: env(safe-area-inset-bottom, 0px);
   --ariadne-safe-left: env(safe-area-inset-left, 0px);
 }

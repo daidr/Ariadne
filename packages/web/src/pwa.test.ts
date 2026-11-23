@@ -240,7 +240,7 @@ describe('resolveDuoFrontWiden', () => {
     ).toBe(false)
   })
 
-  test('stays active with virtual keyboard open and across landscape-secondary -> portrait rotation', () => {
+  test('stays active with virtual keyboard open and across portrait <-> landscape-secondary rotation transients', () => {
     expect(
       resolveDuoFrontWiden({
         standalone: true,
@@ -250,8 +250,14 @@ describe('resolveDuoFrontWiden', () => {
         innerHeight: 350,
         orientationType: 'portrait-primary',
         alreadyWidened: true,
-      }).targetWidth,
-    ).toBe(466)
+      }),
+    ).toEqual({
+      active: true,
+      posture: 'portrait',
+      targetWidth: 466,
+      rightInset: 84,
+      compactHeight: false,
+    })
 
     // Rotating from widened landscape-secondary (width=678) back to portrait transiently measures 678x678.
     expect(
@@ -271,9 +277,29 @@ describe('resolveDuoFrontWiden', () => {
       rightInset: 84,
       compactHeight: false,
     })
+
+    // Rotating from widened portrait (466x678) into landscape-secondary transiently measures 466x678
+    // before innerHeight shrinks to 466.
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 466,
+        screenHeight: 678,
+        innerWidth: 466,
+        innerHeight: 678,
+        orientationType: 'landscape-secondary',
+        alreadyWidened: true,
+      }),
+    ).toEqual({
+      active: true,
+      posture: 'landscape-secondary',
+      targetWidth: 678,
+      rightInset: 84,
+      compactHeight: true,
+    })
   })
 
-  test('falls back to viewport geometry when screen size is spoofed without matching split view or other iPhones', () => {
+  test('falls back to viewport geometry when screen size is spoofed, keeping keyboard and rotation transitions active without matching split view or other iPhones', () => {
     expect(
       resolveDuoFrontWiden({
         standalone: true,
@@ -290,6 +316,128 @@ describe('resolveDuoFrontWiden', () => {
       rightInset: 84,
       compactHeight: false,
     })
+
+    // Already widened under spoofed screen: portrait virtual keyboard and cross-orientation transients stay active.
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 390,
+        screenHeight: 844,
+        innerWidth: 466,
+        innerHeight: 350,
+        orientationType: 'portrait-primary',
+        alreadyWidened: true,
+      }),
+    ).toEqual({
+      active: true,
+      posture: 'portrait',
+      targetWidth: 466,
+      rightInset: 84,
+      compactHeight: false,
+    })
+
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 390,
+        screenHeight: 844,
+        innerWidth: 466,
+        innerHeight: 678,
+        orientationType: 'landscape-secondary',
+        alreadyWidened: true,
+      }),
+    ).toEqual({
+      active: true,
+      posture: 'landscape-secondary',
+      targetWidth: 678,
+      rightInset: 84,
+      compactHeight: true,
+    })
+
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 390,
+        screenHeight: 844,
+        innerWidth: 466,
+        innerHeight: 466,
+        orientationType: 'landscape-secondary',
+        alreadyWidened: true,
+      }),
+    ).toEqual({
+      active: true,
+      posture: 'landscape-secondary',
+      targetWidth: 678,
+      rightInset: 84,
+      compactHeight: true,
+    })
+
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 390,
+        screenHeight: 844,
+        innerWidth: 678,
+        innerHeight: 466,
+        orientationType: 'portrait-primary',
+        alreadyWidened: true,
+      }),
+    ).toEqual({
+      active: true,
+      posture: 'portrait',
+      targetWidth: 466,
+      rightInset: 84,
+      compactHeight: false,
+    })
+
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 390,
+        screenHeight: 844,
+        innerWidth: 678,
+        innerHeight: 678,
+        orientationType: 'portrait-primary',
+        alreadyWidened: true,
+      }),
+    ).toEqual({
+      active: true,
+      posture: 'portrait',
+      targetWidth: 466,
+      rightInset: 84,
+      compactHeight: false,
+    })
+
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 390,
+        screenHeight: 844,
+        innerWidth: 678,
+        innerHeight: 220,
+        orientationType: 'landscape-secondary',
+        alreadyWidened: true,
+      }),
+    ).toEqual({
+      active: true,
+      posture: 'landscape-secondary',
+      targetWidth: 678,
+      rightInset: 84,
+      compactHeight: true,
+    })
+
+    // Unfolding to inner portrait with keyboard open must still deactivate under spoofed screen.
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 390,
+        screenHeight: 844,
+        innerWidth: 669,
+        innerHeight: 450,
+        orientationType: 'portrait-primary',
+        alreadyWidened: true,
+      }).active,
+    ).toBe(false)
 
     // Inner display split view (385pt) and standard iPhones must not trigger the fallback.
     expect(
@@ -1149,13 +1297,27 @@ describe('usePwaEnvironment', () => {
     })
     window.scrollTo = scrollToSpy as unknown as typeof window.scrollTo
 
+    const observerState: { callback: ResizeObserverCallback | null } = { callback: null }
+    const observed: Element[] = []
+    const OriginalResizeObserver = globalThis.ResizeObserver
+    globalThis.ResizeObserver = class MockResizeObserver {
+      constructor(cb: ResizeObserverCallback) {
+        observerState.callback = cb
+      }
+      observe(target: Element) {
+        observed.push(target)
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver
+
     const originalGetComputedStyle = window.getComputedStyle.bind(window)
     const computedSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((el) => {
       const style = originalGetComputedStyle(el)
       if (el instanceof HTMLElement && el.style.paddingRight.includes('--ariadne-safe-right')) {
         return new Proxy(style, {
           get(target, prop) {
-            if (prop === 'marginRight') return nativeEnvRight
+            if (prop === 'paddingLeft') return nativeEnvRight
             if (prop === 'paddingRight') {
               return document.documentElement.dataset.duoFrontWiden ? '84px' : nativeEnvRight
             }
@@ -1176,6 +1338,27 @@ describe('usePwaEnvironment', () => {
       expect(env.insets.right).toBe(84)
       expect(env.duoRail.value).toEqual({ active: true, compactHeight: false })
 
+      // Verify the native right inset is probed via padding-left (border-box observable).
+      const topRightProbe = observed.find(
+        (el) => el instanceof HTMLElement && el.style.paddingRight.includes('--ariadne-safe-right'),
+      ) as HTMLElement | undefined
+      expect(topRightProbe?.style.paddingLeft).toContain('safe-area-inset-right')
+
+      // Opening the virtual keyboard in portrait (466x350) must NOT flip compactHeight to true.
+      innerWidth = 466
+      innerHeight = 350
+      window.dispatchEvent(new Event('resize'))
+      expect(env.duoFrontWiden.value).toEqual({
+        active: true,
+        posture: 'portrait',
+        targetWidth: 466,
+        rightInset: 84,
+        compactHeight: false,
+      })
+      expect(env.duoRail.value).toEqual({ active: true, compactHeight: false })
+      innerHeight = 678
+      window.dispatchEvent(new Event('resize'))
+
       // Sideways drag while finger is down waits until touchend + settle delay before gliding back.
       currentScrollX = 48
       const touchStart = new Event('touchstart')
@@ -1192,14 +1375,20 @@ describe('usePwaEnvironment', () => {
       expect(scrollToSpy).toHaveBeenCalledWith({ left: 0, behavior: 'smooth' })
       expect(currentScrollX).toBe(0)
 
-      // Rotate to landscape-secondary (right column): widen to 678 and enable compactHeight.
+      // Rotate to landscape-secondary (right column): even on the transient 466x678 frame before
+      // innerHeight shrinks, widening stays active and switches cleanly to 678 + compactHeight.
       orientationType = 'landscape-secondary'
-      innerWidth = 594
-      innerHeight = 466
       orientationTarget.dispatchEvent(new Event('change'))
+      expect(env.duoFrontWiden.value.active).toBe(true)
       expect(env.duoFrontWiden.value.targetWidth).toBe(678)
       expect(meta.content).toBe(buildDuoFrontViewportContent(678))
       expect(document.documentElement.dataset.duoFrontWiden).toBe('landscape-secondary')
+      expect(env.duoRail.value).toEqual({ active: true, compactHeight: true })
+
+      innerWidth = 594
+      innerHeight = 466
+      window.dispatchEvent(new Event('resize'))
+      expect(env.duoFrontWiden.value.targetWidth).toBe(678)
       expect(env.duoRail.value).toEqual({ active: true, compactHeight: true })
 
       // Flip 180deg to landscape-primary (left column): disable widening cleanly.
@@ -1224,14 +1413,15 @@ describe('usePwaEnvironment', () => {
       expect(env.duoFrontWiden.value.active).toBe(false)
       expect(meta.content).toBe(STANDALONE_VIEWPORT_CONTENT)
 
-      // Fold back to outer portrait and simulate native WebKit exposing env(safe-area-inset-right)=84px.
+      // Fold back to outer portrait and simulate native WebKit exposing env(safe-area-inset-right)=84px
+      // asynchronously via border-box ResizeObserver (without a window resize event).
       innerWidth = 466
       innerHeight = 678
       window.dispatchEvent(new Event('resize'))
       expect(env.duoFrontWiden.value.active).toBe(true)
 
       nativeEnvRight = '84px'
-      window.dispatchEvent(new Event('resize'))
+      observerState.callback?.([], {} as ResizeObserver)
       expect(env.duoFrontWiden.value.active).toBe(false)
       expect(meta.content).toBe(STANDALONE_VIEWPORT_CONTENT)
       expect(document.documentElement.dataset.duoFrontWiden).toBeUndefined()
@@ -1240,6 +1430,7 @@ describe('usePwaEnvironment', () => {
     } finally {
       scope.stop()
       computedSpy.mockRestore()
+      globalThis.ResizeObserver = OriginalResizeObserver
       window.scrollTo = originalScrollTo
       if (originalScreen) Object.defineProperty(window, 'screen', originalScreen)
       if (originalInnerWidth) Object.defineProperty(window, 'innerWidth', originalInnerWidth)
