@@ -27,6 +27,7 @@ import {
   api,
   ApiError,
   type Concurrency,
+  type CoordinatorEffort,
   type Currency,
   type Effort,
   type ListedModel,
@@ -35,8 +36,8 @@ import {
   type ModelProblem,
   type ModelSettings,
 } from '../api'
-import { applyModelSettings } from '../store'
-import { EFFORTS, effortsOf, effortWithin } from '../effort'
+import { applyModelSettings, refreshConversationModels } from '../store'
+import { coordinatorDefaultEffort, EFFORTS, effortsOf, effortWithin } from '../effort'
 import { lt, t, tm } from '../i18n'
 import InputSettings from './InputSettings.vue'
 import McpSettings from './McpSettings.vue'
@@ -101,7 +102,7 @@ const models = ref<DraftModel[]>([])
 // Threads come first: they do the work. The coordinator may use another model, and think less.
 const threadModel = ref('')
 const threadEffort = ref<Effort | ''>('')
-const coordinatorEffort = ref<Effort | ''>('')
+const coordinatorEffort = ref<CoordinatorEffort | ''>('')
 // An empty value means the coordinator inherits the discussion thread's model.
 const coordinatorModel = ref('')
 // Questions a conversation hands to a research; `''` is the asking conversation's own model.
@@ -254,7 +255,37 @@ function rolePath(
   })
 }
 const threadPath = rolePath(threadOptions, threadModel, threadEffort)
-const coordinatorPath = rolePath(coordinatorOptions, coordinatorModel, coordinatorEffort)
+const coordinatorPath = computed({
+  get() {
+    const current =
+      coordinatorOptions.value.find((option) => option.value === coordinatorModel.value) ??
+      coordinatorOptions.value[0]
+    if (!current) return null
+    const wanted =
+      current.value === ''
+        ? coordinatorEffort.value === 'default'
+          ? ''
+          : coordinatorEffort.value || (coordinatorDefaultEffort(threadTold.value) ?? '')
+        : coordinatorEffort.value === 'default'
+          ? ''
+          : coordinatorEffort.value
+    const depth = current.children?.find((child) => child.value === wanted) ?? current.children?.[0]
+    return depth ? [current.value, depth.value] : [current.value]
+  },
+  set(path: CascaderValue[] | CascaderValue[][] | null) {
+    const [id, depth] = path ?? []
+    if (typeof id !== 'string') return
+    coordinatorModel.value = id
+    const explicit = EFFORTS.find((value) => value === depth)
+    if (explicit) {
+      coordinatorEffort.value = explicit
+    } else if (id === '' && depth === '') {
+      coordinatorEffort.value = 'default'
+    } else {
+      coordinatorEffort.value = ''
+    }
+  },
+})
 const researchPath = rolePath(researchOptions, researchModel, researchEffort)
 // A model that does not take what was picked: the nearest it does, as the server asks.
 watch([threadTold, threadEffort], ([told, effort]) => {
@@ -264,7 +295,7 @@ watch([threadTold, threadEffort], ([told, effort]) => {
 })
 watch([coordinatorTold, coordinatorEffort], ([told, effort]) => {
   const accepted = effortsOf(told)
-  if (effort && !accepted.includes(effort)) {
+  if (effort && effort !== 'default' && !accepted.includes(effort)) {
     coordinatorEffort.value = effortWithin(effort, accepted) ?? ''
   }
 })
@@ -667,6 +698,7 @@ async function saveModels(): Promise<boolean> {
       }
       return body as Record<string, unknown>
     })
+    const keptCoordinatorModel = keep(coordinatorModel.value || null)
     const saved = await api.saveModelSettings({
       providers: providers.value.map((provider, at) => ({
         id: provider.id,
@@ -705,8 +737,13 @@ async function saveModels(): Promise<boolean> {
           effort: threadEffort.value || null,
         },
         coordinator: {
-          model: keep(coordinatorModel.value || null),
-          effort: coordinatorEffort.value || null,
+          model: keptCoordinatorModel,
+          effort:
+            coordinatorEffort.value === 'default'
+              ? keptCoordinatorModel
+                ? null
+                : 'default'
+              : coordinatorEffort.value || null,
         },
         triage: {
           model: keep(hidden?.triage.model ?? null),
@@ -719,6 +756,7 @@ async function saveModels(): Promise<boolean> {
       },
     })
     load(saved)
+    void refreshConversationModels()
     problems.value = saved.problems
     if (concurrency.value) concurrency.value = await api.saveConcurrency(concurrency.value)
     savedModelDraft = modelDraft()

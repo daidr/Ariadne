@@ -1530,6 +1530,12 @@ export function applyModelSettings(settings: ModelSettings) {
   }))
 }
 
+/** Re-fetch open conversations so their displayed model and effort reflect saved settings. */
+export function refreshConversationModels(): Promise<void> {
+  if (!state.currentId) return Promise.resolve()
+  return refreshCurrent(['conversations']).catch(report)
+}
+
 /** Give a thread another model/effort, or back to the default with `model = null`. */
 export async function setThreadModel(
   threadId: string,

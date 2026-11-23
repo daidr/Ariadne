@@ -306,6 +306,25 @@ describe('Domain 1 ConnectRPC mappers', () => {
     })
     expect(decoded.roles.coordinator).toEqual({ model: null, effort: null })
 
+    const defaultEffortReq = toProtoSaveModelSettingsRequest({
+      providers: [],
+      models: [],
+      roles: {
+        thread: { model: null, effort: null },
+        coordinator: { model: null, effort: 'default' },
+        triage: { model: null, effort: null },
+        research: { model: null, effort: null },
+      },
+      showCost: false,
+    })
+    expect(defaultEffortReq.roles.coordinator).toEqual({ effort: 'default' })
+    const decodedDefaultCoordinator = fromProtoModelSettings(
+      create(ModelSettingsSchema, {
+        roles: { coordinator: { effort: 'default' } },
+      }),
+    )
+    expect(decodedDefaultCoordinator.roles.coordinator).toEqual({ model: null, effort: 'default' })
+
     const problems = fromProtoModelProblems([
       create(ModelProblemSchema, {
         model: 'm1',

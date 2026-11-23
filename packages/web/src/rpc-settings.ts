@@ -43,6 +43,7 @@ import type { Value } from '@bufbuild/protobuf/wkt'
 import type {
   CommandAction,
   Concurrency,
+  CoordinatorEffort,
   Currency,
   Effort,
   FoundSetup,
@@ -380,14 +381,14 @@ function fromProtoModelEntry(entry: ProtoModelEntry): ModelEntry {
   }
 }
 
-function fromProtoRole(role?: ProtoRoleConfig): RoleInput {
+function fromProtoRole<E extends string = Effort>(role?: ProtoRoleConfig): RoleInput<E> {
   return {
     model: role?.model ?? null,
-    effort: (role?.effort as Effort | undefined) ?? null,
+    effort: (role?.effort as E | undefined) ?? null,
   }
 }
 
-function toProtoRole(role: RoleInput) {
+function toProtoRole<E extends string>(role: RoleInput<E>) {
   return {
     ...(role.model !== null ? { model: role.model } : {}),
     ...(role.effort !== null ? { effort: role.effort } : {}),
@@ -397,7 +398,7 @@ function toProtoRole(role: RoleInput) {
 function fromProtoRoles(roles?: ProtoModelRoles): ModelSettings['roles'] {
   return {
     thread: fromProtoRole(roles?.thread),
-    coordinator: fromProtoRole(roles?.coordinator),
+    coordinator: fromProtoRole<CoordinatorEffort>(roles?.coordinator),
     triage: fromProtoRole(roles?.triage),
     research: fromProtoRole(roles?.research),
   }

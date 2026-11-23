@@ -274,11 +274,14 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo, valid
 				raw := given[field]
 				if raw != nil {
 					value, ok := raw.(string)
-					if !ok || field == "effort" && !hasString(efforts, value) || field != "effort" && !ids[value] {
+					if !ok || field == "effort" && !validRoleEffort(role, value) || field != "effort" && !ids[value] {
 						return bad("roles." + role + "." + field)
 					}
 					entry[field] = value
 				}
+			}
+			if entry["model"] != nil && entry["effort"] == defaultEffort {
+				entry["effort"] = nil
 			}
 			roleConfig[role] = entry
 		}

@@ -57,16 +57,37 @@ func modelFor(config Object, role, given string) (Object, bool) {
 	}
 }
 func effortFor(config Object, role string) string {
-	configured := object(object(config["models"])["roles"])
+	models := object(config["models"])
+	items := list(models["models"])
+	configured := object(models["roles"])
 	own := object(configured[role])
-	if role == "triage" && !truthy(own["model"]) && !truthy(own["effort"]) {
+	if role == "triage" && findByID(items, text(own["model"])) == nil && !truthy(own["effort"]) {
 		return text(object(configured["coordinator"])["effort"])
 	}
 	return text(own["effort"])
 }
+func roleUsesCoordinatorDefault(config Object, role string) bool {
+	models := object(config["models"])
+	items := list(models["models"])
+	configured := object(models["roles"])
+	hasModel := func(role string) bool { return findByID(items, text(object(configured[role])["model"])) != nil }
+	switch role {
+	case "triage":
+		own := object(configured["triage"])
+		if hasModel("triage") || truthy(own["effort"]) {
+			return false
+		}
+		fallthrough
+	case "coordinator":
+		coord := object(configured["coordinator"])
+		return !hasModel("coordinator") && !truthy(coord["effort"])
+	default:
+		return false
+	}
+}
 func acceptedEfforts(chosen Object) *[]string {
 	raw, exists := chosen["efforts"]
-	if !exists {
+	if !exists || raw == nil {
 		return nil
 	}
 	values := []string{}
@@ -75,12 +96,25 @@ func acceptedEfforts(chosen Object) *[]string {
 	}
 	return &values
 }
+func acceptsEffort(chosen Object, wanted string) bool {
+	accepted := acceptedEfforts(chosen)
+	if accepted == nil {
+		return hasString([]string{"low", "medium", "high"}, wanted)
+	}
+	return hasString(*accepted, wanted)
+}
 func resolveEffort(config Object, role, givenEffort string, chosen Object, matchedGiven bool) string {
 	wanted := effortFor(config, role)
 	if role == "thread" && matchedGiven {
 		wanted = givenEffort
 	}
+	if wanted == defaultEffort {
+		return ""
+	}
 	if wanted == "" {
+		if roleUsesCoordinatorDefault(config, role) && acceptsEffort(chosen, "low") {
+			return "low"
+		}
 		return ""
 	}
 	return sdk.EffortWithin(wanted, acceptedEfforts(chosen))
