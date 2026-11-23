@@ -34,6 +34,7 @@ func (turn *turn) trackThreadInput(entries []transcript.Entry) {
 // that goes to the model, so a concurrent direct request can be answered there.
 func (turn *turn) trackCoordinatorInput(entries []transcript.Entry) {
 	threads := map[string]bool{}
+	messageThreads := map[string]string{}
 	var reports []string
 	independent := false
 	for _, entry := range entries {
@@ -52,8 +53,14 @@ func (turn *turn) trackCoordinatorInput(entries []transcript.Entry) {
 			note, _ := entry["note"].(map[string]any)
 			switch note["type"] {
 			case "user-in-thread", "answer-in-thread":
-				threads[text(note, "threadId")] = true
-				turn.userSpoke = turn.userSpoke || note["type"] == "user-in-thread"
+				threadID := text(note, "threadId")
+				threads[threadID] = true
+				if note["type"] == "user-in-thread" {
+					turn.userSpoke = true
+					if msgID := text(note, "messageId"); msgID != "" && threadID != "" {
+						messageThreads[msgID] = threadID
+					}
+				}
 			case "answer":
 				turn.userSpoke = true
 				turn.directUserInput = true
@@ -75,7 +82,32 @@ func (turn *turn) trackCoordinatorInput(entries []transcript.Entry) {
 			independent = true
 		}
 	}
-	turn.quiet = len(threads) != 0 && !independent
+	turn.quietThreads = threads
+	turn.quietMessageThreads = messageThreads
+	turn.quiet = len(threads) != 0 && !independent && !turn.routedToOtherThread
+}
+
+func (turn *turn) markRoutedToOtherThread() {
+	if turn.conversation.Role != "coordinator" {
+		return
+	}
+	turn.routedToOtherThread = true
+	turn.quiet = false
+}
+
+func (turn *turn) isRoutingToOtherThread(targetThreadID string, cites []string) bool {
+	if turn.conversation.Role != "coordinator" || !turn.quiet {
+		return false
+	}
+	if !turn.quietThreads[targetThreadID] {
+		return true
+	}
+	for _, cite := range cites {
+		if source := turn.quietMessageThreads[cite]; source != "" && source != targetThreadID {
+			return true
+		}
+	}
+	return false
 }
 
 func coordinatorChatTool(name string) bool {

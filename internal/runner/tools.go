@@ -403,6 +403,9 @@ func (turn *turn) createThread(ctx context.Context, input args) (string, error) 
 	}
 	thread, err := turn.Repository.CreateBriefedThread(ctx, turn.conversation.ProjectID,
 		core.NewThread{Title: title, Model: model, NodeID: optional(input, "nodeId"), Branch: optional(input, "branch")}, brief, cites)
+	if err == nil && turn.quiet {
+		turn.markRoutedToOtherThread()
+	}
 	return reply(args{"threadId": thread.ID, "stage": thread.Stage}, relayToolError(err, "brief"))
 }
 
@@ -470,6 +473,9 @@ func (turn *turn) messageThread(ctx context.Context, input args) (string, error)
 	_, err = turn.Repository.PostMessage(ctx, thread.ProjectID, core.MessageInput{ConversationID: id, Author: "coordinator", Kind: "relay", Content: content, Cites: cites})
 	if err != nil {
 		return "", relayToolError(err, "content")
+	}
+	if turn.isRoutingToOtherThread(id, cites) {
+		turn.markRoutedToOtherThread()
 	}
 	return "Sent.", nil
 }
