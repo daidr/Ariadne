@@ -33,7 +33,7 @@ export type Translate = (key: MessageKey, params?: MessageParams) => string
 
 export function createTranslator(locale: Locale = defaultLocale): Translate {
   const messages = locales[locale]
-  return (key, params) => format(messages[key] ?? zhCN[key], params)
+  return (key, params) => format(messages[key] ?? zhCN[key] ?? key, params)
 }
 
 /**

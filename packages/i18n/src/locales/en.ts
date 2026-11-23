@@ -795,10 +795,6 @@ export const en: Record<MessageKey, string> = {
   'mcp.ask.once': 'Only this once',
   'mcp.ask.yes': 'Allow',
   'mcp.ask.no': "Don't",
-  'error.budgetThread':
-    'This thread used {used}k tokens, the {limit}k each thread may use in the project settings, so it stopped. Raise the limit and retry',
-  'error.budgetProject':
-    'This project used {used}k tokens, the {limit}k it may use in the project settings, so it stopped. Raise the limit and retry',
   'command.ask.question': 'Run this command once?',
   'command.ask.rule': 'It matches your command rule "{pattern}"',
   'command.ask.yes': 'Run',
@@ -962,9 +958,6 @@ export const en: Record<MessageKey, string> = {
     'Runs after each file a thread edits, and a failure goes back to it; {placeholder} becomes the changed files',
   'projectSettings.env': 'Command environment variables',
   'projectSettings.autopilotMethod': 'Merge method',
-  'projectSettings.budgetThread': 'Most one thread may use (k tokens)',
-  'projectSettings.budgetProject': 'Most the project may use (k tokens)',
-  'projectSettings.noCap': 'No cap',
   'project.export': 'Export project',
   'error.notReviewer': 'Only a reviewing thread can give a review verdict',
   'error.noReviewRound': 'No review round is waiting for a verdict',

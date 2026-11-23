@@ -314,29 +314,6 @@ func requestFor(model *settings.ResolvedModel, conversation string) sdk.Request 
 	return request
 }
 
-func budgetError(project core.ProjectView, conversation core.ConversationView) error {
-	over := func(limit *float64, usage map[string]any, key string) error {
-		used := asNumber(usage["input"]) + asNumber(usage["output"])
-		if limit == nil || used < *limit {
-			return nil
-		}
-		format := func(n float64) string {
-			if n < 1000 {
-				return fmt.Sprintf("%.0f", n)
-			}
-			return fmt.Sprintf("%.1fk", n/1000)
-		}
-		return domainerr.New(key, map[string]any{"used": format(used), "limit": format(*limit)})
-	}
-	if err := over(project.Settings.Budget.Project, project.Usage, "error.budgetProject"); err != nil {
-		return err
-	}
-	if conversation.Role == "thread" {
-		return over(project.Settings.Budget.Thread, conversation.Usage, "error.budgetThread")
-	}
-	return nil
-}
-
 func (turn *turn) history(ctx context.Context) (int64, []transcript.Entry, error) {
 	seq, err := turn.Repository.Store.LastSeq(ctx)
 	if err != nil {
@@ -398,13 +375,6 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		}
 		project, err := turn.Repository.GetProjectForRun(ctx, conversation.ProjectID)
 		if err != nil {
-			return err
-		}
-		current, err := turn.Repository.GetConversation(ctx, conversation.ID)
-		if err != nil {
-			return err
-		}
-		if err := budgetError(project, current); err != nil {
 			return err
 		}
 		if turn.instructionsDirty.Load() {

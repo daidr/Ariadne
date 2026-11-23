@@ -17,6 +17,9 @@ describe('i18n', () => {
   test('translates with the chosen locale', () => {
     expect(createTranslator('en')('error.notFound', { what: 'Project' })).toBe('Project not found')
     expect(createTranslator()('attention.title')).toBe('需要我')
+    expect(createTranslator('en')('error.legacyRemoved' as never, { used: 1 })).toBe(
+      'error.legacyRemoved',
+    )
   })
 
   test("reads a terminal's language", () => {

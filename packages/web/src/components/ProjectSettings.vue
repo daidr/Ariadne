@@ -9,7 +9,6 @@ import {
   DouForm,
   DouFormItem,
   DouInput,
-  DouInputNumber,
   DouSelect,
   DouSwitch,
   DouTabPanel,
@@ -44,7 +43,7 @@ import { resolveWorkspaceLayout, type WorkspaceLayoutMode } from '../workspace-l
 
 /**
  * The open project's own settings: where its files are, instructions, workspaces and MCP,
- * and the review, autopilot, budgets and routines. What the page no longer shows (tool
+ * and the review, autopilot and routines. What the page no longer shows (tool
  * switches, the shell, the branch prefix, the project's own concurrency) is saved back as
  * it was.
  */
@@ -66,9 +65,6 @@ const tab = computed({
 const source = ref<InstanceType<typeof FileSourcesForm> | null>(null)
 const settings = ref<ProjectSettings | null>(null)
 const env = ref<DraftPair[]>([])
-/** Budgets in thousands of tokens, as typed; empty is no cap. */
-const threadK = ref<number | null>(null)
-const projectK = ref<number | null>(null)
 const slots = ref<number | null>(null)
 const mcp = ref<string[]>([])
 const mcpServers = ref<McpServerView[]>([])
@@ -159,8 +155,6 @@ const mcpOptions = computed(() =>
   mcpServers.value.map((server) => ({ value: server.id, label: server.name })),
 )
 
-const toK = (tokens: number | null) => (tokens ? Math.round(tokens / 1000) : null)
-
 watch(
   () => state.projectSettingsOpen,
   async (open) => {
@@ -189,8 +183,6 @@ watch(
       setup.value = auto.setup ? found.setup : view.settings.workspace.setup
       check.value = auto.check ? found.check : view.settings.workspace.check
       env.value = storedPairs(view.env)
-      threadK.value = toK(view.settings.budget.thread)
-      projectK.value = toK(view.settings.budget.project)
       mcpServers.value = servers.servers
     } catch (cause) {
       error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
@@ -240,10 +232,6 @@ async function save() {
         ? (state.detail?.project.settings.routines ?? settings.value.routines)
         : // One left without words does nothing; it goes rather than failing the save.
           settings.value.routines.filter((routine) => routine.prompt.trim()),
-    budget: {
-      thread: threadK.value ? threadK.value * 1000 : null,
-      project: projectK.value ? projectK.value * 1000 : null,
-    },
   }
   error.value = await saveProjectSettings(
     { settings: next, env: pairsInput(env.value) },
@@ -423,26 +411,6 @@ async function save() {
             >
               <DouSelect v-model="settings.autopilot.method" :options="methodOptions" />
             </DouFormItem>
-            <div class="project-row">
-              <DouFormItem :label="t('projectSettings.budgetThread')" class="project-grow">
-                <DouInputNumber
-                  v-model="threadK"
-                  :min="1"
-                  :max="1000000"
-                  :step="100"
-                  :placeholder="t('projectSettings.noCap')"
-                />
-              </DouFormItem>
-              <DouFormItem :label="t('projectSettings.budgetProject')" class="project-grow">
-                <DouInputNumber
-                  v-model="projectK"
-                  :min="1"
-                  :max="100000000"
-                  :step="1000"
-                  :placeholder="t('projectSettings.noCap')"
-                />
-              </DouFormItem>
-            </div>
           </DouForm>
           <div class="project-routines">
             <DouText weight="medium" size="sm">{{ t('projectSettings.tab.routines') }}</DouText>
@@ -537,16 +505,6 @@ async function save() {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.project-row {
-  display: flex;
-  gap: 12px;
-}
-
-.project-grow {
-  flex: 1;
-  min-width: 0;
 }
 
 .project-code :deep(textarea),

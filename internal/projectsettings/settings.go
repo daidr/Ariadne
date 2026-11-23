@@ -32,10 +32,6 @@ type Delivery struct {
 	Mode         string `json:"mode"`
 	Instructions string `json:"instructions"`
 }
-type Budget struct {
-	Thread  *float64 `json:"thread"`
-	Project *float64 `json:"project"`
-}
 type Auto struct {
 	Setup bool `json:"setup"`
 	Check bool `json:"check"`
@@ -66,7 +62,6 @@ type Settings struct {
 	Instructions string    `json:"instructions"`
 	Delivery     Delivery  `json:"delivery"`
 	Tools        []string  `json:"tools"`
-	Budget       Budget    `json:"budget"`
 	Workspace    Workspace `json:"workspace"`
 	Routines     []Routine `json:"routines"`
 	Review       Review    `json:"review"`
@@ -123,16 +118,6 @@ func number(raw any) (float64, bool) {
 		return n, err == nil
 	}
 	return 0, false
-}
-func budgetValue(raw any, at string) (*float64, error) {
-	if raw == nil || raw == "" {
-		return nil, nil
-	}
-	value, ok := number(raw)
-	if !ok || math.IsInf(value, 0) || math.IsNaN(value) || math.Trunc(value) != value || value < 1000 {
-		return nil, bad(at)
-	}
-	return &value, nil
 }
 
 func ValidBranchPrefix(prefix string) bool {
@@ -229,18 +214,6 @@ func Parse(input any, allowedTools []string) (Settings, error) {
 			}
 		}
 		sort.Strings(out.Tools)
-	}
-	if raw, exists := body["budget"]; exists {
-		value := object(raw)
-		var err error
-		out.Budget.Thread, err = budgetValue(value["thread"], "budget.thread")
-		if err != nil {
-			return Settings{}, err
-		}
-		out.Budget.Project, err = budgetValue(value["project"], "budget.project")
-		if err != nil {
-			return Settings{}, err
-		}
 	}
 	if raw, exists := body["workspace"]; exists {
 		value := object(raw)

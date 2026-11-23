@@ -62,9 +62,6 @@ func (repo *Repository) advanceAutopilotPlan(ctx context.Context, tx *eventstore
 			slots--
 		}
 	}
-	budget := project.Settings.Budget.Project
-	usage := record(project.Usage)
-	outOfBudget := budget != nil && float64(usage.integer("input")+usage.integer("output")) >= *budget
 	nodes := plan["nodes"].([]object)
 	graph := make(map[string]object, len(nodes))
 	status := make(map[string]string, len(nodes))
@@ -101,7 +98,7 @@ func (repo *Repository) advanceAutopilotPlan(ctx context.Context, tx *eventstore
 				}
 			}
 		case "task":
-			if slots <= 0 || outOfBudget || len(node["threads"].([]object)) > 0 {
+			if slots <= 0 || len(node["threads"].([]object)) > 0 {
 				continue
 			}
 			title := node.str("title")

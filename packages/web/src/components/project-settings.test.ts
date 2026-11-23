@@ -14,7 +14,6 @@ function makeProjectSettingsView(): ProjectSettingsView {
       instructions: '',
       delivery: { mode: 'merge', instructions: '' },
       tools: [],
-      budget: { thread: null, project: null },
       workspace: {
         retention: 'auto',
         setup: '',
@@ -129,5 +128,10 @@ describe('ProjectSettings', () => {
     expect(dialog().props('fullscreen')).toBe(true)
     expect(tabBar().props('placement')).toBe('top')
     expect(tabBar().props('height')).toBe('100%')
+
+    state.projectSettingsTab = 'autopilot'
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('每个讨论串最多用')
+    expect(wrapper.text()).not.toContain('整个项目最多用')
   })
 })
