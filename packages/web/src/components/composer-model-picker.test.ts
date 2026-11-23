@@ -131,6 +131,7 @@ describe('ConversationPanel cascading model and effort switcher', () => {
   afterEach(() => {
     wrappers.splice(0).forEach((wrapper) => wrapper.unmount())
     document.body.innerHTML = ''
+    state.coordinator = emptyConversation()
     state.threads = {}
     state.detail = null
     state.currentId = null
@@ -212,5 +213,42 @@ describe('ConversationPanel cascading model and effort switcher', () => {
     await nextTick()
     expect(wrapper.find(`button[title="${t('thread.model')}"]`).exists()).toBe(false)
     expect(wrapper.find('.conversation-model').text()).toBe('Gemini 4 · 高')
+  })
+
+  test('displays coordinator model with resolved low effort in the composer footer', async () => {
+    state.coordinator = {
+      ...emptyConversation(),
+      conversation: {
+        ...makeConversation(),
+        id: 'crd_1',
+        role: 'coordinator',
+      },
+      model: {
+        id: 'm-gemini',
+        contextTokens: 200_000,
+        compactAt: 120_000,
+        effort: 'low',
+      },
+    }
+
+    const wrapper = mount(ConversationPanel, {
+      global: { stubs: { teleport: true } },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.find(`button[title="${t('thread.model')}"]`).exists()).toBe(false)
+    expect(wrapper.find('.conversation-model').text()).toBe('Gemini 4 · 低')
+
+    state.coordinator = {
+      ...state.coordinator,
+      model: {
+        id: 'm-plain',
+        contextTokens: 128_000,
+        compactAt: 76_800,
+      },
+    }
+    await nextTick()
+    expect(wrapper.find('.conversation-model').text()).toBe('GPT-4o')
   })
 })

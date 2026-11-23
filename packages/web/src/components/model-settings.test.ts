@@ -234,4 +234,108 @@ describe('ModelSettings', () => {
     expect('fallback' in savedInput!.roles.coordinator).toBe(false)
     expect('fallback' in savedInput!.roles.research).toBe(false)
   })
+
+  test('defaults coordinator to low effort when inherited thread model supports low and preserves explicit overrides', async () => {
+    const initial = makeModelSettings(true)
+    initial.models = [
+      { id: 'm-oa', provider: 'p-oa', model: 'gpt-5', contextTokens: 128000 },
+      {
+        id: 'm-medhigh',
+        provider: 'p-anth',
+        model: 'claude-medhigh',
+        contextTokens: 200000,
+        efforts: ['medium', 'high'],
+      },
+      {
+        id: 'm-plain',
+        provider: 'p-anth',
+        model: 'claude-plain',
+        contextTokens: 200000,
+        efforts: [],
+      },
+    ]
+    initial.roles.thread = { model: 'm-oa', effort: 'high' }
+    initial.roles.coordinator = { model: null, effort: null }
+
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(initial)
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+    vi.spyOn(api, 'saveConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+    let savedInput: ModelSettingsInput | null = null
+    vi.spyOn(api, 'saveModelSettings').mockImplementation(async (input) => {
+      savedInput = input
+      return {
+        ...initial,
+        roles: input.roles,
+        problems: [],
+      }
+    })
+
+    const wrapper = mount(ModelSettingsDialog, {
+      props: { open: false, tab: 'models' },
+      global: {
+        stubs: {
+          PluginSettings: true,
+          SearchSettings: true,
+          WorkSettings: true,
+          InputSettings: true,
+          McpSettings: true,
+          DataTab: true,
+          UpdatesSettings: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+
+    const cascaders = () => wrapper.findAllComponents({ name: 'DouCascader' })
+
+    // Inherited model (unknown efforts -> common low/medium/high) defaults coordinator to ['','low'] ("沿用讨论串模型 · 低").
+    expect(cascaders()[1]!.props('modelValue')).toEqual(['', 'low'])
+    expect(cascaders()[1]!.text()).toContain('沿用讨论串模型 · 低')
+
+    // Saving untouched keeps coordinator role unset so it stays adaptive.
+    const saveButton = () =>
+      wrapper.findAll('button').find((button) => button.text().trim() === '保存')!
+    await saveButton().trigger('click')
+    await flushPromises()
+    expect(savedInput!.roles.coordinator).toEqual({ model: null, effort: null })
+
+    // Reopen and switch thread model to one without low effort: coordinator falls back to default effort.
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    await cascaders()[0]!.vm.$emit('update:modelValue', ['m-medhigh', 'high'])
+    await flushPromises()
+    expect(cascaders()[1]!.props('modelValue')).toEqual(['', ''])
+    expect(cascaders()[1]!.text()).toContain('沿用讨论串模型 · 默认')
+
+    // Switch thread model to one without any effort support: coordinator has no effort suffix.
+    await cascaders()[0]!.vm.$emit('update:modelValue', ['m-plain'])
+    await flushPromises()
+    expect(cascaders()[1]!.props('modelValue')).toEqual([''])
+
+    // Switch back to m-oa and explicitly pick "沿用讨论串模型 · 默认" -> persists effort: 'default'.
+    await cascaders()[0]!.vm.$emit('update:modelValue', ['m-oa', 'high'])
+    await flushPromises()
+    expect(cascaders()[1]!.props('modelValue')).toEqual(['', 'low'])
+    await cascaders()[1]!.vm.$emit('update:modelValue', ['', ''])
+    await flushPromises()
+    expect(cascaders()[1]!.props('modelValue')).toEqual(['', ''])
+    expect(cascaders()[1]!.text()).toContain('沿用讨论串模型 · 默认')
+    await saveButton().trigger('click')
+    await flushPromises()
+    expect(savedInput!.roles.coordinator).toEqual({ model: null, effort: 'default' })
+
+    // Reopen and pick an explicit model with default effort -> saves effort: null.
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    await cascaders()[1]!.vm.$emit('update:modelValue', ['m-medhigh', ''])
+    await flushPromises()
+    expect(cascaders()[1]!.props('modelValue')).toEqual(['m-medhigh', ''])
+    await saveButton().trigger('click')
+    await flushPromises()
+    expect(savedInput!.roles.coordinator).toEqual({ model: 'm-medhigh', effort: null })
+  })
 })

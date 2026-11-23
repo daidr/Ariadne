@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { effortsOf, effortWithin } from './effort'
+import { coordinatorDefaultEffort, effortsOf, effortWithin } from './effort'
 
 test('a model whose efforts nobody told takes the common ones, as the server does', () => {
   expect(effortsOf(null)).toEqual(['low', 'medium', 'high'])
@@ -14,4 +14,13 @@ test('an effort a model does not take becomes the nearest it does', () => {
   expect(effortWithin('xhigh', ['low', 'high', 'max'])).toBe('high')
   expect(effortWithin('low', ['medium', 'high'])).toBe('medium')
   expect(effortWithin('high', [])).toBeNull()
+})
+
+test('coordinator defaults to low effort only when the inherited model supports low', () => {
+  expect(coordinatorDefaultEffort(null)).toBe('low')
+  expect(coordinatorDefaultEffort(undefined)).toBe('low')
+  expect(coordinatorDefaultEffort(['low', 'medium', 'high'])).toBe('low')
+  expect(coordinatorDefaultEffort(['low', 'max'])).toBe('low')
+  expect(coordinatorDefaultEffort(['medium', 'high'])).toBeNull()
+  expect(coordinatorDefaultEffort([])).toBeNull()
 })

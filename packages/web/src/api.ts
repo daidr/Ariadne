@@ -639,20 +639,33 @@ export interface ModelSettingsInput {
   providers: ModelProviderInput[]
   models: ModelEntry[]
   /**
-   * `coordinator.model: null` uses the threads' model, `triage.model: null` the
-   * coordinator's, `research.model: null` the asking conversation's; `effort: null` asks
-   * nothing.
+   * `coordinator.model: null` uses the threads' model (and `'low'` effort when `effort` is
+   * `null` and the model accepts `'low'`, or the model's own default when `effort` is
+   * `'default'`), `triage.model: null` the coordinator's, `research.model: null` the asking
+   * conversation's; `effort: null` asks nothing for other roles.
    */
-  roles: { thread: RoleInput; coordinator: RoleInput; triage: RoleInput; research: RoleInput }
+  roles: {
+    thread: RoleInput
+    coordinator: RoleInput<CoordinatorEffort>
+    triage: RoleInput
+    research: RoleInput
+  }
   /** Usage also shows the estimated cost. */
   showCost: boolean
 }
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
-export interface RoleInput {
+/**
+ * Effort stored on the coordinator role: a thinking level, `'default'` when the user
+ * explicitly chose the model's own default while inheriting the threads' model, or `null`
+ * when untouched (which defaults to `'low'` if the inherited model accepts it).
+ */
+export type CoordinatorEffort = Effort | 'default'
+
+export interface RoleInput<E extends string = Effort> {
   model: string | null
-  effort: Effort | null
+  effort: E | null
 }
 
 export interface ModelSettings extends Omit<ModelSettingsInput, 'providers'> {
