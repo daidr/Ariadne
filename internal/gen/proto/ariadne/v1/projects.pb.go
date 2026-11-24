@@ -578,58 +578,6 @@ func (x *ProjectDeliverySettings) GetInstructions() string {
 	return ""
 }
 
-type ProjectBudgetSettings struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Thread        *float64               `protobuf:"fixed64,1,opt,name=thread,proto3,oneof" json:"thread,omitempty"`
-	Project       *float64               `protobuf:"fixed64,2,opt,name=project,proto3,oneof" json:"project,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ProjectBudgetSettings) Reset() {
-	*x = ProjectBudgetSettings{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ProjectBudgetSettings) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ProjectBudgetSettings) ProtoMessage() {}
-
-func (x *ProjectBudgetSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ProjectBudgetSettings.ProtoReflect.Descriptor instead.
-func (*ProjectBudgetSettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *ProjectBudgetSettings) GetThread() float64 {
-	if x != nil && x.Thread != nil {
-		return *x.Thread
-	}
-	return 0
-}
-
-func (x *ProjectBudgetSettings) GetProject() float64 {
-	if x != nil && x.Project != nil {
-		return *x.Project
-	}
-	return 0
-}
-
 type ProjectWorkspaceAutoSettings struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Setup         bool                   `protobuf:"varint,1,opt,name=setup,proto3" json:"setup,omitempty"`
@@ -640,7 +588,7 @@ type ProjectWorkspaceAutoSettings struct {
 
 func (x *ProjectWorkspaceAutoSettings) Reset() {
 	*x = ProjectWorkspaceAutoSettings{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[10]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -652,7 +600,7 @@ func (x *ProjectWorkspaceAutoSettings) String() string {
 func (*ProjectWorkspaceAutoSettings) ProtoMessage() {}
 
 func (x *ProjectWorkspaceAutoSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[10]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -665,7 +613,7 @@ func (x *ProjectWorkspaceAutoSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectWorkspaceAutoSettings.ProtoReflect.Descriptor instead.
 func (*ProjectWorkspaceAutoSettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{10}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ProjectWorkspaceAutoSettings) GetSetup() bool {
@@ -696,7 +644,7 @@ type ProjectWorkspaceSettings struct {
 
 func (x *ProjectWorkspaceSettings) Reset() {
 	*x = ProjectWorkspaceSettings{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[11]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -708,7 +656,7 @@ func (x *ProjectWorkspaceSettings) String() string {
 func (*ProjectWorkspaceSettings) ProtoMessage() {}
 
 func (x *ProjectWorkspaceSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[11]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -721,7 +669,7 @@ func (x *ProjectWorkspaceSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectWorkspaceSettings.ProtoReflect.Descriptor instead.
 func (*ProjectWorkspaceSettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{11}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ProjectWorkspaceSettings) GetRetention() string {
@@ -779,7 +727,7 @@ type ProjectRoutine struct {
 
 func (x *ProjectRoutine) Reset() {
 	*x = ProjectRoutine{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[12]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -791,7 +739,7 @@ func (x *ProjectRoutine) String() string {
 func (*ProjectRoutine) ProtoMessage() {}
 
 func (x *ProjectRoutine) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[12]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -804,7 +752,7 @@ func (x *ProjectRoutine) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectRoutine.ProtoReflect.Descriptor instead.
 func (*ProjectRoutine) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{12}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ProjectRoutine) GetId() string {
@@ -851,7 +799,7 @@ type ProjectReviewSettings struct {
 
 func (x *ProjectReviewSettings) Reset() {
 	*x = ProjectReviewSettings{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[13]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -863,7 +811,7 @@ func (x *ProjectReviewSettings) String() string {
 func (*ProjectReviewSettings) ProtoMessage() {}
 
 func (x *ProjectReviewSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[13]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -876,7 +824,7 @@ func (x *ProjectReviewSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectReviewSettings.ProtoReflect.Descriptor instead.
 func (*ProjectReviewSettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{13}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ProjectReviewSettings) GetEnabled() bool {
@@ -896,7 +844,7 @@ type ProjectAutopilotSettings struct {
 
 func (x *ProjectAutopilotSettings) Reset() {
 	*x = ProjectAutopilotSettings{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[14]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -908,7 +856,7 @@ func (x *ProjectAutopilotSettings) String() string {
 func (*ProjectAutopilotSettings) ProtoMessage() {}
 
 func (x *ProjectAutopilotSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[14]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -921,7 +869,7 @@ func (x *ProjectAutopilotSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectAutopilotSettings.ProtoReflect.Descriptor instead.
 func (*ProjectAutopilotSettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{14}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ProjectAutopilotSettings) GetEnabled() bool {
@@ -943,7 +891,6 @@ type ProjectSettings struct {
 	Instructions  string                    `protobuf:"bytes,1,opt,name=instructions,proto3" json:"instructions,omitempty"`
 	Delivery      *ProjectDeliverySettings  `protobuf:"bytes,2,opt,name=delivery,proto3" json:"delivery,omitempty"`
 	Tools         []string                  `protobuf:"bytes,3,rep,name=tools,proto3" json:"tools,omitempty"`
-	Budget        *ProjectBudgetSettings    `protobuf:"bytes,4,opt,name=budget,proto3" json:"budget,omitempty"`
 	Workspace     *ProjectWorkspaceSettings `protobuf:"bytes,5,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	Routines      []*ProjectRoutine         `protobuf:"bytes,6,rep,name=routines,proto3" json:"routines,omitempty"`
 	Review        *ProjectReviewSettings    `protobuf:"bytes,7,opt,name=review,proto3" json:"review,omitempty"`
@@ -954,7 +901,7 @@ type ProjectSettings struct {
 
 func (x *ProjectSettings) Reset() {
 	*x = ProjectSettings{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[15]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -966,7 +913,7 @@ func (x *ProjectSettings) String() string {
 func (*ProjectSettings) ProtoMessage() {}
 
 func (x *ProjectSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[15]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -979,7 +926,7 @@ func (x *ProjectSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectSettings.ProtoReflect.Descriptor instead.
 func (*ProjectSettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{15}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ProjectSettings) GetInstructions() string {
@@ -999,13 +946,6 @@ func (x *ProjectSettings) GetDelivery() *ProjectDeliverySettings {
 func (x *ProjectSettings) GetTools() []string {
 	if x != nil {
 		return x.Tools
-	}
-	return nil
-}
-
-func (x *ProjectSettings) GetBudget() *ProjectBudgetSettings {
-	if x != nil {
-		return x.Budget
 	}
 	return nil
 }
@@ -1048,7 +988,7 @@ type ProjectDetectedCommand struct {
 
 func (x *ProjectDetectedCommand) Reset() {
 	*x = ProjectDetectedCommand{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[16]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1060,7 +1000,7 @@ func (x *ProjectDetectedCommand) String() string {
 func (*ProjectDetectedCommand) ProtoMessage() {}
 
 func (x *ProjectDetectedCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[16]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1073,7 +1013,7 @@ func (x *ProjectDetectedCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectDetectedCommand.ProtoReflect.Descriptor instead.
 func (*ProjectDetectedCommand) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{16}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ProjectDetectedCommand) GetCommand() string {
@@ -1100,7 +1040,7 @@ type ProjectDetected struct {
 
 func (x *ProjectDetected) Reset() {
 	*x = ProjectDetected{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[17]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1112,7 +1052,7 @@ func (x *ProjectDetected) String() string {
 func (*ProjectDetected) ProtoMessage() {}
 
 func (x *ProjectDetected) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[17]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1125,7 +1065,7 @@ func (x *ProjectDetected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectDetected.ProtoReflect.Descriptor instead.
 func (*ProjectDetected) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{17}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ProjectDetected) GetSetup() *ProjectDetectedCommand {
@@ -1152,7 +1092,7 @@ type ProjectEnvVar struct {
 
 func (x *ProjectEnvVar) Reset() {
 	*x = ProjectEnvVar{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[18]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1164,7 +1104,7 @@ func (x *ProjectEnvVar) String() string {
 func (*ProjectEnvVar) ProtoMessage() {}
 
 func (x *ProjectEnvVar) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[18]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1177,7 +1117,7 @@ func (x *ProjectEnvVar) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectEnvVar.ProtoReflect.Descriptor instead.
 func (*ProjectEnvVar) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{18}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ProjectEnvVar) GetName() string {
@@ -1203,7 +1143,7 @@ type ProjectEnvVarList struct {
 
 func (x *ProjectEnvVarList) Reset() {
 	*x = ProjectEnvVarList{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[19]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1215,7 +1155,7 @@ func (x *ProjectEnvVarList) String() string {
 func (*ProjectEnvVarList) ProtoMessage() {}
 
 func (x *ProjectEnvVarList) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[19]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1228,7 +1168,7 @@ func (x *ProjectEnvVarList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectEnvVarList.ProtoReflect.Descriptor instead.
 func (*ProjectEnvVarList) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{19}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ProjectEnvVarList) GetEntries() []*ProjectEnvVar {
@@ -1251,7 +1191,7 @@ type ProjectSettingsView struct {
 
 func (x *ProjectSettingsView) Reset() {
 	*x = ProjectSettingsView{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[20]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1263,7 +1203,7 @@ func (x *ProjectSettingsView) String() string {
 func (*ProjectSettingsView) ProtoMessage() {}
 
 func (x *ProjectSettingsView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[20]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1276,7 +1216,7 @@ func (x *ProjectSettingsView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectSettingsView.ProtoReflect.Descriptor instead.
 func (*ProjectSettingsView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{20}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ProjectSettingsView) GetSettings() *ProjectSettings {
@@ -1339,7 +1279,7 @@ type ProjectView struct {
 
 func (x *ProjectView) Reset() {
 	*x = ProjectView{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[21]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1351,7 +1291,7 @@ func (x *ProjectView) String() string {
 func (*ProjectView) ProtoMessage() {}
 
 func (x *ProjectView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[21]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1364,7 +1304,7 @@ func (x *ProjectView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectView.ProtoReflect.Descriptor instead.
 func (*ProjectView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{21}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ProjectView) GetId() string {
@@ -1496,7 +1436,7 @@ type ProjectProgress struct {
 
 func (x *ProjectProgress) Reset() {
 	*x = ProjectProgress{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[22]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1508,7 +1448,7 @@ func (x *ProjectProgress) String() string {
 func (*ProjectProgress) ProtoMessage() {}
 
 func (x *ProjectProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[22]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1521,7 +1461,7 @@ func (x *ProjectProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectProgress.ProtoReflect.Descriptor instead.
 func (*ProjectProgress) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{22}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ProjectProgress) GetDone() int32 {
@@ -1549,7 +1489,7 @@ type ProjectThreadArtifact struct {
 
 func (x *ProjectThreadArtifact) Reset() {
 	*x = ProjectThreadArtifact{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[23]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1561,7 +1501,7 @@ func (x *ProjectThreadArtifact) String() string {
 func (*ProjectThreadArtifact) ProtoMessage() {}
 
 func (x *ProjectThreadArtifact) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[23]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1574,7 +1514,7 @@ func (x *ProjectThreadArtifact) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectThreadArtifact.ProtoReflect.Descriptor instead.
 func (*ProjectThreadArtifact) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{23}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ProjectThreadArtifact) GetId() string {
@@ -1612,7 +1552,7 @@ type ProjectWorkspaceView struct {
 
 func (x *ProjectWorkspaceView) Reset() {
 	*x = ProjectWorkspaceView{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[24]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1624,7 +1564,7 @@ func (x *ProjectWorkspaceView) String() string {
 func (*ProjectWorkspaceView) ProtoMessage() {}
 
 func (x *ProjectWorkspaceView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[24]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1637,7 +1577,7 @@ func (x *ProjectWorkspaceView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectWorkspaceView.ProtoReflect.Descriptor instead.
 func (*ProjectWorkspaceView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{24}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ProjectWorkspaceView) GetSourceId() string {
@@ -1697,7 +1637,7 @@ type ProjectBranchMerge struct {
 
 func (x *ProjectBranchMerge) Reset() {
 	*x = ProjectBranchMerge{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[25]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1709,7 +1649,7 @@ func (x *ProjectBranchMerge) String() string {
 func (*ProjectBranchMerge) ProtoMessage() {}
 
 func (x *ProjectBranchMerge) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[25]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1722,7 +1662,7 @@ func (x *ProjectBranchMerge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectBranchMerge.ProtoReflect.Descriptor instead.
 func (*ProjectBranchMerge) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{25}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ProjectBranchMerge) GetBranch() string {
@@ -1785,7 +1725,7 @@ type ProjectChangeTotals struct {
 
 func (x *ProjectChangeTotals) Reset() {
 	*x = ProjectChangeTotals{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[26]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1797,7 +1737,7 @@ func (x *ProjectChangeTotals) String() string {
 func (*ProjectChangeTotals) ProtoMessage() {}
 
 func (x *ProjectChangeTotals) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[26]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1810,7 +1750,7 @@ func (x *ProjectChangeTotals) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectChangeTotals.ProtoReflect.Descriptor instead.
 func (*ProjectChangeTotals) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{26}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ProjectChangeTotals) GetFiles() int32 {
@@ -1844,7 +1784,7 @@ type ProjectPullRequestChecks struct {
 
 func (x *ProjectPullRequestChecks) Reset() {
 	*x = ProjectPullRequestChecks{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[27]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1856,7 +1796,7 @@ func (x *ProjectPullRequestChecks) String() string {
 func (*ProjectPullRequestChecks) ProtoMessage() {}
 
 func (x *ProjectPullRequestChecks) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[27]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1869,7 +1809,7 @@ func (x *ProjectPullRequestChecks) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectPullRequestChecks.ProtoReflect.Descriptor instead.
 func (*ProjectPullRequestChecks) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{27}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ProjectPullRequestChecks) GetState() string {
@@ -1902,7 +1842,7 @@ type ProjectThreadPullRequest struct {
 
 func (x *ProjectThreadPullRequest) Reset() {
 	*x = ProjectThreadPullRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[28]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1914,7 +1854,7 @@ func (x *ProjectThreadPullRequest) String() string {
 func (*ProjectThreadPullRequest) ProtoMessage() {}
 
 func (x *ProjectThreadPullRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[28]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1927,7 +1867,7 @@ func (x *ProjectThreadPullRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectThreadPullRequest.ProtoReflect.Descriptor instead.
 func (*ProjectThreadPullRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{28}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ProjectThreadPullRequest) GetNumber() int64 {
@@ -1998,7 +1938,7 @@ type ProjectAsideView struct {
 
 func (x *ProjectAsideView) Reset() {
 	*x = ProjectAsideView{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[29]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2010,7 +1950,7 @@ func (x *ProjectAsideView) String() string {
 func (*ProjectAsideView) ProtoMessage() {}
 
 func (x *ProjectAsideView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[29]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2023,7 +1963,7 @@ func (x *ProjectAsideView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectAsideView.ProtoReflect.Descriptor instead.
 func (*ProjectAsideView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{29}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ProjectAsideView) GetUntil() int64 {
@@ -2065,7 +2005,7 @@ type ProjectStoppedView struct {
 
 func (x *ProjectStoppedView) Reset() {
 	*x = ProjectStoppedView{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[30]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2077,7 +2017,7 @@ func (x *ProjectStoppedView) String() string {
 func (*ProjectStoppedView) ProtoMessage() {}
 
 func (x *ProjectStoppedView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[30]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2090,7 +2030,7 @@ func (x *ProjectStoppedView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectStoppedView.ProtoReflect.Descriptor instead.
 func (*ProjectStoppedView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{30}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ProjectStoppedView) GetReason() string {
@@ -2128,7 +2068,7 @@ type ProjectThreadReference struct {
 
 func (x *ProjectThreadReference) Reset() {
 	*x = ProjectThreadReference{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[31]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2140,7 +2080,7 @@ func (x *ProjectThreadReference) String() string {
 func (*ProjectThreadReference) ProtoMessage() {}
 
 func (x *ProjectThreadReference) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[31]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2153,7 +2093,7 @@ func (x *ProjectThreadReference) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectThreadReference.ProtoReflect.Descriptor instead.
 func (*ProjectThreadReference) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{31}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ProjectThreadReference) GetId() string {
@@ -2208,7 +2148,7 @@ type ProjectEndedReference struct {
 
 func (x *ProjectEndedReference) Reset() {
 	*x = ProjectEndedReference{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[32]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2220,7 +2160,7 @@ func (x *ProjectEndedReference) String() string {
 func (*ProjectEndedReference) ProtoMessage() {}
 
 func (x *ProjectEndedReference) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[32]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2233,7 +2173,7 @@ func (x *ProjectEndedReference) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectEndedReference.ProtoReflect.Descriptor instead.
 func (*ProjectEndedReference) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{32}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ProjectEndedReference) GetAttentionId() string {
@@ -2261,7 +2201,7 @@ type ProjectReviewView struct {
 
 func (x *ProjectReviewView) Reset() {
 	*x = ProjectReviewView{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[33]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2273,7 +2213,7 @@ func (x *ProjectReviewView) String() string {
 func (*ProjectReviewView) ProtoMessage() {}
 
 func (x *ProjectReviewView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[33]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2286,7 +2226,7 @@ func (x *ProjectReviewView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectReviewView.ProtoReflect.Descriptor instead.
 func (*ProjectReviewView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{33}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ProjectReviewView) GetReviewerId() string {
@@ -2349,7 +2289,7 @@ type ProjectThreadView struct {
 
 func (x *ProjectThreadView) Reset() {
 	*x = ProjectThreadView{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[34]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2361,7 +2301,7 @@ func (x *ProjectThreadView) String() string {
 func (*ProjectThreadView) ProtoMessage() {}
 
 func (x *ProjectThreadView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[34]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2374,7 +2314,7 @@ func (x *ProjectThreadView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectThreadView.ProtoReflect.Descriptor instead.
 func (*ProjectThreadView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{34}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ProjectThreadView) GetId() string {
@@ -2604,7 +2544,7 @@ type ProjectChoiceOption struct {
 
 func (x *ProjectChoiceOption) Reset() {
 	*x = ProjectChoiceOption{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[35]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2616,7 +2556,7 @@ func (x *ProjectChoiceOption) String() string {
 func (*ProjectChoiceOption) ProtoMessage() {}
 
 func (x *ProjectChoiceOption) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[35]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2629,7 +2569,7 @@ func (x *ProjectChoiceOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectChoiceOption.ProtoReflect.Descriptor instead.
 func (*ProjectChoiceOption) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{35}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ProjectChoiceOption) GetLabel() string {
@@ -2657,7 +2597,7 @@ type ProjectChoiceBlock struct {
 
 func (x *ProjectChoiceBlock) Reset() {
 	*x = ProjectChoiceBlock{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[36]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2669,7 +2609,7 @@ func (x *ProjectChoiceBlock) String() string {
 func (*ProjectChoiceBlock) ProtoMessage() {}
 
 func (x *ProjectChoiceBlock) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[36]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2682,7 +2622,7 @@ func (x *ProjectChoiceBlock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectChoiceBlock.ProtoReflect.Descriptor instead.
 func (*ProjectChoiceBlock) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{36}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ProjectChoiceBlock) GetQuestion() string {
@@ -2721,7 +2661,7 @@ type ProjectConfirmBlock struct {
 
 func (x *ProjectConfirmBlock) Reset() {
 	*x = ProjectConfirmBlock{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[37]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2733,7 +2673,7 @@ func (x *ProjectConfirmBlock) String() string {
 func (*ProjectConfirmBlock) ProtoMessage() {}
 
 func (x *ProjectConfirmBlock) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[37]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2746,7 +2686,7 @@ func (x *ProjectConfirmBlock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectConfirmBlock.ProtoReflect.Descriptor instead.
 func (*ProjectConfirmBlock) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{37}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ProjectConfirmBlock) GetTitle() string {
@@ -2808,7 +2748,7 @@ type ProjectFormOption struct {
 
 func (x *ProjectFormOption) Reset() {
 	*x = ProjectFormOption{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[38]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2820,7 +2760,7 @@ func (x *ProjectFormOption) String() string {
 func (*ProjectFormOption) ProtoMessage() {}
 
 func (x *ProjectFormOption) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[38]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2833,7 +2773,7 @@ func (x *ProjectFormOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectFormOption.ProtoReflect.Descriptor instead.
 func (*ProjectFormOption) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{38}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ProjectFormOption) GetLabel() string {
@@ -2865,7 +2805,7 @@ type ProjectFormValue struct {
 
 func (x *ProjectFormValue) Reset() {
 	*x = ProjectFormValue{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[39]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2877,7 +2817,7 @@ func (x *ProjectFormValue) String() string {
 func (*ProjectFormValue) ProtoMessage() {}
 
 func (x *ProjectFormValue) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[39]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2890,7 +2830,7 @@ func (x *ProjectFormValue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectFormValue.ProtoReflect.Descriptor instead.
 func (*ProjectFormValue) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{39}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ProjectFormValue) GetValue() isProjectFormValue_Value {
@@ -2981,7 +2921,7 @@ type ProjectFormField struct {
 
 func (x *ProjectFormField) Reset() {
 	*x = ProjectFormField{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[40]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2993,7 +2933,7 @@ func (x *ProjectFormField) String() string {
 func (*ProjectFormField) ProtoMessage() {}
 
 func (x *ProjectFormField) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[40]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3006,7 +2946,7 @@ func (x *ProjectFormField) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectFormField.ProtoReflect.Descriptor instead.
 func (*ProjectFormField) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{40}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ProjectFormField) GetKey() string {
@@ -3084,7 +3024,7 @@ type ProjectFormBlock struct {
 
 func (x *ProjectFormBlock) Reset() {
 	*x = ProjectFormBlock{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[41]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3096,7 +3036,7 @@ func (x *ProjectFormBlock) String() string {
 func (*ProjectFormBlock) ProtoMessage() {}
 
 func (x *ProjectFormBlock) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[41]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3109,7 +3049,7 @@ func (x *ProjectFormBlock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectFormBlock.ProtoReflect.Descriptor instead.
 func (*ProjectFormBlock) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{41}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ProjectFormBlock) GetTitle() string {
@@ -3154,7 +3094,7 @@ type ProjectAskBlock struct {
 
 func (x *ProjectAskBlock) Reset() {
 	*x = ProjectAskBlock{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[42]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3166,7 +3106,7 @@ func (x *ProjectAskBlock) String() string {
 func (*ProjectAskBlock) ProtoMessage() {}
 
 func (x *ProjectAskBlock) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[42]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3179,7 +3119,7 @@ func (x *ProjectAskBlock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectAskBlock.ProtoReflect.Descriptor instead.
 func (*ProjectAskBlock) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{42}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ProjectAskBlock) GetBlock() isProjectAskBlock_Block {
@@ -3254,7 +3194,7 @@ type ProjectAttentionView struct {
 
 func (x *ProjectAttentionView) Reset() {
 	*x = ProjectAttentionView{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[43]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3266,7 +3206,7 @@ func (x *ProjectAttentionView) String() string {
 func (*ProjectAttentionView) ProtoMessage() {}
 
 func (x *ProjectAttentionView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[43]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3279,7 +3219,7 @@ func (x *ProjectAttentionView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectAttentionView.ProtoReflect.Descriptor instead.
 func (*ProjectAttentionView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{43}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ProjectAttentionView) GetId() string {
@@ -3349,7 +3289,7 @@ type NeedsMeAttention struct {
 
 func (x *NeedsMeAttention) Reset() {
 	*x = NeedsMeAttention{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[44]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3361,7 +3301,7 @@ func (x *NeedsMeAttention) String() string {
 func (*NeedsMeAttention) ProtoMessage() {}
 
 func (x *NeedsMeAttention) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[44]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3374,7 +3314,7 @@ func (x *NeedsMeAttention) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NeedsMeAttention.ProtoReflect.Descriptor instead.
 func (*NeedsMeAttention) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{44}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *NeedsMeAttention) GetAttention() *ProjectAttentionView {
@@ -3407,7 +3347,7 @@ type NeedsMeThread struct {
 
 func (x *NeedsMeThread) Reset() {
 	*x = NeedsMeThread{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[45]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3419,7 +3359,7 @@ func (x *NeedsMeThread) String() string {
 func (*NeedsMeThread) ProtoMessage() {}
 
 func (x *NeedsMeThread) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[45]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3432,7 +3372,7 @@ func (x *NeedsMeThread) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NeedsMeThread.ProtoReflect.Descriptor instead.
 func (*NeedsMeThread) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{45}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *NeedsMeThread) GetThreadId() string {
@@ -3455,7 +3395,7 @@ type NeedsMeItem struct {
 
 func (x *NeedsMeItem) Reset() {
 	*x = NeedsMeItem{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[46]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3467,7 +3407,7 @@ func (x *NeedsMeItem) String() string {
 func (*NeedsMeItem) ProtoMessage() {}
 
 func (x *NeedsMeItem) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[46]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3480,7 +3420,7 @@ func (x *NeedsMeItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NeedsMeItem.ProtoReflect.Descriptor instead.
 func (*NeedsMeItem) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{46}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *NeedsMeItem) GetItem() isNeedsMeItem_Item {
@@ -3535,7 +3475,7 @@ type ProjectThreadSync struct {
 
 func (x *ProjectThreadSync) Reset() {
 	*x = ProjectThreadSync{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[47]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3547,7 +3487,7 @@ func (x *ProjectThreadSync) String() string {
 func (*ProjectThreadSync) ProtoMessage() {}
 
 func (x *ProjectThreadSync) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[47]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3560,7 +3500,7 @@ func (x *ProjectThreadSync) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectThreadSync.ProtoReflect.Descriptor instead.
 func (*ProjectThreadSync) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{47}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ProjectThreadSync) GetCursor() string {
@@ -3594,7 +3534,7 @@ type ProjectConversationActivity struct {
 
 func (x *ProjectConversationActivity) Reset() {
 	*x = ProjectConversationActivity{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[48]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3606,7 +3546,7 @@ func (x *ProjectConversationActivity) String() string {
 func (*ProjectConversationActivity) ProtoMessage() {}
 
 func (x *ProjectConversationActivity) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[48]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3619,7 +3559,7 @@ func (x *ProjectConversationActivity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectConversationActivity.ProtoReflect.Descriptor instead.
 func (*ProjectConversationActivity) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{48}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ProjectConversationActivity) GetStatus() string {
@@ -3648,7 +3588,7 @@ type ProjectThreadActivity struct {
 
 func (x *ProjectThreadActivity) Reset() {
 	*x = ProjectThreadActivity{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[49]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3660,7 +3600,7 @@ func (x *ProjectThreadActivity) String() string {
 func (*ProjectThreadActivity) ProtoMessage() {}
 
 func (x *ProjectThreadActivity) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[49]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3673,7 +3613,7 @@ func (x *ProjectThreadActivity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectThreadActivity.ProtoReflect.Descriptor instead.
 func (*ProjectThreadActivity) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{49}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ProjectThreadActivity) GetId() string {
@@ -3716,7 +3656,7 @@ type ProjectThreadSearchHit struct {
 
 func (x *ProjectThreadSearchHit) Reset() {
 	*x = ProjectThreadSearchHit{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[50]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3728,7 +3668,7 @@ func (x *ProjectThreadSearchHit) String() string {
 func (*ProjectThreadSearchHit) ProtoMessage() {}
 
 func (x *ProjectThreadSearchHit) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[50]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3741,7 +3681,7 @@ func (x *ProjectThreadSearchHit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectThreadSearchHit.ProtoReflect.Descriptor instead.
 func (*ProjectThreadSearchHit) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{50}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ProjectThreadSearchHit) GetId() string {
@@ -3785,7 +3725,7 @@ type ProjectArtifactSearchHit struct {
 
 func (x *ProjectArtifactSearchHit) Reset() {
 	*x = ProjectArtifactSearchHit{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[51]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3797,7 +3737,7 @@ func (x *ProjectArtifactSearchHit) String() string {
 func (*ProjectArtifactSearchHit) ProtoMessage() {}
 
 func (x *ProjectArtifactSearchHit) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[51]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3810,7 +3750,7 @@ func (x *ProjectArtifactSearchHit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectArtifactSearchHit.ProtoReflect.Descriptor instead.
 func (*ProjectArtifactSearchHit) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{51}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ProjectArtifactSearchHit) GetId() string {
@@ -3861,7 +3801,7 @@ type ProjectMessageSearchHit struct {
 
 func (x *ProjectMessageSearchHit) Reset() {
 	*x = ProjectMessageSearchHit{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[52]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3873,7 +3813,7 @@ func (x *ProjectMessageSearchHit) String() string {
 func (*ProjectMessageSearchHit) ProtoMessage() {}
 
 func (x *ProjectMessageSearchHit) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[52]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3886,7 +3826,7 @@ func (x *ProjectMessageSearchHit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectMessageSearchHit.ProtoReflect.Descriptor instead.
 func (*ProjectMessageSearchHit) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{52}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ProjectMessageSearchHit) GetId() string {
@@ -3933,7 +3873,7 @@ type ListProjectsRequest struct {
 
 func (x *ListProjectsRequest) Reset() {
 	*x = ListProjectsRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[53]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3945,7 +3885,7 @@ func (x *ListProjectsRequest) String() string {
 func (*ListProjectsRequest) ProtoMessage() {}
 
 func (x *ListProjectsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[53]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3958,7 +3898,7 @@ func (x *ListProjectsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProjectsRequest.ProtoReflect.Descriptor instead.
 func (*ListProjectsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{53}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ListProjectsRequest) GetIds() []string {
@@ -3978,7 +3918,7 @@ type ListProjectsResponse struct {
 
 func (x *ListProjectsResponse) Reset() {
 	*x = ListProjectsResponse{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[54]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3990,7 +3930,7 @@ func (x *ListProjectsResponse) String() string {
 func (*ListProjectsResponse) ProtoMessage() {}
 
 func (x *ListProjectsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[54]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4003,7 +3943,7 @@ func (x *ListProjectsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProjectsResponse.ProtoReflect.Descriptor instead.
 func (*ListProjectsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{54}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *ListProjectsResponse) GetProjects() []*ProjectView {
@@ -4030,7 +3970,7 @@ type GetProjectRequest struct {
 
 func (x *GetProjectRequest) Reset() {
 	*x = GetProjectRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[55]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4042,7 +3982,7 @@ func (x *GetProjectRequest) String() string {
 func (*GetProjectRequest) ProtoMessage() {}
 
 func (x *GetProjectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[55]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4055,7 +3995,7 @@ func (x *GetProjectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProjectRequest.ProtoReflect.Descriptor instead.
 func (*GetProjectRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{55}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *GetProjectRequest) GetProjectId() string {
@@ -4085,7 +4025,7 @@ type GetProjectResponse struct {
 
 func (x *GetProjectResponse) Reset() {
 	*x = GetProjectResponse{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[56]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4097,7 +4037,7 @@ func (x *GetProjectResponse) String() string {
 func (*GetProjectResponse) ProtoMessage() {}
 
 func (x *GetProjectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[56]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4110,7 +4050,7 @@ func (x *GetProjectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProjectResponse.ProtoReflect.Descriptor instead.
 func (*GetProjectResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{56}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *GetProjectResponse) GetProject() *ProjectView {
@@ -4163,7 +4103,7 @@ type CreateProjectRequest struct {
 
 func (x *CreateProjectRequest) Reset() {
 	*x = CreateProjectRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[57]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4175,7 +4115,7 @@ func (x *CreateProjectRequest) String() string {
 func (*CreateProjectRequest) ProtoMessage() {}
 
 func (x *CreateProjectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[57]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4188,7 +4128,7 @@ func (x *CreateProjectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateProjectRequest.ProtoReflect.Descriptor instead.
 func (*CreateProjectRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{57}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *CreateProjectRequest) GetName() string {
@@ -4249,7 +4189,7 @@ type CreateProjectResponse struct {
 
 func (x *CreateProjectResponse) Reset() {
 	*x = CreateProjectResponse{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[58]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4261,7 +4201,7 @@ func (x *CreateProjectResponse) String() string {
 func (*CreateProjectResponse) ProtoMessage() {}
 
 func (x *CreateProjectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[58]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4274,7 +4214,7 @@ func (x *CreateProjectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateProjectResponse.ProtoReflect.Descriptor instead.
 func (*CreateProjectResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{58}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *CreateProjectResponse) GetProject() *ProjectView {
@@ -4303,7 +4243,7 @@ type UpdateProjectRequest struct {
 
 func (x *UpdateProjectRequest) Reset() {
 	*x = UpdateProjectRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[59]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4315,7 +4255,7 @@ func (x *UpdateProjectRequest) String() string {
 func (*UpdateProjectRequest) ProtoMessage() {}
 
 func (x *UpdateProjectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[59]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4328,7 +4268,7 @@ func (x *UpdateProjectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateProjectRequest.ProtoReflect.Descriptor instead.
 func (*UpdateProjectRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{59}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *UpdateProjectRequest) GetProjectId() string {
@@ -4424,7 +4364,7 @@ type UpdateProjectResponse struct {
 
 func (x *UpdateProjectResponse) Reset() {
 	*x = UpdateProjectResponse{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[60]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4436,7 +4376,7 @@ func (x *UpdateProjectResponse) String() string {
 func (*UpdateProjectResponse) ProtoMessage() {}
 
 func (x *UpdateProjectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[60]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4449,7 +4389,7 @@ func (x *UpdateProjectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateProjectResponse.ProtoReflect.Descriptor instead.
 func (*UpdateProjectResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{60}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *UpdateProjectResponse) GetProject() *ProjectView {
@@ -4475,7 +4415,7 @@ type DeleteProjectRequest struct {
 
 func (x *DeleteProjectRequest) Reset() {
 	*x = DeleteProjectRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[61]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4487,7 +4427,7 @@ func (x *DeleteProjectRequest) String() string {
 func (*DeleteProjectRequest) ProtoMessage() {}
 
 func (x *DeleteProjectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[61]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4500,7 +4440,7 @@ func (x *DeleteProjectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteProjectRequest.ProtoReflect.Descriptor instead.
 func (*DeleteProjectRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{61}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *DeleteProjectRequest) GetProjectId() string {
@@ -4518,7 +4458,7 @@ type DeleteProjectResponse struct {
 
 func (x *DeleteProjectResponse) Reset() {
 	*x = DeleteProjectResponse{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[62]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4530,7 +4470,7 @@ func (x *DeleteProjectResponse) String() string {
 func (*DeleteProjectResponse) ProtoMessage() {}
 
 func (x *DeleteProjectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[62]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4543,7 +4483,7 @@ func (x *DeleteProjectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteProjectResponse.ProtoReflect.Descriptor instead.
 func (*DeleteProjectResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{62}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{61}
 }
 
 type GetProjectActivityRequest struct {
@@ -4555,7 +4495,7 @@ type GetProjectActivityRequest struct {
 
 func (x *GetProjectActivityRequest) Reset() {
 	*x = GetProjectActivityRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[63]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4567,7 +4507,7 @@ func (x *GetProjectActivityRequest) String() string {
 func (*GetProjectActivityRequest) ProtoMessage() {}
 
 func (x *GetProjectActivityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[63]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4580,7 +4520,7 @@ func (x *GetProjectActivityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProjectActivityRequest.ProtoReflect.Descriptor instead.
 func (*GetProjectActivityRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{63}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *GetProjectActivityRequest) GetProjectId() string {
@@ -4600,7 +4540,7 @@ type GetProjectActivityResponse struct {
 
 func (x *GetProjectActivityResponse) Reset() {
 	*x = GetProjectActivityResponse{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[64]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4612,7 +4552,7 @@ func (x *GetProjectActivityResponse) String() string {
 func (*GetProjectActivityResponse) ProtoMessage() {}
 
 func (x *GetProjectActivityResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[64]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4625,7 +4565,7 @@ func (x *GetProjectActivityResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProjectActivityResponse.ProtoReflect.Descriptor instead.
 func (*GetProjectActivityResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{64}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *GetProjectActivityResponse) GetCoordinator() *ProjectConversationActivity {
@@ -4652,7 +4592,7 @@ type SearchProjectRequest struct {
 
 func (x *SearchProjectRequest) Reset() {
 	*x = SearchProjectRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[65]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4664,7 +4604,7 @@ func (x *SearchProjectRequest) String() string {
 func (*SearchProjectRequest) ProtoMessage() {}
 
 func (x *SearchProjectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[65]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4677,7 +4617,7 @@ func (x *SearchProjectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchProjectRequest.ProtoReflect.Descriptor instead.
 func (*SearchProjectRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{65}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *SearchProjectRequest) GetProjectId() string {
@@ -4706,7 +4646,7 @@ type SearchProjectResponse struct {
 
 func (x *SearchProjectResponse) Reset() {
 	*x = SearchProjectResponse{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[66]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4718,7 +4658,7 @@ func (x *SearchProjectResponse) String() string {
 func (*SearchProjectResponse) ProtoMessage() {}
 
 func (x *SearchProjectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[66]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4731,7 +4671,7 @@ func (x *SearchProjectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchProjectResponse.ProtoReflect.Descriptor instead.
 func (*SearchProjectResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{66}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *SearchProjectResponse) GetTerms() []string {
@@ -4771,7 +4711,7 @@ type GetProjectSettingsRequest struct {
 
 func (x *GetProjectSettingsRequest) Reset() {
 	*x = GetProjectSettingsRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[67]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4783,7 +4723,7 @@ func (x *GetProjectSettingsRequest) String() string {
 func (*GetProjectSettingsRequest) ProtoMessage() {}
 
 func (x *GetProjectSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[67]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4796,7 +4736,7 @@ func (x *GetProjectSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProjectSettingsRequest.ProtoReflect.Descriptor instead.
 func (*GetProjectSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{67}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *GetProjectSettingsRequest) GetProjectId() string {
@@ -4815,7 +4755,7 @@ type GetProjectSettingsResponse struct {
 
 func (x *GetProjectSettingsResponse) Reset() {
 	*x = GetProjectSettingsResponse{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[68]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4827,7 +4767,7 @@ func (x *GetProjectSettingsResponse) String() string {
 func (*GetProjectSettingsResponse) ProtoMessage() {}
 
 func (x *GetProjectSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[68]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4840,7 +4780,7 @@ func (x *GetProjectSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProjectSettingsResponse.ProtoReflect.Descriptor instead.
 func (*GetProjectSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{68}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *GetProjectSettingsResponse) GetSettingsView() *ProjectSettingsView {
@@ -4859,7 +4799,7 @@ type GetFileSourcesRequest struct {
 
 func (x *GetFileSourcesRequest) Reset() {
 	*x = GetFileSourcesRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[69]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4871,7 +4811,7 @@ func (x *GetFileSourcesRequest) String() string {
 func (*GetFileSourcesRequest) ProtoMessage() {}
 
 func (x *GetFileSourcesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[69]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4884,7 +4824,7 @@ func (x *GetFileSourcesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetFileSourcesRequest.ProtoReflect.Descriptor instead.
 func (*GetFileSourcesRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{69}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *GetFileSourcesRequest) GetProjectId() string {
@@ -4905,7 +4845,7 @@ type GetFileSourcesResponse struct {
 
 func (x *GetFileSourcesResponse) Reset() {
 	*x = GetFileSourcesResponse{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[70]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4917,7 +4857,7 @@ func (x *GetFileSourcesResponse) String() string {
 func (*GetFileSourcesResponse) ProtoMessage() {}
 
 func (x *GetFileSourcesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[70]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4930,7 +4870,7 @@ func (x *GetFileSourcesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetFileSourcesResponse.ProtoReflect.Descriptor instead.
 func (*GetFileSourcesResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{70}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *GetFileSourcesResponse) GetSources() []*FileSource {
@@ -4965,7 +4905,7 @@ type SetFileSourcesRequest struct {
 
 func (x *SetFileSourcesRequest) Reset() {
 	*x = SetFileSourcesRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[71]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4977,7 +4917,7 @@ func (x *SetFileSourcesRequest) String() string {
 func (*SetFileSourcesRequest) ProtoMessage() {}
 
 func (x *SetFileSourcesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[71]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4990,7 +4930,7 @@ func (x *SetFileSourcesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetFileSourcesRequest.ProtoReflect.Descriptor instead.
 func (*SetFileSourcesRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{71}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *SetFileSourcesRequest) GetProjectId() string {
@@ -5023,7 +4963,7 @@ type SetFileSourcesResponse struct {
 
 func (x *SetFileSourcesResponse) Reset() {
 	*x = SetFileSourcesResponse{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[72]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5035,7 +4975,7 @@ func (x *SetFileSourcesResponse) String() string {
 func (*SetFileSourcesResponse) ProtoMessage() {}
 
 func (x *SetFileSourcesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[72]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5048,7 +4988,7 @@ func (x *SetFileSourcesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetFileSourcesResponse.ProtoReflect.Descriptor instead.
 func (*SetFileSourcesResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{72}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *SetFileSourcesResponse) GetProject() *ProjectView {
@@ -5068,7 +5008,7 @@ type AddProjectReferenceRequest struct {
 
 func (x *AddProjectReferenceRequest) Reset() {
 	*x = AddProjectReferenceRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[73]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5080,7 +5020,7 @@ func (x *AddProjectReferenceRequest) String() string {
 func (*AddProjectReferenceRequest) ProtoMessage() {}
 
 func (x *AddProjectReferenceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[73]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5093,7 +5033,7 @@ func (x *AddProjectReferenceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddProjectReferenceRequest.ProtoReflect.Descriptor instead.
 func (*AddProjectReferenceRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{73}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *AddProjectReferenceRequest) GetProjectId() string {
@@ -5119,7 +5059,7 @@ type AddProjectReferenceResponse struct {
 
 func (x *AddProjectReferenceResponse) Reset() {
 	*x = AddProjectReferenceResponse{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[74]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5131,7 +5071,7 @@ func (x *AddProjectReferenceResponse) String() string {
 func (*AddProjectReferenceResponse) ProtoMessage() {}
 
 func (x *AddProjectReferenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[74]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5144,7 +5084,7 @@ func (x *AddProjectReferenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddProjectReferenceResponse.ProtoReflect.Descriptor instead.
 func (*AddProjectReferenceResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{74}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *AddProjectReferenceResponse) GetProject() *ProjectView {
@@ -5164,7 +5104,7 @@ type RemoveProjectReferenceRequest struct {
 
 func (x *RemoveProjectReferenceRequest) Reset() {
 	*x = RemoveProjectReferenceRequest{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[75]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5176,7 +5116,7 @@ func (x *RemoveProjectReferenceRequest) String() string {
 func (*RemoveProjectReferenceRequest) ProtoMessage() {}
 
 func (x *RemoveProjectReferenceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[75]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5189,7 +5129,7 @@ func (x *RemoveProjectReferenceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveProjectReferenceRequest.ProtoReflect.Descriptor instead.
 func (*RemoveProjectReferenceRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{75}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *RemoveProjectReferenceRequest) GetProjectId() string {
@@ -5215,7 +5155,7 @@ type RemoveProjectReferenceResponse struct {
 
 func (x *RemoveProjectReferenceResponse) Reset() {
 	*x = RemoveProjectReferenceResponse{}
-	mi := &file_ariadne_v1_projects_proto_msgTypes[76]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5227,7 +5167,7 @@ func (x *RemoveProjectReferenceResponse) String() string {
 func (*RemoveProjectReferenceResponse) ProtoMessage() {}
 
 func (x *RemoveProjectReferenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_projects_proto_msgTypes[76]
+	mi := &file_ariadne_v1_projects_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5240,7 +5180,7 @@ func (x *RemoveProjectReferenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveProjectReferenceResponse.ProtoReflect.Descriptor instead.
 func (*RemoveProjectReferenceResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{76}
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *RemoveProjectReferenceResponse) GetProject() *ProjectView {
@@ -5306,13 +5246,7 @@ const file_ariadne_v1_projects_proto_rawDesc = "" +
 	"\bsettings\x18\x04 \x01(\v2\x17.google.protobuf.StructR\bsettings\"Q\n" +
 	"\x17ProjectDeliverySettings\x12\x12\n" +
 	"\x04mode\x18\x01 \x01(\tR\x04mode\x12\"\n" +
-	"\finstructions\x18\x02 \x01(\tR\finstructions\"j\n" +
-	"\x15ProjectBudgetSettings\x12\x1b\n" +
-	"\x06thread\x18\x01 \x01(\x01H\x00R\x06thread\x88\x01\x01\x12\x1d\n" +
-	"\aproject\x18\x02 \x01(\x01H\x01R\aproject\x88\x01\x01B\t\n" +
-	"\a_threadB\n" +
-	"\n" +
-	"\b_project\"J\n" +
+	"\finstructions\x18\x02 \x01(\tR\finstructions\"J\n" +
 	"\x1cProjectWorkspaceAutoSettings\x12\x14\n" +
 	"\x05setup\x18\x01 \x01(\bR\x05setup\x12\x14\n" +
 	"\x05check\x18\x02 \x01(\bR\x05check\"\xdd\x01\n" +
@@ -5333,16 +5267,15 @@ const file_ariadne_v1_projects_proto_rawDesc = "" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\"L\n" +
 	"\x18ProjectAutopilotSettings\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x16\n" +
-	"\x06method\x18\x02 \x01(\tR\x06method\"\xc2\x03\n" +
+	"\x06method\x18\x02 \x01(\tR\x06method\"\x95\x03\n" +
 	"\x0fProjectSettings\x12\"\n" +
 	"\finstructions\x18\x01 \x01(\tR\finstructions\x12?\n" +
 	"\bdelivery\x18\x02 \x01(\v2#.ariadne.v1.ProjectDeliverySettingsR\bdelivery\x12\x14\n" +
-	"\x05tools\x18\x03 \x03(\tR\x05tools\x129\n" +
-	"\x06budget\x18\x04 \x01(\v2!.ariadne.v1.ProjectBudgetSettingsR\x06budget\x12B\n" +
+	"\x05tools\x18\x03 \x03(\tR\x05tools\x12B\n" +
 	"\tworkspace\x18\x05 \x01(\v2$.ariadne.v1.ProjectWorkspaceSettingsR\tworkspace\x126\n" +
 	"\broutines\x18\x06 \x03(\v2\x1a.ariadne.v1.ProjectRoutineR\broutines\x129\n" +
 	"\x06review\x18\a \x01(\v2!.ariadne.v1.ProjectReviewSettingsR\x06review\x12B\n" +
-	"\tautopilot\x18\b \x01(\v2$.ariadne.v1.ProjectAutopilotSettingsR\tautopilot\"O\n" +
+	"\tautopilot\x18\b \x01(\v2$.ariadne.v1.ProjectAutopilotSettingsR\tautopilotJ\x04\b\x04\x10\x05R\x06budget\"O\n" +
 	"\x16ProjectDetectedCommand\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x1b\n" +
 	"\tthread_id\x18\x02 \x01(\tR\bthreadId\"\xa3\x01\n" +
@@ -5783,7 +5716,7 @@ func file_ariadne_v1_projects_proto_rawDescGZIP() []byte {
 	return file_ariadne_v1_projects_proto_rawDescData
 }
 
-var file_ariadne_v1_projects_proto_msgTypes = make([]protoimpl.MessageInfo, 79)
+var file_ariadne_v1_projects_proto_msgTypes = make([]protoimpl.MessageInfo, 78)
 var file_ariadne_v1_projects_proto_goTypes = []any{
 	(*ProjectStringList)(nil),              // 0: ariadne.v1.ProjectStringList
 	(*ProjectUsageTotals)(nil),             // 1: ariadne.v1.ProjectUsageTotals
@@ -5794,193 +5727,191 @@ var file_ariadne_v1_projects_proto_goTypes = []any{
 	(*FileSourceInput)(nil),                // 6: ariadne.v1.FileSourceInput
 	(*ProjectReference)(nil),               // 7: ariadne.v1.ProjectReference
 	(*ProjectDeliverySettings)(nil),        // 8: ariadne.v1.ProjectDeliverySettings
-	(*ProjectBudgetSettings)(nil),          // 9: ariadne.v1.ProjectBudgetSettings
-	(*ProjectWorkspaceAutoSettings)(nil),   // 10: ariadne.v1.ProjectWorkspaceAutoSettings
-	(*ProjectWorkspaceSettings)(nil),       // 11: ariadne.v1.ProjectWorkspaceSettings
-	(*ProjectRoutine)(nil),                 // 12: ariadne.v1.ProjectRoutine
-	(*ProjectReviewSettings)(nil),          // 13: ariadne.v1.ProjectReviewSettings
-	(*ProjectAutopilotSettings)(nil),       // 14: ariadne.v1.ProjectAutopilotSettings
-	(*ProjectSettings)(nil),                // 15: ariadne.v1.ProjectSettings
-	(*ProjectDetectedCommand)(nil),         // 16: ariadne.v1.ProjectDetectedCommand
-	(*ProjectDetected)(nil),                // 17: ariadne.v1.ProjectDetected
-	(*ProjectEnvVar)(nil),                  // 18: ariadne.v1.ProjectEnvVar
-	(*ProjectEnvVarList)(nil),              // 19: ariadne.v1.ProjectEnvVarList
-	(*ProjectSettingsView)(nil),            // 20: ariadne.v1.ProjectSettingsView
-	(*ProjectView)(nil),                    // 21: ariadne.v1.ProjectView
-	(*ProjectProgress)(nil),                // 22: ariadne.v1.ProjectProgress
-	(*ProjectThreadArtifact)(nil),          // 23: ariadne.v1.ProjectThreadArtifact
-	(*ProjectWorkspaceView)(nil),           // 24: ariadne.v1.ProjectWorkspaceView
-	(*ProjectBranchMerge)(nil),             // 25: ariadne.v1.ProjectBranchMerge
-	(*ProjectChangeTotals)(nil),            // 26: ariadne.v1.ProjectChangeTotals
-	(*ProjectPullRequestChecks)(nil),       // 27: ariadne.v1.ProjectPullRequestChecks
-	(*ProjectThreadPullRequest)(nil),       // 28: ariadne.v1.ProjectThreadPullRequest
-	(*ProjectAsideView)(nil),               // 29: ariadne.v1.ProjectAsideView
-	(*ProjectStoppedView)(nil),             // 30: ariadne.v1.ProjectStoppedView
-	(*ProjectThreadReference)(nil),         // 31: ariadne.v1.ProjectThreadReference
-	(*ProjectEndedReference)(nil),          // 32: ariadne.v1.ProjectEndedReference
-	(*ProjectReviewView)(nil),              // 33: ariadne.v1.ProjectReviewView
-	(*ProjectThreadView)(nil),              // 34: ariadne.v1.ProjectThreadView
-	(*ProjectChoiceOption)(nil),            // 35: ariadne.v1.ProjectChoiceOption
-	(*ProjectChoiceBlock)(nil),             // 36: ariadne.v1.ProjectChoiceBlock
-	(*ProjectConfirmBlock)(nil),            // 37: ariadne.v1.ProjectConfirmBlock
-	(*ProjectFormOption)(nil),              // 38: ariadne.v1.ProjectFormOption
-	(*ProjectFormValue)(nil),               // 39: ariadne.v1.ProjectFormValue
-	(*ProjectFormField)(nil),               // 40: ariadne.v1.ProjectFormField
-	(*ProjectFormBlock)(nil),               // 41: ariadne.v1.ProjectFormBlock
-	(*ProjectAskBlock)(nil),                // 42: ariadne.v1.ProjectAskBlock
-	(*ProjectAttentionView)(nil),           // 43: ariadne.v1.ProjectAttentionView
-	(*NeedsMeAttention)(nil),               // 44: ariadne.v1.NeedsMeAttention
-	(*NeedsMeThread)(nil),                  // 45: ariadne.v1.NeedsMeThread
-	(*NeedsMeItem)(nil),                    // 46: ariadne.v1.NeedsMeItem
-	(*ProjectThreadSync)(nil),              // 47: ariadne.v1.ProjectThreadSync
-	(*ProjectConversationActivity)(nil),    // 48: ariadne.v1.ProjectConversationActivity
-	(*ProjectThreadActivity)(nil),          // 49: ariadne.v1.ProjectThreadActivity
-	(*ProjectThreadSearchHit)(nil),         // 50: ariadne.v1.ProjectThreadSearchHit
-	(*ProjectArtifactSearchHit)(nil),       // 51: ariadne.v1.ProjectArtifactSearchHit
-	(*ProjectMessageSearchHit)(nil),        // 52: ariadne.v1.ProjectMessageSearchHit
-	(*ListProjectsRequest)(nil),            // 53: ariadne.v1.ListProjectsRequest
-	(*ListProjectsResponse)(nil),           // 54: ariadne.v1.ListProjectsResponse
-	(*GetProjectRequest)(nil),              // 55: ariadne.v1.GetProjectRequest
-	(*GetProjectResponse)(nil),             // 56: ariadne.v1.GetProjectResponse
-	(*CreateProjectRequest)(nil),           // 57: ariadne.v1.CreateProjectRequest
-	(*CreateProjectResponse)(nil),          // 58: ariadne.v1.CreateProjectResponse
-	(*UpdateProjectRequest)(nil),           // 59: ariadne.v1.UpdateProjectRequest
-	(*UpdateProjectResponse)(nil),          // 60: ariadne.v1.UpdateProjectResponse
-	(*DeleteProjectRequest)(nil),           // 61: ariadne.v1.DeleteProjectRequest
-	(*DeleteProjectResponse)(nil),          // 62: ariadne.v1.DeleteProjectResponse
-	(*GetProjectActivityRequest)(nil),      // 63: ariadne.v1.GetProjectActivityRequest
-	(*GetProjectActivityResponse)(nil),     // 64: ariadne.v1.GetProjectActivityResponse
-	(*SearchProjectRequest)(nil),           // 65: ariadne.v1.SearchProjectRequest
-	(*SearchProjectResponse)(nil),          // 66: ariadne.v1.SearchProjectResponse
-	(*GetProjectSettingsRequest)(nil),      // 67: ariadne.v1.GetProjectSettingsRequest
-	(*GetProjectSettingsResponse)(nil),     // 68: ariadne.v1.GetProjectSettingsResponse
-	(*GetFileSourcesRequest)(nil),          // 69: ariadne.v1.GetFileSourcesRequest
-	(*GetFileSourcesResponse)(nil),         // 70: ariadne.v1.GetFileSourcesResponse
-	(*SetFileSourcesRequest)(nil),          // 71: ariadne.v1.SetFileSourcesRequest
-	(*SetFileSourcesResponse)(nil),         // 72: ariadne.v1.SetFileSourcesResponse
-	(*AddProjectReferenceRequest)(nil),     // 73: ariadne.v1.AddProjectReferenceRequest
-	(*AddProjectReferenceResponse)(nil),    // 74: ariadne.v1.AddProjectReferenceResponse
-	(*RemoveProjectReferenceRequest)(nil),  // 75: ariadne.v1.RemoveProjectReferenceRequest
-	(*RemoveProjectReferenceResponse)(nil), // 76: ariadne.v1.RemoveProjectReferenceResponse
-	nil,                                    // 77: ariadne.v1.ProjectUsageTotals.CostEntry
-	nil,                                    // 78: ariadne.v1.GetFileSourcesResponse.SecretsSetEntry
-	(*structpb.Struct)(nil),                // 79: google.protobuf.Struct
+	(*ProjectWorkspaceAutoSettings)(nil),   // 9: ariadne.v1.ProjectWorkspaceAutoSettings
+	(*ProjectWorkspaceSettings)(nil),       // 10: ariadne.v1.ProjectWorkspaceSettings
+	(*ProjectRoutine)(nil),                 // 11: ariadne.v1.ProjectRoutine
+	(*ProjectReviewSettings)(nil),          // 12: ariadne.v1.ProjectReviewSettings
+	(*ProjectAutopilotSettings)(nil),       // 13: ariadne.v1.ProjectAutopilotSettings
+	(*ProjectSettings)(nil),                // 14: ariadne.v1.ProjectSettings
+	(*ProjectDetectedCommand)(nil),         // 15: ariadne.v1.ProjectDetectedCommand
+	(*ProjectDetected)(nil),                // 16: ariadne.v1.ProjectDetected
+	(*ProjectEnvVar)(nil),                  // 17: ariadne.v1.ProjectEnvVar
+	(*ProjectEnvVarList)(nil),              // 18: ariadne.v1.ProjectEnvVarList
+	(*ProjectSettingsView)(nil),            // 19: ariadne.v1.ProjectSettingsView
+	(*ProjectView)(nil),                    // 20: ariadne.v1.ProjectView
+	(*ProjectProgress)(nil),                // 21: ariadne.v1.ProjectProgress
+	(*ProjectThreadArtifact)(nil),          // 22: ariadne.v1.ProjectThreadArtifact
+	(*ProjectWorkspaceView)(nil),           // 23: ariadne.v1.ProjectWorkspaceView
+	(*ProjectBranchMerge)(nil),             // 24: ariadne.v1.ProjectBranchMerge
+	(*ProjectChangeTotals)(nil),            // 25: ariadne.v1.ProjectChangeTotals
+	(*ProjectPullRequestChecks)(nil),       // 26: ariadne.v1.ProjectPullRequestChecks
+	(*ProjectThreadPullRequest)(nil),       // 27: ariadne.v1.ProjectThreadPullRequest
+	(*ProjectAsideView)(nil),               // 28: ariadne.v1.ProjectAsideView
+	(*ProjectStoppedView)(nil),             // 29: ariadne.v1.ProjectStoppedView
+	(*ProjectThreadReference)(nil),         // 30: ariadne.v1.ProjectThreadReference
+	(*ProjectEndedReference)(nil),          // 31: ariadne.v1.ProjectEndedReference
+	(*ProjectReviewView)(nil),              // 32: ariadne.v1.ProjectReviewView
+	(*ProjectThreadView)(nil),              // 33: ariadne.v1.ProjectThreadView
+	(*ProjectChoiceOption)(nil),            // 34: ariadne.v1.ProjectChoiceOption
+	(*ProjectChoiceBlock)(nil),             // 35: ariadne.v1.ProjectChoiceBlock
+	(*ProjectConfirmBlock)(nil),            // 36: ariadne.v1.ProjectConfirmBlock
+	(*ProjectFormOption)(nil),              // 37: ariadne.v1.ProjectFormOption
+	(*ProjectFormValue)(nil),               // 38: ariadne.v1.ProjectFormValue
+	(*ProjectFormField)(nil),               // 39: ariadne.v1.ProjectFormField
+	(*ProjectFormBlock)(nil),               // 40: ariadne.v1.ProjectFormBlock
+	(*ProjectAskBlock)(nil),                // 41: ariadne.v1.ProjectAskBlock
+	(*ProjectAttentionView)(nil),           // 42: ariadne.v1.ProjectAttentionView
+	(*NeedsMeAttention)(nil),               // 43: ariadne.v1.NeedsMeAttention
+	(*NeedsMeThread)(nil),                  // 44: ariadne.v1.NeedsMeThread
+	(*NeedsMeItem)(nil),                    // 45: ariadne.v1.NeedsMeItem
+	(*ProjectThreadSync)(nil),              // 46: ariadne.v1.ProjectThreadSync
+	(*ProjectConversationActivity)(nil),    // 47: ariadne.v1.ProjectConversationActivity
+	(*ProjectThreadActivity)(nil),          // 48: ariadne.v1.ProjectThreadActivity
+	(*ProjectThreadSearchHit)(nil),         // 49: ariadne.v1.ProjectThreadSearchHit
+	(*ProjectArtifactSearchHit)(nil),       // 50: ariadne.v1.ProjectArtifactSearchHit
+	(*ProjectMessageSearchHit)(nil),        // 51: ariadne.v1.ProjectMessageSearchHit
+	(*ListProjectsRequest)(nil),            // 52: ariadne.v1.ListProjectsRequest
+	(*ListProjectsResponse)(nil),           // 53: ariadne.v1.ListProjectsResponse
+	(*GetProjectRequest)(nil),              // 54: ariadne.v1.GetProjectRequest
+	(*GetProjectResponse)(nil),             // 55: ariadne.v1.GetProjectResponse
+	(*CreateProjectRequest)(nil),           // 56: ariadne.v1.CreateProjectRequest
+	(*CreateProjectResponse)(nil),          // 57: ariadne.v1.CreateProjectResponse
+	(*UpdateProjectRequest)(nil),           // 58: ariadne.v1.UpdateProjectRequest
+	(*UpdateProjectResponse)(nil),          // 59: ariadne.v1.UpdateProjectResponse
+	(*DeleteProjectRequest)(nil),           // 60: ariadne.v1.DeleteProjectRequest
+	(*DeleteProjectResponse)(nil),          // 61: ariadne.v1.DeleteProjectResponse
+	(*GetProjectActivityRequest)(nil),      // 62: ariadne.v1.GetProjectActivityRequest
+	(*GetProjectActivityResponse)(nil),     // 63: ariadne.v1.GetProjectActivityResponse
+	(*SearchProjectRequest)(nil),           // 64: ariadne.v1.SearchProjectRequest
+	(*SearchProjectResponse)(nil),          // 65: ariadne.v1.SearchProjectResponse
+	(*GetProjectSettingsRequest)(nil),      // 66: ariadne.v1.GetProjectSettingsRequest
+	(*GetProjectSettingsResponse)(nil),     // 67: ariadne.v1.GetProjectSettingsResponse
+	(*GetFileSourcesRequest)(nil),          // 68: ariadne.v1.GetFileSourcesRequest
+	(*GetFileSourcesResponse)(nil),         // 69: ariadne.v1.GetFileSourcesResponse
+	(*SetFileSourcesRequest)(nil),          // 70: ariadne.v1.SetFileSourcesRequest
+	(*SetFileSourcesResponse)(nil),         // 71: ariadne.v1.SetFileSourcesResponse
+	(*AddProjectReferenceRequest)(nil),     // 72: ariadne.v1.AddProjectReferenceRequest
+	(*AddProjectReferenceResponse)(nil),    // 73: ariadne.v1.AddProjectReferenceResponse
+	(*RemoveProjectReferenceRequest)(nil),  // 74: ariadne.v1.RemoveProjectReferenceRequest
+	(*RemoveProjectReferenceResponse)(nil), // 75: ariadne.v1.RemoveProjectReferenceResponse
+	nil,                                    // 76: ariadne.v1.ProjectUsageTotals.CostEntry
+	nil,                                    // 77: ariadne.v1.GetFileSourcesResponse.SecretsSetEntry
+	(*structpb.Struct)(nil),                // 78: google.protobuf.Struct
 }
 var file_ariadne_v1_projects_proto_depIdxs = []int32{
-	77, // 0: ariadne.v1.ProjectUsageTotals.cost:type_name -> ariadne.v1.ProjectUsageTotals.CostEntry
-	79, // 1: ariadne.v1.ProjectSourcePart.settings:type_name -> google.protobuf.Struct
-	79, // 2: ariadne.v1.ProjectSource.settings:type_name -> google.protobuf.Struct
+	76, // 0: ariadne.v1.ProjectUsageTotals.cost:type_name -> ariadne.v1.ProjectUsageTotals.CostEntry
+	78, // 1: ariadne.v1.ProjectSourcePart.settings:type_name -> google.protobuf.Struct
+	78, // 2: ariadne.v1.ProjectSource.settings:type_name -> google.protobuf.Struct
 	2,  // 3: ariadne.v1.ProjectSource.hosting:type_name -> ariadne.v1.ProjectSourcePart
-	79, // 4: ariadne.v1.FileSource.settings:type_name -> google.protobuf.Struct
+	78, // 4: ariadne.v1.FileSource.settings:type_name -> google.protobuf.Struct
 	2,  // 5: ariadne.v1.FileSource.hosting:type_name -> ariadne.v1.ProjectSourcePart
 	4,  // 6: ariadne.v1.FileSourceSet.sources:type_name -> ariadne.v1.FileSource
-	79, // 7: ariadne.v1.FileSourceInput.settings:type_name -> google.protobuf.Struct
+	78, // 7: ariadne.v1.FileSourceInput.settings:type_name -> google.protobuf.Struct
 	2,  // 8: ariadne.v1.FileSourceInput.hosting:type_name -> ariadne.v1.ProjectSourcePart
-	79, // 9: ariadne.v1.ProjectReference.settings:type_name -> google.protobuf.Struct
-	10, // 10: ariadne.v1.ProjectWorkspaceSettings.auto:type_name -> ariadne.v1.ProjectWorkspaceAutoSettings
+	78, // 9: ariadne.v1.ProjectReference.settings:type_name -> google.protobuf.Struct
+	9,  // 10: ariadne.v1.ProjectWorkspaceSettings.auto:type_name -> ariadne.v1.ProjectWorkspaceAutoSettings
 	8,  // 11: ariadne.v1.ProjectSettings.delivery:type_name -> ariadne.v1.ProjectDeliverySettings
-	9,  // 12: ariadne.v1.ProjectSettings.budget:type_name -> ariadne.v1.ProjectBudgetSettings
-	11, // 13: ariadne.v1.ProjectSettings.workspace:type_name -> ariadne.v1.ProjectWorkspaceSettings
-	12, // 14: ariadne.v1.ProjectSettings.routines:type_name -> ariadne.v1.ProjectRoutine
-	13, // 15: ariadne.v1.ProjectSettings.review:type_name -> ariadne.v1.ProjectReviewSettings
-	14, // 16: ariadne.v1.ProjectSettings.autopilot:type_name -> ariadne.v1.ProjectAutopilotSettings
-	16, // 17: ariadne.v1.ProjectDetected.setup:type_name -> ariadne.v1.ProjectDetectedCommand
-	16, // 18: ariadne.v1.ProjectDetected.check:type_name -> ariadne.v1.ProjectDetectedCommand
-	18, // 19: ariadne.v1.ProjectEnvVarList.entries:type_name -> ariadne.v1.ProjectEnvVar
-	15, // 20: ariadne.v1.ProjectSettingsView.settings:type_name -> ariadne.v1.ProjectSettings
-	17, // 21: ariadne.v1.ProjectSettingsView.detected:type_name -> ariadne.v1.ProjectDetected
-	3,  // 22: ariadne.v1.ProjectView.source:type_name -> ariadne.v1.ProjectSource
-	5,  // 23: ariadne.v1.ProjectView.file_sources:type_name -> ariadne.v1.FileSourceSet
-	7,  // 24: ariadne.v1.ProjectView.references:type_name -> ariadne.v1.ProjectReference
-	15, // 25: ariadne.v1.ProjectView.settings:type_name -> ariadne.v1.ProjectSettings
-	17, // 26: ariadne.v1.ProjectView.detected:type_name -> ariadne.v1.ProjectDetected
-	1,  // 27: ariadne.v1.ProjectView.usage:type_name -> ariadne.v1.ProjectUsageTotals
-	27, // 28: ariadne.v1.ProjectThreadPullRequest.checks:type_name -> ariadne.v1.ProjectPullRequestChecks
-	79, // 29: ariadne.v1.ProjectThreadReference.settings:type_name -> google.protobuf.Struct
-	23, // 30: ariadne.v1.ProjectThreadView.last_artifacts:type_name -> ariadne.v1.ProjectThreadArtifact
-	24, // 31: ariadne.v1.ProjectThreadView.workspace:type_name -> ariadne.v1.ProjectWorkspaceView
-	25, // 32: ariadne.v1.ProjectThreadView.merged:type_name -> ariadne.v1.ProjectBranchMerge
-	26, // 33: ariadne.v1.ProjectThreadView.changes:type_name -> ariadne.v1.ProjectChangeTotals
-	28, // 34: ariadne.v1.ProjectThreadView.pull_request:type_name -> ariadne.v1.ProjectThreadPullRequest
-	29, // 35: ariadne.v1.ProjectThreadView.aside:type_name -> ariadne.v1.ProjectAsideView
-	30, // 36: ariadne.v1.ProjectThreadView.stopped:type_name -> ariadne.v1.ProjectStoppedView
-	31, // 37: ariadne.v1.ProjectThreadView.references:type_name -> ariadne.v1.ProjectThreadReference
-	32, // 38: ariadne.v1.ProjectThreadView.ended_references:type_name -> ariadne.v1.ProjectEndedReference
-	1,  // 39: ariadne.v1.ProjectThreadView.usage:type_name -> ariadne.v1.ProjectUsageTotals
-	22, // 40: ariadne.v1.ProjectThreadView.progress:type_name -> ariadne.v1.ProjectProgress
-	33, // 41: ariadne.v1.ProjectThreadView.review:type_name -> ariadne.v1.ProjectReviewView
-	35, // 42: ariadne.v1.ProjectChoiceBlock.options:type_name -> ariadne.v1.ProjectChoiceOption
-	0,  // 43: ariadne.v1.ProjectFormValue.string_list:type_name -> ariadne.v1.ProjectStringList
-	38, // 44: ariadne.v1.ProjectFormField.options:type_name -> ariadne.v1.ProjectFormOption
-	39, // 45: ariadne.v1.ProjectFormField.default_value:type_name -> ariadne.v1.ProjectFormValue
-	40, // 46: ariadne.v1.ProjectFormBlock.fields:type_name -> ariadne.v1.ProjectFormField
-	36, // 47: ariadne.v1.ProjectAskBlock.choice:type_name -> ariadne.v1.ProjectChoiceBlock
-	37, // 48: ariadne.v1.ProjectAskBlock.confirm:type_name -> ariadne.v1.ProjectConfirmBlock
-	41, // 49: ariadne.v1.ProjectAskBlock.form:type_name -> ariadne.v1.ProjectFormBlock
-	42, // 50: ariadne.v1.ProjectAttentionView.block:type_name -> ariadne.v1.ProjectAskBlock
-	43, // 51: ariadne.v1.NeedsMeAttention.attention:type_name -> ariadne.v1.ProjectAttentionView
-	44, // 52: ariadne.v1.NeedsMeItem.attention:type_name -> ariadne.v1.NeedsMeAttention
-	45, // 53: ariadne.v1.NeedsMeItem.thread:type_name -> ariadne.v1.NeedsMeThread
-	0,  // 54: ariadne.v1.ProjectThreadSync.ids:type_name -> ariadne.v1.ProjectStringList
-	22, // 55: ariadne.v1.ProjectConversationActivity.progress:type_name -> ariadne.v1.ProjectProgress
-	22, // 56: ariadne.v1.ProjectThreadActivity.progress:type_name -> ariadne.v1.ProjectProgress
-	21, // 57: ariadne.v1.ListProjectsResponse.projects:type_name -> ariadne.v1.ProjectView
-	21, // 58: ariadne.v1.GetProjectResponse.project:type_name -> ariadne.v1.ProjectView
-	34, // 59: ariadne.v1.GetProjectResponse.threads:type_name -> ariadne.v1.ProjectThreadView
-	46, // 60: ariadne.v1.GetProjectResponse.needs_me:type_name -> ariadne.v1.NeedsMeItem
-	47, // 61: ariadne.v1.GetProjectResponse.sync:type_name -> ariadne.v1.ProjectThreadSync
-	3,  // 62: ariadne.v1.CreateProjectRequest.source:type_name -> ariadne.v1.ProjectSource
-	2,  // 63: ariadne.v1.CreateProjectRequest.references:type_name -> ariadne.v1.ProjectSourcePart
-	6,  // 64: ariadne.v1.CreateProjectRequest.sources:type_name -> ariadne.v1.FileSourceInput
-	21, // 65: ariadne.v1.CreateProjectResponse.project:type_name -> ariadne.v1.ProjectView
-	15, // 66: ariadne.v1.UpdateProjectRequest.settings:type_name -> ariadne.v1.ProjectSettings
-	19, // 67: ariadne.v1.UpdateProjectRequest.env:type_name -> ariadne.v1.ProjectEnvVarList
-	0,  // 68: ariadne.v1.UpdateProjectRequest.mcp_servers:type_name -> ariadne.v1.ProjectStringList
-	21, // 69: ariadne.v1.UpdateProjectResponse.project:type_name -> ariadne.v1.ProjectView
-	20, // 70: ariadne.v1.UpdateProjectResponse.settings_view:type_name -> ariadne.v1.ProjectSettingsView
-	48, // 71: ariadne.v1.GetProjectActivityResponse.coordinator:type_name -> ariadne.v1.ProjectConversationActivity
-	49, // 72: ariadne.v1.GetProjectActivityResponse.threads:type_name -> ariadne.v1.ProjectThreadActivity
-	50, // 73: ariadne.v1.SearchProjectResponse.threads:type_name -> ariadne.v1.ProjectThreadSearchHit
-	51, // 74: ariadne.v1.SearchProjectResponse.artifacts:type_name -> ariadne.v1.ProjectArtifactSearchHit
-	52, // 75: ariadne.v1.SearchProjectResponse.messages:type_name -> ariadne.v1.ProjectMessageSearchHit
-	20, // 76: ariadne.v1.GetProjectSettingsResponse.settings_view:type_name -> ariadne.v1.ProjectSettingsView
-	4,  // 77: ariadne.v1.GetFileSourcesResponse.sources:type_name -> ariadne.v1.FileSource
-	78, // 78: ariadne.v1.GetFileSourcesResponse.secrets_set:type_name -> ariadne.v1.GetFileSourcesResponse.SecretsSetEntry
-	6,  // 79: ariadne.v1.SetFileSourcesRequest.sources:type_name -> ariadne.v1.FileSourceInput
-	21, // 80: ariadne.v1.SetFileSourcesResponse.project:type_name -> ariadne.v1.ProjectView
-	2,  // 81: ariadne.v1.AddProjectReferenceRequest.reference:type_name -> ariadne.v1.ProjectSourcePart
-	21, // 82: ariadne.v1.AddProjectReferenceResponse.project:type_name -> ariadne.v1.ProjectView
-	21, // 83: ariadne.v1.RemoveProjectReferenceResponse.project:type_name -> ariadne.v1.ProjectView
-	0,  // 84: ariadne.v1.GetFileSourcesResponse.SecretsSetEntry.value:type_name -> ariadne.v1.ProjectStringList
-	53, // 85: ariadne.v1.ProjectService.ListProjects:input_type -> ariadne.v1.ListProjectsRequest
-	55, // 86: ariadne.v1.ProjectService.GetProject:input_type -> ariadne.v1.GetProjectRequest
-	57, // 87: ariadne.v1.ProjectService.CreateProject:input_type -> ariadne.v1.CreateProjectRequest
-	59, // 88: ariadne.v1.ProjectService.UpdateProject:input_type -> ariadne.v1.UpdateProjectRequest
-	61, // 89: ariadne.v1.ProjectService.DeleteProject:input_type -> ariadne.v1.DeleteProjectRequest
-	63, // 90: ariadne.v1.ProjectService.GetProjectActivity:input_type -> ariadne.v1.GetProjectActivityRequest
-	65, // 91: ariadne.v1.ProjectService.SearchProject:input_type -> ariadne.v1.SearchProjectRequest
-	67, // 92: ariadne.v1.ProjectService.GetProjectSettings:input_type -> ariadne.v1.GetProjectSettingsRequest
-	69, // 93: ariadne.v1.ProjectService.GetFileSources:input_type -> ariadne.v1.GetFileSourcesRequest
-	71, // 94: ariadne.v1.ProjectService.SetFileSources:input_type -> ariadne.v1.SetFileSourcesRequest
-	73, // 95: ariadne.v1.ProjectService.AddProjectReference:input_type -> ariadne.v1.AddProjectReferenceRequest
-	75, // 96: ariadne.v1.ProjectService.RemoveProjectReference:input_type -> ariadne.v1.RemoveProjectReferenceRequest
-	54, // 97: ariadne.v1.ProjectService.ListProjects:output_type -> ariadne.v1.ListProjectsResponse
-	56, // 98: ariadne.v1.ProjectService.GetProject:output_type -> ariadne.v1.GetProjectResponse
-	58, // 99: ariadne.v1.ProjectService.CreateProject:output_type -> ariadne.v1.CreateProjectResponse
-	60, // 100: ariadne.v1.ProjectService.UpdateProject:output_type -> ariadne.v1.UpdateProjectResponse
-	62, // 101: ariadne.v1.ProjectService.DeleteProject:output_type -> ariadne.v1.DeleteProjectResponse
-	64, // 102: ariadne.v1.ProjectService.GetProjectActivity:output_type -> ariadne.v1.GetProjectActivityResponse
-	66, // 103: ariadne.v1.ProjectService.SearchProject:output_type -> ariadne.v1.SearchProjectResponse
-	68, // 104: ariadne.v1.ProjectService.GetProjectSettings:output_type -> ariadne.v1.GetProjectSettingsResponse
-	70, // 105: ariadne.v1.ProjectService.GetFileSources:output_type -> ariadne.v1.GetFileSourcesResponse
-	72, // 106: ariadne.v1.ProjectService.SetFileSources:output_type -> ariadne.v1.SetFileSourcesResponse
-	74, // 107: ariadne.v1.ProjectService.AddProjectReference:output_type -> ariadne.v1.AddProjectReferenceResponse
-	76, // 108: ariadne.v1.ProjectService.RemoveProjectReference:output_type -> ariadne.v1.RemoveProjectReferenceResponse
-	97, // [97:109] is the sub-list for method output_type
-	85, // [85:97] is the sub-list for method input_type
-	85, // [85:85] is the sub-list for extension type_name
-	85, // [85:85] is the sub-list for extension extendee
-	0,  // [0:85] is the sub-list for field type_name
+	10, // 12: ariadne.v1.ProjectSettings.workspace:type_name -> ariadne.v1.ProjectWorkspaceSettings
+	11, // 13: ariadne.v1.ProjectSettings.routines:type_name -> ariadne.v1.ProjectRoutine
+	12, // 14: ariadne.v1.ProjectSettings.review:type_name -> ariadne.v1.ProjectReviewSettings
+	13, // 15: ariadne.v1.ProjectSettings.autopilot:type_name -> ariadne.v1.ProjectAutopilotSettings
+	15, // 16: ariadne.v1.ProjectDetected.setup:type_name -> ariadne.v1.ProjectDetectedCommand
+	15, // 17: ariadne.v1.ProjectDetected.check:type_name -> ariadne.v1.ProjectDetectedCommand
+	17, // 18: ariadne.v1.ProjectEnvVarList.entries:type_name -> ariadne.v1.ProjectEnvVar
+	14, // 19: ariadne.v1.ProjectSettingsView.settings:type_name -> ariadne.v1.ProjectSettings
+	16, // 20: ariadne.v1.ProjectSettingsView.detected:type_name -> ariadne.v1.ProjectDetected
+	3,  // 21: ariadne.v1.ProjectView.source:type_name -> ariadne.v1.ProjectSource
+	5,  // 22: ariadne.v1.ProjectView.file_sources:type_name -> ariadne.v1.FileSourceSet
+	7,  // 23: ariadne.v1.ProjectView.references:type_name -> ariadne.v1.ProjectReference
+	14, // 24: ariadne.v1.ProjectView.settings:type_name -> ariadne.v1.ProjectSettings
+	16, // 25: ariadne.v1.ProjectView.detected:type_name -> ariadne.v1.ProjectDetected
+	1,  // 26: ariadne.v1.ProjectView.usage:type_name -> ariadne.v1.ProjectUsageTotals
+	26, // 27: ariadne.v1.ProjectThreadPullRequest.checks:type_name -> ariadne.v1.ProjectPullRequestChecks
+	78, // 28: ariadne.v1.ProjectThreadReference.settings:type_name -> google.protobuf.Struct
+	22, // 29: ariadne.v1.ProjectThreadView.last_artifacts:type_name -> ariadne.v1.ProjectThreadArtifact
+	23, // 30: ariadne.v1.ProjectThreadView.workspace:type_name -> ariadne.v1.ProjectWorkspaceView
+	24, // 31: ariadne.v1.ProjectThreadView.merged:type_name -> ariadne.v1.ProjectBranchMerge
+	25, // 32: ariadne.v1.ProjectThreadView.changes:type_name -> ariadne.v1.ProjectChangeTotals
+	27, // 33: ariadne.v1.ProjectThreadView.pull_request:type_name -> ariadne.v1.ProjectThreadPullRequest
+	28, // 34: ariadne.v1.ProjectThreadView.aside:type_name -> ariadne.v1.ProjectAsideView
+	29, // 35: ariadne.v1.ProjectThreadView.stopped:type_name -> ariadne.v1.ProjectStoppedView
+	30, // 36: ariadne.v1.ProjectThreadView.references:type_name -> ariadne.v1.ProjectThreadReference
+	31, // 37: ariadne.v1.ProjectThreadView.ended_references:type_name -> ariadne.v1.ProjectEndedReference
+	1,  // 38: ariadne.v1.ProjectThreadView.usage:type_name -> ariadne.v1.ProjectUsageTotals
+	21, // 39: ariadne.v1.ProjectThreadView.progress:type_name -> ariadne.v1.ProjectProgress
+	32, // 40: ariadne.v1.ProjectThreadView.review:type_name -> ariadne.v1.ProjectReviewView
+	34, // 41: ariadne.v1.ProjectChoiceBlock.options:type_name -> ariadne.v1.ProjectChoiceOption
+	0,  // 42: ariadne.v1.ProjectFormValue.string_list:type_name -> ariadne.v1.ProjectStringList
+	37, // 43: ariadne.v1.ProjectFormField.options:type_name -> ariadne.v1.ProjectFormOption
+	38, // 44: ariadne.v1.ProjectFormField.default_value:type_name -> ariadne.v1.ProjectFormValue
+	39, // 45: ariadne.v1.ProjectFormBlock.fields:type_name -> ariadne.v1.ProjectFormField
+	35, // 46: ariadne.v1.ProjectAskBlock.choice:type_name -> ariadne.v1.ProjectChoiceBlock
+	36, // 47: ariadne.v1.ProjectAskBlock.confirm:type_name -> ariadne.v1.ProjectConfirmBlock
+	40, // 48: ariadne.v1.ProjectAskBlock.form:type_name -> ariadne.v1.ProjectFormBlock
+	41, // 49: ariadne.v1.ProjectAttentionView.block:type_name -> ariadne.v1.ProjectAskBlock
+	42, // 50: ariadne.v1.NeedsMeAttention.attention:type_name -> ariadne.v1.ProjectAttentionView
+	43, // 51: ariadne.v1.NeedsMeItem.attention:type_name -> ariadne.v1.NeedsMeAttention
+	44, // 52: ariadne.v1.NeedsMeItem.thread:type_name -> ariadne.v1.NeedsMeThread
+	0,  // 53: ariadne.v1.ProjectThreadSync.ids:type_name -> ariadne.v1.ProjectStringList
+	21, // 54: ariadne.v1.ProjectConversationActivity.progress:type_name -> ariadne.v1.ProjectProgress
+	21, // 55: ariadne.v1.ProjectThreadActivity.progress:type_name -> ariadne.v1.ProjectProgress
+	20, // 56: ariadne.v1.ListProjectsResponse.projects:type_name -> ariadne.v1.ProjectView
+	20, // 57: ariadne.v1.GetProjectResponse.project:type_name -> ariadne.v1.ProjectView
+	33, // 58: ariadne.v1.GetProjectResponse.threads:type_name -> ariadne.v1.ProjectThreadView
+	45, // 59: ariadne.v1.GetProjectResponse.needs_me:type_name -> ariadne.v1.NeedsMeItem
+	46, // 60: ariadne.v1.GetProjectResponse.sync:type_name -> ariadne.v1.ProjectThreadSync
+	3,  // 61: ariadne.v1.CreateProjectRequest.source:type_name -> ariadne.v1.ProjectSource
+	2,  // 62: ariadne.v1.CreateProjectRequest.references:type_name -> ariadne.v1.ProjectSourcePart
+	6,  // 63: ariadne.v1.CreateProjectRequest.sources:type_name -> ariadne.v1.FileSourceInput
+	20, // 64: ariadne.v1.CreateProjectResponse.project:type_name -> ariadne.v1.ProjectView
+	14, // 65: ariadne.v1.UpdateProjectRequest.settings:type_name -> ariadne.v1.ProjectSettings
+	18, // 66: ariadne.v1.UpdateProjectRequest.env:type_name -> ariadne.v1.ProjectEnvVarList
+	0,  // 67: ariadne.v1.UpdateProjectRequest.mcp_servers:type_name -> ariadne.v1.ProjectStringList
+	20, // 68: ariadne.v1.UpdateProjectResponse.project:type_name -> ariadne.v1.ProjectView
+	19, // 69: ariadne.v1.UpdateProjectResponse.settings_view:type_name -> ariadne.v1.ProjectSettingsView
+	47, // 70: ariadne.v1.GetProjectActivityResponse.coordinator:type_name -> ariadne.v1.ProjectConversationActivity
+	48, // 71: ariadne.v1.GetProjectActivityResponse.threads:type_name -> ariadne.v1.ProjectThreadActivity
+	49, // 72: ariadne.v1.SearchProjectResponse.threads:type_name -> ariadne.v1.ProjectThreadSearchHit
+	50, // 73: ariadne.v1.SearchProjectResponse.artifacts:type_name -> ariadne.v1.ProjectArtifactSearchHit
+	51, // 74: ariadne.v1.SearchProjectResponse.messages:type_name -> ariadne.v1.ProjectMessageSearchHit
+	19, // 75: ariadne.v1.GetProjectSettingsResponse.settings_view:type_name -> ariadne.v1.ProjectSettingsView
+	4,  // 76: ariadne.v1.GetFileSourcesResponse.sources:type_name -> ariadne.v1.FileSource
+	77, // 77: ariadne.v1.GetFileSourcesResponse.secrets_set:type_name -> ariadne.v1.GetFileSourcesResponse.SecretsSetEntry
+	6,  // 78: ariadne.v1.SetFileSourcesRequest.sources:type_name -> ariadne.v1.FileSourceInput
+	20, // 79: ariadne.v1.SetFileSourcesResponse.project:type_name -> ariadne.v1.ProjectView
+	2,  // 80: ariadne.v1.AddProjectReferenceRequest.reference:type_name -> ariadne.v1.ProjectSourcePart
+	20, // 81: ariadne.v1.AddProjectReferenceResponse.project:type_name -> ariadne.v1.ProjectView
+	20, // 82: ariadne.v1.RemoveProjectReferenceResponse.project:type_name -> ariadne.v1.ProjectView
+	0,  // 83: ariadne.v1.GetFileSourcesResponse.SecretsSetEntry.value:type_name -> ariadne.v1.ProjectStringList
+	52, // 84: ariadne.v1.ProjectService.ListProjects:input_type -> ariadne.v1.ListProjectsRequest
+	54, // 85: ariadne.v1.ProjectService.GetProject:input_type -> ariadne.v1.GetProjectRequest
+	56, // 86: ariadne.v1.ProjectService.CreateProject:input_type -> ariadne.v1.CreateProjectRequest
+	58, // 87: ariadne.v1.ProjectService.UpdateProject:input_type -> ariadne.v1.UpdateProjectRequest
+	60, // 88: ariadne.v1.ProjectService.DeleteProject:input_type -> ariadne.v1.DeleteProjectRequest
+	62, // 89: ariadne.v1.ProjectService.GetProjectActivity:input_type -> ariadne.v1.GetProjectActivityRequest
+	64, // 90: ariadne.v1.ProjectService.SearchProject:input_type -> ariadne.v1.SearchProjectRequest
+	66, // 91: ariadne.v1.ProjectService.GetProjectSettings:input_type -> ariadne.v1.GetProjectSettingsRequest
+	68, // 92: ariadne.v1.ProjectService.GetFileSources:input_type -> ariadne.v1.GetFileSourcesRequest
+	70, // 93: ariadne.v1.ProjectService.SetFileSources:input_type -> ariadne.v1.SetFileSourcesRequest
+	72, // 94: ariadne.v1.ProjectService.AddProjectReference:input_type -> ariadne.v1.AddProjectReferenceRequest
+	74, // 95: ariadne.v1.ProjectService.RemoveProjectReference:input_type -> ariadne.v1.RemoveProjectReferenceRequest
+	53, // 96: ariadne.v1.ProjectService.ListProjects:output_type -> ariadne.v1.ListProjectsResponse
+	55, // 97: ariadne.v1.ProjectService.GetProject:output_type -> ariadne.v1.GetProjectResponse
+	57, // 98: ariadne.v1.ProjectService.CreateProject:output_type -> ariadne.v1.CreateProjectResponse
+	59, // 99: ariadne.v1.ProjectService.UpdateProject:output_type -> ariadne.v1.UpdateProjectResponse
+	61, // 100: ariadne.v1.ProjectService.DeleteProject:output_type -> ariadne.v1.DeleteProjectResponse
+	63, // 101: ariadne.v1.ProjectService.GetProjectActivity:output_type -> ariadne.v1.GetProjectActivityResponse
+	65, // 102: ariadne.v1.ProjectService.SearchProject:output_type -> ariadne.v1.SearchProjectResponse
+	67, // 103: ariadne.v1.ProjectService.GetProjectSettings:output_type -> ariadne.v1.GetProjectSettingsResponse
+	69, // 104: ariadne.v1.ProjectService.GetFileSources:output_type -> ariadne.v1.GetFileSourcesResponse
+	71, // 105: ariadne.v1.ProjectService.SetFileSources:output_type -> ariadne.v1.SetFileSourcesResponse
+	73, // 106: ariadne.v1.ProjectService.AddProjectReference:output_type -> ariadne.v1.AddProjectReferenceResponse
+	75, // 107: ariadne.v1.ProjectService.RemoveProjectReference:output_type -> ariadne.v1.RemoveProjectReferenceResponse
+	96, // [96:108] is the sub-list for method output_type
+	84, // [84:96] is the sub-list for method input_type
+	84, // [84:84] is the sub-list for extension type_name
+	84, // [84:84] is the sub-list for extension extendee
+	0,  // [0:84] is the sub-list for field type_name
 }
 
 func init() { file_ariadne_v1_projects_proto_init() }
@@ -5991,50 +5922,49 @@ func file_ariadne_v1_projects_proto_init() {
 	file_ariadne_v1_projects_proto_msgTypes[3].OneofWrappers = []any{}
 	file_ariadne_v1_projects_proto_msgTypes[4].OneofWrappers = []any{}
 	file_ariadne_v1_projects_proto_msgTypes[6].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[9].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[17].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[21].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[24].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[28].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[34].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[16].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[20].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[23].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[27].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[33].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[35].OneofWrappers = []any{}
 	file_ariadne_v1_projects_proto_msgTypes[36].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[37].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[39].OneofWrappers = []any{
+	file_ariadne_v1_projects_proto_msgTypes[38].OneofWrappers = []any{
 		(*ProjectFormValue_StringValue)(nil),
 		(*ProjectFormValue_NumberValue)(nil),
 		(*ProjectFormValue_BoolValue)(nil),
 		(*ProjectFormValue_StringList)(nil),
 	}
+	file_ariadne_v1_projects_proto_msgTypes[39].OneofWrappers = []any{}
 	file_ariadne_v1_projects_proto_msgTypes[40].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[41].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[42].OneofWrappers = []any{
+	file_ariadne_v1_projects_proto_msgTypes[41].OneofWrappers = []any{
 		(*ProjectAskBlock_Choice)(nil),
 		(*ProjectAskBlock_Confirm)(nil),
 		(*ProjectAskBlock_Form)(nil),
 	}
+	file_ariadne_v1_projects_proto_msgTypes[42].OneofWrappers = []any{}
 	file_ariadne_v1_projects_proto_msgTypes[43].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[44].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[46].OneofWrappers = []any{
+	file_ariadne_v1_projects_proto_msgTypes[45].OneofWrappers = []any{
 		(*NeedsMeItem_Attention)(nil),
 		(*NeedsMeItem_Thread)(nil),
 	}
+	file_ariadne_v1_projects_proto_msgTypes[46].OneofWrappers = []any{}
 	file_ariadne_v1_projects_proto_msgTypes[47].OneofWrappers = []any{}
 	file_ariadne_v1_projects_proto_msgTypes[48].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[49].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[52].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[57].OneofWrappers = []any{}
-	file_ariadne_v1_projects_proto_msgTypes[59].OneofWrappers = []any{
+	file_ariadne_v1_projects_proto_msgTypes[51].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[56].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[58].OneofWrappers = []any{
 		(*UpdateProjectRequest_SetSlots)(nil),
 		(*UpdateProjectRequest_ClearSlots)(nil),
 	}
-	file_ariadne_v1_projects_proto_msgTypes[71].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[70].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ariadne_v1_projects_proto_rawDesc), len(file_ariadne_v1_projects_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   79,
+			NumMessages:   78,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

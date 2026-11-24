@@ -238,8 +238,7 @@ func TestProjectServiceAtomicUpdateAndCRUD(t *testing.T) {
 		Settings: &ariadnev1.ProjectSettings{
 			Instructions: "Follow Go conventions",
 			Delivery:     &ariadnev1.ProjectDeliverySettings{Mode: "merge", Instructions: ""},
-			Tools:        []string{"fetch"},
-			Budget:       &ariadnev1.ProjectBudgetSettings{},
+			Tools: []string{"fetch"},
 			Workspace: &ariadnev1.ProjectWorkspaceSettings{
 				Retention: "auto",
 				Auto:      &ariadnev1.ProjectWorkspaceAutoSettings{Setup: true, Check: false},

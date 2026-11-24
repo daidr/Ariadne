@@ -103,9 +103,12 @@ func readServiceConfig(home string) (*storedServiceConfig, error) {
 	return &cfg, nil
 }
 
-// detachedManager is a fallback for headless Linux / containers without systemd --user.
+// detachedManager is a fallback for environments without an active OS user service
+// manager (such as headless Linux containers without systemd --user or headless macOS
+// SSH sessions without a GUI launchd domain).
 type detachedManager struct {
 	home string
+	note string
 }
 
 func (m *detachedManager) ManagedBy() string       { return ManagedDetached }
@@ -116,6 +119,10 @@ func (m *detachedManager) Info(_ context.Context) (ServiceInfo, error) {
 	if err != nil {
 		return ServiceInfo{}, err
 	}
+	note := m.note
+	if note == "" {
+		note = "user service manager unavailable; running in detached background mode without autostart"
+	}
 	info := ServiceInfo{
 		Installed:         cfg != nil,
 		ManagedBy:         ManagedDetached,
@@ -123,7 +130,7 @@ func (m *detachedManager) Info(_ context.Context) (ServiceInfo, error) {
 		SupportsAutostart: false,
 		ConfigPath:        serviceConfigPath(m.home),
 		LogPath:           LogPath(m.home),
-		Note:              "systemd user session unavailable; running in detached background mode without autostart",
+		Note:              note,
 	}
 	if cfg != nil && cfg.LogPath != "" {
 		info.LogPath = cfg.LogPath
@@ -132,9 +139,18 @@ func (m *detachedManager) Info(_ context.Context) (ServiceInfo, error) {
 }
 
 func (m *detachedManager) Install(_ context.Context, opts InstallOptions) (ServiceInfo, error) {
+	if opts.Executable == "" {
+		return ServiceInfo{}, errors.New("executable path is required")
+	}
+	if opts.Home == "" {
+		opts.Home = m.home
+	}
 	logPath := opts.LogPath
 	if logPath == "" {
-		logPath = LogPath(m.home)
+		logPath = LogPath(opts.Home)
+	}
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		return ServiceInfo{}, err
 	}
 	if err := writeServiceConfig(m.home, storedServiceConfig{
 		Executable: opts.Executable,
@@ -159,8 +175,17 @@ func (m *detachedManager) Uninstall(_ context.Context) error {
 
 func (m *detachedManager) Start(_ context.Context, opts InstallOptions) error {
 	cfg, _ := readServiceConfig(m.home)
+	if cfg == nil {
+		if _, err := m.Install(context.Background(), opts); err != nil {
+			return err
+		}
+		cfg, _ = readServiceConfig(m.home)
+	}
 	if opts.Executable == "" && cfg != nil {
 		opts.Executable = cfg.Executable
+	}
+	if opts.Executable == "" {
+		return errors.New("executable path is required to start Ariadne service")
 	}
 	if opts.Home == "" {
 		opts.Home = m.home

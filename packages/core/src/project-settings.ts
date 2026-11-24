@@ -26,9 +26,8 @@ export const SHELL_CHOICES: ShellChoice[] = ['auto', ...SHELL_NAMES]
 
 /**
  * What the user set for one project beyond its source: words every conversation of it
- * follows, how its threads' workspaces are set up, the built-in tools it goes without, and
- * how many tokens it may spend. Secrets (environment variables) are kept in the user's
- * settings file, not here.
+ * follows, how its threads' workspaces are set up, and the built-in tools it goes without.
+ * Secrets (environment variables) are kept in the user's settings file, not here.
  */
 export interface ProjectSettings {
   /** Instructions for this project that are not in its repository, for every conversation. */
@@ -37,8 +36,6 @@ export interface ProjectSettings {
   delivery: { mode: 'merge' | 'external'; instructions: string }
   /** Groups of built-in tools its conversations do not get, e.g. `fetch` for fetch_url. */
   tools: string[]
-  /** Tokens (read and written) one thread, and the whole project, may use; `null` is no cap. */
-  budget: { thread: number | null; project: number | null }
   workspace: {
     /** Automatic cleanup, only after integration, or only on an explicit user request. */
     retention: 'auto' | 'merged' | 'keep'

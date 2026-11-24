@@ -66,7 +66,7 @@ Usage:
   ariadne service <subcommand> [flags]
 
 Subcommands:
-  install       Register the user-level background service (launchd / systemd / Windows logon task)
+  install       Register the user-level background service (launchd / systemd / Windows user startup)
   uninstall     Stop and remove the background service registration
   start         Start the background service and wait until ready
   stop          Safely drain active sessions and stop the running server

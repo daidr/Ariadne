@@ -340,6 +340,6 @@ body,
   overflow: auto;
   align-items: safe center;
   padding-top: 24px;
-  padding-bottom: calc(24px + var(--ariadne-safe-bottom));
+  padding-bottom: max(24px, var(--ariadne-safe-bottom));
 }
 </style>

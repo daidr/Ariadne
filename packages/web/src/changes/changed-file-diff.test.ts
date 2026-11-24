@@ -257,3 +257,84 @@ describe('ChangedFileDiff syntax highlighting', () => {
     proto.unmount()
   })
 })
+
+describe('ChangedFileDiff gutters', () => {
+  test('overlays line comments, omits the review-comments gutter column when empty, and shows it reactively when notes arrive', async () => {
+    const file: ChangedFile = {
+      path: 'internal/runner/prompt.go',
+      previousPath: null,
+      status: 'modified',
+      added: 1,
+      removed: 1,
+    }
+    const wrapper = mount(ChangedFileDiff, {
+      props: {
+        threadId: 'thr-diff-gutter',
+        file,
+        loadVersions: cachedLoader('line 1\nline 2\n', 'line 1\nline 2 updated\n'),
+        sent: [],
+        notes: [],
+        mode: 'inline',
+      },
+      attachTo: document.body,
+    })
+
+    await nextTick()
+    const rowWithoutNotes = wrapper.find('.dou-code-editor__number')
+    const cellsWithoutNotes = rowWithoutNotes.find('.dou-code-editor__cells')
+    expect(cellsWithoutNotes.exists()).toBe(true)
+    // Inline mode flow columns: diff-original + diff-modified + diff sign (line-comments overlays; no empty review-comments column).
+    expect(cellsWithoutNotes.findAll('.dou-code-editor__cell')).toHaveLength(3)
+    expect(
+      rowWithoutNotes.findAll('.dou-code-editor__overlays > .dou-code-editor__cell.is-overlay'),
+    ).toHaveLength(1)
+    expect(wrapper.find('.review-comment-mark').exists()).toBe(false)
+
+    await wrapper.setProps({
+      notes: [
+        {
+          id: 'r0c0',
+          round: {
+            threadId: 'thr-diff-gutter',
+            round: 1,
+            reviewerId: 'rev-1',
+            head: 'abc123',
+            requestedAt: 1,
+            verdict: 'changes',
+            abandoned: false,
+            summary: 'Check line 2',
+            submittedAt: 1,
+            comments: [
+              {
+                path: file.path,
+                line: 2,
+                quote: 'line 2 updated',
+                body: 'Please verify this change',
+                kind: 'bug',
+              },
+            ],
+            replies: [],
+          },
+          comment: {
+            path: file.path,
+            line: 2,
+            quote: 'line 2 updated',
+            body: 'Please verify this change',
+            kind: 'bug',
+          },
+          reply: null,
+        },
+      ],
+    })
+    await nextTick()
+
+    const rowWithNotes = wrapper.find('.dou-code-editor__number')
+    const cellsWithNotes = rowWithNotes.find('.dou-code-editor__cells')
+    expect(cellsWithNotes.findAll('.dou-code-editor__cell')).toHaveLength(4)
+    expect(
+      rowWithNotes.findAll('.dou-code-editor__overlays > .dou-code-editor__cell.is-overlay'),
+    ).toHaveLength(1)
+    expect(wrapper.find('.review-comment-mark').exists()).toBe(true)
+    wrapper.unmount()
+  })
+})

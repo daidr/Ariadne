@@ -77,11 +77,6 @@ message ProjectDeliverySettings {
   string instructions = 2;
 }
 
-message ProjectBudgetSettings {
-  optional double thread = 1;
-  optional double project = 2;
-}
-
 message ProjectWorkspaceAutoSettings {
   bool setup = 1;
   bool check = 2;
@@ -114,10 +109,11 @@ message ProjectAutopilotSettings {
 }
 
 message ProjectSettings {
+  reserved 4;
+  reserved "budget";
   string instructions = 1;
   ProjectDeliverySettings delivery = 2;
   repeated string tools = 3;
-  ProjectBudgetSettings budget = 4;
   ProjectWorkspaceSettings workspace = 5;
   repeated ProjectRoutine routines = 6;
   ProjectReviewSettings review = 7;

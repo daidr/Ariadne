@@ -304,10 +304,6 @@ function fromProtoProjectSettings(settings?: ProtoProjectSettings): ProjectSetti
       instructions: settings?.delivery?.instructions ?? '',
     },
     tools: [...(settings?.tools ?? [])],
-    budget: {
-      thread: settings?.budget?.thread ?? null,
-      project: settings?.budget?.project ?? null,
-    },
     workspace: {
       retention: (settings?.workspace?.retention ||
         'auto') as ProjectSettings['workspace']['retention'],
@@ -345,10 +341,6 @@ function toProtoProjectSettingsInput(settings: ProjectSettings) {
       instructions: settings.delivery.instructions,
     },
     tools: [...settings.tools],
-    budget: {
-      ...(settings.budget.thread === null ? {} : { thread: settings.budget.thread }),
-      ...(settings.budget.project === null ? {} : { project: settings.budget.project }),
-    },
     workspace: {
       retention: settings.workspace.retention,
       auto: {

@@ -20,6 +20,7 @@ const ExitCodeRestart = 75
 const (
 	ManagedLaunchd     = "launchd"
 	ManagedSystemd     = "systemd"
+	ManagedWindowsRun  = "windows-run"
 	ManagedWindowsTask = "windows-task"
 	ManagedDetached    = "detached"
 	ManagedDirect      = "direct"
@@ -44,19 +45,24 @@ func (info RuntimeInfo) Address() string {
 	return net.JoinHostPort(host, strconv.Itoa(info.Port))
 }
 
+func loopbackHost(host string) string {
+	switch host {
+	case "", "0.0.0.0":
+		return "127.0.0.1"
+	case "::":
+		return "::1"
+	default:
+		return host
+	}
+}
+
 func (info RuntimeInfo) BaseURL() string {
-	return "http://" + info.Address()
+	return "http://" + net.JoinHostPort(loopbackHost(info.Host), strconv.Itoa(info.Port))
 }
 
 // DashboardURL constructs the authenticated browser URL for an Ariadne server.
 func DashboardURL(host string, port int, token string) string {
-	if host == "" || host == "0.0.0.0" {
-		host = "127.0.0.1"
-	}
-	if host == "::" {
-		host = "::1"
-	}
-	return "http://" + net.JoinHostPort(host, strconv.Itoa(port)) + "/#" + url.Values{"token": {token}}.Encode()
+	return "http://" + net.JoinHostPort(loopbackHost(host), strconv.Itoa(port)) + "/#" + url.Values{"token": {token}}.Encode()
 }
 
 func RuntimePath(home string) string {

@@ -511,7 +511,7 @@ export interface EventMap {
   'project.slots.set': { slots: number | null }
   /** The external tool servers (MCP) this project's conversations may use, by id. */
   'project.mcp.set': { servers: string[] }
-  /** The project's own settings, whole: instructions, workspace setup, tools, budget. */
+  /** The project's own settings, whole: instructions, workspace setup, tools. */
   'project.settings.set': {
     settings: ProjectSettings
     /** A routine an agent added or removed, and in which conversation: shown there. */

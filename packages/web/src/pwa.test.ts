@@ -1,4 +1,7 @@
 // @vitest-environment happy-dom
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { effectScope } from 'vue'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import {
@@ -751,6 +754,35 @@ describe('usePwaEnvironment', () => {
       computedSpy.mockRestore()
       rafSpy.mockRestore()
       cancelSpy.mockRestore()
+    }
+  })
+})
+
+describe('bottom safe-area spacing', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const bottomSafeFiles = [
+    './App.vue',
+    './artifacts/ArtifactsOverview.vue',
+    './components/ConversationPanel.vue',
+    './components/DuoSafeAreaRail.vue',
+    './components/StartScreen.vue',
+    './components/UnauthorizedScreen.vue',
+    './plan/PlanMain.vue',
+    './side/SideLayout.vue',
+  ]
+
+  test('ConversationPanel uses max() for footer bottom padding instead of stacking on safe-area-inset-bottom', () => {
+    const source = readFileSync(resolve(here, './components/ConversationPanel.vue'), 'utf8')
+    expect(source).toContain(
+      '--conversation-footer-padding: max(16px, var(--ariadne-safe-bottom));',
+    )
+    expect(source).not.toMatch(/calc\([^)]*--ariadne-safe-bottom/)
+  })
+
+  test('layout components do not add fixed bottom margins on top of --ariadne-safe-bottom', () => {
+    for (const file of bottomSafeFiles) {
+      const source = readFileSync(resolve(here, file), 'utf8')
+      expect(source, file).not.toMatch(/calc\([^)]*--ariadne-safe-bottom/)
     }
   })
 })

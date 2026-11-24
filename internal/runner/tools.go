@@ -187,8 +187,7 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 		specification("send_message", "Send the user a message in this conversation. Use Markdown and the user's language. Attach files by workspace path or existing file ID (up to 50 MiB each).",
 			args{"text": field("string"), "replyTo": field("string"), "files": arrayOf(field("string"))}, []string{"text"}, turn.sendMessage),
 		turn.readAttachmentTool(),
-		specification("update_todo", "Replace your live checklist. Keep completed items and put next steps in order.",
-			args{"items": arrayOf(args{"type": "object", "properties": args{"label": field("string"), "status": args{"type": "string", "enum": []string{"doing", "next", "waiting", "done"}}, "detail": field("string")}, "required": []string{"label", "status"}})}, []string{"items"}, turn.updateTodo),
+		turn.updateTodoTool(),
 		readOnlySpec("search_messages", "Search messages and thread titles in the current project.",
 			args{"query": field("string")}, []string{"query"}, func(ctx context.Context, input args) (string, error) {
 				return reply(turn.Repository.Search(ctx, conversation.ProjectID, text(input, "query")))
@@ -353,6 +352,15 @@ func (turn *turn) sendMessage(ctx context.Context, input args) (string, error) {
 	return "Sent (" + saved.ID + ").", nil
 }
 
+func (turn *turn) updateTodoTool() tool {
+	description := "Replace your live checklist. Keep completed items and put next steps in order."
+	if turn.conversation.Role == "coordinator" {
+		description = "Replace your active work list. Keep only current doing, waiting, and next items in order. Remove completed or merged items on later updates instead of keeping finished history, and pass an empty list when nothing is active."
+	}
+	return specification("update_todo", description,
+		args{"items": arrayOf(args{"type": "object", "properties": args{"label": field("string"), "status": args{"type": "string", "enum": []string{"doing", "next", "waiting", "done"}}, "detail": field("string")}, "required": []string{"label", "status"}})}, []string{"items"}, turn.updateTodo)
+}
+
 func (turn *turn) updateTodo(ctx context.Context, input args) (string, error) {
 	values, ok := input["items"].([]any)
 	if !ok || len(values) > 100 {
@@ -403,6 +411,9 @@ func (turn *turn) createThread(ctx context.Context, input args) (string, error) 
 	}
 	thread, err := turn.Repository.CreateBriefedThread(ctx, turn.conversation.ProjectID,
 		core.NewThread{Title: title, Model: model, NodeID: optional(input, "nodeId"), Branch: optional(input, "branch")}, brief, cites)
+	if err == nil && turn.quiet {
+		turn.markRoutedToOtherThread()
+	}
 	return reply(args{"threadId": thread.ID, "stage": thread.Stage}, relayToolError(err, "brief"))
 }
 
@@ -470,6 +481,9 @@ func (turn *turn) messageThread(ctx context.Context, input args) (string, error)
 	_, err = turn.Repository.PostMessage(ctx, thread.ProjectID, core.MessageInput{ConversationID: id, Author: "coordinator", Kind: "relay", Content: content, Cites: cites})
 	if err != nil {
 		return "", relayToolError(err, "content")
+	}
+	if turn.isRoutingToOtherThread(id, cites) {
+		turn.markRoutedToOtherThread()
 	}
 	return "Sent.", nil
 }

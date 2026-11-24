@@ -339,8 +339,10 @@ append_line_once() {
   if [ -f "$profile" ] && grep -F "$line" "$profile" >/dev/null 2>&1; then
     return 0
   fi
-  mkdir -p "$(dirname "$profile")"
-  printf '\n# Ariadne\n%s\n' "$line" >> "$profile"
+  if ! mkdir -p "$(dirname "$profile")" 2>/dev/null || ! printf '\n# Ariadne\n%s\n' "$line" >> "$profile" 2>/dev/null; then
+    warn "Could not update $profile; add '$INSTALL_DIR' to your PATH manually."
+    return 0
+  fi
   PATH_UPDATED_FILE="$profile"
 }
 
@@ -475,12 +477,25 @@ main() {
   fi
 
   say ""
-  if "$TARGET" service status --json 2>/dev/null | grep -q '"running": true'; then
+  if "$TARGET" service status --json 2>/dev/null | grep -Eq '"running"[[:space:]]*:[[:space:]]*true'; then
     say "Detected a running Ariadne service; performing a safe restart..."
-    "$TARGET" service restart
+    if ! "$TARGET" service restart; then
+      warn "Ariadne binary was installed at '$TARGET', but restarting the background service failed."
+      say "You can retry or inspect the failure with:"
+      say "  $TARGET service restart"
+      say "  $TARGET service logs"
+      exit 1
+    fi
   else
     say "Registering and starting the Ariadne background service..."
-    "$TARGET" service install --start
+    if ! "$TARGET" service install --start; then
+      warn "Ariadne binary was installed at '$TARGET', but background service setup failed."
+      say "You can retry or inspect the failure with:"
+      say "  $TARGET service install --start"
+      say "  $TARGET service install --no-autostart --start"
+      say "  $TARGET service logs"
+      exit 1
+    fi
   fi
 }
 

@@ -1142,6 +1142,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
             :sender="sender(message)"
             :parts="partsOf(message)"
             :markdown="sender(message) === 'assistant' && markdown"
+            :status="item.pending ? 'sending' : undefined"
             :data-message-id="message.id"
             :data-pending="item.pending ? '' : undefined"
             :highlighted="!!focused && focused === relayIdOf(message.id)"
@@ -1516,7 +1517,9 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 }
 
 .conversation {
-  --conversation-footer-padding: calc(16px + var(--ariadne-safe-bottom));
+  /* safe-area-inset-bottom (e.g. 34px on iOS) already clears the Home Indicator with
+     built-in breathing room; adding 16px on top stacks two bottom gaps (50px). */
+  --conversation-footer-padding: max(16px, var(--ariadne-safe-bottom));
   position: relative;
   display: flex;
   flex-direction: column;

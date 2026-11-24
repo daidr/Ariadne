@@ -62,27 +62,30 @@ type Runner struct {
 
 type turn struct {
 	*Runner
-	conversation      core.ConversationView
-	id                string
-	draft             *realtime.DraftHandle
-	draftCall         *int
-	draftTool         string
-	artifactDrafts    map[int]*collab.Draft
-	artifactPreviewAt map[int]time.Time
-	skills            *skills.Set
-	external          []tool
-	instructionsDirty atomic.Bool
-	handledBefore     int64
-	userSpoke         bool
-	directUserInput   bool
-	mergeRequestID    string
-	quiet             bool
-	statefulSession   bool
-	changes           *turnChanges
-	looks             coordinatorLookState
-	todo              todoHintState
-	reviewChecked     bool
-	isReview          bool
+	conversation        core.ConversationView
+	id                  string
+	draft               *realtime.DraftHandle
+	draftCall           *int
+	draftTool           string
+	artifactDrafts      map[int]*collab.Draft
+	artifactPreviewAt   map[int]time.Time
+	skills              *skills.Set
+	external            []tool
+	instructionsDirty   atomic.Bool
+	handledBefore       int64
+	userSpoke           bool
+	directUserInput     bool
+	mergeRequestID      string
+	quiet               bool
+	quietThreads        map[string]bool
+	quietMessageThreads map[string]string
+	routedToOtherThread bool
+	statefulSession     bool
+	changes             *turnChanges
+	looks               coordinatorLookState
+	todo                todoHintState
+	reviewChecked       bool
+	isReview            bool
 }
 
 const (
@@ -94,11 +97,14 @@ const (
 	coordinatorLookHintText       = "[Ariadne: you have looked at a lot this turn. Looking further is doing the work yourself, and work is a thread's: put what you found into a brief and open a thread with create_thread (or pass it to the thread that has it with message_thread). Answer yourself only if what you have already answers the user.]"
 	coordinatorLookRefusedText    = "[Ariadne: not run. You have looked as far as a coordinator does in one turn without handing anything to a thread. Open a thread with create_thread and put what you found into its brief, or message the thread that has the work; after that you may look again for the next one.]"
 
-	todoMissingAfter = 3
-	todoStaleAfter   = 10
-	todoMissingHint  = "[Ariadne: you are working without a todo list, so the user cannot see what you are doing or what comes next. Write your steps with update_todo now, before your next step, and keep it current as you go. A rough outline is enough; change it as you learn more.]"
-	todoFinishedHint = "[Ariadne: your todo list is the finished one of earlier work, so the user cannot see what you are doing now. Write the steps of this work with update_todo now, before your next step (keep the earlier ones as done if they still matter), and keep it current as you go. A rough outline is enough; change it as you learn more.]"
-	todoStaleHint    = "[Ariadne: your todo list has not changed for many steps. If it no longer shows where you are, bring it up to date with update_todo: mark finished steps done and the one you are on as doing.]"
+	todoMissingAfter            = 3
+	todoStaleAfter              = 10
+	todoMissingHint             = "[Ariadne: you are working without a todo list, so the user cannot see what you are doing or what comes next. Write your steps with update_todo now, before your next step, and keep it current as you go. A rough outline is enough; change it as you learn more.]"
+	todoFinishedHint            = "[Ariadne: your todo list is the finished one of earlier work, so the user cannot see what you are doing now. Write the steps of this work with update_todo now, before your next step (keep the earlier ones as done if they still matter), and keep it current as you go. A rough outline is enough; change it as you learn more.]"
+	todoStaleHint               = "[Ariadne: your todo list has not changed for many steps. If it no longer shows where you are, bring it up to date with update_todo: mark finished steps done and the one you are on as doing.]"
+	coordinatorTodoMissingHint  = "[Ariadne: you are working without an active work list, so the user cannot see what is underway or waiting. Write your active items (doing, waiting, next) with update_todo now, before your next step, and remove them once finished.]"
+	coordinatorTodoFinishedHint = "[Ariadne: your todo list only contains finished items from earlier work, so the user cannot see what is active now. Replace it with only your current doing, waiting, and next items using update_todo now, removing completed or merged items.]"
+	coordinatorTodoStaleHint    = "[Ariadne: your active work list has not changed for many steps. If it no longer reflects current work, update it with update_todo: remove finished or merged items and keep only active doing, waiting, and next items.]"
 )
 
 type coordinatorLookState struct {
@@ -193,20 +199,31 @@ func (turn *turn) todoHint(ctx context.Context, state *todoHintState) (string, e
 			break
 		}
 	}
-	if len(items) == 0 || (finished && !state.todoThisTurn) {
+	coordinator := turn.conversation.Role == "coordinator"
+	clearedThisTurn := coordinator && len(items) == 0 && state.todoThisTurn
+	if (len(items) == 0 && !clearedThisTurn) || (finished && !state.todoThisTurn) {
 		if state.hintedMissing || state.workSteps < todoMissingAfter {
 			return "", nil
 		}
 		state.hintedMissing = true
 		if len(items) > 0 {
+			if coordinator {
+				return coordinatorTodoFinishedHint, nil
+			}
 			return todoFinishedHint, nil
+		}
+		if coordinator {
+			return coordinatorTodoMissingHint, nil
 		}
 		return todoMissingHint, nil
 	}
-	if state.hintedStale || state.sinceTodo < todoStaleAfter || finished {
+	if state.hintedStale || state.sinceTodo < todoStaleAfter || finished || clearedThisTurn {
 		return "", nil
 	}
 	state.hintedStale = true
+	if coordinator {
+		return coordinatorTodoStaleHint, nil
+	}
 	return todoStaleHint, nil
 }
 
@@ -314,29 +331,6 @@ func requestFor(model *settings.ResolvedModel, conversation string) sdk.Request 
 	return request
 }
 
-func budgetError(project core.ProjectView, conversation core.ConversationView) error {
-	over := func(limit *float64, usage map[string]any, key string) error {
-		used := asNumber(usage["input"]) + asNumber(usage["output"])
-		if limit == nil || used < *limit {
-			return nil
-		}
-		format := func(n float64) string {
-			if n < 1000 {
-				return fmt.Sprintf("%.0f", n)
-			}
-			return fmt.Sprintf("%.1fk", n/1000)
-		}
-		return domainerr.New(key, map[string]any{"used": format(used), "limit": format(*limit)})
-	}
-	if err := over(project.Settings.Budget.Project, project.Usage, "error.budgetProject"); err != nil {
-		return err
-	}
-	if conversation.Role == "thread" {
-		return over(project.Settings.Budget.Thread, conversation.Usage, "error.budgetThread")
-	}
-	return nil
-}
-
 func (turn *turn) history(ctx context.Context) (int64, []transcript.Entry, error) {
 	seq, err := turn.Repository.Store.LastSeq(ctx)
 	if err != nil {
@@ -398,13 +392,6 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		}
 		project, err := turn.Repository.GetProjectForRun(ctx, conversation.ProjectID)
 		if err != nil {
-			return err
-		}
-		current, err := turn.Repository.GetConversation(ctx, conversation.ID)
-		if err != nil {
-			return err
-		}
-		if err := budgetError(project, current); err != nil {
 			return err
 		}
 		if turn.instructionsDirty.Load() {
@@ -697,7 +684,7 @@ func (turn *turn) runToolCall(ctx context.Context, call sdk.ToolCall, byName map
 	if len(call.Arguments) > 2<<20 || json.Unmarshal([]byte(call.Arguments), &input) != nil || input == nil {
 		err = errors.New("tool arguments must be a JSON object within 2 MiB")
 	} else if turn.quiet && coordinatorChatTool(call.Name) {
-		err = errors.New("that discussion owns the user-facing reply. Use message_thread if it needs coordination or a correction, or end the turn silently")
+		err = errors.New("that discussion owns the user-facing reply. Use message_thread if it needs coordination or a correction, route unrelated work with create_thread or message_thread to another thread before notifying the user, or end the turn silently")
 	} else if entry, available := byName[call.Name]; !available {
 		err = fmt.Errorf("tool %q is unavailable", textutil.HeadUnits(call.Name, 128))
 	} else {

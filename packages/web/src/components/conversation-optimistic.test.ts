@@ -110,6 +110,10 @@ describe('ConversationPanel optimistic user messages', () => {
     const bubbleEl = pendingNodes[0]!.element
     expect(pendingNodes[0]!.attributes('data-message-id')).toMatch(/^pending:/)
     expect(pendingNodes[0]!.attributes('data-pending')).toBe('')
+    expect(pendingNodes[0]!.classes()).toContain('is-sending')
+    expect(pendingNodes[0]!.attributes('aria-busy')).toBe('true')
+    expect(pendingNodes[0]!.find('.dou-chat-message__status .dou-spinner').exists()).toBe(true)
+    expect(pendingNodes[0]!.find('.dou-chat-message__actions').exists()).toBe(false)
     expect(pendingNodes[0]!.text()).toContain('马上上屏的消息')
 
     // Confirm from server: same DOM element stays mounted without flicker or duplication.
@@ -122,6 +126,10 @@ describe('ConversationPanel optimistic user messages', () => {
     expect(confirmedNodes[0]!.element).toBe(bubbleEl)
     expect(confirmedNodes[0]!.attributes('data-message-id')).toBe('msg_server_1')
     expect(confirmedNodes[0]!.attributes('data-pending')).toBeUndefined()
+    expect(confirmedNodes[0]!.classes()).not.toContain('is-sending')
+    expect(confirmedNodes[0]!.attributes('aria-busy')).toBeUndefined()
+    expect(confirmedNodes[0]!.find('.dou-chat-message__status .dou-spinner').exists()).toBe(false)
+    expect(confirmedNodes[0]!.find('.dou-chat-message__actions').exists()).toBe(true)
 
     wrapper.unmount()
   })
@@ -161,6 +169,8 @@ describe('ConversationPanel optimistic user messages', () => {
     expect(nodesDuringRace[0]!.element).toBe(bubbleEl)
     expect(nodesDuringRace[0]!.attributes('data-message-id')).toBe('msg_sse_first')
     expect(nodesDuringRace[0]!.attributes('data-pending')).toBeUndefined()
+    expect(nodesDuringRace[0]!.classes()).not.toContain('is-sending')
+    expect(nodesDuringRace[0]!.find('.dou-chat-message__status .dou-spinner').exists()).toBe(false)
 
     // Now the HTTP response resolves: still 1 bubble, same DOM node.
     resolvePost({ message: confirmed })
@@ -283,9 +293,11 @@ describe('ConversationPanel optimistic user messages', () => {
     expect(midNodes[0]!.element).toBe(firstEl)
     expect(midNodes[0]!.attributes('data-message-id')).toBe('msg_same_1')
     expect(midNodes[0]!.attributes('data-pending')).toBeUndefined()
+    expect(midNodes[0]!.find('.dou-chat-message__status .dou-spinner').exists()).toBe(false)
     expect(midNodes[1]!.element).toBe(secondEl)
     expect(midNodes[1]!.attributes('data-message-id')).toMatch(/^pending:/)
     expect(midNodes[1]!.attributes('data-pending')).toBe('')
+    expect(midNodes[1]!.find('.dou-chat-message__status .dou-spinner').exists()).toBe(true)
 
     // Second message confirms: both keep their exact DOM nodes.
     resolvers[1]!({ message: makeMessage('msg_same_2', '相同的消息', { createdAt: 2001 }) })

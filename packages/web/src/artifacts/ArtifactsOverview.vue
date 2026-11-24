@@ -137,7 +137,7 @@ const shown = computed(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 16px;
-  padding: 12px 16px calc(16px + var(--ariadne-safe-bottom));
+  padding: 12px 16px max(16px, var(--ariadne-safe-bottom));
   overflow-y: auto;
 }
 
