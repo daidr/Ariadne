@@ -8,6 +8,7 @@ import (
 
 	"github.com/daidr/Ariadne/internal/collab"
 	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/internal/files"
 )
 
 func TestWhiteboardPrototypeStandaloneEmbeddedAndLargeFileStorage(t *testing.T) {
@@ -142,5 +143,41 @@ func TestWhiteboardPrototypeStandaloneEmbeddedAndLargeFileStorage(t *testing.T) 
 	}
 	if !strings.Contains(readOut, `"htmlBytes"`) || !strings.Contains(readOut, `"accent"`) {
 		t.Fatalf("expected readArtifact summary to include htmlBytes and tweaks, got:\n%s", readOut)
+	}
+
+	// Verify update_whiteboard preserves prototype kind when updating an existing prototype via file without specifying kind.
+	updatedHTML := `<!doctype html><html><body><button>V2 原型</button></body></html>`
+	fileStore := files.Store{Events: repo.Store}
+	savedFile, err := fileStore.Save(ctx, project.ID, "text/plain", []byte(updatedHTML), true)
+	if err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+	if _, err := agent.updateWhiteboard(ctx, args{
+		"artifactId": artifactID,
+		"reason":     "update prototype from project file without repeating kind",
+		"items": []any{
+			args{
+				"id":   "proto-standalone",
+				"file": savedFile.ID,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("updateWhiteboard prototype via file without kind failed: %v", err)
+	}
+	updatedArtifact, err := repo.GetArtifact(ctx, artifactID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updatedBoard whiteboard
+	if err := json.Unmarshal([]byte(updatedArtifact.Content), &updatedBoard); err != nil {
+		t.Fatal(err)
+	}
+	updatedNode := boardItems(updatedBoard.Nodes)["proto-standalone"]
+	if updatedNode == nil || text(updatedNode, "type") != "prototype" {
+		t.Fatalf("expected proto-standalone to remain a prototype node, got %+v", updatedNode)
+	}
+	uData := objectField(updatedNode, "data")
+	if !strings.Contains(text(uData, "html"), "V2 原型") {
+		t.Fatalf("expected updated prototype HTML to contain V2 原型, got data=%+v", uData)
 	}
 }

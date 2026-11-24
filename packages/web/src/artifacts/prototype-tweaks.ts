@@ -1,3 +1,5 @@
+import type { ArtifactCommentElement } from '@ariadne/core'
+
 export type PrototypeTweakKind = 'color' | 'enum' | 'range' | 'boolean' | 'text'
 
 export type PrototypeTweakValue = string | number | boolean
@@ -42,6 +44,48 @@ export const PROTOTYPE_DEFAULT_VIEWPORT_HEIGHT = 800
 
 const TWEAK_KEY_RE = /^[a-zA-Z0-9_-]{1,64}$/
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
+const PROTOTYPE_SRC_RE = /^\/api\/files\/fil_[\w-]+$/
+
+/** Returns true only for single-segment project file URLs without path traversal. */
+export function isValidPrototypeSrc(src: unknown): src is string {
+  return typeof src === 'string' && PROTOTYPE_SRC_RE.test(src)
+}
+
+function cleanElementString(val: unknown, maxLen: number): string | undefined {
+  if (typeof val !== 'string') return undefined
+  const trimmed = val.trim().replace(/\s+/g, ' ')
+  return trimmed ? trimmed.slice(0, maxLen) : undefined
+}
+
+function clampUnitNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : null
+}
+
+/** Sanitizes an untrusted element inspection payload received from a sandboxed prototype iframe. */
+export function sanitizeCommentElement(raw: unknown): ArtifactCommentElement | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const rec = raw as Record<string, unknown>
+  const out: ArtifactCommentElement = {}
+  const label = cleanElementString(rec.label, 120)
+  const role = cleanElementString(rec.role, 40)
+  const tag = cleanElementString(rec.tag, 40)
+  const selector = cleanElementString(rec.selector, 240)
+  if (label) out.label = label
+  if (role) out.role = role
+  if (tag) out.tag = tag
+  if (selector) out.selector = selector
+  if (rec.rect && typeof rec.rect === 'object' && !Array.isArray(rec.rect)) {
+    const r = rec.rect as Record<string, unknown>
+    const x = clampUnitNumber(r.x)
+    const y = clampUnitNumber(r.y)
+    const w = clampUnitNumber(r.w)
+    const h = clampUnitNumber(r.h)
+    if (x !== null && y !== null && w !== null && h !== null) {
+      out.rect = { x, y, w, h }
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
 const TWEAKS_SCRIPT_RE = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi
 const TWEAKS_ATTR_RE = /\bdata-ariadne-tweaks\b/i
 const JSON_TYPE_ATTR_RE = /\btype\s*=\s*["']?application\/json["']?/i
@@ -220,6 +264,8 @@ export function effectiveTweakValues(
       result[spec.key] = spec.options?.some((o) => o.value === candidate) ? candidate : spec.default
     } else if (spec.kind === 'color' && typeof candidate === 'string' && candidate.trim()) {
       result[spec.key] = candidate.trim()
+    } else if (spec.kind === 'text' && typeof candidate === 'string') {
+      result[spec.key] = candidate.slice(0, 200)
     } else {
       result[spec.key] = spec.default
     }
@@ -442,17 +488,10 @@ export function buildSandboxedPrototypeDoc(
 ): string {
   const cspTag = `<meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}">`
   const bridge = buildBridgeScript(frameId, specs, initialValues)
-  const injection = `${cspTag}\n${bridge}\n`
-
-  const headOpen = /<head\b[^>]*>/i.exec(rawHtml)
-  if (headOpen) {
-    const insertAt = headOpen.index + headOpen[0].length
-    return `${rawHtml.slice(0, insertAt)}\n${injection}${rawHtml.slice(insertAt)}`
-  }
-  const htmlOpen = /<html\b[^>]*>/i.exec(rawHtml)
-  if (htmlOpen) {
-    const insertAt = htmlOpen.index + htmlOpen[0].length
-    return `${rawHtml.slice(0, insertAt)}\n<head>${injection}</head>${rawHtml.slice(insertAt)}`
-  }
-  return `<!doctype html><html><head><meta charset="utf-8">${injection}</head><body>${rawHtml}</body></html>`
+  // Always prepend CSP + bridge right after any leading BOM/whitespace/doctype so that HTML5 parsing
+  // activates the strict CSP before any comment, tag, or external resource in the untrusted HTML.
+  const leading = /^\uFEFF?\s*(<!doctype\b[^>]*>)?/i.exec(rawHtml)
+  const doctype = leading?.[1] ?? '<!doctype html>'
+  const rest = rawHtml.slice(leading ? leading[0].length : 0)
+  return `${doctype}\n${cspTag}\n${bridge}\n${rest}`
 }

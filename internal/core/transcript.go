@@ -238,59 +238,59 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 		payload["title"] = artifact["title"]
 		payload["kind"] = artifact["kind"]
 		note(d["notify"], payload, true)
-		case "artifact.feedback_withdrawn":
-			notify := d["notify"]
-			eventSeq, _ := number(d["eventSeq"])
-			seq := int64(eventSeq)
-			if notify == nil || seq <= 0 {
-				return
-			}
-			w.run("DELETE FROM transcript WHERE conversation_id = ? AND seq = ? AND kind = 'note' AND json_extract(payload, '$.type') = 'artifact-feedback'", notify, seq)
-			conv := w.one("SELECT pending_seq, pending_since FROM conversations WHERE id = ?", notify)
-			if conv != nil {
-				pendingSeq := conv.integer("pending_seq")
-				pendingSince := conv.integer("pending_since")
-				switch {
-				case pendingSeq == seq && pendingSince == seq:
-					w.run("UPDATE conversations SET pending_seq = 0, pending_since = 0 WHERE id = ?", notify)
-				case pendingSeq == seq:
-					prevT := w.one("SELECT coalesce(max(seq), 0) AS seq FROM transcript WHERE conversation_id = ? AND woke = 1 AND seq >= ? AND seq < ?", notify, pendingSince, seq)
-					prevE := w.one(`SELECT coalesce(max(seq), 0) AS seq FROM events
+	case "artifact.feedback_withdrawn":
+		notify := d["notify"]
+		eventSeq, _ := number(d["eventSeq"])
+		seq := int64(eventSeq)
+		if notify == nil || seq <= 0 {
+			return
+		}
+		w.run("DELETE FROM transcript WHERE conversation_id = ? AND seq = ? AND kind = 'note' AND json_extract(payload, '$.type') = 'artifact-feedback'", notify, seq)
+		conv := w.one("SELECT pending_seq, pending_since FROM conversations WHERE id = ?", notify)
+		if conv != nil {
+			pendingSeq := conv.integer("pending_seq")
+			pendingSince := conv.integer("pending_since")
+			switch {
+			case pendingSeq == seq && pendingSince == seq:
+				w.run("UPDATE conversations SET pending_seq = 0, pending_since = 0 WHERE id = ?", notify)
+			case pendingSeq == seq:
+				prevT := w.one("SELECT coalesce(max(seq), 0) AS seq FROM transcript WHERE conversation_id = ? AND woke = 1 AND seq >= ? AND seq < ?", notify, pendingSince, seq)
+				prevE := w.one(`SELECT coalesce(max(seq), 0) AS seq FROM events
 						WHERE seq >= ? AND seq < ?
 						  AND ((type = 'turn.requested' AND json_extract(data, '$.conversationId') = ?)
 						    OR (type = 'turn.finished' AND json_extract(data, '$.conversationId') = ? AND json_extract(data, '$.outcome') IN ('interrupted', 'suspended')))`,
-						pendingSince, seq, notify, notify)
-					nextSeq := max(prevT.integer("seq"), prevE.integer("seq"))
-					if nextSeq > 0 {
-						w.run("UPDATE conversations SET pending_seq = ? WHERE id = ?", nextSeq, notify)
-					} else {
-						w.run("UPDATE conversations SET pending_seq = 0, pending_since = 0 WHERE id = ?", notify)
-					}
-				case pendingSince == seq:
-					nextT := w.one("SELECT coalesce(min(seq), 0) AS seq FROM transcript WHERE conversation_id = ? AND woke = 1 AND seq > ? AND seq <= ?", notify, seq, pendingSeq)
-					nextE := w.one(`SELECT coalesce(min(seq), 0) AS seq FROM events
+					pendingSince, seq, notify, notify)
+				nextSeq := max(prevT.integer("seq"), prevE.integer("seq"))
+				if nextSeq > 0 {
+					w.run("UPDATE conversations SET pending_seq = ? WHERE id = ?", nextSeq, notify)
+				} else {
+					w.run("UPDATE conversations SET pending_seq = 0, pending_since = 0 WHERE id = ?", notify)
+				}
+			case pendingSince == seq:
+				nextT := w.one("SELECT coalesce(min(seq), 0) AS seq FROM transcript WHERE conversation_id = ? AND woke = 1 AND seq > ? AND seq <= ?", notify, seq, pendingSeq)
+				nextE := w.one(`SELECT coalesce(min(seq), 0) AS seq FROM events
 						WHERE seq > ? AND seq <= ?
 						  AND ((type = 'turn.requested' AND json_extract(data, '$.conversationId') = ?)
 						    OR (type = 'turn.finished' AND json_extract(data, '$.conversationId') = ? AND json_extract(data, '$.outcome') IN ('interrupted', 'suspended')))`,
-						seq, pendingSeq, notify, notify)
-					tSeq, eSeq := nextT.integer("seq"), nextE.integer("seq")
-					var nextSince int64
-					switch {
-					case tSeq > 0 && eSeq > 0:
-						nextSince = min(tSeq, eSeq)
-					case tSeq > 0:
-						nextSince = tSeq
-					default:
-						nextSince = eSeq
-					}
-					if nextSince > 0 {
-						w.run("UPDATE conversations SET pending_since = ? WHERE id = ?", nextSince, notify)
-					} else {
-						w.run("UPDATE conversations SET pending_seq = 0, pending_since = 0 WHERE id = ?", notify)
-					}
+					seq, pendingSeq, notify, notify)
+				tSeq, eSeq := nextT.integer("seq"), nextE.integer("seq")
+				var nextSince int64
+				switch {
+				case tSeq > 0 && eSeq > 0:
+					nextSince = min(tSeq, eSeq)
+				case tSeq > 0:
+					nextSince = tSeq
+				default:
+					nextSince = eSeq
+				}
+				if nextSince > 0 {
+					w.run("UPDATE conversations SET pending_since = ? WHERE id = ?", nextSince, notify)
+				} else {
+					w.run("UPDATE conversations SET pending_seq = 0, pending_since = 0 WHERE id = ?", notify)
 				}
 			}
-			touchThread(w, e.Seq, notify)
+		}
+		touchThread(w, e.Seq, notify)
 	case "conversation.feedback_reminder":
 		note(d["conversationId"], object{"type": "artifact-feedback-reminder", "rounds": d["rounds"]}, false)
 	case "plan.proposal.stale":

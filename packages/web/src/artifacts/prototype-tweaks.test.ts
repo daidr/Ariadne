@@ -7,6 +7,8 @@ import {
   effectiveTweakValues,
   extractTweaksFromHtml,
   groupTweaksBySection,
+  isValidPrototypeSrc,
+  sanitizeCommentElement,
 } from './prototype-tweaks'
 
 describe('prototype tweaks & sandbox builder', () => {
@@ -46,26 +48,41 @@ describe('prototype tweaks & sandbox builder', () => {
     expect(grouped[1]?.items.map((i) => i.key)).toEqual(['density', 'gap'])
   })
 
-  test('computes effective values, clamps ranges, and counts modifications', () => {
+  test('computes effective values, clamps ranges, and counts modifications including text & boolean', () => {
     const specs = extractTweaksFromHtml(
       `<script type="application/json" data-ariadne-tweaks>[
         {"key":"accent","kind":"color","default":"#2563eb"},
         {"key":"gap","kind":"range","min":8,"max":24,"default":16,"unit":"px"},
-        {"key":"mode","kind":"enum","default":"light","options":["light","dark"]}
+        {"key":"mode","kind":"enum","default":"light","options":["light","dark"]},
+        {"key":"dense","kind":"boolean","default":false},
+        {"key":"cta","kind":"text","default":"确认发布"}
       ]</script>`,
     )
     const vals = effectiveTweakValues(specs, {
       accent: '#10b981',
       gap: 99,
       mode: 'unknown',
+      dense: true,
+      cta: '立即灰度发布',
     })
-    expect(vals).toEqual({ accent: '#10b981', gap: 24, mode: 'light' })
-    expect(countModifiedTweaks(specs, vals)).toBe(2)
+    expect(vals).toEqual({
+      accent: '#10b981',
+      gap: 24,
+      mode: 'light',
+      dense: true,
+      cta: '立即灰度发布',
+    })
+    expect(countModifiedTweaks(specs, vals)).toBe(4)
+
+    // Empty string is preserved for text tweaks and counted as modified.
+    const cleared = effectiveTweakValues(specs, { cta: '' })
+    expect(cleared.cta).toBe('')
+    expect(countModifiedTweaks(specs, cleared)).toBe(1)
   })
 
-  test('injects strict CSP and safely escapes script closing sequences', () => {
+  test('prepends strict CSP before leading comments or external script tags and escapes script closes', () => {
     const html =
-      '<!doctype html><html><head><title>Demo</title></head><body><h1>Hi</h1></body></html>'
+      '<!-- <head> trick --><script src="https://evil.example/leak.js"></script><head><title>Demo</title></head><body><h1>Hi</h1></body>'
     const doc = buildSandboxedPrototypeDoc(
       html,
       'frame-1',
@@ -73,16 +90,48 @@ describe('prototype tweaks & sandbox builder', () => {
         {
           key: 'note',
           label: 'Note',
-          kind: 'color',
+          kind: 'text',
           default: '</script><script>alert(1)</script>',
         },
       ],
       { note: '</script><script>alert(1)</script>' },
     )
-    expect(doc).toContain('Content-Security-Policy')
+    const cspIdx = doc.indexOf('Content-Security-Policy')
+    const commentIdx = doc.indexOf('<!-- <head> trick -->')
+    const externalScriptIdx = doc.indexOf('https://evil.example/leak.js')
+    expect(cspIdx).toBeGreaterThan(-1)
+    expect(cspIdx).toBeLessThan(commentIdx)
+    expect(cspIdx).toBeLessThan(externalScriptIdx)
     expect(doc).toContain("connect-src 'none'")
     expect(doc).toContain('data-ariadne-bridge="1"')
     expect(doc).not.toContain('</script><script>alert(1)')
+  })
+
+  test('validates prototype data.src strictly and sanitizes untrusted comment element payloads', () => {
+    expect(isValidPrototypeSrc('/api/files/fil_abc123-XYZ')).toBe(true)
+    expect(isValidPrototypeSrc('/api/files/../../api/settings')).toBe(false)
+    expect(isValidPrototypeSrc('/api/files/fil_abc/extra')).toBe(false)
+    expect(isValidPrototypeSrc('https://evil.example/x.html')).toBe(false)
+    expect(isValidPrototypeSrc('')).toBe(false)
+
+    expect(sanitizeCommentElement(null)).toBeNull()
+    expect(sanitizeCommentElement([])).toBeNull()
+    expect(
+      sanitizeCommentElement({
+        tag: 'button',
+        role: 'button',
+        label: '  立即   发布  ',
+        selector: 'button#go',
+        rect: { x: -0.5, y: 0.25, w: 1.5, h: 0.2 },
+        injected: { evil: true },
+      }),
+    ).toEqual({
+      tag: 'button',
+      role: 'button',
+      label: '立即 发布',
+      selector: 'button#go',
+      rect: { x: 0, y: 0.25, w: 1, h: 0.2 },
+    })
   })
 
   test('maps comment pins on standalone and option-embedded prototypes to logical viewport coords', () => {

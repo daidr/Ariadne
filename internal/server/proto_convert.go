@@ -1213,51 +1213,51 @@ func toProtoArtifactFeedbackItem(raw any) *ariadnev1.ArtifactFeedbackItem {
 				},
 			},
 		}
-		case "answer":
-			answer := &ariadnev1.ArtifactFeedbackAnswerItem{}
-			for _, item := range protoSlice(m["answers"]) {
-				am := protoMap(item)
-				if am == nil {
+	case "answer":
+		answer := &ariadnev1.ArtifactFeedbackAnswerItem{}
+		for _, item := range protoSlice(m["answers"]) {
+			am := protoMap(item)
+			if am == nil {
+				continue
+			}
+			answer.Answers = append(answer.Answers, &ariadnev1.ArtifactFeedbackAnswerEntry{
+				Id:       protoStr(am["id"]),
+				Question: protoStr(am["question"]),
+				Values:   protoStringSlice(am["values"]),
+				Note:     protoOptStr(am["note"]),
+			})
+		}
+		return &ariadnev1.ArtifactFeedbackItem{Item: &ariadnev1.ArtifactFeedbackItem_Answer{Answer: answer}}
+	case "tweak":
+		tweakItem := &ariadnev1.ArtifactFeedbackTweakItem{}
+		for _, entryRaw := range protoSlice(m["tweaks"]) {
+			em := protoMap(entryRaw)
+			if em == nil {
+				continue
+			}
+			entry := &ariadnev1.ArtifactFeedbackTweakEntry{
+				NodeId:      protoStr(em["nodeId"]),
+				Title:       protoStr(em["title"]),
+				OptionId:    protoOptStr(em["optionId"]),
+				OptionTitle: protoOptStr(em["optionTitle"]),
+			}
+			for _, chRaw := range protoSlice(em["changes"]) {
+				cm := protoMap(chRaw)
+				if cm == nil {
 					continue
 				}
-				answer.Answers = append(answer.Answers, &ariadnev1.ArtifactFeedbackAnswerEntry{
-					Id:       protoStr(am["id"]),
-					Question: protoStr(am["question"]),
-					Values:   protoStringSlice(am["values"]),
-					Note:     protoOptStr(am["note"]),
+				entry.Changes = append(entry.Changes, &ariadnev1.ArtifactFeedbackTweakChange{
+					Key:      protoStr(cm["key"]),
+					Label:    protoStr(cm["label"]),
+					Value:    protoStr(cm["value"]),
+					Previous: protoOptStr(cm["previous"]),
+					Unit:     protoOptStr(cm["unit"]),
 				})
 			}
-			return &ariadnev1.ArtifactFeedbackItem{Item: &ariadnev1.ArtifactFeedbackItem_Answer{Answer: answer}}
-		case "tweak":
-			tweakItem := &ariadnev1.ArtifactFeedbackTweakItem{}
-			for _, entryRaw := range protoSlice(m["tweaks"]) {
-				em := protoMap(entryRaw)
-				if em == nil {
-					continue
-				}
-				entry := &ariadnev1.ArtifactFeedbackTweakEntry{
-					NodeId:      protoStr(em["nodeId"]),
-					Title:       protoStr(em["title"]),
-					OptionId:    protoOptStr(em["optionId"]),
-					OptionTitle: protoOptStr(em["optionTitle"]),
-				}
-				for _, chRaw := range protoSlice(em["changes"]) {
-					cm := protoMap(chRaw)
-					if cm == nil {
-						continue
-					}
-					entry.Changes = append(entry.Changes, &ariadnev1.ArtifactFeedbackTweakChange{
-						Key:      protoStr(cm["key"]),
-						Label:    protoStr(cm["label"]),
-						Value:    protoStr(cm["value"]),
-						Previous: protoOptStr(cm["previous"]),
-						Unit:     protoOptStr(cm["unit"]),
-					})
-				}
-				tweakItem.Tweaks = append(tweakItem.Tweaks, entry)
-			}
-			return &ariadnev1.ArtifactFeedbackItem{Item: &ariadnev1.ArtifactFeedbackItem_Tweak{Tweak: tweakItem}}
+			tweakItem.Tweaks = append(tweakItem.Tweaks, entry)
 		}
+		return &ariadnev1.ArtifactFeedbackItem{Item: &ariadnev1.ArtifactFeedbackItem_Tweak{Tweak: tweakItem}}
+	}
 	return nil
 }
 

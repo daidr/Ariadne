@@ -23,9 +23,9 @@ const (
 )
 
 var (
-	prototypeTweakKeyRe    = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
-	prototypeTweaksTagRe   = regexp.MustCompile(`(?is)<script\b([^>]*)>(.*?)</script>`)
-	prototypeTweaksAttrRe  = regexp.MustCompile(`(?i)\bdata-ariadne-tweaks\b`)
+	prototypeTweakKeyRe     = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+	prototypeTweaksTagRe    = regexp.MustCompile(`(?is)<script\b([^>]*)>(.*?)</script>`)
+	prototypeTweaksAttrRe   = regexp.MustCompile(`(?i)\bdata-ariadne-tweaks\b`)
 	prototypeJSONTypeAttrRe = regexp.MustCompile(`(?i)\btype\s*=\s*["']?application/json["']?`)
 )
 

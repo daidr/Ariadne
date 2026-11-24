@@ -416,162 +416,162 @@ func boardNodeName(node object) string {
 	return node.str("id")
 }
 
-	func boardNodeKind(node object) string {
-		switch name := node.str("type"); name {
-		case "ink":
-			return "drawing"
-		case "sticky":
-			return "sticky note"
-		case "default":
-			return "box"
-		case "prototype":
-			return "prototype"
-		default:
-			return name
-		}
+func boardNodeKind(node object) string {
+	switch name := node.str("type"); name {
+	case "ink":
+		return "drawing"
+	case "sticky":
+		return "sticky note"
+	case "default":
+		return "box"
+	case "prototype":
+		return "prototype"
+	default:
+		return name
 	}
+}
 
-	func formatTweakScalar(v any) (string, bool) {
-		if v == nil {
+func formatTweakScalar(v any) (string, bool) {
+	if v == nil {
+		return "", false
+	}
+	switch val := v.(type) {
+	case string:
+		return val, true
+	case bool:
+		if val {
+			return "true", true
+		}
+		return "false", true
+	case float64, float32, int, int64, int32, uint, uint64, json.Number:
+		n, ok := number(val)
+		if !ok {
 			return "", false
 		}
-		switch val := v.(type) {
-		case string:
-			return val, true
-		case bool:
-			if val {
-				return "true", true
-			}
-			return "false", true
-		case float64, float32, int, int64, int32, uint, uint64, json.Number:
-			n, ok := number(val)
-			if !ok {
-				return "", false
-			}
-			return strconv.FormatFloat(n, 'f', -1, 64), true
-		default:
-			return "", false
-		}
+		return strconv.FormatFloat(n, 'f', -1, 64), true
+	default:
+		return "", false
 	}
+}
 
-	func describePrototypeTweaks(previous []object, oldIndex map[string]object, current []object, newIndex map[string]object) []object {
-		_ = previous
-		entries := []object{}
-		for _, node := range current {
-			if node.str("type") != "prototype" {
-				continue
-			}
-			id := node.str("id")
-			data := node.obj("data")
-			currValues := asObject(data["tweakValues"])
-			var prevValues object
-			if prior := oldIndex[id]; prior != nil {
-				prevValues = asObject(prior.obj("data")["tweakValues"])
-			}
-			if len(currValues) == 0 && len(prevValues) == 0 {
-				continue
-			}
-			type tweakMeta struct {
-				label string
-				def   string
-				hasD  bool
-				unit  string
-				order int
-			}
-			metaByKey := map[string]tweakMeta{}
-			keys := []string{}
-			seenKey := map[string]bool{}
-			if specs, ok := data["tweaks"].([]any); ok {
-				for idx, raw := range specs {
-					spec := asObject(raw)
-					if spec == nil {
-						continue
-					}
-					key := spec.str("key")
-					if key == "" {
-						continue
-					}
-					def, hasDef := formatTweakScalar(spec["default"])
-					label := spec.str("label")
-					if label == "" {
-						label = key
-					}
-					metaByKey[key] = tweakMeta{
-						label: label,
-						def:   def,
-						hasD:  hasDef,
-						unit:  spec.str("unit"),
-						order: idx,
-					}
-					if !seenKey[key] {
-						seenKey[key] = true
-						keys = append(keys, key)
-					}
-				}
-			}
-			extraKeys := []string{}
-			for k := range currValues {
-				if !seenKey[k] {
-					seenKey[k] = true
-					extraKeys = append(extraKeys, k)
-				}
-			}
-			for k := range prevValues {
-				if !seenKey[k] {
-					seenKey[k] = true
-					extraKeys = append(extraKeys, k)
-				}
-			}
-			slices.Sort(extraKeys)
-			keys = append(keys, extraKeys...)
-
-			changes := []object{}
-			for _, key := range keys {
-				meta, hasMeta := metaByKey[key]
-				currStr, hasCurr := formatTweakScalar(currValues[key])
-				if !hasCurr && hasMeta && meta.hasD {
-					currStr = meta.def
-				}
-				prevStr, hasPrev := formatTweakScalar(prevValues[key])
-				if !hasPrev && hasMeta && meta.hasD {
-					prevStr = meta.def
-				}
-				if currStr == prevStr {
+func describePrototypeTweaks(previous []object, oldIndex map[string]object, current []object, newIndex map[string]object) []object {
+	_ = previous
+	entries := []object{}
+	for _, node := range current {
+		if node.str("type") != "prototype" {
+			continue
+		}
+		id := node.str("id")
+		data := node.obj("data")
+		currValues := asObject(data["tweakValues"])
+		var prevValues object
+		if prior := oldIndex[id]; prior != nil {
+			prevValues = asObject(prior.obj("data")["tweakValues"])
+		}
+		if len(currValues) == 0 && len(prevValues) == 0 {
+			continue
+		}
+		type tweakMeta struct {
+			label string
+			def   string
+			hasD  bool
+			unit  string
+			order int
+		}
+		metaByKey := map[string]tweakMeta{}
+		keys := []string{}
+		seenKey := map[string]bool{}
+		if specs, ok := data["tweaks"].([]any); ok {
+			for idx, raw := range specs {
+				spec := asObject(raw)
+				if spec == nil {
 					continue
 				}
-				label := key
-				if hasMeta && meta.label != "" {
-					label = meta.label
+				key := spec.str("key")
+				if key == "" {
+					continue
 				}
-				change := object{
-					"key":   key,
-					"label": label,
-					"value": currStr,
+				def, hasDef := formatTweakScalar(spec["default"])
+				label := spec.str("label")
+				if label == "" {
+					label = key
 				}
-				if prevStr != "" {
-					change["previous"] = prevStr
+				metaByKey[key] = tweakMeta{
+					label: label,
+					def:   def,
+					hasD:  hasDef,
+					unit:  spec.str("unit"),
+					order: idx,
 				}
-				if hasMeta && meta.unit != "" {
-					change["unit"] = meta.unit
+				if !seenKey[key] {
+					seenKey[key] = true
+					keys = append(keys, key)
 				}
-				changes = append(changes, change)
 			}
-			if len(changes) == 0 {
+		}
+		extraKeys := []string{}
+		for k := range currValues {
+			if !seenKey[k] {
+				seenKey[k] = true
+				extraKeys = append(extraKeys, k)
+			}
+		}
+		for k := range prevValues {
+			if !seenKey[k] {
+				seenKey[k] = true
+				extraKeys = append(extraKeys, k)
+			}
+		}
+		slices.Sort(extraKeys)
+		keys = append(keys, extraKeys...)
+
+		changes := []object{}
+		for _, key := range keys {
+			meta, hasMeta := metaByKey[key]
+			currStr, hasCurr := formatTweakScalar(currValues[key])
+			if !hasCurr && hasMeta && meta.hasD {
+				currStr = meta.def
+			}
+			prevStr, hasPrev := formatTweakScalar(prevValues[key])
+			if !hasPrev && hasMeta && meta.hasD {
+				prevStr = meta.def
+			}
+			if currStr == prevStr {
 				continue
 			}
-			entry := object{
-				"nodeId":  id,
-				"title":   boardNodeName(node),
-				"changes": changes,
+			label := key
+			if hasMeta && meta.label != "" {
+				label = meta.label
 			}
-			if opt := boardOption(current, newIndex, node); opt != nil {
-				entry["optionId"] = opt.str("id")
-				entry["optionTitle"] = boardNodeName(opt)
+			change := object{
+				"key":   key,
+				"label": label,
+				"value": currStr,
 			}
-			entries = append(entries, entry)
+			if prevStr != "" {
+				change["previous"] = prevStr
+			}
+			if hasMeta && meta.unit != "" {
+				change["unit"] = meta.unit
+			}
+			changes = append(changes, change)
 		}
-		return entries
+		if len(changes) == 0 {
+			continue
+		}
+		entry := object{
+			"nodeId":  id,
+			"title":   boardNodeName(node),
+			"changes": changes,
+		}
+		if opt := boardOption(current, newIndex, node); opt != nil {
+			entry["optionId"] = opt.str("id")
+			entry["optionTitle"] = boardNodeName(opt)
+		}
+		entries = append(entries, entry)
 	}
+	return entries
+}
 
 func optionGroupID(node object, index map[string]object) string {
 	if group := node.obj("data").str("group"); group != "" {
@@ -617,16 +617,16 @@ func describeBoardChanges(previous, current []object) []any {
 	}
 	items := []any{}
 	before, _ := chosen(previous, old)
-		after, now := chosen(current, new)
-		slices.Sort(before)
-		slices.Sort(after)
-		if !slices.Equal(before, after) {
-			items = append(items, object{"kind": "choice", "chosen": now})
-		}
-		if tweaks := describePrototypeTweaks(previous, old, current, new); len(tweaks) > 0 {
-			items = append(items, object{"kind": "tweak", "tweaks": tweaks})
-		}
-		changes := []string{}
+	after, now := chosen(current, new)
+	slices.Sort(before)
+	slices.Sort(after)
+	if !slices.Equal(before, after) {
+		items = append(items, object{"kind": "choice", "chosen": now})
+	}
+	if tweaks := describePrototypeTweaks(previous, old, current, new); len(tweaks) > 0 {
+		items = append(items, object{"kind": "tweak", "tweaks": tweaks})
+	}
+	changes := []string{}
 	for _, node := range current {
 		id, kind := node.str("id"), boardNodeKind(node)
 		words := node.obj("data").str("text")
@@ -720,71 +720,71 @@ func boardImage(nodes []object, x, y float64) object {
 	return nil
 }
 
-	func boardPrototype(nodes []object, x, y float64) object {
-		for _, candidate := range nodes {
-			if candidate.str("type") == "prototype" && rectangle(candidate).contains(x, y) {
-				return candidate
-			}
+func boardPrototype(nodes []object, x, y float64) object {
+	for _, candidate := range nodes {
+		if candidate.str("type") == "prototype" && rectangle(candidate).contains(x, y) {
+			return candidate
 		}
-		return nil
 	}
+	return nil
+}
 
-	func prototypePosition(proto object, x, y float64) string {
-		box := rectangle(proto)
-		title := proto.obj("data").str("title")
-		if title != "" {
-			title = fmt.Sprintf(" %q", title)
-		}
-		px, py := math.Round((x-box.x)/box.w*100), math.Round((y-box.y)/box.h*100)
-		return fmt.Sprintf("prototype%s (%s) at %.0f%% across, %.0f%% down", title, proto.str("id"), px, py)
+func prototypePosition(proto object, x, y float64) string {
+	box := rectangle(proto)
+	title := proto.obj("data").str("title")
+	if title != "" {
+		title = fmt.Sprintf(" %q", title)
 	}
+	px, py := math.Round((x-box.x)/box.w*100), math.Round((y-box.y)/box.h*100)
+	return fmt.Sprintf("prototype%s (%s) at %.0f%% across, %.0f%% down", title, proto.str("id"), px, py)
+}
 
-	func describeCommentElement(elem object) string {
-		if elem == nil {
-			return ""
-		}
-		parts := []string{}
-		roleOrTag := elem.str("role")
-		if roleOrTag == "" {
-			roleOrTag = elem.str("tag")
-		}
-		if roleOrTag != "" {
-			parts = append(parts, roleOrTag)
-		}
-		if label := elem.str("label"); label != "" {
-			parts = append(parts, fmt.Sprintf("%q", label))
-		}
-		if selector := elem.str("selector"); selector != "" {
-			parts = append(parts, "("+selector+")")
-		}
-		return strings.Join(parts, " ")
+func describeCommentElement(elem object) string {
+	if elem == nil {
+		return ""
 	}
+	parts := []string{}
+	roleOrTag := elem.str("role")
+	if roleOrTag == "" {
+		roleOrTag = elem.str("tag")
+	}
+	if roleOrTag != "" {
+		parts = append(parts, roleOrTag)
+	}
+	if label := elem.str("label"); label != "" {
+		parts = append(parts, fmt.Sprintf("%q", label))
+	}
+	if selector := elem.str("selector"); selector != "" {
+		parts = append(parts, "("+selector+")")
+	}
+	return strings.Join(parts, " ")
+}
 
-	func boardPlacement(nodes []object, index map[string]object, node object) string {
-		id, kind := node.str("id"), node.str("type")
-		if kind == "option" {
-			return fmt.Sprintf("on option %q (%s) as a whole", boardNodeName(node), id)
-		}
-		place := "on the board, in no option"
-		if option := boardOption(nodes, index, node); option != nil {
-			place = fmt.Sprintf("in option %q (%s)", boardNodeName(option), option.str("id"))
-		}
-		if kind == "image" {
-			return place + ", the image " + id
-		}
-		if kind == "prototype" {
-			return fmt.Sprintf("%s, prototype %q (%s)", place, boardNodeName(node), id)
-		}
-		pos := rectangle(node)
-		x, y := pos.x+pos.w/2, pos.y+pos.h/2
-		if image := boardImage(nodes, x, y); image != nil {
-			return place + ", over " + imagePosition(image, x, y)
-		}
-		if proto := boardPrototype(nodes, x, y); proto != nil {
-			return place + ", over " + prototypePosition(proto, x, y)
-		}
-		return place
+func boardPlacement(nodes []object, index map[string]object, node object) string {
+	id, kind := node.str("id"), node.str("type")
+	if kind == "option" {
+		return fmt.Sprintf("on option %q (%s) as a whole", boardNodeName(node), id)
 	}
+	place := "on the board, in no option"
+	if option := boardOption(nodes, index, node); option != nil {
+		place = fmt.Sprintf("in option %q (%s)", boardNodeName(option), option.str("id"))
+	}
+	if kind == "image" {
+		return place + ", the image " + id
+	}
+	if kind == "prototype" {
+		return fmt.Sprintf("%s, prototype %q (%s)", place, boardNodeName(node), id)
+	}
+	pos := rectangle(node)
+	x, y := pos.x+pos.w/2, pos.y+pos.h/2
+	if image := boardImage(nodes, x, y); image != nil {
+		return place + ", over " + imagePosition(image, x, y)
+	}
+	if proto := boardPrototype(nodes, x, y); proto != nil {
+		return place + ", over " + prototypePosition(proto, x, y)
+	}
+	return place
+}
 
 func imagePosition(image object, x, y float64) string {
 	box := rectangle(image)
@@ -817,44 +817,44 @@ func boardAnchor(nodes []object, anchor object, thread string) string {
 		return "on " + id + ", which is gone now"
 	}
 	kind := boardNodeKind(node)
-		if pin := node.obj("commentPins").obj(thread); pin != nil {
-			place := "on the board"
-			option := boardOption(nodes, index, node)
-			if kind == "option" {
-				option = node
-			}
-			if option != nil {
-				place = fmt.Sprintf("in option %q (%s)", boardNodeName(option), option.str("id"))
-			}
-			box := rectangle(node)
-			px, _ := number(pin["x"])
-			py, _ := number(pin["y"])
-			x, y := box.x+px*box.w, box.y+py*box.h
-			image := node
-			if kind != "image" {
-				image = boardImage(nodes, x, y)
-			}
-			proto := node
-			if kind != "prototype" {
-				proto = boardPrototype(nodes, x, y)
-			}
-			point := fmt.Sprintf("at %.0f%% across, %.0f%% down of %s", math.Round(px*100), math.Round(py*100), id)
-			if image != nil {
-				point = "on " + imagePosition(image, x, y)
-			} else if proto != nil {
-				point = "on " + prototypePosition(proto, x, y)
-			}
-			if elemDesc := describeCommentElement(anchor.obj("element")); elemDesc != "" {
-				point = "element " + elemDesc + " " + point
-			}
-			return "pinned " + place + ", " + point
-		}
+	if pin := node.obj("commentPins").obj(thread); pin != nil {
+		place := "on the board"
+		option := boardOption(nodes, index, node)
 		if kind == "option" {
-			return boardPlacement(nodes, index, node)
+			option = node
+		}
+		if option != nil {
+			place = fmt.Sprintf("in option %q (%s)", boardNodeName(option), option.str("id"))
+		}
+		box := rectangle(node)
+		px, _ := number(pin["x"])
+		py, _ := number(pin["y"])
+		x, y := box.x+px*box.w, box.y+py*box.h
+		image := node
+		if kind != "image" {
+			image = boardImage(nodes, x, y)
+		}
+		proto := node
+		if kind != "prototype" {
+			proto = boardPrototype(nodes, x, y)
+		}
+		point := fmt.Sprintf("at %.0f%% across, %.0f%% down of %s", math.Round(px*100), math.Round(py*100), id)
+		if image != nil {
+			point = "on " + imagePosition(image, x, y)
+		} else if proto != nil {
+			point = "on " + prototypePosition(proto, x, y)
 		}
 		if elemDesc := describeCommentElement(anchor.obj("element")); elemDesc != "" {
-			return fmt.Sprintf("on element %s of %s (%s) %s", elemDesc, kind, id, boardPlacement(nodes, index, node))
+			point = "element " + elemDesc + " " + point
 		}
+		return "pinned " + place + ", " + point
+	}
+	if kind == "option" {
+		return boardPlacement(nodes, index, node)
+	}
+	if elemDesc := describeCommentElement(anchor.obj("element")); elemDesc != "" {
+		return fmt.Sprintf("on element %s of %s (%s) %s", elemDesc, kind, id, boardPlacement(nodes, index, node))
+	}
 	words := node.obj("data").str("text")
 	if words != "" {
 		words = fmt.Sprintf(" %q", words)

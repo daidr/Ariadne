@@ -121,12 +121,12 @@ func TestWhiteboardDecisionGroupsAndRounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-		for _, want := range []string{"grp-nav", "grp-density", `"recommended":true`} {
-			if !strings.Contains(summary, want) {
-				t.Fatalf("expected readArtifact summary to contain %q, got:\n%s", want, summary)
-			}
+	for _, want := range []string{"grp-nav", "grp-density", `"recommended":true`} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("expected readArtifact summary to contain %q, got:\n%s", want, summary)
 		}
 	}
+}
 
 func TestWhiteboardStandaloneImagesAndBaselineComparison(t *testing.T) {
 	ctx := t.Context()

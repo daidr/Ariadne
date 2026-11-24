@@ -171,3 +171,44 @@ func TestPrototypeNodeValidationAndTweakFeedback(t *testing.T) {
 		}
 	}
 }
+
+func TestValidatePrototypeSrcRejectsPathTraversal(t *testing.T) {
+	cases := []struct {
+		name    string
+		src     string
+		wantErr bool
+	}{
+		{name: "valid file id", src: "/api/files/fil_01a20c-abc_123", wantErr: false},
+		{name: "path traversal", src: "/api/files/../../api/settings", wantErr: true},
+		{name: "extra segment", src: "/api/files/fil_abc/raw", wantErr: true},
+		{name: "missing fil prefix", src: "/api/files/secret", wantErr: true},
+		{name: "external url", src: "https://example.com/p.html", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			board := object{
+				"version": 1,
+				"nodes": []any{
+					object{
+						"id":     "p1",
+						"type":   "prototype",
+						"x":      0,
+						"y":      0,
+						"width":  480,
+						"height": 336,
+						"data":   object{"title": "Test", "src": tc.src},
+					},
+				},
+				"edges": []any{},
+			}
+			encoded, _ := json.Marshal(board)
+			err := ValidateArtifactContent("whiteboard", string(encoded))
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error for src=%q, got nil", tc.src)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("expected valid src=%q, got error %v", tc.src, err)
+			}
+		})
+	}
+}

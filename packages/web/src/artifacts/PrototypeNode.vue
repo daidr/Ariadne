@@ -14,7 +14,9 @@ import {
   countModifiedTweaks,
   effectiveTweakValues,
   extractTweaksFromHtml,
+  isValidPrototypeSrc,
   normalizePrototypeTweaks,
+  sanitizeCommentElement,
   type PrototypeNodeData,
   type PrototypeTweakSpec,
   type PrototypeTweakValues,
@@ -45,7 +47,7 @@ watch(
       loadError.value = false
       return
     }
-    if (!src) {
+    if (!isValidPrototypeSrc(src)) {
       fetchedHtml.value = null
       loading.value = false
       loadError.value = true
@@ -231,11 +233,7 @@ function onWindowMessage(event: MessageEvent) {
     const resolve = pendingInspects.get(msg.requestId)
     if (resolve) {
       pendingInspects.delete(msg.requestId)
-      const elem =
-        msg.element && typeof msg.element === 'object'
-          ? (msg.element as ArtifactCommentElement)
-          : null
-      resolve(elem)
+      resolve(sanitizeCommentElement(msg.element))
     }
   }
 }
