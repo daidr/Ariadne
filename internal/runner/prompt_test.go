@@ -95,6 +95,12 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		`baselineImages alongside images`,
 		"self-contained HTML prototype",
 		"data-ariadne-tweaks",
+		"color|range|enum|boolean|text",
+		"--tweak-<key>",
+		"--tweak-<key>-raw",
+		"data-tweak-<key>",
+		"ariadne:tweaks",
+		"event.detail.values",
 	} {
 		if !strings.Contains(threadPrompt, want) {
 			t.Errorf("thread prompt missing %q", want)
@@ -186,8 +192,14 @@ func TestToolSchemasDocumentPlanSequencingAndReviewEnums(t *testing.T) {
 	createWhiteboard := findTool(threadTools, "create_whiteboard")
 	if !strings.Contains(createWhiteboard.spec.Description, `kind:"prototype"`) ||
 		!strings.Contains(createWhiteboard.spec.Description, "no external network requests") ||
-		!strings.Contains(createWhiteboard.spec.Description, "baselineImages") {
-		t.Errorf("create_whiteboard description missing prototype/baselineImages guidance: %q", createWhiteboard.spec.Description)
+		!strings.Contains(createWhiteboard.spec.Description, "baselineImages") ||
+		!strings.Contains(createWhiteboard.spec.Description, "color|range|enum|boolean|text") ||
+		!strings.Contains(createWhiteboard.spec.Description, "min/max/step/unit") ||
+		!strings.Contains(createWhiteboard.spec.Description, "--tweak-<key>") ||
+		!strings.Contains(createWhiteboard.spec.Description, "data-tweak-<key>") ||
+		!strings.Contains(createWhiteboard.spec.Description, "ariadne:tweaks") ||
+		!strings.Contains(createWhiteboard.spec.Description, "event.detail.values") {
+		t.Errorf("create_whiteboard description missing prototype/tweaks/baselineImages guidance: %q", createWhiteboard.spec.Description)
 	}
 	updateDocument := findTool(threadTools, "update_document")
 	if !strings.Contains(updateDocument.spec.Description, "Documents do not render Mermaid") ||
