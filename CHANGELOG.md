@@ -1,5 +1,10 @@
 # 更新日志
 
+## 0.1.0-alpha.21 (2026-11-24)
+
+- fix(runner,acp): 收紧摘要重放预算并增加跨压缩无进展循环护栏 (#227)
+- Merge pull request #225 from daidr/release/alpha
+
 ## 0.1.0-alpha.20 (2026-11-24)
 
 - feat(workspaces): 支持多仓库回合快照与改动页分组 Diff 展示 (#226)
