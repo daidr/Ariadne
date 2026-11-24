@@ -124,14 +124,9 @@ func TestWorkspaceNativeSearchAndFiles(t *testing.T) {
 }
 
 func TestWorkspaceFilesRespectsGitignoreAndAllowsExplicitIgnoredSubdir(t *testing.T) {
-	t.Run("git repo", func(t *testing.T) {
-		root, _ := initGit(t)
-		writeGit(t, root, "src/code.ts", "hello\n")
-		writeGit(t, root, ".github/ci.yml", "name: ci\n")
-		writeGit(t, root, ".gitignore", "ignored/\nnode_modules/\n")
-		writeGit(t, root, "ignored/private.ts", "secret\n")
-		writeGit(t, root, "node_modules/pkg/index.d.ts", "export {}\n")
-		workspace := newTestWorkspace(t, root, WorkspaceOptions{HideGit: true})
+	t.Parallel()
+	assertGitRepoListing := func(t *testing.T, workspace *Workspace) {
+		t.Helper()
 		view := SearchableView(workspace, "")
 
 		rootFiles, err := view.(sdk.SourceFiles).Files(t.Context(), ".")
@@ -158,9 +153,38 @@ func TestWorkspaceFilesRespectsGitignoreAndAllowsExplicitIgnoredSubdir(t *testin
 		if !strings.Contains(strings.Join(pkgFiles.Files, "\n"), "node_modules/pkg/index.d.ts") {
 			t.Fatalf("explicit ignored subdir listing missed file: %v", pkgFiles.Files)
 		}
+
+		missingIgnored, err := view.(sdk.SourceFiles).Files(t.Context(), "ignored/missing")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(missingIgnored.Files) != 0 {
+			t.Fatalf("nonexistent ignored path returned phantom files: %v", missingIgnored.Files)
+		}
+	}
+
+	t.Run("git repo", func(t *testing.T) {
+		t.Parallel()
+		root, _ := initGit(t)
+		writeGit(t, root, "src/code.ts", "hello\n")
+		writeGit(t, root, ".github/ci.yml", "name: ci\n")
+		writeGit(t, root, ".gitignore", "ignored/\nnode_modules/\n")
+		writeGit(t, root, "ignored/private.ts", "secret\n")
+		writeGit(t, root, "node_modules/pkg/index.d.ts", "export {}\n")
+
+		// Default path (uses rg when installed, falls back to git + sdk.Walk otherwise).
+		assertGitRepoListing(t, newTestWorkspace(t, root, WorkspaceOptions{HideGit: true}))
+
+		// Explicitly exercise the no-rg fallback path even on hosts with rg installed.
+		noRG := newTestWorkspace(t, root, WorkspaceOptions{HideGit: true})
+		done := make(chan struct{})
+		close(done)
+		noRG.probes = map[string]*probeResult{"rg": {done: done, value: false}}
+		assertGitRepoListing(t, noRG)
 	})
 
 	t.Run("non-git directory with gitignore", func(t *testing.T) {
+		t.Parallel()
 		root := t.TempDir()
 		writeGit(t, root, "src/code.ts", "hello\n")
 		writeGit(t, root, ".gitignore", "ignored/\nnode_modules/\n")

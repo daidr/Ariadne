@@ -2,7 +2,9 @@ package local
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -44,13 +46,16 @@ func (workspace *Workspace) probe(ctx context.Context, key string, argv []string
 	}
 }
 func (workspace *Workspace) Files(ctx context.Context, path string) (sdk.FileListing, error) {
-	if _, err := workspace.Resolve(path); err != nil {
+	resolved, err := workspace.Resolve(path)
+	if err != nil {
 		return sdk.FileListing{}, err
 	}
 	target := path
 	if target == "" {
 		target = "."
 	}
+	cleanedTarget := strings.TrimPrefix(strings.ReplaceAll(strings.TrimSpace(target), "\\", "/"), "./")
+	isRoot := cleanedTarget == "" || cleanedTarget == "."
 	options := sdk.ExecOptions{Timeout: 60 * time.Second}
 	var files []string
 	partial := false
@@ -80,17 +85,30 @@ func (workspace *Workspace) Files(ctx context.Context, path string) (sdk.FileLis
 			return sdk.FileListing{}, err
 		}
 		if inGit {
-			result, err := workspace.ExecFile(ctx, []string{"git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", target}, options)
-			if err != nil {
-				return sdk.FileListing{}, err
+			ignoredTarget := false
+			if !isRoot {
+				check, err := workspace.ExecFile(ctx, []string{"git", "check-ignore", "-q", "--", target}, options)
+				if err != nil {
+					return sdk.FileListing{}, err
+				}
+				ignoredTarget = check.ExitCode == 0
 			}
-			if result.ExitCode == 0 {
-				files = parseNullFileList(result.Stdout)
-				partial = strings.Contains(result.Stdout, " characters cut …]")
+			if !ignoredTarget {
+				result, err := workspace.ExecFile(ctx, []string{"git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", target}, options)
+				if err != nil {
+					return sdk.FileListing{}, err
+				}
+				if result.ExitCode == 0 {
+					files = parseNullFileList(result.Stdout)
+					partial = strings.Contains(result.Stdout, " characters cut …]")
+				}
 			}
 		}
 	}
 	if files == nil {
+		if _, statErr := os.Stat(resolved); errors.Is(statErr, os.ErrNotExist) {
+			return sdk.FileListing{Files: []string{}}, nil
+		}
 		return sdk.Walk(ctx, workspace, path)
 	}
 	for index, file := range files {
