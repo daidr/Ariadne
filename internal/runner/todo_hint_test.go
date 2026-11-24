@@ -57,6 +57,9 @@ func TestThreadTodoMissingHintOnce(t *testing.T) {
 	if len(hintedAt) != 1 || hintedAt[0] != todoMissingAfter-1 {
 		t.Fatalf("missing hint indices = %v, want [%d]", hintedAt, todoMissingAfter-1)
 	}
+	if strings.Contains(results[hintedAt[0]].content, "<current_todo>") {
+		t.Fatalf("missing hint with empty todo must not include <current_todo>: %q", results[hintedAt[0]].content)
+	}
 }
 
 func TestThreadTodoWrittenFirstNoMissingHint(t *testing.T) {
@@ -91,6 +94,10 @@ func TestThreadTodoStaleHintAtTenSteps(t *testing.T) {
 	}
 	if len(hintedAt) != 1 || hintedAt[0] != todoStaleAfter {
 		t.Fatalf("stale hint indices = %v, want [%d]", hintedAt, todoStaleAfter)
+	}
+	if !strings.Contains(results[hintedAt[0]].content, "<current_todo>") ||
+		!strings.Contains(results[hintedAt[0]].content, "- [doing] 执行步骤") {
+		t.Fatalf("stale hint should include current todo items: %q", results[hintedAt[0]].content)
 	}
 }
 
@@ -260,6 +267,10 @@ func TestCoordinatorTodoStaleHintUsesCoordinatorWording(t *testing.T) {
 	if len(hintedAt) != 1 || hintedAt[0] != todoStaleAfter {
 		t.Fatalf("coordinator stale hint indices = %v, want [%d]", hintedAt, todoStaleAfter)
 	}
+	if !strings.Contains(results[hintedAt[0]].content, "<current_todo>") ||
+		!strings.Contains(results[hintedAt[0]].content, "- [doing] 执行步骤") {
+		t.Fatalf("coordinator stale hint should include current todo items: %q", results[hintedAt[0]].content)
+	}
 }
 
 func TestCoordinatorTodoClearedThisTurnNotReminded(t *testing.T) {
@@ -328,5 +339,9 @@ func TestCoordinatorTodoFinishedEarlierTurnRemindedToDropDone(t *testing.T) {
 	}
 	if len(hintedAt) != 1 || hintedAt[0] != todoMissingAfter-1 {
 		t.Fatalf("coordinator finished hint indices = %v, want [%d]", hintedAt, todoMissingAfter-1)
+	}
+	if !strings.Contains(results[hintedAt[0]].content, "<current_todo>") ||
+		!strings.Contains(results[hintedAt[0]].content, "- [done] 执行步骤") {
+		t.Fatalf("coordinator finished hint should include current todo items: %q", results[hintedAt[0]].content)
 	}
 }

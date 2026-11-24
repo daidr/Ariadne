@@ -3,6 +3,9 @@ package agentruntime
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -10,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/daidr/Ariadne/internal/jsonutil"
+	"github.com/daidr/Ariadne/internal/textutil"
 	"github.com/daidr/Ariadne/sdk"
 )
 
@@ -31,13 +35,22 @@ const (
 	maxReplayToolArgsBytes      = 2 * 1024
 	maxReplayOldMessageBytes    = 6 * 1024
 
-	historyHeader         = "<history>\nThe conversation so far, from before this session started. Earlier replies, notes, and tool calls are shown as they were; continue from these findings and only re-run a tool if you need fresh state or missing details.\n\n"
-	historyFooter         = "\n</history>\n\n"
-	historyOmittedNote    = "[Earlier messages were omitted to stay within the history replay limit.]"
-	historyContinueEnding = "Go on from where it ends; the calls above have already run."
-	historyAnswerEnding   = "Answer the last user message."
-	summaryLeadPrefix     = "<history_summarised>"
-	summaryNotesPrefix    = "<your_notes>"
+	historyHeader            = "<history>\nThe conversation so far, from before this session started. Earlier replies, notes, and tool calls are shown as they were; continue from these findings and only re-run a tool if you need fresh state or missing details.\n\n"
+	historyFooter            = "\n</history>\n\n"
+	historyOmittedNote       = "[Earlier messages were omitted to stay within the history replay limit.]"
+	historyContinueEnding    = "Go on from where it ends; the calls above have already run."
+	historyAnswerEnding      = "Answer the last user message."
+	summaryLeadPrefix        = "<history_summarised>"
+	summaryNotesPrefix       = "<your_notes>"
+	currentTodoTagPrefix     = "<current_todo>"
+	maxReplayTodoLabelUnits  = 240
+	maxReplayTodoDetailUnits = 180
+	maxReplayTodoStateUnits  = 2400
+)
+
+var (
+	replayWhitespace = regexp.MustCompile(`\s+`)
+	replayTodoTag    = regexp.MustCompile(`(?i)[<＜﹤〈‹]\s*(/?)\s*current(?:[^A-Za-z0-9_]|_)*todo`)
 )
 
 type Input struct {
@@ -260,6 +273,149 @@ func splitSummaryPrefix(messages []sdk.Message) ([]sdk.Message, []sdk.Message) {
 	return messages[:1], messages[1:]
 }
 
+func pinnedHasTodo(messages []sdk.Message) bool {
+	for _, message := range messages {
+		if strings.Contains(message.Content, currentTodoTagPrefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func findLatestSucceededUpdateTodo(messages []sdk.Message) (int, sdk.ToolCall, bool) {
+	succeeded := map[string]bool{}
+	for _, message := range messages {
+		if message.Role == "tool" && !message.IsError && message.ToolCallID != "" {
+			succeeded[message.ToolCallID] = true
+		}
+	}
+	if len(succeeded) == 0 {
+		return -1, sdk.ToolCall{}, false
+	}
+	latestIdx := -1
+	var latestCall sdk.ToolCall
+	for i, message := range messages {
+		if message.Role != "assistant" {
+			continue
+		}
+		for _, call := range message.ToolCalls {
+			if call.Name == "update_todo" && succeeded[call.ID] {
+				latestIdx = i
+				latestCall = call
+			}
+		}
+	}
+	return latestIdx, latestCall, latestIdx >= 0
+}
+
+func replayUTF16Len(text string) int {
+	count := 0
+	for _, r := range text {
+		count++
+		if r > 0xffff {
+			count++
+		}
+	}
+	return count
+}
+
+func sanitizeReplayTodoText(value string, limit int) string {
+	cleaned := textutil.Trim(replayWhitespace.ReplaceAllString(value, " "))
+	if cleaned == "" {
+		return ""
+	}
+	cleaned = replayTodoTag.ReplaceAllString(cleaned, "‹${1}current todo")
+	if limit > 0 && replayUTF16Len(cleaned) > limit {
+		cleaned = textutil.Trim(textutil.HeadUnits(cleaned, limit)) + "…"
+	}
+	return cleaned
+}
+
+func formatRecoveredTodo(rawArgs string, pinnedHasTodo bool) string {
+	var payload struct {
+		Items []struct {
+			Label  string  `json:"label"`
+			Status string  `json:"status"`
+			Detail *string `json:"detail"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(rawArgs), &payload); err != nil {
+		return ""
+	}
+	if len(payload.Items) == 0 {
+		if !pinnedHasTodo {
+			return ""
+		}
+		return "<current_todo>\nYour current todo list in Ariadne is currently empty (cleared after earlier notes).\n</current_todo>"
+	}
+	const lead = "Your current todo list in Ariadne (update_todo replaces the full list):"
+	lines := make([]string, 0, len(payload.Items)+1)
+	used := replayUTF16Len(lead)
+	omitted := 0
+	for index, item := range payload.Items {
+		label := sanitizeReplayTodoText(item.Label, maxReplayTodoLabelUnits)
+		if label == "" {
+			continue
+		}
+		status := sanitizeReplayTodoText(item.Status, 32)
+		if status == "" {
+			status = "next"
+		}
+		line := "- [" + status + "] " + label
+		if item.Detail != nil {
+			if detail := sanitizeReplayTodoText(*item.Detail, maxReplayTodoDetailUnits); detail != "" {
+				line += " — " + detail
+			}
+		}
+		lineUnits := replayUTF16Len(line) + 1
+		if len(lines) > 0 && used+lineUnits > maxReplayTodoStateUnits {
+			omitted = len(payload.Items) - index
+			break
+		}
+		lines = append(lines, line)
+		used += lineUnits
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	if omitted > 0 {
+		lines = append(lines, fmt.Sprintf("- (… %d more item(s) omitted)", omitted))
+	}
+	return "<current_todo>\n" + lead + "\n" + strings.Join(lines, "\n") + "\n</current_todo>"
+}
+
+func selectKeptHistory(historyItems []replayItem, remaining int, allowEmpty bool) []replayItem {
+	groups := groupReplayItems(historyItems)
+	keptReversed := make([]replayItem, 0, len(historyItems))
+	for g := len(groups) - 1; g >= 0; g-- {
+		group := groups[g]
+		need := 2 + joinedReplayBytes(group)
+		if need <= remaining {
+			for i := len(group) - 1; i >= 0; i-- {
+				keptReversed = append(keptReversed, group[i])
+			}
+			remaining -= need
+			continue
+		}
+		if len(keptReversed) == 0 {
+			for i := len(group) - 1; i >= 0; i-- {
+				itemNeed := 2 + len(group[i].text)
+				if itemNeed > remaining {
+					break
+				}
+				keptReversed = append(keptReversed, group[i])
+				remaining -= itemNeed
+			}
+		}
+		break
+	}
+	if !allowEmpty && len(keptReversed) == 0 && len(historyItems) > 0 {
+		keptReversed = append(keptReversed, historyItems[len(historyItems)-1])
+	}
+	slices.Reverse(keptReversed)
+	return keptReversed
+}
+
 func RenderHistory(messages []sdk.Message) Input {
 	return RenderHistoryWithBudget(messages, DefaultHistoryReplayBytes)
 }
@@ -326,50 +482,40 @@ func RenderHistoryWithBudget(messages []sdk.Message, maxBytes int) Input {
 	}
 
 	var keptHistory []replayItem
+	todoNote := ""
 	if len(historyItems) == 0 || joinedReplayBytes(historyItems) <= available {
 		keptHistory = historyItems
 	} else {
 		// Only tighten oversized historical entries when the full replay would
 		// otherwise exceed the budget; keep short histories completely verbatim.
 		historyItems = renderReplayItems(tailMessages, names, true)
-		if joinedReplayBytes(historyItems) <= available {
+		latestTodoIdx, latestTodoCall, hasTodo := findLatestSucceededUpdateTodo(tailMessages)
+		todoTruncated := hasTodo && len(latestTodoCall.Arguments) > maxReplayToolArgsBytes
+		if todoTruncated {
+			todoNote = formatRecoveredTodo(latestTodoCall.Arguments, pinnedHasTodo(pinnedMessages))
+		}
+		todoExtra := 0
+		if todoNote != "" {
+			todoExtra = 2 + len(todoNote)
+		}
+		if joinedReplayBytes(historyItems)+todoExtra <= available {
 			keptHistory = historyItems
 		} else {
-			remaining := available - len(historyOmittedNote)
-			groups := groupReplayItems(historyItems)
-			keptReversed := make([]replayItem, 0, len(historyItems))
-			for g := len(groups) - 1; g >= 0; g-- {
-				group := groups[g]
-				need := 2 + joinedReplayBytes(group)
-				if need <= remaining {
-					for i := len(group) - 1; i >= 0; i-- {
-						keptReversed = append(keptReversed, group[i])
-					}
-					remaining -= need
-					continue
-				}
-				if len(keptReversed) == 0 {
-					for i := len(group) - 1; i >= 0; i-- {
-						itemNeed := 2 + len(group[i].text)
-						if itemNeed > remaining {
-							break
-						}
-						keptReversed = append(keptReversed, group[i])
-						remaining -= itemNeed
+			keptHistory = selectKeptHistory(historyItems, available-len(historyOmittedNote)-todoExtra, len(currentItems) > 0)
+			if hasTodo && todoNote == "" {
+				keptStart := len(historyItems) - len(keptHistory)
+				if latestTodoIdx < keptStart {
+					if recovered := formatRecoveredTodo(latestTodoCall.Arguments, pinnedHasTodo(pinnedMessages)); recovered != "" {
+						todoNote = recovered
+						keptHistory = selectKeptHistory(historyItems, available-len(historyOmittedNote)-2-len(todoNote), len(currentItems) > 0)
 					}
 				}
-				break
 			}
-			if len(currentItems) == 0 && len(keptReversed) == 0 {
-				keptReversed = append(keptReversed, historyItems[len(historyItems)-1])
-			}
-			slices.Reverse(keptReversed)
-			keptHistory = keptReversed
 		}
 	}
 	omitted := len(keptHistory) < len(historyItems)
 
-	parts := make([]string, 0, len(pinnedItems)+len(keptHistory)+len(currentItems)+1)
+	parts := make([]string, 0, len(pinnedItems)+len(keptHistory)+len(currentItems)+2)
 	images := []sdk.Image{}
 	for _, item := range pinnedItems {
 		parts = append(parts, item.text)
@@ -381,6 +527,9 @@ func RenderHistoryWithBudget(messages []sdk.Message, maxBytes int) Input {
 	for _, item := range keptHistory {
 		parts = append(parts, item.text)
 		images = append(images, item.images...)
+	}
+	if todoNote != "" {
+		parts = append(parts, todoNote)
 	}
 	for _, item := range currentItems {
 		parts = append(parts, item.text)
