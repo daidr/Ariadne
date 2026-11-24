@@ -1,5 +1,6 @@
 import { resolveShikiLanguage, type ShikiLanguageKey } from './languages'
 import type { ShikiHighlightResponse, ShikiWorkerPort } from './shiki-worker-protocol'
+import { shikiWorkerUrl } from './shiki-worker-url'
 
 export type HighlightPriority = 'high' | 'normal' | 'low'
 
@@ -93,7 +94,7 @@ function createAbortError(): Error {
 
 function createDefaultShikiWorker(): ShikiWorkerPort | null {
   if (typeof Worker === 'undefined') return null
-  return new Worker(new URL('./shiki.worker.ts', import.meta.url), {
+  return new Worker(shikiWorkerUrl(), {
     type: 'module',
     name: 'ariadne-shiki',
   }) as unknown as ShikiWorkerPort
