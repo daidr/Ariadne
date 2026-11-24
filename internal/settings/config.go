@@ -28,7 +28,7 @@ type Rule struct {
 
 var ShortcutActions = []string{"search", "focus", "previousThread", "nextThread", "stop", "sheet"}
 var defaultKeys = Object{"search": "mod+k", "focus": "/", "previousThread": "mod+up", "nextThread": "mod+down", "stop": "escape", "sheet": "?"}
-var defaultLimits = Object{"commandTimeout": float64(120), "commandTimeoutMax": float64(600), "commandOutput": float64(30000), "compactShare": .6, "modelRetries": float64(4), "loopRepeats": float64(4)}
+var defaultLimits = Object{"commandTimeout": float64(120), "commandTimeoutMax": float64(600), "commandOutput": float64(30000), "compactShare": .75, "modelRetries": float64(4), "loopRepeats": float64(4)}
 var limitRanges = map[string][2]float64{"commandTimeout": {5, 3600}, "commandTimeoutMax": {5, 7200}, "commandOutput": {2000, 200000}, "compactShare": {.3, .9}, "modelRetries": {0, 10}, "loopRepeats": {2, 20}}
 var limitKeys = []string{"commandTimeout", "commandTimeoutMax", "commandOutput", "compactShare", "modelRetries", "loopRepeats"}
 var roles = []string{"thread", "coordinator", "triage", "research"}
@@ -39,6 +39,7 @@ const defaultEffort = "default"
 func validRoleEffort(role, value string) bool {
 	return hasString(efforts, value) || (role == "coordinator" && value == defaultEffort)
 }
+
 var snippetID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var headerName = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
@@ -234,12 +235,12 @@ func Normalize(stored Object) Object {
 		if model, ok := given["model"].(string); ok {
 			value["model"] = model
 		}
-			if effort, ok := given["effort"].(string); ok && validRoleEffort(role, effort) {
-				value["effort"] = effort
-			}
-			if value["model"] != nil && value["effort"] == defaultEffort {
-				value["effort"] = nil
-			}
+		if effort, ok := given["effort"].(string); ok && validRoleEffort(role, effort) {
+			value["effort"] = effort
+		}
+		if value["model"] != nil && value["effort"] == defaultEffort {
+			value["effort"] = nil
+		}
 		normalizedRoles[role] = value
 	}
 	config["models"] = Object{"providers": fallback(models["providers"], []any{}), "models": fallback(models["models"], []any{}), "roles": normalizedRoles, "showCost": models["showCost"] == true}

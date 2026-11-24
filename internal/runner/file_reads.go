@@ -18,8 +18,15 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
+const (
+	readFileDefaultLimit = 2000
+	readFileMaxLimit     = 100_000
+	readFileMaxLineUnits = 2000
+	readFileMaxBytes     = 50 * 1024 // 50 KiB (aligned with OpenCode)
+)
+
 func (turn *turn) readFileTool() tool {
-	entry := specification("read_file", "Read numbered lines of a text file up to 1 MiB. Pass source to select a named file source. Use the returned offset for more lines. Give large logs, traces, source maps and generated bundles to a script for a targeted summary. Images are attached to the result.",
+	entry := specification("read_file", "Read numbered lines of a text file up to 1 MiB (defaults to 2000 lines or 50 KiB per call; offset is 1-based). Pass source to select a named file source. Use the returned offset for more lines. Give large logs, traces, source maps and generated bundles to a script for a targeted summary. Images are attached to the result.",
 		args{"path": field("string"), "source": field("string"), "reference": field("string"), "offset": field("integer"), "limit": field("integer")},
 		[]string{"path"}, nil)
 	entry.readOnly = true
@@ -54,6 +61,8 @@ func (turn *turn) readFile(ctx context.Context, input args) (string, []any, erro
 	maxBytes := int64(1 << 20)
 	if image != "" {
 		maxBytes = 5 << 20
+	} else if _, ok := view.(*toolOutputView); ok {
+		maxBytes = maxSavedCommandOutputBytes
 	}
 	data, err := view.ReadBytes(ctx, path, maxBytes)
 	if err != nil {
@@ -74,8 +83,8 @@ func (turn *turn) readFile(ctx context.Context, input args) (string, []any, erro
 	if bytes.ContainsRune(data, 0) {
 		return "", nil, fmt.Errorf("%s is a binary file", path)
 	}
-	if len(data) > 1<<20 {
-		return "", nil, errors.New("the text file exceeds the 1 MiB read limit")
+	if int64(len(data)) > maxBytes {
+		return "", nil, fmt.Errorf("the text file exceeds the %d-byte read limit", maxBytes)
 	}
 	lines := textLines(data)
 	offset, limit := readFileRange(len(lines), input)
@@ -99,12 +108,12 @@ func textLines(data []byte) []string {
 }
 
 func readFileRange(lineCount int, input args) (int, int) {
-	offset, limit := 1, 240
+	offset, limit := 1, readFileDefaultLimit
 	if input["offset"] != nil {
 		offset = int(max(1, min(asNumber(input["offset"]), float64(lineCount+1))))
 	}
 	if input["limit"] != nil {
-		limit = int(max(1, min(asNumber(input["limit"]), 800)))
+		limit = int(max(1, min(asNumber(input["limit"]), readFileMaxLimit)))
 	}
 	return offset, limit
 }
@@ -117,21 +126,37 @@ func formatNumberedLines(data []byte, input args) string {
 }
 
 func formatNumberedRange(lines []string, offset, limit int) string {
+	if offset > len(lines) {
+		return fmt.Sprintf("[No lines returned: offset is past end of file — total %d lines.]", len(lines))
+	}
 	var out strings.Builder
 	end := offset - 1
-	for ; end < min(len(lines), offset-1+limit) && out.Len() < 60000; end++ {
-		if end != offset-1 {
-			out.WriteByte('\n')
-		}
+	stop := min(len(lines), offset-1+limit)
+	truncatedByBytes := false
+	for ; end < stop; end++ {
 		line := strings.TrimSuffix(lines[end], "\r")
-		prefix := textutil.HeadUnits(line, 2000)
-		fmt.Fprintf(&out, "%5d\t%s", end+1, prefix)
-		if prefix != line {
-			out.WriteString(" […]")
+		prefix := textutil.HeadUnits(line, readFileMaxLineUnits)
+		var formatted strings.Builder
+		if end != offset-1 {
+			formatted.WriteByte('\n')
 		}
+		fmt.Fprintf(&formatted, "%5d\t%s", end+1, prefix)
+		if prefix != line {
+			formatted.WriteString(" […]")
+		}
+		if end > offset-1 && out.Len()+formatted.Len() > readFileMaxBytes {
+			truncatedByBytes = true
+			break
+		}
+		out.WriteString(formatted.String())
 	}
-	if end < len(lines) {
+	switch {
+	case truncatedByBytes:
+		fmt.Fprintf(&out, "\n[Lines %d–%d of %d (output capped at 50 KiB). Continue at offset %d.]", offset, end, len(lines), end+1)
+	case end < len(lines):
 		fmt.Fprintf(&out, "\n[Lines %d–%d of %d. Continue at offset %d.]", offset, end, len(lines), end+1)
+	default:
+		fmt.Fprintf(&out, "\n[End of file — total %d lines.]", len(lines))
 	}
 	return out.String()
 }

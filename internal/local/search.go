@@ -47,48 +47,45 @@ func (workspace *Workspace) Files(ctx context.Context, path string) (sdk.FileLis
 	if _, err := workspace.Resolve(path); err != nil {
 		return sdk.FileListing{}, err
 	}
+	target := path
+	if target == "" {
+		target = "."
+	}
 	options := sdk.ExecOptions{Timeout: 60 * time.Second}
-	inGit, err := workspace.probe(ctx, "git", []string{"git", "rev-parse", "--is-inside-work-tree"})
+	var files []string
+	partial := false
+	hasRG, err := workspace.probe(ctx, "rg", []string{"rg", "--version"})
 	if err != nil {
 		return sdk.FileListing{}, err
 	}
-	var files []string
-	partial := false
-	if inGit {
-		result, err := workspace.ExecFile(ctx, []string{"git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", path}, options)
+	if hasRG {
+		result, err := workspace.ExecFile(ctx, []string{"rg", "--files", "-0", "--hidden", "--no-require-git", "-g", "!.git", "--", target}, options)
 		if err != nil {
 			return sdk.FileListing{}, err
 		}
-		if result.ExitCode == 0 {
-			files = []string{}
-			seen := map[string]bool{}
-			for _, file := range strings.Split(result.Stdout, "\x00") {
-				if file != "" && !seen[file] {
-					files = append(files, file)
-					seen[file] = true
-				}
+		if result.ExitCode == 2 && strings.Contains(result.Stderr, "no-require-git") {
+			result, err = workspace.ExecFile(ctx, []string{"rg", "--files", "-0", "--hidden", "-g", "!.git", "--", target}, options)
+			if err != nil {
+				return sdk.FileListing{}, err
 			}
+		}
+		if result.ExitCode == 0 || result.ExitCode == 1 {
+			files = parseNullFileList(result.Stdout)
 			partial = strings.Contains(result.Stdout, " characters cut …]")
 		}
 	}
 	if files == nil {
-		hasRG, err := workspace.probe(ctx, "rg", []string{"rg", "--version"})
+		inGit, err := workspace.probe(ctx, "git", []string{"git", "rev-parse", "--is-inside-work-tree"})
 		if err != nil {
 			return sdk.FileListing{}, err
 		}
-		if hasRG {
-			result, err := workspace.ExecFile(ctx, []string{"rg", "--files", "--", path}, options)
+		if inGit {
+			result, err := workspace.ExecFile(ctx, []string{"git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", target}, options)
 			if err != nil {
 				return sdk.FileListing{}, err
 			}
-			if result.ExitCode == 0 || result.ExitCode == 1 {
-				files = []string{}
-				for _, line := range strings.Split(result.Stdout, "\n") {
-					line = strings.TrimSpace(line)
-					if line != "" {
-						files = append(files, line)
-					}
-				}
+			if result.ExitCode == 0 {
+				files = parseNullFileList(result.Stdout)
 				partial = strings.Contains(result.Stdout, " characters cut …]")
 			}
 		}
@@ -100,6 +97,19 @@ func (workspace *Workspace) Files(ctx context.Context, path string) (sdk.FileLis
 		files[index] = strings.TrimPrefix(strings.ReplaceAll(file, "\\", "/"), "./")
 	}
 	return sdk.FileListing{Files: files, Partial: partial}, nil
+}
+
+func parseNullFileList(stdout string) []string {
+	files := []string{}
+	seen := map[string]bool{}
+	for _, file := range strings.Split(stdout, "\x00") {
+		if file == "" || strings.Contains(file, " characters cut …]") || seen[file] {
+			continue
+		}
+		files = append(files, file)
+		seen[file] = true
+	}
+	return files
 }
 func (workspace *Workspace) Search(ctx context.Context, pattern, path string, options sdk.SearchOptions) (sdk.FileSearchResult, error) {
 	if _, err := workspace.Resolve(path); err != nil {

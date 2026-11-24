@@ -452,13 +452,13 @@ func TestLongTurnCompactsDirectlyWithoutClearingOldToolResults(t *testing.T) {
 				return
 			}
 			requests++
-			// Report ContextInput above threshold (20000 * 0.6 = 12000) after building
+			// Report ContextInput above threshold (20000 * 0.75 = 15000) after building
 			// enough tool steps so CompactionCut has a valid cut point twice in one turn.
 			switch requests {
 			case 1, 2:
-				if yield(sdk.Part{Type: "tool-call", ID: fmt.Sprintf("todo-%d", requests), Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step %d","detail":%q,"status":"doing"}]}`, requests, strings.Repeat("x", 12000))}) {
+				if yield(sdk.Part{Type: "tool-call", ID: fmt.Sprintf("todo-%d", requests), Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step %d","detail":%q,"status":"doing"}]}`, requests, strings.Repeat("x", 16000))}) {
 					if requests == 2 {
-						yield(sdk.Part{Type: "usage", Input: new(int64(15000)), Output: new(int64(50)), ContextInput: new(int64(15000))})
+						yield(sdk.Part{Type: "usage", Input: new(int64(16000)), Output: new(int64(50)), ContextInput: new(int64(16000))})
 					}
 					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 				}
@@ -466,9 +466,9 @@ func TestLongTurnCompactsDirectlyWithoutClearingOldToolResults(t *testing.T) {
 				if requests == 3 && summaries != 1 {
 					t.Errorf("expected first compaction before step 3, got %d summaries", summaries)
 				}
-				if yield(sdk.Part{Type: "tool-call", ID: fmt.Sprintf("todo-%d", requests), Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step %d","detail":%q,"status":"doing"}]}`, requests, strings.Repeat("y", 12000))}) {
+				if yield(sdk.Part{Type: "tool-call", ID: fmt.Sprintf("todo-%d", requests), Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step %d","detail":%q,"status":"doing"}]}`, requests, strings.Repeat("y", 16000))}) {
 					if requests == 4 {
-						yield(sdk.Part{Type: "usage", Input: new(int64(16000)), Output: new(int64(50)), ContextInput: new(int64(16000))})
+						yield(sdk.Part{Type: "usage", Input: new(int64(17000)), Output: new(int64(50)), ContextInput: new(int64(17000))})
 					}
 					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 				}
@@ -555,42 +555,42 @@ func TestEffectiveContextSizePreventsFalseCompactionFromEstimateInflation(t *tes
 				return
 			}
 			requests++
-			// Threshold is 20,000 * 0.6 = 12,000 tokens.
+			// Threshold is 20,000 * 0.75 = 15,000 tokens.
 			switch requests {
 			case 1:
-				// Add ~35,000 ASCII chars (~10,000 estimated tokens) to history.
-				if yield(sdk.Part{Type: "tool-call", ID: "todo-1", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step 1","detail":%q,"status":"doing"}]}`, strings.Repeat("a", 35000))}) {
-					yield(sdk.Part{Type: "usage", Input: new(int64(4000)), Output: new(int64(20)), ContextInput: new(int64(4000))})
+				// Add ~45,000 ASCII chars (~12,900 estimated tokens) to history.
+				if yield(sdk.Part{Type: "tool-call", ID: "todo-1", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step 1","detail":%q,"status":"doing"}]}`, strings.Repeat("a", 45000))}) {
+					yield(sdk.Part{Type: "usage", Input: new(int64(5000)), Output: new(int64(20)), ContextInput: new(int64(5000))})
 					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 				}
 			case 2:
-				// Before step 2, estimate is ~10,500 (< 12,000). Report true provider
-				// ContextInput = 6,000, and add ~7,000 ASCII chars (~2,000 est tokens)
-				// so raw estimate before step 3 crosses 12,500 (> 12,000), while
-				// calibrated effectiveContextSize stays ~8,000 (< 12,000).
+				// Before step 2, estimate is ~13,400 (< 15,000). Report true provider
+				// ContextInput = 7,000, and add ~10,000 ASCII chars (~2,860 est tokens)
+				// so raw estimate before step 3 crosses 16,000 (> 15,000), while
+				// calibrated effectiveContextSize stays ~9,900 (< 15,000).
 				if summaries != 0 {
 					t.Errorf("unexpected compaction before step 2: %d", summaries)
 				}
-				if yield(sdk.Part{Type: "tool-call", ID: "todo-2", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step 2","detail":%q,"status":"doing"}]}`, strings.Repeat("b", 7000))}) {
-					yield(sdk.Part{Type: "usage", Input: new(int64(6000)), Output: new(int64(20)), ContextInput: new(int64(6000))})
+				if yield(sdk.Part{Type: "tool-call", ID: "todo-2", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step 2","detail":%q,"status":"doing"}]}`, strings.Repeat("b", 10000))}) {
+					yield(sdk.Part{Type: "usage", Input: new(int64(7000)), Output: new(int64(20)), ContextInput: new(int64(7000))})
 					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 				}
 			case 3:
-				// Must NOT compact here even though raw EstimateTokens(messages) >= 12,000.
+				// Must NOT compact here even though raw EstimateTokens(messages) >= 15,000.
 				tmsgs := make([]transcript.Message, len(request.Messages))
 				for i, m := range request.Messages {
 					tmsgs[i] = transcript.Message{Role: m.Role, Content: m.Content, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID}
 				}
-				if est := transcript.EstimateTokens(tmsgs); est < 12000 {
-					t.Errorf("test precondition failed: expected raw EstimateTokens >= 12000 at step 3, got %d", est)
+				if est := transcript.EstimateTokens(tmsgs); est < 15000 {
+					t.Errorf("test precondition failed: expected raw EstimateTokens >= 15000 at step 3, got %d", est)
 				}
 				if summaries != 0 {
 					t.Errorf("false compaction triggered before step 3 despite calibrated context below threshold (summaries=%d)", summaries)
 				}
-				// Now emit a genuinely large delta (~24,000 ASCII chars ≈ ~6,900 est tokens)
-				// with ContextInput=6,500 so effectiveContextSize (~13,400) crosses 12,000.
-				if yield(sdk.Part{Type: "tool-call", ID: "todo-3", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step 3","detail":%q,"status":"doing"}]}`, strings.Repeat("c", 24000))}) {
-					yield(sdk.Part{Type: "usage", Input: new(int64(6500)), Output: new(int64(20)), ContextInput: new(int64(6500))})
+				// Now emit a genuinely large delta (~32,000 ASCII chars ≈ ~9,150 est tokens)
+				// with ContextInput=7,500 so effectiveContextSize (~16,650) crosses 15,000.
+				if yield(sdk.Part{Type: "tool-call", ID: "todo-3", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step 3","detail":%q,"status":"doing"}]}`, strings.Repeat("c", 32000))}) {
+					yield(sdk.Part{Type: "usage", Input: new(int64(7500)), Output: new(int64(20)), ContextInput: new(int64(7500))})
 					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 				}
 			case 4:

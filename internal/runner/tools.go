@@ -301,7 +301,7 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 			turn.readFileTool(),
 			readOnlySpec("search", "Search tracked and unignored files for a regular expression. Results include file paths and matching line numbers. Pass source to select a named file source.",
 				args{"path": field("string"), "source": field("string"), "reference": field("string"), "pattern": field("string"), "glob": field("string"), "ignoreCase": field("boolean")}, []string{"pattern"}, turn.searchFiles),
-			readOnlySpec("find_files", "Find tracked and unignored files by a glob. A pattern without a slash matches names at any depth. Pass source to select a named file source.",
+			readOnlySpec("find_files", "Find files by a glob, respecting .gitignore at the search root (pass an ignored subdirectory in path to inspect it). A pattern without a slash matches names at any depth. Pass source to select a named file source.",
 				args{"path": field("string"), "source": field("string"), "reference": field("string"), "pattern": field("string")}, []string{"pattern"}, turn.findFiles),
 		)
 		if conversation.Role == "thread" && (project.Source != nil || ownReferences) {
@@ -315,7 +315,8 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 				specs = append(specs, turn.saveAttachmentTool())
 				specs = append(specs, turn.editorTools()...)
 				if !slices.Contains(project.Settings.Tools, "commands") {
-					specs = append(specs, turn.commandTools()...)
+					shell, _ := turn.Workspaces.Shell(ctx, project.ID)
+					specs = append(specs, turn.commandTools(shell)...)
 					specs = append(specs, turn.workspaceNoteTools(ctx, thread.ID)...)
 				}
 			}
@@ -496,16 +497,24 @@ func (turn *turn) source(ctx context.Context, input args) (sdk.SourceView, error
 	}
 	var sourceID string
 	if name != "" {
-		owner := ""
-		if conversation.Role == "thread" {
-			owner = conversation.ID
-		}
-		var err error
-		sourceID, err = turn.Workspaces.ResolveFileSource(ctx, conversation.ProjectID, name, owner)
-		if err != nil {
-			return nil, err
+		if turn.Workspaces != nil {
+			owner := ""
+			if conversation.Role == "thread" {
+				owner = conversation.ID
+			}
+			var err error
+			sourceID, err = turn.Workspaces.ResolveFileSource(ctx, conversation.ProjectID, name, owner)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if sourceID == "" {
+			if name == toolOutputSourceName {
+				return turn.toolOutputView()
+			}
+			if turn.Workspaces == nil {
+				return nil, fmt.Errorf("unknown file source %q", name)
+			}
 			return turn.Workspaces.ReferenceView(ctx, conversation.ProjectID, name, conversation.ID)
 		}
 	}

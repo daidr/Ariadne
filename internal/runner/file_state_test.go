@@ -492,10 +492,10 @@ func TestTurnCompactionAndCancelForgetReads(t *testing.T) {
 						yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 					}
 				case 2:
-					// Second read in the same context should hit dedup; also add a large todo payload + ContextInput over threshold.
+					// Second read in the same context should hit dedup; also add a large todo payload + ContextInput over threshold (20000 * 0.75 = 15000).
 					if yield(sdk.Part{Type: "tool-call", ID: "read-2", Name: "read_file", Arguments: `{"path":"notes.txt"}`}) {
-						if yield(sdk.Part{Type: "tool-call", ID: "todo-1", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Pad","detail":%q,"status":"doing"}]}`, strings.Repeat("p", 12000))}) {
-							yield(sdk.Part{Type: "usage", Input: new(int64(15000)), Output: new(int64(50)), ContextInput: new(int64(15000))})
+						if yield(sdk.Part{Type: "tool-call", ID: "todo-1", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Pad","detail":%q,"status":"doing"}]}`, strings.Repeat("p", 16000))}) {
+							yield(sdk.Part{Type: "usage", Input: new(int64(16000)), Output: new(int64(50)), ContextInput: new(int64(16000))})
 							yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 						}
 					}

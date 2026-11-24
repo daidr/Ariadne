@@ -16,6 +16,7 @@ import (
 	"github.com/daidr/Ariadne/internal/commandpolicy"
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/jsonutil"
+	"github.com/daidr/Ariadne/internal/process"
 	"github.com/daidr/Ariadne/internal/realtime"
 	"github.com/daidr/Ariadne/internal/textutil"
 	"github.com/daidr/Ariadne/sdk"
@@ -99,12 +100,29 @@ func (turn *turn) writeFile(ctx context.Context, input args) (string, error) {
 	return "Wrote " + path + "." + turn.checkAfterEdit(ctx, thread, workspace, []string{path}), nil
 }
 
-func (turn *turn) commandTools() []tool {
+func runCommandDescription(shell process.Shell) string {
+	intro := "Run a shell command in the workspace."
+	if name := strings.TrimSpace(shell.Name); name != "" {
+		switch name {
+		case "powershell":
+			intro = "Run a powershell command in the workspace (Windows PowerShell syntax; use ; instead of && and avoid bash heredocs)."
+		case "pwsh":
+			intro = "Run a pwsh command in the workspace (PowerShell syntax; avoid bash heredocs and POSIX-only syntax)."
+		case "cmd":
+			intro = "Run a cmd command in the workspace (Windows cmd.exe syntax)."
+		default:
+			intro = fmt.Sprintf("Run a %s command in the workspace.", name)
+		}
+	}
+	return intro + " Pass source to select a writable source. Commands covered by an approval rule require the user's answer. Long commands may continue in the background. For large logs, traces, source maps or generated bundles, use a script that prints a small targeted summary."
+}
+
+func (turn *turn) commandTools(shell process.Shell) []tool {
 	readOutput := specification("read_command_output", "Read the status and next page of output of one of your background commands. If more is available, use the same handle to continue.",
 		args{"handle": field("string"), "waitSeconds": args{"type": "integer", "description": "Seconds to wait for new output or completion while the command is running, up to 60."}}, []string{"handle"}, nil)
 	readOutput.poll = turn.readCommand
 	return []tool{
-		specification("run_command", "Run a shell command in the workspace. Pass source to select a writable source. Commands covered by an approval rule require the user's answer. Long commands may continue in the background. For large logs, traces, source maps or generated bundles, use a script that prints a small targeted summary.",
+		specification("run_command", runCommandDescription(shell),
 			args{"command": field("string"), "cwd": field("string"), "source": field("string"),
 				"timeoutSeconds": args{"type": "integer", "description": "Maximum execution time, even after the command moves to the background."},
 				"yieldSeconds":   args{"type": "integer", "description": "How long to wait for a foreground command before returning a background handle."},
@@ -331,7 +349,7 @@ func (turn *turn) foreground(ctx context.Context, thread core.ThreadView, comman
 	}
 	select {
 	case result := <-ended:
-		return formatCommand(result, limit, setup)
+		return turn.formatCommandResult(result, limit, setup)
 	case <-ctx.Done():
 		cancel()
 		<-ended
@@ -350,22 +368,49 @@ func (turn *turn) foreground(ctx context.Context, thread core.ThreadView, comman
 			}
 		}
 		cancel()
-		return formatCommand(<-ended, limit, setup)
+		return turn.formatCommandResult(<-ended, limit, setup)
 	}
 }
 
+func (turn *turn) formatCommandResult(result background.Execution, limit int, setup string) (string, error) {
+	if result.Err != nil {
+		return "", result.Err
+	}
+	savedName := ""
+	if len(result.Result.Stdout)+len(result.Result.Stderr)+1 > limit {
+		savedName = turn.saveCommandOutput(result.Result)
+	}
+	return formatCommandOutput(result, limit, setup, savedName)
+}
+
 func formatCommand(result background.Execution, limit int, setup string) (string, error) {
+	return formatCommandOutput(result, limit, setup, "")
+}
+
+func formatCommandOutput(result background.Execution, limit int, setup, savedName string) (string, error) {
 	if result.Err != nil {
 		return "", result.Err
 	}
 	stdout, stderr := result.Result.Stdout, result.Result.Stderr
+	footer := ""
 	if len(stdout)+len(stderr)+1 > limit {
-		budget := max(0, limit-1)
+		totalLines := countOutputLines(stdout) + countOutputLines(stderr)
+		totalBytes := len(stdout) + len(stderr)
+		if savedName != "" {
+			footer = fmt.Sprintf("\n[Output truncated: total %d lines, %d bytes. Full output saved: use read_file(source=%q, path=%q, offset=1) or search(source=%q, path=%q, pattern=\"...\").]",
+				totalLines, totalBytes, toolOutputSourceName, savedName, toolOutputSourceName, savedName)
+		} else {
+			footer = fmt.Sprintf("\n[Output truncated: total %d lines, %d bytes.]", totalLines, totalBytes)
+		}
+		if len(footer) > limit/2 {
+			footer = ""
+		}
+		budget := max(0, limit-1-len(footer))
 		errorBudget := max(budget/2, budget-len(stdout))
 		stderr = commandExcerpt(stderr, errorBudget)
 		stdout = commandExcerpt(stdout, max(budget-errorBudget, budget-len(stderr)))
 	}
-	text := fmt.Sprintf("Exit code %d\n%s\n%s", result.Result.ExitCode, stdout, stderr)
+	text := fmt.Sprintf("Exit code %d\n%s\n%s%s", result.Result.ExitCode, stdout, stderr, footer)
 	if setup != "" {
 		text = setup + "\n\n" + text
 	}
@@ -375,17 +420,44 @@ func formatCommand(result background.Execution, limit int, setup string) (string
 	return text, nil
 }
 
+func countOutputLines(output string) int {
+	if output == "" {
+		return 0
+	}
+	n := strings.Count(output, "\n")
+	if !strings.HasSuffix(output, "\n") {
+		n++
+	}
+	return n
+}
+
 func commandExcerpt(output string, limit int) string {
 	head := textutil.HeadUnits(output, limit)
 	if len(head) == len(output) {
 		return output
 	}
-	const notice = "\n[… output truncated …]\n"
-	if limit <= len(notice) {
+	const fallbackNotice = "\n[… output truncated …]\n"
+	if limit <= len(fallbackNotice) {
 		return head
 	}
-	budget := limit - len(notice)
-	return textutil.HeadUnits(output, budget/3) + notice + textutil.TailUnits(output, budget-budget/3)
+	const maxDetailedNotice = 80
+	if limit <= maxDetailedNotice+32 {
+		budget := limit - len(fallbackNotice)
+		return textutil.HeadUnits(output, budget/3) + fallbackNotice + textutil.TailUnits(output, budget-budget/3)
+	}
+	budget := limit - maxDetailedNotice
+	headPart := textutil.HeadUnits(output, budget/3)
+	tailPart := textutil.TailUnits(output, budget-budget/3)
+	omittedBytes := len(output) - len(headPart) - len(tailPart)
+	if omittedBytes <= 0 {
+		return output
+	}
+	omittedLines := strings.Count(output[len(headPart):len(output)-len(tailPart)], "\n")
+	notice := fmt.Sprintf("\n[… output truncated: %d lines / %d bytes omitted …]\n", omittedLines, omittedBytes)
+	if len(notice) > maxDetailedNotice {
+		notice = fallbackNotice
+	}
+	return headPart + notice + tailPart
 }
 
 func formatOutput(output *background.Output, setup string, err error) (string, error) {

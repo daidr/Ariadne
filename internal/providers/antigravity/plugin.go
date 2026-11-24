@@ -103,9 +103,10 @@ func Plugin(opts agentruntime.PluginOptions) sdk.Plugin {
 		Setup: func(_ context.Context, pc sdk.PluginContext) (func(context.Context) error, error) {
 			dataDir := agentruntime.ResolveDataDir(opts, pc.DataDir)
 			sessions, err := agentruntime.NewSessions(Kind(opts.Bridge, opts.StdioLauncher), agentruntime.SessionOptions{
-				DataDir: dataDir,
-				Context: pc.Context,
-				Now:     opts.Now,
+				DataDir:      dataDir,
+				Context:      pc.Context,
+				Now:          opts.Now,
+				DisableQuiet: true,
 			})
 			if err != nil {
 				return nil, err

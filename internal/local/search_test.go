@@ -122,3 +122,71 @@ func TestWorkspaceNativeSearchAndFiles(t *testing.T) {
 		t.Fatal(result, err)
 	}
 }
+
+func TestWorkspaceFilesRespectsGitignoreAndAllowsExplicitIgnoredSubdir(t *testing.T) {
+	t.Run("git repo", func(t *testing.T) {
+		root, _ := initGit(t)
+		writeGit(t, root, "src/code.ts", "hello\n")
+		writeGit(t, root, ".github/ci.yml", "name: ci\n")
+		writeGit(t, root, ".gitignore", "ignored/\nnode_modules/\n")
+		writeGit(t, root, "ignored/private.ts", "secret\n")
+		writeGit(t, root, "node_modules/pkg/index.d.ts", "export {}\n")
+		workspace := newTestWorkspace(t, root, WorkspaceOptions{HideGit: true})
+		view := SearchableView(workspace, "")
+
+		rootFiles, err := view.(sdk.SourceFiles).Files(t.Context(), ".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined := strings.Join(rootFiles.Files, "\n")
+		if !strings.Contains(joined, "src/code.ts") || !strings.Contains(joined, ".github/ci.yml") {
+			t.Fatalf("root listing missing expected files:\n%s", joined)
+		}
+		if strings.Contains(joined, "ignored/private.ts") || strings.Contains(joined, "node_modules/pkg/index.d.ts") || strings.Contains(joined, ".git/") {
+			t.Fatalf("root listing leaked ignored files:\n%s", joined)
+		}
+
+		emptyPathFiles, err := workspace.Files(t.Context(), "")
+		if err != nil || !strings.Contains(strings.Join(emptyPathFiles.Files, "\n"), "src/code.ts") {
+			t.Fatalf("empty path listing failed: %v %v", emptyPathFiles.Files, err)
+		}
+
+		pkgFiles, err := view.(sdk.SourceFiles).Files(t.Context(), "node_modules/pkg")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.Join(pkgFiles.Files, "\n"), "node_modules/pkg/index.d.ts") {
+			t.Fatalf("explicit ignored subdir listing missed file: %v", pkgFiles.Files)
+		}
+	})
+
+	t.Run("non-git directory with gitignore", func(t *testing.T) {
+		root := t.TempDir()
+		writeGit(t, root, "src/code.ts", "hello\n")
+		writeGit(t, root, ".gitignore", "ignored/\nnode_modules/\n")
+		writeGit(t, root, "ignored/private.ts", "secret\n")
+		writeGit(t, root, "node_modules/pkg/index.d.ts", "export {}\n")
+		workspace := newTestWorkspace(t, root, WorkspaceOptions{HideGit: true})
+		view := SearchableView(workspace, "")
+
+		rootFiles, err := view.(sdk.SourceFiles).Files(t.Context(), ".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined := strings.Join(rootFiles.Files, "\n")
+		if !strings.Contains(joined, "src/code.ts") {
+			t.Fatalf("non-git root listing missing src/code.ts:\n%s", joined)
+		}
+		if strings.Contains(joined, "ignored/private.ts") || strings.Contains(joined, "node_modules/pkg/index.d.ts") {
+			t.Fatalf("non-git root listing ignored .gitignore:\n%s", joined)
+		}
+
+		pkgFiles, err := view.(sdk.SourceFiles).Files(t.Context(), "node_modules/pkg")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.Join(pkgFiles.Files, "\n"), "node_modules/pkg/index.d.ts") {
+			t.Fatalf("non-git explicit ignored subdir missed file: %v", pkgFiles.Files)
+		}
+	})
+}

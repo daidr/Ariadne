@@ -345,3 +345,98 @@ func TestCoordinatorTodoFinishedEarlierTurnRemindedToDropDone(t *testing.T) {
 		t.Fatalf("coordinator finished hint should include current todo items: %q", results[hintedAt[0]].content)
 	}
 }
+
+func TestStatefulSerialToolCallbacksCountByInferenceRound(t *testing.T) {
+	t.Run("serial callbacks inside one inference round do not prematurely trigger stale hint", func(t *testing.T) {
+		repo, store, project := openTestEnv(t)
+		thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "串行回调"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+		// Round 0: update_todo (1 callback with usage/reasoning)
+		// Rounds 1..4: 4 inference rounds, each emitting 4 serial tool callbacks
+		// (only the first callback of each round carries reasoning/usage) = 16 callbacks total,
+		// but only 4 real inference rounds since update_todo (< todoStaleAfter=10).
+		step := 0
+		results := runToolTurn(t, repo, store, conv, nil, func(_ sdk.Request) iter.Seq[sdk.Part] {
+			current := step
+			step++
+			return func(yield func(sdk.Part) bool) {
+				if current == 0 {
+					ctxIn := int64(1000)
+					yield(sdk.Part{Type: "reasoning", Text: "plan"})
+					yield(sdk.Part{Type: "usage", ContextInput: &ctxIn})
+					yield(updateTodoCall(0, "doing"))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					return
+				}
+				if current <= 16 {
+					roundIdx := (current - 1) / 4
+					callInRound := (current - 1) % 4
+					if callInRound == 0 {
+						ctxIn := int64(2000 + roundIdx*1000)
+						yield(sdk.Part{Type: "reasoning", Text: fmt.Sprintf("round %d", roundIdx)})
+						yield(sdk.Part{Type: "usage", ContextInput: &ctxIn})
+					}
+					yield(lookMessageCall(current))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					return
+				}
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		})
+		for i, res := range results {
+			if strings.Contains(res.content, todoStaleHint) || strings.Contains(res.content, todoMissingHint) {
+				t.Fatalf("unexpected todo hint at callback %d (only 4 real inference rounds elapsed): %q", i, res.content)
+			}
+		}
+	})
+
+	t.Run("stale hint fires on the tenth real inference round even with serial callbacks", func(t *testing.T) {
+		repo, store, project := openTestEnv(t)
+		thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "多轮串行回调"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+		// Callback 0: update_todo (round 0)
+		// Callbacks 1..24: 12 real inference rounds, 2 serial calls each.
+		// 10th real round starts at callback 1 + 9*2 = 19.
+		step := 0
+		results := runToolTurn(t, repo, store, conv, nil, func(_ sdk.Request) iter.Seq[sdk.Part] {
+			current := step
+			step++
+			return func(yield func(sdk.Part) bool) {
+				if current == 0 {
+					ctxIn := int64(1000)
+					yield(sdk.Part{Type: "usage", ContextInput: &ctxIn})
+					yield(updateTodoCall(0, "doing"))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					return
+				}
+				if current <= 24 {
+					roundIdx := (current - 1) / 2
+					if (current-1)%2 == 0 {
+						ctxIn := int64(2000 + roundIdx*500)
+						yield(sdk.Part{Type: "usage", ContextInput: &ctxIn})
+					}
+					yield(lookMessageCall(current))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					return
+				}
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		})
+		var hintedAt []int
+		for i, res := range results {
+			if strings.Contains(res.content, todoStaleHint) {
+				hintedAt = append(hintedAt, i)
+			}
+		}
+		wantIndex := 1 + (todoStaleAfter-1)*2
+		if len(hintedAt) != 1 || hintedAt[0] != wantIndex {
+			t.Fatalf("stale hint indices = %v, want [%d]", hintedAt, wantIndex)
+		}
+	})
+}

@@ -71,13 +71,13 @@ func TestCoordinatorCompactionInjectsActiveTodoIntoContextAndNextTurn(t *testing
 					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 				}
 			case 2, 3, 4:
-				// Post ~5.5k tokens per step so total crosses threshold (20_000 * 0.72 = 14_400)
+				// Post ~5.5k tokens per step so total crosses threshold (20_000 * 0.75 = 15_000)
 				// after step 4 and the compaction cut lands past todo-init.
 				if yield(sdk.Part{
 					Type:      "tool-call",
 					ID:        fmt.Sprintf("msg-%d", requests),
 					Name:      "send_message",
-					Arguments: fmt.Sprintf(`{"text":%q}`, strings.Repeat(fmt.Sprintf("update-%d-", requests), 1500)),
+					Arguments: fmt.Sprintf(`{"text":%q}`, strings.Repeat(fmt.Sprintf("update-%d-", requests), 2000)),
 				}) {
 					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 				}
@@ -252,7 +252,7 @@ func TestThreadCompactionInjectsTodoAndOmitsWhenEmpty(t *testing.T) {
 						Type:      "tool-call",
 						ID:        fmt.Sprintf("msg-%d", requests),
 						Name:      "send_message",
-						Arguments: fmt.Sprintf(`{"text":%q}`, strings.Repeat(fmt.Sprintf("log-%d-", requests), 2400)),
+						Arguments: fmt.Sprintf(`{"text":%q}`, strings.Repeat(fmt.Sprintf("log-%d-", requests), 3000)),
 					}) {
 						yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 					}

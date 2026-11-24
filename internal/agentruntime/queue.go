@@ -59,6 +59,27 @@ func (q *eventQueue) close() {
 	default:
 	}
 }
+func (q *eventQueue) tryNext(ctx context.Context) (Event, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return Event{}, false, err
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.err != nil {
+		return Event{}, false, q.err
+	}
+	if len(q.items) == 0 {
+		return Event{}, true, nil
+	}
+	event := q.items[0]
+	q.items[0] = Event{}
+	q.items = q.items[1:]
+	q.bytes -= eventSize(event)
+	if len(q.items) == 0 {
+		q.items = nil
+	}
+	return event, false, nil
+}
 func (q *eventQueue) next(ctx context.Context, wait time.Duration) (Event, bool, error) {
 	var timeout <-chan time.Time
 	if wait > 0 {
