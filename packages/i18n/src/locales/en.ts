@@ -470,7 +470,6 @@ export const en: Record<MessageKey, string> = {
   'error.projectBusy': 'A turn in this project is still running; try again shortly',
   'error.invalidBody': 'Invalid request: {reason}',
   'error.connection': 'Lost connection to the local server, reconnecting',
-  'error.reconnected': 'Reconnected to the local server',
   'error.turnRunning': 'This conversation is working; wait for it to finish or stop it first',
   'error.turnNotRunning': 'This turn has already ended',
   'error.noModel': 'No model is configured yet; add one in settings',

@@ -8,7 +8,7 @@ import App from './App.vue'
 import { api } from './api'
 import { setLocale, t } from './i18n'
 import { state } from './store'
-import { RECONNECTED_DURATION_MS, useStreamStatusToast } from './stream-toast'
+import { useStreamStatusToast } from './stream-toast'
 import { createWorkspaceRouter } from './workspace-route'
 
 function mountHost() {
@@ -52,7 +52,8 @@ describe('useStreamStatusToast', () => {
     wrapper.unmount()
   })
 
-  test('shows a persistent loading toast on disconnect and resolves it in place on reconnect', async () => {
+  test('shows a persistent loading toast on disconnect and dismisses it on reconnect without a success toast', async () => {
+    const successSpy = vi.spyOn(toast, 'success')
     const { wrapper } = mountHost()
     state.stream = 'open'
     await nextTick()
@@ -60,7 +61,7 @@ describe('useStreamStatusToast', () => {
     state.stream = 'lost'
     await nextTick()
 
-    let items = toastItems()
+    const items = toastItems()
     expect(items).toHaveLength(1)
     expect(items[0]?.classList.contains('dou-toast--warning')).toBe(true)
     expect(items[0]?.getAttribute('aria-busy')).toBe('true')
@@ -73,25 +74,17 @@ describe('useStreamStatusToast', () => {
     await nextTick()
     expect(toastItems()).toHaveLength(1)
 
-    // Reconnecting morphs the same toast into a self-dismissing success confirmation.
+    // Reconnecting simply dismisses the loading toast with no success confirmation.
     state.stream = 'open'
     await nextTick()
 
-    items = toastItems()
-    expect(items).toHaveLength(1)
-    expect(items[0]?.classList.contains('dou-toast--success')).toBe(true)
-    expect(items[0]?.getAttribute('aria-busy')).toBeNull()
-    expect(items[0]?.querySelector('.dou-spinner')).toBeNull()
-    expect(items[0]?.textContent).toContain(t('error.reconnected'))
-
-    vi.advanceTimersByTime(RECONNECTED_DURATION_MS)
-    await nextTick()
     expect(toastItems()).toHaveLength(0)
+    expect(successSpy).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })
 
-  test('reuses the active toast without duplicating if connection drops again before recovery fades', async () => {
+  test('shows a fresh loading toast without duplicating if connection drops again after recovery', async () => {
     const { wrapper } = mountHost()
     state.stream = 'lost'
     await nextTick()
@@ -99,9 +92,8 @@ describe('useStreamStatusToast', () => {
 
     state.stream = 'open'
     await nextTick()
-    vi.advanceTimersByTime(RECONNECTED_DURATION_MS / 2)
+    expect(toastItems()).toHaveLength(0)
 
-    // Drop again before the recovery toast finishes its countdown.
     state.stream = 'lost'
     await nextTick()
 
@@ -111,7 +103,7 @@ describe('useStreamStatusToast', () => {
     expect(items[0]?.getAttribute('aria-busy')).toBe('true')
     expect(items[0]?.textContent).toContain(t('error.connection'))
 
-    // Previous countdown was cancelled; the loading toast stays persistent.
+    // The re-shown loading toast stays persistent.
     vi.advanceTimersByTime(60_000)
     await nextTick()
     expect(toastItems()).toHaveLength(1)
