@@ -377,7 +377,7 @@ func (turn *turn) formatCommandResult(result background.Execution, limit int, se
 		return "", result.Err
 	}
 	savedName := ""
-	if len(result.Result.Stdout)+len(result.Result.Stderr)+1 > limit {
+	if outputUnits(result.Result.Stdout)+outputUnits(result.Result.Stderr)+1 > limit {
 		savedName = turn.saveCommandOutput(result.Result)
 	}
 	return formatCommandOutput(result, limit, setup, savedName)
@@ -392,8 +392,9 @@ func formatCommandOutput(result background.Execution, limit int, setup, savedNam
 		return "", result.Err
 	}
 	stdout, stderr := result.Result.Stdout, result.Result.Stderr
+	stdoutUnits, stderrUnits := outputUnits(stdout), outputUnits(stderr)
 	footer := ""
-	if len(stdout)+len(stderr)+1 > limit {
+	if stdoutUnits+stderrUnits+1 > limit {
 		totalLines := countOutputLines(stdout) + countOutputLines(stderr)
 		totalBytes := len(stdout) + len(stderr)
 		if savedName != "" {
@@ -402,13 +403,17 @@ func formatCommandOutput(result background.Execution, limit int, setup, savedNam
 		} else {
 			footer = fmt.Sprintf("\n[Output truncated: total %d lines, %d bytes.]", totalLines, totalBytes)
 		}
-		if len(footer) > limit/2 {
+		if outputUnits(footer) > limit/2 {
 			footer = ""
 		}
-		budget := max(0, limit-1-len(footer))
-		errorBudget := max(budget/2, budget-len(stdout))
-		stderr = commandExcerpt(stderr, errorBudget)
-		stdout = commandExcerpt(stdout, max(budget-errorBudget, budget-len(stderr)))
+		budget := max(0, limit-1-outputUnits(footer))
+		errorBudget := max(budget/2, budget-stdoutUnits)
+		var stderrCut, stdoutCut bool
+		stderr, stderrCut = commandExcerptWithStatus(stderr, errorBudget)
+		stdout, stdoutCut = commandExcerptWithStatus(stdout, max(budget-errorBudget, budget-outputUnits(stderr)))
+		if !stderrCut && !stdoutCut {
+			footer = ""
+		}
 	}
 	text := fmt.Sprintf("Exit code %d\n%s\n%s%s", result.Result.ExitCode, stdout, stderr, footer)
 	if setup != "" {
@@ -418,6 +423,18 @@ func formatCommandOutput(result background.Execution, limit int, setup, savedNam
 		return text, errors.New("command finished with a nonzero exit code")
 	}
 	return text, nil
+}
+
+func outputUnits(text string) int {
+	units := 0
+	for _, r := range text {
+		if r > 0xffff {
+			units += 2
+		} else {
+			units++
+		}
+	}
+	return units
 }
 
 func countOutputLines(output string) int {
@@ -432,32 +449,45 @@ func countOutputLines(output string) int {
 }
 
 func commandExcerpt(output string, limit int) string {
-	head := textutil.HeadUnits(output, limit)
-	if len(head) == len(output) {
-		return output
+	excerpt, _ := commandExcerptWithStatus(output, limit)
+	return excerpt
+}
+
+func commandExcerptWithStatus(output string, limit int) (string, bool) {
+	if outputUnits(output) <= limit {
+		return output, false
 	}
 	const fallbackNotice = "\n[… output truncated …]\n"
-	if limit <= len(fallbackNotice) {
-		return head
+	fallbackUnits := outputUnits(fallbackNotice)
+	if limit <= fallbackUnits {
+		return textutil.HeadUnits(output, limit), true
 	}
 	const maxDetailedNotice = 80
 	if limit <= maxDetailedNotice+32 {
-		budget := limit - len(fallbackNotice)
-		return textutil.HeadUnits(output, budget/3) + fallbackNotice + textutil.TailUnits(output, budget-budget/3)
+		budget := limit - fallbackUnits
+		return textutil.HeadUnits(output, budget/3) + fallbackNotice + textutil.TailUnits(output, budget-budget/3), true
 	}
 	budget := limit - maxDetailedNotice
 	headPart := textutil.HeadUnits(output, budget/3)
 	tailPart := textutil.TailUnits(output, budget-budget/3)
-	omittedBytes := len(output) - len(headPart) - len(tailPart)
-	if omittedBytes <= 0 {
-		return output
+	origHeadLen := len(headPart)
+	if !strings.HasPrefix(output, headPart) {
+		origHeadLen = len(strings.TrimSuffix(headPart, "\ufffd"))
 	}
-	omittedLines := strings.Count(output[len(headPart):len(output)-len(tailPart)], "\n")
+	origTailLen := len(tailPart)
+	if !strings.HasSuffix(output, tailPart) {
+		origTailLen = len(strings.TrimPrefix(tailPart, "\ufffd"))
+	}
+	omittedBytes := len(output) - origHeadLen - origTailLen
+	if omittedBytes <= 0 {
+		return output, false
+	}
+	omittedLines := strings.Count(output[origHeadLen:len(output)-origTailLen], "\n")
 	notice := fmt.Sprintf("\n[… output truncated: %d lines / %d bytes omitted …]\n", omittedLines, omittedBytes)
-	if len(notice) > maxDetailedNotice {
+	if outputUnits(notice) > maxDetailedNotice {
 		notice = fallbackNotice
 	}
-	return headPart + notice + tailPart
+	return headPart + notice + tailPart, true
 }
 
 func formatOutput(output *background.Output, setup string, err error) (string, error) {

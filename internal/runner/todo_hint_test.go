@@ -439,4 +439,75 @@ func TestStatefulSerialToolCallbacksCountByInferenceRound(t *testing.T) {
 			t.Fatalf("stale hint indices = %v, want [%d]", hintedAt, wantIndex)
 		}
 	})
+
+	t.Run("plain text on first step does not latch inference signal or disable todo hints", func(t *testing.T) {
+		repo, store, project := openTestEnv(t)
+		thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "纯文本不锁存"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+		step := 0
+		results := runToolTurn(t, repo, store, conv, nil, func(_ sdk.Request) iter.Seq[sdk.Part] {
+			current := step
+			step++
+			return func(yield func(sdk.Part) bool) {
+				if current < todoMissingAfter+1 {
+					if current == 0 {
+						yield(sdk.Part{Type: "text", Text: "我先查看当前文件。"})
+					}
+					yield(lookMessageCall(current))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					return
+				}
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		})
+		var hintedAt []int
+		for i, res := range results {
+			if strings.Contains(res.content, todoMissingHint) {
+				hintedAt = append(hintedAt, i)
+			}
+		}
+		if len(hintedAt) != 1 || hintedAt[0] != todoMissingAfter-1 {
+			t.Fatalf("missing hint indices = %v, want [%d]", hintedAt, todoMissingAfter-1)
+		}
+	})
+
+	t.Run("settled pending usage with ContextInput=0 does not latch inference signal", func(t *testing.T) {
+		repo, store, project := openTestEnv(t)
+		thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "历史结算usage不锁存"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+		step := 0
+		results := runToolTurn(t, repo, store, conv, nil, func(_ sdk.Request) iter.Seq[sdk.Part] {
+			current := step
+			step++
+			return func(yield func(sdk.Part) bool) {
+				if current < todoMissingAfter+1 {
+					if current == 0 {
+						zeroCtx := int64(0)
+						in := int64(99000)
+						out := int64(250)
+						yield(sdk.Part{Type: "usage", Input: &in, Output: &out, ContextInput: &zeroCtx})
+					}
+					yield(lookMessageCall(current))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					return
+				}
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		})
+		var hintedAt []int
+		for i, res := range results {
+			if strings.Contains(res.content, todoMissingHint) {
+				hintedAt = append(hintedAt, i)
+			}
+		}
+		if len(hintedAt) != 1 || hintedAt[0] != todoMissingAfter-1 {
+			t.Fatalf("missing hint indices = %v, want [%d]", hintedAt, todoMissingAfter-1)
+		}
+	})
 }

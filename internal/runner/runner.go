@@ -166,17 +166,28 @@ type todoHintState struct {
 	sawInferenceSignal bool
 }
 
+func stepHasLiveUsage(usage *core.TokenUsage) bool {
+	if usage == nil {
+		return false
+	}
+	if usage.ContextInput != nil {
+		return *usage.ContextInput > 0
+	}
+	return usage.Input > 0 || usage.Output > 0
+}
+
+func stepLatchesInferenceSignal(answer *modelstep.Result) bool {
+	if answer == nil {
+		return false
+	}
+	return len(answer.Reasoning) > 0 || stepHasLiveUsage(answer.Usage)
+}
+
 func stepHasInferenceSignal(answer *modelstep.Result) bool {
 	if answer == nil {
 		return false
 	}
-	if strings.TrimSpace(answer.Text) != "" || len(answer.Reasoning) > 0 {
-		return true
-	}
-	if answer.Usage == nil {
-		return false
-	}
-	return answer.Usage.Input > 0 || answer.Usage.Output > 0 || (answer.Usage.ContextInput != nil && *answer.Usage.ContextInput > 0)
+	return strings.TrimSpace(answer.Text) != "" || stepLatchesInferenceSignal(answer)
 }
 
 func compactionLoopHint(count int) string {
@@ -632,9 +643,9 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		}
 		countTodoStep := true
 		if turn.statefulSession {
-			if stepHasInferenceSignal(answer) {
+			if stepLatchesInferenceSignal(answer) {
 				turn.todo.sawInferenceSignal = true
-			} else if turn.todo.sawInferenceSignal {
+			} else if turn.todo.sawInferenceSignal && !stepHasInferenceSignal(answer) {
 				countTodoStep = false
 			}
 		}

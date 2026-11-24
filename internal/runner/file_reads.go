@@ -58,13 +58,15 @@ func (turn *turn) readFile(ctx context.Context, input args) (string, []any, erro
 		return "", nil, err
 	}
 	image := workspaceImageType(path)
-	maxBytes := int64(1 << 20)
-	if image != "" {
-		maxBytes = 5 << 20
-	} else if _, ok := view.(*toolOutputView); ok {
-		maxBytes = maxSavedCommandOutputBytes
+	textMaxBytes := int64(1 << 20)
+	if _, ok := view.(*toolOutputView); ok {
+		textMaxBytes = maxSavedCommandOutputBytes
 	}
-	data, err := view.ReadBytes(ctx, path, maxBytes)
+	readMaxBytes := textMaxBytes
+	if image != "" {
+		readMaxBytes = 5 << 20
+	}
+	data, err := view.ReadBytes(ctx, path, readMaxBytes)
 	if err != nil {
 		var tooLarge *sdk.FileTooLargeError
 		if image == "" && errors.As(err, &tooLarge) {
@@ -83,8 +85,11 @@ func (turn *turn) readFile(ctx context.Context, input args) (string, []any, erro
 	if bytes.ContainsRune(data, 0) {
 		return "", nil, fmt.Errorf("%s is a binary file", path)
 	}
-	if int64(len(data)) > maxBytes {
-		return "", nil, fmt.Errorf("the text file exceeds the %d-byte read limit", maxBytes)
+	if int64(len(data)) > textMaxBytes {
+		if textMaxBytes == 1<<20 {
+			return "", nil, errors.New("the text file exceeds the 1 MiB read limit")
+		}
+		return "", nil, fmt.Errorf("the text file exceeds the %d-byte read limit", textMaxBytes)
 	}
 	lines := textLines(data)
 	offset, limit := readFileRange(len(lines), input)

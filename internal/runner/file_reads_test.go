@@ -2,6 +2,8 @@ package runner
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -92,4 +94,25 @@ func TestReadFileRangeAndFormatting(t *testing.T) {
 			t.Fatalf("read_file description missing limits: %q", spec.Description)
 		}
 	})
+}
+
+func TestReadFileRejectsOversizedTextWithImageExtension(t *testing.T) {
+	ctx := t.Context()
+	fx := newFileStateFixture(t, "", nil)
+
+	oversized := strings.Repeat("plain text pretending to be png\n", (1<<20)/32+10)
+	if err := os.WriteFile(filepath.Join(fx.dir, "disguised.png"), []byte(oversized), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := fx.turn.readFile(ctx, args{"path": "disguised.png"}); err == nil || !strings.Contains(err.Error(), "1 MiB read limit") {
+		t.Fatalf("expected 1 MiB limit error for oversized text with .png extension, got: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(fx.dir, "small.png"), []byte("hello text\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := fx.turn.readFile(ctx, args{"path": "small.png"})
+	if err != nil || !strings.Contains(out, "hello text") {
+		t.Fatalf("expected small text with .png extension to read as text, got out=%q err=%v", out, err)
+	}
 }

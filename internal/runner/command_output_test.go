@@ -176,3 +176,86 @@ func TestPruneToolOutputDirRemovesExpiredFilesAndEmptyDirs(t *testing.T) {
 		t.Fatalf("expected fresh file to remain, stat err = %v", err)
 	}
 }
+
+func TestCommandOutputMultibyteUTF16Consistency(t *testing.T) {
+	ctx := t.Context()
+
+	t.Run("multibyte output within UTF-16 limit is not persisted or marked truncated", func(t *testing.T) {
+		home := t.TempDir()
+		active := &turn{
+			Runner:       &Runner{Home: home},
+			conversation: core.ConversationView{ID: "thr_cjk_fit", ProjectID: "prj_1", Role: "thread"},
+		}
+		// 500 Chinese chars = 1,500 UTF-8 bytes (> limit 1000) but only 500 UTF-16 units (<= limit 1000).
+		cjk := strings.Repeat("中文日志测试输出行\n", 50)
+		if len(cjk) <= 1000 || outputUnits(cjk) >= 1000 {
+			t.Fatalf("bad test fixture: bytes=%d units=%d", len(cjk), outputUnits(cjk))
+		}
+		out, err := active.formatCommandResult(background.Execution{Result: sdk.ExecResult{
+			ExitCode: 0,
+			Stdout:   cjk,
+		}}, 1000, "")
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if strings.Contains(out, "[Output truncated:") || strings.Contains(out, "output truncated") {
+			t.Fatalf("unexpected truncation notice for output within UTF-16 unit limit: %q", out)
+		}
+		if !strings.Contains(out, cjk) {
+			t.Fatalf("expected full Chinese output to be preserved")
+		}
+		dir := filepath.Join(home, toolOutputDirName, "thr_cjk_fit")
+		if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+			t.Fatalf("expected no persisted tool-output file when output was not truncated, stat err = %v", statErr)
+		}
+	})
+
+	t.Run("multibyte output exceeding UTF-16 limit is truncated, persisted, and readable", func(t *testing.T) {
+		home := t.TempDir()
+		active := &turn{
+			Runner:       &Runner{Home: home},
+			conversation: core.ConversationView{ID: "thr_cjk_cut", ProjectID: "prj_1", Role: "thread"},
+		}
+		// 1,600 Chinese units (> limit 1000) with a unique middle marker.
+		var sb strings.Builder
+		sb.WriteString("开头标记\n")
+		for i := 0; i < 80; i++ {
+			if i == 40 {
+				sb.WriteString("中间定位关键字_9527\n")
+			} else {
+				sb.WriteString("这是一段包含中文字符的详细构建日志内容\n")
+			}
+		}
+		sb.WriteString("结尾标记\n")
+		cjk := sb.String()
+		if outputUnits(cjk) <= 1000 {
+			t.Fatalf("bad test fixture: units=%d", outputUnits(cjk))
+		}
+		out, err := active.formatCommandResult(background.Execution{Result: sdk.ExecResult{
+			ExitCode: 0,
+			Stdout:   cjk,
+		}}, 1000, "")
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if !strings.Contains(out, "output truncated:") || !strings.Contains(out, "[Output truncated:") {
+			t.Fatalf("expected truncation notices for oversized Chinese output, got: %q", out)
+		}
+		if strings.Contains(out, "中间定位关键字_9527") {
+			t.Fatalf("expected middle Chinese line to be omitted from truncated excerpt")
+		}
+		// Total output excluding the "Exit code 0\n" prefix stays within the 1000-unit budget.
+		body := strings.TrimPrefix(out, "Exit code 0\n")
+		if gotUnits := outputUnits(body); gotUnits > 1000 {
+			t.Fatalf("truncated Chinese output exceeded 1000 UTF-16 units: got %d", gotUnits)
+		}
+		match := regexp.MustCompile(`path="(cmd-[^"]+\.txt)"`).FindStringSubmatch(out)
+		if len(match) != 2 {
+			t.Fatalf("missing saved file path in footer: %q", out)
+		}
+		hits, err := active.searchFiles(ctx, args{"source": toolOutputSourceName, "path": match[1], "pattern": "中间定位关键字_9527"})
+		if err != nil || !strings.Contains(hits, "中间定位关键字_9527") {
+			t.Fatalf("search on saved Chinese output failed: hits=%q err=%v", hits, err)
+		}
+	})
+}
