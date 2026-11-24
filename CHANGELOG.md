@@ -1,5 +1,12 @@
 # 更新日志
 
+## 0.1.0-alpha.20 (2026-11-24)
+
+- feat(workspaces): 支持多仓库回合快照与改动页分组 Diff 展示 (#226)
+- feat(artifacts): whiteboard decision groups, visible feedback bar, and withdraw (#218)
+- fix(workspaces): 纳入 CoW 同级工作区存储统计并保护内嵌 .git 多仓工作区 (#224)
+- Merge pull request #214 from daidr/release/alpha
+
 ## 0.1.0-alpha.19 (2026-11-24)
 
 - chore(web): 升级 DouUI 至 0.1.0-alpha.24 并接入 Diff 悬浮行动作 (#223)
