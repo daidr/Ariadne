@@ -117,13 +117,31 @@ func TestThreadSyncChangedSeqIncrementalAndInvalidCursors(t *testing.T) {
 		}
 	}
 
-	// Advancing time into another hour triggers a full snapshot so time-based archival stays fresh.
+	// Advancing time into another hour keeps the incremental partial path when no thread crosses an archive boundary.
 	now = now.Add(2 * time.Hour)
 	_, afterHour, err := syncer.ProjectDetail(t.Context(), repo.Reader, "prj_a", withAtt.Cursor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if afterHour.Partial || len(afterHour.Threads) != 3 {
-		t.Fatalf("afterHour should return full snapshot: %+v", afterHour)
+	if !afterHour.Partial || len(afterHour.Threads) != 0 || afterHour.IDs != nil {
+		t.Fatalf("afterHour should stay incremental with empty delta: %+v", afterHour)
+	}
+
+	// Completing a thread and advancing past 7 days across hour/day boundaries returns only that archived thread in partial mode.
+	appendEvent("thread.reported", map[string]any{"threadId": "thr_c", "report": "done", "headline": "完成", "summary": "ok", "artifacts": []string{}})
+	_, reported, err := syncer.ProjectDetail(t.Context(), repo.Reader, "prj_a", afterHour.Cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reported.Partial || len(reported.Threads) != 1 || reported.Threads[0].ID != "thr_c" || reported.Threads[0].Archived {
+		t.Fatalf("reported: %+v", reported)
+	}
+	now = now.Add(7*24*time.Hour + time.Hour)
+	_, archived, err := syncer.ProjectDetail(t.Context(), repo.Reader, "prj_a", reported.Cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !archived.Partial || len(archived.Threads) != 1 || archived.Threads[0].ID != "thr_c" || !archived.Threads[0].Archived {
+		t.Fatalf("archived across hour/day boundary should return only thr_c in partial delta: %+v", archived)
 	}
 }
