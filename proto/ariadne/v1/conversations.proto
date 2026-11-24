@@ -592,6 +592,17 @@ message TurnFile {
   optional int32 removed = 5;
 }
 
+message TurnRepoChanges {
+  optional string source_id = 1;
+  optional string source_name = 2;
+  optional string repo_path = 3;
+  optional string branch = 4;
+  string from = 5;
+  string to = 6;
+  repeated TurnFile files = 7;
+  ThreadChangeTotals total = 8;
+}
+
 message TurnChangesNotice {
   string turn_id = 1;
   string from = 2;
@@ -599,6 +610,7 @@ message TurnChangesNotice {
   repeated TurnFile files = 4;
   ThreadChangeTotals total = 5;
   optional int64 started_at = 6 [jstype = JS_NUMBER];
+  repeated TurnRepoChanges repos = 7;
 }
 
 message NoticeView {

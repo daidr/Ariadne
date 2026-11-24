@@ -38,4 +38,11 @@ describe('what a removed worktree leaves to do', () => {
     expect(hasOpenBranch(empty)).toBe(true)
     expect(branchChanges(empty)).toBeNull()
   })
+
+  test('plain directory with embedded repo changes opens changes without offering local merge', () => {
+    const embeddedOnly = thread({ branch: null, base: null })
+    expect(mergeOffered(embeddedOnly)).toBe(false)
+    expect(hasOpenBranch(embeddedOnly)).toBe(true)
+    expect(branchChanges(embeddedOnly)).toBe(changes)
+  })
 })

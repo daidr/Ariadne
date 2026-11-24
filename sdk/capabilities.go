@@ -40,6 +40,9 @@ type ThreadBranch struct {
 	Branch   string `json:"branch"`
 }
 type FileVersionRequest struct {
+	ThreadID     string  `json:"threadId,omitempty"`
+	SourceID     string  `json:"sourceId,omitempty"`
+	RepoPath     string  `json:"repoPath,omitempty"`
 	From         string  `json:"from"`
 	Head         string  `json:"head"`
 	Path         string  `json:"path"`
@@ -80,6 +83,11 @@ type BranchCapability struct {
 	SharesStorage func(context.Context) (bool, error)
 	Snapshot      func(context.Context, string) (*string, error)
 	Diff          func(context.Context, string, string) ([]ChangedFile, error)
+	// Multi-repo extensions for embedded .git repositories inside a worktree.
+	// Optional; callers fall back to the single-repo methods when nil.
+	EmbeddedChanges func(ctx context.Context, threadID string, baselines map[string]RepoBaseline) ([]RepoChanges, error)
+	RepoSnapshots   func(ctx context.Context, threadID string) ([]RepoSnapshot, error)
+	RepoDiff        func(ctx context.Context, threadID, repoPath, from, to string) ([]ChangedFile, error)
 }
 type WorkspaceCapability struct {
 	Isolated bool

@@ -112,6 +112,9 @@ func (factory *Workspaces) Capability() *sdk.WorkspaceCapability {
 			defer done()
 			return TreeDiff(ctx, factory.git, from, to)
 		},
+		EmbeddedChanges: factory.EmbeddedChanges,
+		RepoSnapshots:   factory.RepoSnapshots,
+		RepoDiff:        factory.RepoDiff,
 	}
 	return capability
 }

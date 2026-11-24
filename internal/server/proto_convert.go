@@ -1486,6 +1486,41 @@ func toProtoNoticeView(raw map[string]any) *ariadnev1.NoticeView {
 				Removed: protoInt32(total["removed"]),
 			}
 		}
+		for _, item := range protoSlice(raw["repos"]) {
+			rm := protoMap(item)
+			if rm == nil {
+				continue
+			}
+			rc := &ariadnev1.TurnRepoChanges{
+				SourceId:   protoOptNonEmptyStr(protoStr(rm["sourceId"])),
+				SourceName: protoOptNonEmptyStr(protoStr(rm["sourceName"])),
+				RepoPath:   protoOptNonEmptyStr(protoStr(rm["repoPath"])),
+				Branch:     protoOptNonEmptyStr(protoStr(rm["branch"])),
+				From:       protoStr(rm["from"]),
+				To:         protoStr(rm["to"]),
+			}
+			for _, f := range protoSlice(rm["files"]) {
+				fm := protoMap(f)
+				if fm == nil {
+					continue
+				}
+				rc.Files = append(rc.Files, &ariadnev1.TurnFile{
+					Path:         protoStr(fm["path"]),
+					PreviousPath: protoOptStr(fm["previousPath"]),
+					Status:       protoStr(fm["status"]),
+					Added:        protoOptInt32(fm["added"]),
+					Removed:      protoOptInt32(fm["removed"]),
+				})
+			}
+			if total := protoMap(rm["total"]); total != nil {
+				rc.Total = &ariadnev1.ThreadChangeTotals{
+					Files:   protoInt32(total["files"]),
+					Added:   protoInt32(total["added"]),
+					Removed: protoInt32(total["removed"]),
+				}
+			}
+			tc.Repos = append(tc.Repos, rc)
+		}
 		out.Payload = &ariadnev1.NoticeView_TurnChanges{TurnChanges: tc}
 	}
 	return out
@@ -1813,6 +1848,24 @@ func toProtoBranchChanges(changes *sdk.BranchChanges) *ariadnev1.BranchChanges {
 			Status:       f.Status,
 			Added:        f.Added,
 			Removed:      f.Removed,
+		})
+	}
+	return out
+}
+
+func toProtoRepoChangesList(repos []sdk.RepoChanges) []*ariadnev1.RepoChanges {
+	if len(repos) == 0 {
+		return nil
+	}
+	out := make([]*ariadnev1.RepoChanges, 0, len(repos))
+	for _, repo := range repos {
+		out = append(out, &ariadnev1.RepoChanges{
+			SourceId:   protoOptNonEmptyStr(repo.SourceID),
+			SourceName: protoOptNonEmptyStr(repo.SourceName),
+			RepoPath:   protoOptNonEmptyStr(repo.RepoPath),
+			Embedded:   repo.Embedded,
+			Mergeable:  repo.Mergeable,
+			Changes:    toProtoBranchChanges(repo.Changes),
 		})
 	}
 	return out

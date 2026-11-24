@@ -474,9 +474,14 @@ func (factory *Workspaces) remove(ctx context.Context, threadID string, options 
 			return false, err
 		}
 	}
+	var externalEmbeddedCommonDirs []string
+	if options.Discard && info != nil {
+		externalEmbeddedCommonDirs = collectExternalEmbeddedCommonDirs(ctx, dir)
+	}
 	removed, err := RemoveWorktree(ctx, factory.git, dir, options)
 	if err == nil && removed && options.Discard {
 		err = DropSnapshots(ctx, factory.git, threadID)
+		dropSnapshotsInCommonDirs(ctx, externalEmbeddedCommonDirs, threadID)
 	}
 	return removed, err
 }
@@ -745,20 +750,98 @@ func (factory *Workspaces) FileVersions(ctx context.Context, requests []sdk.File
 		return nil, err
 	}
 	defer done()
-	inputs := make([]VersionInput, len(requests))
+	if len(requests) == 0 {
+		return []sdk.FileVersions{}, nil
+	}
+	hasEmbedded := false
+	for _, req := range requests {
+		if req.RepoPath != "" {
+			hasEmbedded = true
+			break
+		}
+	}
+	if !hasEmbedded {
+		inputs := make([]VersionInput, len(requests))
+		for i, req := range requests {
+			inputs[i] = VersionInput{From: req.From, Head: req.Head, Path: req.Path, PreviousPath: req.PreviousPath}
+		}
+		if reader := factory.batchReader(); reader != nil {
+			return reader.ReadVersions(ctx, factory.git, inputs)
+		}
+		results := make([]sdk.FileVersions, len(inputs))
+		for i, input := range inputs {
+			file, err := FileVersions(ctx, factory.git, input)
+			if err != nil {
+				return nil, err
+			}
+			results[i] = file
+		}
+		return results, nil
+	}
+
+	type groupKey struct{ threadID, repoPath string }
+	type groupItem struct {
+		index int
+		input VersionInput
+	}
+	order := []groupKey{}
+	groups := map[groupKey][]groupItem{}
 	for i, req := range requests {
-		inputs[i] = VersionInput{From: req.From, Head: req.Head, Path: req.Path, PreviousPath: req.PreviousPath}
+		key := groupKey{threadID: req.ThreadID, repoPath: req.RepoPath}
+		if _, exists := groups[key]; !exists {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], groupItem{
+			index: i,
+			input: VersionInput{From: req.From, Head: req.Head, Path: req.Path, PreviousPath: req.PreviousPath},
+		})
 	}
-	if reader := factory.batchReader(); reader != nil {
-		return reader.ReadVersions(ctx, factory.git, inputs)
-	}
-	results := make([]sdk.FileVersions, len(inputs))
-	for i, input := range inputs {
-		file, err := FileVersions(ctx, factory.git, input)
+	results := make([]sdk.FileVersions, len(requests))
+	for _, key := range order {
+		items := groups[key]
+		inputs := make([]VersionInput, len(items))
+		for i, item := range items {
+			inputs[i] = item.input
+		}
+		var groupResults []sdk.FileVersions
+		if key.repoPath == "" {
+			if reader := factory.batchReader(); reader != nil {
+				groupResults, err = reader.ReadVersions(ctx, factory.git, inputs)
+			} else {
+				groupResults = make([]sdk.FileVersions, len(inputs))
+				for i, input := range inputs {
+					groupResults[i], err = FileVersions(ctx, factory.git, input)
+					if err != nil {
+						break
+					}
+				}
+			}
+		} else {
+			var dir string
+			dir, err = factory.checkedDirectory(key.threadID)
+			if err == nil {
+				var repo EmbeddedRepo
+				repo, err = resolveEmbeddedRepoPath(ctx, dir, key.repoPath)
+				if err == nil {
+					repoGit := NewGit(repo.Path, "file")
+					if len(inputs) > 1 {
+						batch := newCatFileBatch(repo.Path)
+						groupResults, err = batch.ReadVersions(ctx, repoGit, inputs)
+						_ = batch.Close()
+					} else {
+						var file sdk.FileVersions
+						file, err = FileVersions(ctx, repoGit, inputs[0])
+						groupResults = []sdk.FileVersions{file}
+					}
+				}
+			}
+		}
 		if err != nil {
 			return nil, err
 		}
-		results[i] = file
+		for i, item := range items {
+			results[item.index] = groupResults[i]
+		}
 	}
 	return results, nil
 }

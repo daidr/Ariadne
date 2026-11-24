@@ -31,7 +31,7 @@ func (LifecycleProjection) Forget(ctx context.Context, tx *sql.Tx, projectID str
 		}
 	}
 	// Only the application's known tables are touched, preserving plugin tables.
-	for _, table := range []string{"artifacts", "artifact_shared", "attentions", "issue_writes", "messages", "notices", "memories", "todos", "conversations", "plan_edges", "plan_node_issues", "plan_nodes", "plan_proposals", "plan_revisions", "reviews", "search_docs", "transcript", "prompts", "threads", "files"} {
+	for _, table := range []string{"artifacts", "artifact_shared", "attentions", "issue_writes", "messages", "notices", "memories", "todos", "conversations", "plan_edges", "plan_node_issues", "plan_nodes", "plan_proposals", "plan_revisions", "reviews", "search_docs", "transcript", "prompts", "thread_repo_baselines", "threads", "files"} {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE project_id = ?", projectID); err != nil {
 			return err
 		}
@@ -219,6 +219,11 @@ func threadEvent(w *projectionWriter, e eventstore.Event, d object) {
 		w.run("UPDATE threads SET workspace_source_id = coalesce(?, workspace_source_id), workspace_label = ?, workspace_branch = ?, workspace_base = ?, workspace_removed = 0, workspace_parked = 0, updated_at = ?, changed_seq = ? WHERE id = ?", d["sourceId"], d["label"], d["branch"], d["base"], e.At, e.Seq, id)
 	case "workspace.removed":
 		w.run("UPDATE threads SET workspace_removed = 1, workspace_parked = ?, updated_at = ?, changed_seq = ? WHERE id = ?", boolean(d.str("reason") == "idle"), e.At, e.Seq, id)
+	case "workspace.repo.baseline":
+		if repoPath, baseHead := d.str("repoPath"), d.str("baseHead"); repoPath != "" && baseHead != "" {
+			w.run(`INSERT OR IGNORE INTO thread_repo_baselines (project_id, thread_id, source_id, repo_path, base_head, base_branch)
+			 VALUES (?, ?, ?, ?, ?, ?)`, e.ProjectID, id, d.str("sourceId"), repoPath, baseHead, d.str("baseBranch"))
+		}
 	case "turn.changed":
 		if d["branch"] != nil {
 			w.run("UPDATE threads SET changes = ?, changed_seq = ? WHERE id = ?", encoded(d["branch"]), e.Seq, d["conversationId"])

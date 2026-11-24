@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { fileIconOf, MessageIcon, ScanSearchIcon } from '@dou-ui/icons'
+import { fileIconOf, FolderGitIcon, MessageIcon, ScanSearchIcon } from '@dou-ui/icons'
 import { DouText, DouTree, type TreeNodeData } from 'dou-ui'
 import { t } from '../i18n'
 import type { FileNode } from './files'
@@ -31,6 +31,10 @@ const STATUS_LETTER = {
   modified: 'M',
   type: 'T',
 }
+
+function commentKey(node: FileNode): string {
+  return node.commentPath ?? node.file?.path ?? node.label
+}
 </script>
 
 <template>
@@ -46,31 +50,55 @@ const STATUS_LETTER = {
     @select="(node: TreeNodeData) => emit('select', node)"
   >
     <template #node="{ node }">
-      <span class="file-row" :title="(node as FileNode).file?.path ?? node.label">
+      <span
+        class="file-row"
+        :class="{ 'is-repo': !!(node as FileNode).repo }"
+        :title="
+          (node as FileNode).repo
+            ? [(node as FileNode).label, (node as FileNode).repo!.branch]
+                .filter(Boolean)
+                .join(' · ')
+            : ((node as FileNode).file?.path ?? node.label)
+        "
+      >
+        <FolderGitIcon v-if="(node as FileNode).repo" class="file-icon repo-icon" />
         <component
           :is="fileIconOf((node as FileNode).label.split('.').at(-1) ?? '')"
-          v-if="(node as FileNode).file"
+          v-else-if="(node as FileNode).file"
           class="file-icon"
         />
         <span class="file-name">{{ node.label }}</span>
-        <template v-if="(node as FileNode).file">
+        <template v-if="(node as FileNode).repo">
           <DouText
-            v-if="reviewCount((node as FileNode).file!.path)"
+            v-if="(node as FileNode).repo!.branch"
+            size="sm"
+            variant="tertiary"
+            class="repo-branch"
+          >
+            {{ (node as FileNode).repo!.branch }}
+          </DouText>
+          <DouText size="sm" variant="tertiary" class="repo-count">
+            {{ (node as FileNode).repo!.fileCount }}
+          </DouText>
+        </template>
+        <template v-else-if="(node as FileNode).file">
+          <DouText
+            v-if="reviewCount(commentKey(node as FileNode))"
             size="sm"
             variant="tertiary"
             class="file-comments"
             :title="t('review.commented')"
           >
-            <ScanSearchIcon />{{ reviewCount((node as FileNode).file!.path) }}
+            <ScanSearchIcon />{{ reviewCount(commentKey(node as FileNode)) }}
           </DouText>
           <DouText
-            v-if="commentCount((node as FileNode).file!.path)"
+            v-if="commentCount(commentKey(node as FileNode))"
             size="sm"
             variant="tertiary"
             class="file-comments"
             :title="t('changes.commented')"
           >
-            <MessageIcon />{{ commentCount((node as FileNode).file!.path) }}
+            <MessageIcon />{{ commentCount(commentKey(node as FileNode)) }}
           </DouText>
           <DouText
             size="sm"
@@ -94,9 +122,17 @@ const STATUS_LETTER = {
   width: 100%;
 }
 
+.file-row.is-repo .file-name {
+  font-weight: 500;
+}
+
 .file-icon {
   flex: none;
   color: var(--dou-color-text-tertiary);
+}
+
+.repo-icon {
+  color: var(--dou-color-text-secondary);
 }
 
 .file-name {
@@ -105,6 +141,20 @@ const STATUS_LETTER = {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.repo-branch {
+  flex: none;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--dou-font-family-mono, monospace);
+}
+
+.repo-count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
 }
 
 .file-status {

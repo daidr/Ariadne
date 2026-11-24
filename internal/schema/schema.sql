@@ -321,6 +321,16 @@ CREATE TABLE search_docs (
 
 CREATE VIRTUAL TABLE search_text USING fts5(title, body, tokenize = 'trigram');
 
+CREATE TABLE thread_repo_baselines (
+      project_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      repo_path TEXT NOT NULL,
+      base_head TEXT NOT NULL,
+      base_branch TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (thread_id, source_id, repo_path)
+    );
+
 CREATE TABLE threads (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,

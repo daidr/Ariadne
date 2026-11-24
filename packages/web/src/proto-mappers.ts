@@ -50,6 +50,7 @@ import type {
   ChangedFileStatus,
   FileVersions,
   MergeOutcome,
+  RepoChanges,
 } from '@ariadne/plugin-sdk'
 import type {
   ArtifactFeedbackItem as ProtoArtifactFeedbackItem,
@@ -68,6 +69,7 @@ import type {
   MessageView as ProtoMessageView,
   NoticeView as ProtoNoticeView,
   ProjectWorktrees as ProtoProjectWorktrees,
+  RepoChanges as ProtoRepoChanges,
   ReviewRoundView as ProtoReviewRoundView,
   SentLineComment as ProtoSentLineComment,
   ShowBlock as ProtoShowBlock,
@@ -1024,6 +1026,30 @@ export function fromProtoNoticeView(n: ProtoNoticeView): NoticeView | null {
           added: p.total?.added ?? 0,
           removed: p.total?.removed ?? 0,
         },
+        ...(p.repos.length > 0
+          ? {
+              repos: p.repos.map((r) => ({
+                ...(r.sourceId !== undefined ? { sourceId: r.sourceId } : {}),
+                ...(r.sourceName !== undefined ? { sourceName: r.sourceName } : {}),
+                ...(r.repoPath !== undefined ? { repoPath: r.repoPath } : {}),
+                ...(r.branch !== undefined ? { branch: r.branch } : {}),
+                from: r.from,
+                to: r.to,
+                files: r.files.map((f) => ({
+                  path: f.path,
+                  previousPath: f.previousPath ?? null,
+                  status: f.status as ChangedFileStatus,
+                  added: f.added ?? null,
+                  removed: f.removed ?? null,
+                })),
+                total: {
+                  files: r.total?.files ?? 0,
+                  added: r.total?.added ?? 0,
+                  removed: r.total?.removed ?? 0,
+                },
+              })),
+            }
+          : {}),
         ...(p.startedAt !== undefined ? { startedAt: Number(p.startedAt) } : {}),
       }
     }
@@ -1304,6 +1330,19 @@ export function fromProtoBranchChanges(changes?: ProtoBranchChanges): BranchChan
       removed: f.removed === undefined ? null : Number(f.removed),
     })),
     uncommitted: [...changes.uncommitted],
+  }
+}
+
+export function fromProtoRepoChanges(repo: ProtoRepoChanges): RepoChanges | null {
+  const changes = fromProtoBranchChanges(repo.changes)
+  if (!changes) return null
+  return {
+    ...(repo.sourceId !== undefined ? { sourceId: repo.sourceId } : {}),
+    ...(repo.sourceName !== undefined ? { sourceName: repo.sourceName } : {}),
+    ...(repo.repoPath !== undefined ? { repoPath: repo.repoPath } : {}),
+    embedded: repo.embedded,
+    mergeable: repo.mergeable,
+    changes,
   }
 }
 

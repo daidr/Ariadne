@@ -32,6 +32,33 @@ type BranchChanges struct {
 	Files       []ChangedFile  `json:"files"`
 	Uncommitted []string       `json:"uncommitted"`
 }
+
+// RepoBaseline records the initial HEAD of an embedded repository observed by a thread.
+type RepoBaseline struct {
+	RepoPath   string `json:"repoPath"`
+	BaseHead   string `json:"baseHead"`
+	BaseBranch string `json:"baseBranch,omitempty"`
+}
+
+// RepoSnapshot captures one repository's tree snapshot and current HEAD/branch.
+// RepoPath is empty for the source's root repository and a slash-separated
+// relative path for an embedded .git repository inside the thread's worktree.
+type RepoSnapshot struct {
+	RepoPath string `json:"repoPath,omitempty"`
+	Branch   string `json:"branch,omitempty"`
+	Head     string `json:"head,omitempty"`
+	Tree     string `json:"tree"`
+}
+
+// RepoChanges describes changes for one associated Git repository of a thread.
+type RepoChanges struct {
+	SourceID   string         `json:"sourceId,omitempty"`
+	SourceName string         `json:"sourceName,omitempty"`
+	RepoPath   string         `json:"repoPath,omitempty"`
+	Embedded   bool           `json:"embedded,omitempty"`
+	Mergeable  bool           `json:"mergeable,omitempty"`
+	Changes    *BranchChanges `json:"changes"`
+}
 type FileVersions struct {
 	Before  *string `json:"before"`
 	After   *string `json:"after"`

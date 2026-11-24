@@ -11,11 +11,11 @@ const openView = useOpenView()
 const props = defineProps<{ notice: Extract<NoticeView, { kind: 'turn-changes' }> }>()
 
 function open() {
-  const { turnId, from, to, files, total } = props.notice
+  const { turnId, from, to, files, repos, total } = props.notice
   openView({
     kind: 'changes',
     threadId: props.notice.conversationId,
-    turn: { turnId, from, to, files, total },
+    turn: { turnId, from, to, files, ...(repos ? { repos } : {}), total },
   })
 }
 </script>

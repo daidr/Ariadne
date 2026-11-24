@@ -115,6 +115,16 @@ export interface BranchChanges {
   uncommitted: string[]
 }
 
+/** Changes for one repository associated with a thread (primary, secondary source, or embedded .git repo). */
+export interface RepoChanges {
+  sourceId?: string
+  sourceName?: string
+  repoPath?: string
+  embedded?: boolean
+  mergeable?: boolean
+  changes: BranchChanges
+}
+
 /** A file before and after: `null` where it does not exist. */
 export interface FileVersions {
   before: string | null

@@ -24,6 +24,10 @@ func (manager *Manager) Branches(ctx context.Context, project string) (*sdk.Bran
 }
 
 func (manager *Manager) BranchesForThread(ctx context.Context, thread core.ThreadView) (*sdk.BranchCapability, error) {
+	return manager.BranchesForThreadSource(ctx, thread, "")
+}
+
+func (manager *Manager) BranchesForThreadSource(ctx context.Context, thread core.ThreadView, sourceID string) (*sdk.BranchCapability, error) {
 	ctx, done, err := manager.begin(ctx)
 	if err != nil {
 		return nil, err
@@ -33,7 +37,92 @@ func (manager *Manager) BranchesForThread(ctx context.Context, thread core.Threa
 	if err != nil {
 		return nil, err
 	}
-	return manager.branches(ctx, thread.ProjectID, sourceSelection{id: threadSourceID(project, thread)})
+	if sourceID == "" {
+		sourceID = threadSourceID(project, thread)
+	}
+	return manager.branches(ctx, thread.ProjectID, sourceSelection{id: sourceID, owner: thread.ID})
+}
+
+// ThreadSource represents one writable Git source associated with a thread.
+type ThreadSource struct {
+	ID        string
+	Name      string
+	Primary   bool
+	Workspace *core.WorkspaceView
+	Branches  *sdk.BranchCapability
+	Mergeable bool
+}
+
+func sourceDisplayName(project core.ProjectView, thread core.ThreadView, sourceID string) string {
+	set := project.WritableSources()
+	if source, ok := set.Get(sourceID); ok {
+		if len(set.Sources) > 1 || (source.Name != "" && source.Name != core.LegacyPrimarySource) {
+			return source.Name
+		}
+		return ""
+	}
+	for _, ref := range references(thread.References) {
+		if ref.ID == sourceID && ref.Writable && ref.Name != "" {
+			return ref.Name
+		}
+	}
+	return ""
+}
+
+// ThreadSources returns the primary source (if open/parked) plus any opened
+// secondary writable sources for a thread, each with its BranchCapability.
+func (manager *Manager) ThreadSources(ctx context.Context, thread core.ThreadView) ([]ThreadSource, error) {
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	project, err := manager.options.Repository.GetProject(ctx, thread.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	primaryID := threadSourceID(project, thread)
+	result := []ThreadSource{}
+	if thread.Workspace != nil && (!thread.Workspace.Removed || thread.Workspace.Parked) {
+		branches, err := manager.branches(ctx, thread.ProjectID, sourceSelection{id: primaryID})
+		if err != nil {
+			return nil, err
+		}
+		if branches != nil {
+			ws := *thread.Workspace
+			result = append(result, ThreadSource{
+				ID:        primaryID,
+				Name:      sourceDisplayName(project, thread, primaryID),
+				Primary:   true,
+				Workspace: &ws,
+				Branches:  branches,
+				Mergeable: branches.Merge != nil && project.Settings.Delivery.Mode != "external",
+			})
+		}
+	}
+	secondaryWorkspaces, err := manager.options.Repository.ThreadSecondaryWorkspaces(ctx, thread.ProjectID, thread.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, sw := range secondaryWorkspaces {
+		if sw.SourceID == "" || sw.SourceID == primaryID || sw.Removed {
+			continue
+		}
+		branches, err := manager.branches(ctx, thread.ProjectID, sourceSelection{id: sw.SourceID, owner: thread.ID})
+		if err != nil || branches == nil {
+			continue
+		}
+		ws := sw
+		result = append(result, ThreadSource{
+			ID:        sw.SourceID,
+			Name:      sourceDisplayName(project, thread, sw.SourceID),
+			Primary:   false,
+			Workspace: &ws,
+			Branches:  branches,
+			Mergeable: false,
+		})
+	}
+	return result, nil
 }
 
 func (manager *Manager) branches(ctx context.Context, project string, selection ...sourceSelection) (*sdk.BranchCapability, error) {
@@ -143,6 +232,27 @@ func (manager *Manager) branches(ctx context.Context, project string, selection 
 		proxy.Diff = func(ctx context.Context, before, after string) ([]sdk.ChangedFile, error) {
 			return withBranches(ctx, manager, project, key, func(ctx context.Context, b *sdk.BranchCapability) ([]sdk.ChangedFile, error) {
 				return b.Diff(ctx, before, after)
+			}, selection...)
+		}
+	}
+	if raw.EmbeddedChanges != nil {
+		proxy.EmbeddedChanges = func(ctx context.Context, threadID string, baselines map[string]sdk.RepoBaseline) ([]sdk.RepoChanges, error) {
+			return withBranches(ctx, manager, project, key, func(ctx context.Context, b *sdk.BranchCapability) ([]sdk.RepoChanges, error) {
+				return b.EmbeddedChanges(ctx, threadID, baselines)
+			}, selection...)
+		}
+	}
+	if raw.RepoSnapshots != nil {
+		proxy.RepoSnapshots = func(ctx context.Context, threadID string) ([]sdk.RepoSnapshot, error) {
+			return withBranches(ctx, manager, project, key, func(ctx context.Context, b *sdk.BranchCapability) ([]sdk.RepoSnapshot, error) {
+				return b.RepoSnapshots(ctx, threadID)
+			}, selection...)
+		}
+	}
+	if raw.RepoDiff != nil {
+		proxy.RepoDiff = func(ctx context.Context, threadID, repoPath, before, after string) ([]sdk.ChangedFile, error) {
+			return withBranches(ctx, manager, project, key, func(ctx context.Context, b *sdk.BranchCapability) ([]sdk.ChangedFile, error) {
+				return b.RepoDiff(ctx, threadID, repoPath, before, after)
 			}, selection...)
 		}
 	}
