@@ -205,8 +205,8 @@ const repoGroups = computed<ChangeRepoGroup[]>(() => {
           repoPath,
           embedded,
           mergeable: false,
-          branch: repo.branch ?? (embedded ? '' : (thread.value?.workspace?.branch ?? '')),
-          base: embedded ? '' : (thread.value?.workspace?.base ?? ''),
+          branch: repo.branch ?? '',
+          base: '',
           from: repo.from,
           head: repo.to,
           commits: [],
@@ -225,7 +225,7 @@ const repoGroups = computed<ChangeRepoGroup[]>(() => {
         embedded: false,
         mergeable: false,
         branch: thread.value?.workspace?.branch ?? '',
-        base: thread.value?.workspace?.base ?? '',
+        base: '',
         from: turn.from,
         head: turn.to,
         commits: [],
@@ -299,14 +299,18 @@ function repoContextPrefix(group: ChangeRepoGroup): string {
   return ''
 }
 
+function commentPrefixFor(group: ChangeRepoGroup): string {
+  if (group.repoPath) {
+    return group.sourceName ? `${group.sourceName}/${group.repoPath}` : group.repoPath
+  }
+  if (group.sourceName && isMultiRepo.value) {
+    return group.sourceName
+  }
+  return ''
+}
+
 function commentPathFor(group: ChangeRepoGroup, path: string): string {
-  const prefix = group.repoPath
-    ? group.sourceName
-      ? `${group.sourceName}/${group.repoPath}`
-      : group.repoPath
-    : group.sourceName && isMultiRepo.value
-      ? group.sourceName
-      : ''
+  const prefix = commentPrefixFor(group)
   return prefix ? `${prefix}/${path}` : path
 }
 
@@ -421,7 +425,8 @@ async function skipMerge() {
 
 const tree = computed<FileNode[]>(() => {
   if (!isMultiRepo.value) {
-    return fileTree(singleRepo.value?.files ?? [])
+    const group = singleRepo.value
+    return fileTree(group?.files ?? [], group ? commentPrefixFor(group) : '')
   }
   return repoFileTree(
     repoGroups.value
@@ -432,11 +437,7 @@ const tree = computed<FileNode[]>(() => {
         branch: group.branch,
         embedded: group.embedded,
         files: group.files,
-        commentPrefix: group.repoPath
-          ? group.sourceName
-            ? `${group.sourceName}/${group.repoPath}`
-            : group.repoPath
-          : group.sourceName || '',
+        commentPrefix: commentPrefixFor(group),
       })),
   )
 })

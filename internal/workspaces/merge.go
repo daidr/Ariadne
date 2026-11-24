@@ -90,7 +90,12 @@ func (manager *Manager) ThreadChangesSince(ctx context.Context, threadID string,
 	bySource := baselinesBySource(storedBaselines)
 
 	// Fast-path revision check only when there is a single primary source and no
-	// recorded embedded baselines; multi-repo / embedded views always run a full check.
+	// recorded embedded baselines; even then, check embedded repos while the
+	// worktree is present so newly modified or cloned embedded repos are not missed.
+	var (
+		prefetchedPrimaryEmbedded    []sdk.RepoChanges
+		hasPrefetchedPrimaryEmbedded bool
+	)
 	if known != nil && len(sources) == 1 && sources[0].Primary && len(storedBaselines) == 0 {
 		primary := sources[0]
 		if primary.Branches != nil && primary.Branches.Revisions != nil && primary.Workspace != nil {
@@ -101,7 +106,25 @@ func (manager *Manager) ThreadChangesSince(ctx context.Context, threadID string,
 					return ThreadChanges{}, workError(err)
 				}
 				if revisions == *known {
-					return ThreadChanges{Mergeable: primary.Mergeable, Unchanged: true}, nil
+					if primary.Branches.EmbeddedChanges == nil || primary.Workspace.Removed {
+						return ThreadChanges{Mergeable: primary.Mergeable, Unchanged: true}, nil
+					}
+					embedded, err := primary.Branches.EmbeddedChanges(ctx, threadID, bySource[primary.ID])
+					if err != nil {
+						return ThreadChanges{}, workError(err)
+					}
+					hasEmbeddedActivity := false
+					for _, item := range embedded {
+						if hasRepoActivity(item.Changes) {
+							hasEmbeddedActivity = true
+							break
+						}
+					}
+					if !hasEmbeddedActivity {
+						return ThreadChanges{Mergeable: primary.Mergeable, Unchanged: true}, nil
+					}
+					prefetchedPrimaryEmbedded = embedded
+					hasPrefetchedPrimaryEmbedded = true
 				}
 			}
 		}
@@ -156,7 +179,15 @@ func (manager *Manager) ThreadChangesSince(ctx context.Context, threadID string,
 			}
 		}
 		if src.Branches.EmbeddedChanges != nil && (src.Workspace == nil || !src.Workspace.Removed) {
-			embedded, err := src.Branches.EmbeddedChanges(ctx, threadID, bySource[src.ID])
+			var (
+				embedded []sdk.RepoChanges
+				err      error
+			)
+			if src.Primary && hasPrefetchedPrimaryEmbedded {
+				embedded = prefetchedPrimaryEmbedded
+			} else {
+				embedded, err = src.Branches.EmbeddedChanges(ctx, threadID, bySource[src.ID])
+			}
 			if err != nil {
 				if src.Primary {
 					return ThreadChanges{}, workError(err)

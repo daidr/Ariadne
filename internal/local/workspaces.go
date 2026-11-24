@@ -474,12 +474,14 @@ func (factory *Workspaces) remove(ctx context.Context, threadID string, options 
 			return false, err
 		}
 	}
+	var externalEmbeddedCommonDirs []string
 	if options.Discard && info != nil {
-		dropEmbeddedSnapshots(ctx, dir, threadID)
+		externalEmbeddedCommonDirs = collectExternalEmbeddedCommonDirs(ctx, dir)
 	}
 	removed, err := RemoveWorktree(ctx, factory.git, dir, options)
 	if err == nil && removed && options.Discard {
 		err = DropSnapshots(ctx, factory.git, threadID)
+		dropSnapshotsInCommonDirs(ctx, externalEmbeddedCommonDirs, threadID)
 	}
 	return removed, err
 }

@@ -606,6 +606,10 @@ func TestTurnChangesMultiRepoOuterAndEmbedded(t *testing.T) {
 	if !ok || len(reposRaw) != 2 {
 		t.Fatalf("expected 2 repos in turn-changes notice, got %#v", turnNotice["repos"])
 	}
+	outerTurnRepo, _ := reposRaw[0].(map[string]any)
+	if branch, _ := outerTurnRepo["branch"].(string); branch == "" {
+		t.Fatalf("expected outer root repo branch to be backfilled in turn-changes notice, got %#v", outerTurnRepo)
+	}
 
 	// 3. Verify ThreadChanges returns both repos with embedded repo marked non-mergeable.
 	tc, err := manager.ThreadChanges(ctx, thread.ID)

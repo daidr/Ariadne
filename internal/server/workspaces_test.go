@@ -345,9 +345,13 @@ func TestWorkspaceMultiRepoRPC(t *testing.T) {
 	from, head := strings.Repeat("a", 40), strings.Repeat("b", 40)
 	added := int64(2)
 	var gotRepoPath string
+	embeddedActive := true
 	registry := sources.New()
 	registry.Register(sdk.ContextProvider{Info: sdk.ContextProviderInfo{Kind: "fixture", Provides: []string{"workspace"}}, Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
 		return sdk.Capabilities{Workspace: &sdk.WorkspaceCapability{Isolated: true, Branches: &sdk.BranchCapability{
+			Revisions: func(context.Context, sdk.ThreadBranch, string) (sdk.BranchRevisions, error) {
+				return sdk.BranchRevisions{Head: head, BaseHead: from}, nil
+			},
 			Changes: func(context.Context, sdk.ThreadBranch, string) (*sdk.BranchChanges, error) {
 				return &sdk.BranchChanges{
 					Branch: "work/thread", Base: "integration", From: from, Head: head,
@@ -355,6 +359,9 @@ func TestWorkspaceMultiRepoRPC(t *testing.T) {
 				}, nil
 			},
 			EmbeddedChanges: func(context.Context, string, map[string]sdk.RepoBaseline) ([]sdk.RepoChanges, error) {
+				if !embeddedActive {
+					return nil, nil
+				}
 				return []sdk.RepoChanges{{
 					RepoPath: "packages/sub",
 					Embedded: true,
@@ -397,6 +404,34 @@ func TestWorkspaceMultiRepoRPC(t *testing.T) {
 	if changesResp.Msg.Repos[1].GetRepoPath() != "packages/sub" || !changesResp.Msg.Repos[1].GetEmbedded() || changesResp.Msg.Repos[1].GetMergeable() {
 		t.Fatalf("unexpected embedded repo entry: %+v", changesResp.Msg.Repos[1])
 	}
+
+	// Known outer revisions must not mask newly active embedded repos when no baselines are recorded yet.
+	knownResp, err := client.GetThreadChanges(t.Context(), connect.NewRequest(&ariadnev1.GetThreadChangesRequest{
+		ThreadId: "thr_a",
+		Head:     &head,
+		BaseHead: &from,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if knownResp.Msg.GetUnchanged() || len(knownResp.Msg.Repos) != 2 {
+		t.Fatalf("expected active embedded repo to bypass unchanged fast path, got unchanged=%v repos=%+v", knownResp.Msg.GetUnchanged(), knownResp.Msg.Repos)
+	}
+
+	// When no embedded repo has activity, known outer revisions still take the unchanged fast path.
+	embeddedActive = false
+	unchangedResp, err := client.GetThreadChanges(t.Context(), connect.NewRequest(&ariadnev1.GetThreadChangesRequest{
+		ThreadId: "thr_a",
+		Head:     &head,
+		BaseHead: &from,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unchangedResp.Msg.GetUnchanged() {
+		t.Fatalf("expected unchanged=true when outer revisions match and no embedded repo is active, got %+v", unchangedResp.Msg)
+	}
+	embeddedActive = true
 
 	subPath := "packages/sub"
 	fileResp, err := client.GetChangedFile(t.Context(), connect.NewRequest(&ariadnev1.GetChangedFileRequest{

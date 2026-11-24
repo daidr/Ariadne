@@ -1,8 +1,10 @@
 package local
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/daidr/Ariadne/sdk"
@@ -194,5 +196,101 @@ func TestEmbeddedChangesBaselinesFallbackSnapshotsAndFileVersions(t *testing.T) 
 		Path:     "hello.txt",
 	}}); err == nil {
 		t.Fatal("expected error for escaping RepoPath")
+	}
+}
+
+func TestRemoveWorktreeDropsExternalEmbeddedSnapshotsOnlyAfterRemoval(t *testing.T) {
+	ctx := t.Context()
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		res := NewGit(dir, "file")(ctx, args, GitOptions{})
+		if res.ExitCode != 0 {
+			t.Fatalf("git %v in %s failed: %s", args, dir, res.Stderr)
+		}
+		return strings.TrimSpace(res.Stdout)
+	}
+
+	outerRepo := t.TempDir()
+	runGit(outerRepo, "init", "-q", "-b", "main")
+	runGit(outerRepo, "config", "user.name", "Test")
+	runGit(outerRepo, "config", "user.email", "test@example.invalid")
+	if err := os.WriteFile(filepath.Join(outerRepo, "root.txt"), []byte("root\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(outerRepo, "add", "root.txt")
+	runGit(outerRepo, "commit", "-q", "-m", "init outer")
+
+	// External repository whose worktree will be nested inside the thread worktree.
+	externalRepo := t.TempDir()
+	runGit(externalRepo, "init", "-q", "-b", "main")
+	runGit(externalRepo, "config", "user.name", "Test")
+	runGit(externalRepo, "config", "user.email", "test@example.invalid")
+	if err := os.WriteFile(filepath.Join(externalRepo, "ext.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(externalRepo, "add", "ext.txt")
+	runGit(externalRepo, "commit", "-q", "-m", "init external")
+
+	factory := newFactory(t, FactoryOptions{Path: outerRepo, DataDir: t.TempDir(), DisableClone: true})
+
+	const threadID = "thr_ext_snap"
+	ws, err := factory.Open(ctx, OpenRequest{ThreadID: threadID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wtDir := ws.root.Name()
+	if err := ws.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	nestedWT := filepath.Join(wtDir, "packages", "ext-wt")
+	if err := os.MkdirAll(filepath.Dir(nestedWT), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(externalRepo, "worktree", "add", "-q", "-b", "feat/ext", nestedWT)
+	if err := os.WriteFile(filepath.Join(nestedWT, "ext.txt"), []byte("v1\nv2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Capture snapshot so externalRepo gets a snapshot ref for threadID.
+	if _, err := factory.RepoSnapshots(ctx, threadID); err != nil {
+		t.Fatal(err)
+	}
+	snapshotPrefix := SnapshotRefs(threadID)
+	refsBefore := runGit(externalRepo, "for-each-ref", "--format=%(refname)", snapshotPrefix)
+	if refsBefore == "" {
+		t.Fatalf("expected snapshot refs under %s in external repo before remove", snapshotPrefix)
+	}
+
+	// Simulate git worktree remove failing (e.g. file handle held open).
+	origGit := factory.git
+	failRemove := true
+	factory.git = func(ctx context.Context, args []string, options GitOptions) sdk.ExecResult {
+		if failRemove && len(args) >= 2 && args[0] == "worktree" && args[1] == "remove" {
+			return sdk.ExecResult{ExitCode: 1, Stderr: "simulated worktree remove failure"}
+		}
+		return origGit(ctx, args, options)
+	}
+	if removed, err := factory.Remove(ctx, threadID, RemoveOptions{Discard: true}); err == nil || removed {
+		t.Fatalf("expected Remove to fail when git worktree remove fails, removed=%v err=%v", removed, err)
+	}
+	refsAfterFailedRemove := runGit(externalRepo, "for-each-ref", "--format=%(refname)", snapshotPrefix)
+	if refsAfterFailedRemove == "" {
+		t.Fatal("expected external embedded snapshot refs to remain intact when RemoveWorktree fails")
+	}
+
+	// Re-add nested worktree if force-discard removed it before outer removal failed,
+	// then allow removal to succeed and verify external snapshot refs are dropped.
+	if _, err := os.Stat(nestedWT); os.IsNotExist(err) {
+		runGit(externalRepo, "worktree", "add", "-q", nestedWT, "feat/ext")
+	}
+	failRemove = false
+	removed, err := factory.Remove(ctx, threadID, RemoveOptions{Discard: true})
+	if err != nil || !removed {
+		t.Fatalf("expected Remove to succeed after unlock, removed=%v err=%v", removed, err)
+	}
+	refsAfterSuccess := runGit(externalRepo, "for-each-ref", "--format=%(refname)", snapshotPrefix)
+	if refsAfterSuccess != "" {
+		t.Fatalf("expected external embedded snapshot refs to be dropped after RemoveWorktree succeeds, got %q", refsAfterSuccess)
 	}
 }

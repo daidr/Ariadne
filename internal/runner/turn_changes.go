@@ -295,11 +295,22 @@ func (tc *turnChanges) record(ctx context.Context, turnID string) {
 				continue
 			}
 			files := toTurnFiles(diffFiles)
+			branchName := afterSnap.Branch
+			if branchName == "" && afterSnap.RepoPath == "" && src.Workspace != nil {
+				switch v := src.Workspace.Branch.(type) {
+				case string:
+					branchName = v
+				case *string:
+					if v != nil {
+						branchName = *v
+					}
+				}
+			}
 			turnRepos = append(turnRepos, core.TurnRepoChanges{
 				SourceID:   src.ID,
 				SourceName: src.Name,
 				RepoPath:   afterSnap.RepoPath,
-				Branch:     afterSnap.Branch,
+				Branch:     branchName,
 				From:       beforeSnap.Tree,
 				To:         afterSnap.Tree,
 				Files:      files,

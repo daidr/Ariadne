@@ -39,7 +39,7 @@ export function scopedFileKey(repoKey: string, path: string): string {
  * The changed files as a tree of folders, folders first and by name. A folder with only
  * one folder inside is shown as one row (`src/components`), as code review tools do.
  */
-export function fileTree(files: ChangedFile[]): FileNode[] {
+export function fileTree(files: ChangedFile[], commentPrefix = ''): FileNode[] {
   const root: FileNode = { key: DIR, label: '', children: [] }
   for (const file of files) {
     const parts = file.path.split('/')
@@ -53,7 +53,12 @@ export function fileTree(files: ChangedFile[]): FileNode[] {
       }
       node = next
     }
-    node.children!.push({ key: file.path, label: parts.at(-1)!, file })
+    node.children!.push({
+      key: file.path,
+      label: parts.at(-1)!,
+      file,
+      ...(commentPrefix ? { commentPath: `${commentPrefix}/${file.path}` } : {}),
+    })
   }
   return compact(root).children ?? []
 }

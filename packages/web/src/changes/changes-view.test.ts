@@ -259,14 +259,77 @@ describe('ChangesView single-repo and multi-repo layout', () => {
     wrapper.unmount()
   })
 
-  test('multi-repo turn snapshot view groups turn.repos without calling getChanges', async () => {
+  test('single embedded repository flat file tree preserves prefixed commentPath for comment counts', async () => {
+    vi.spyOn(api, 'getLineComments').mockResolvedValue({
+      comments: [
+        {
+          id: 'lc_1',
+          messageId: 'msg_1',
+          sentAt: 1,
+          path: 'packages/sub/README.md',
+          line: 1,
+          quote: '',
+          body: 'check docs',
+        },
+      ],
+      hasMore: false,
+    })
+    vi.spyOn(api, 'getChanges').mockResolvedValue({
+      changes: {
+        branch: 'feat/sub',
+        base: 'origin/main',
+        from: SHA_C,
+        head: SHA_D,
+        commits: [{ sha: SHA_D, subject: 'sub docs' }],
+        files: [
+          { path: 'README.md', previousPath: null, status: 'modified', added: 2, removed: 0 },
+        ],
+        uncommitted: [],
+      },
+      repos: [
+        {
+          sourceId: 'src_main',
+          repoPath: 'packages/sub',
+          embedded: true,
+          mergeable: false,
+          changes: {
+            branch: 'feat/sub',
+            base: 'origin/main',
+            from: SHA_C,
+            head: SHA_D,
+            commits: [{ sha: SHA_D, subject: 'sub docs' }],
+            files: [
+              { path: 'README.md', previousPath: null, status: 'modified', added: 2, removed: 0 },
+            ],
+            uncommitted: [],
+          },
+        },
+      ],
+      mergeable: false,
+    })
+
+    const wrapper = mount(ChangesView, {
+      props: { threadId: 'thr_changes', place: 'full' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.findAll('.repo-section-header')).toHaveLength(0)
+    const commentBadge = wrapper.find('.file-comments')
+    expect(commentBadge.exists()).toBe(true)
+    expect(commentBadge.text()).toContain('1')
+    wrapper.unmount()
+  })
+
+  test('multi-repo turn snapshot view groups turn.repos without base arrows or inheriting primary branch', async () => {
     const getChangesSpy = vi.spyOn(api, 'getChanges')
     const turn: TurnChangesRef = {
       turnId: 'turn_1',
       from: '',
       to: '',
       files: [],
-      total: { files: 2, added: 7, removed: 1 },
+      total: { files: 3, added: 9, removed: 1 },
       repos: [
         {
           sourceId: 'src_main',
@@ -277,6 +340,14 @@ describe('ChangesView single-repo and multi-repo layout', () => {
             { path: 'main.go', previousPath: null, status: 'modified', added: 3, removed: 1 },
           ],
           total: { files: 1, added: 3, removed: 1 },
+        },
+        {
+          sourceId: 'src_secondary',
+          sourceName: 'secondary-repo',
+          from: SHA_A,
+          to: SHA_B,
+          files: [{ path: 'api.go', previousPath: null, status: 'modified', added: 2, removed: 0 }],
+          total: { files: 1, added: 2, removed: 0 },
         },
         {
           sourceId: 'src_main',
@@ -298,11 +369,19 @@ describe('ChangesView single-repo and multi-repo layout', () => {
     await nextTick()
 
     expect(getChangesSpy).not.toHaveBeenCalled()
-    expect(wrapper.find('.changes-meta').text()).toContain('2 个仓库')
+    expect(wrapper.find('.changes-meta').text()).toContain('3 个仓库')
     const headers = wrapper.findAll('.repo-section-header')
-    expect(headers).toHaveLength(2)
-    expect(headers[1]!.text()).toContain('vendor/sdk')
-    expect(headers[1]!.text()).toContain('dev')
+    expect(headers.length).toBeGreaterThanOrEqual(2)
+    expect(headers[0]!.text()).toContain('ariadne/demo')
+    expect(headers[0]!.text()).not.toContain('→')
+    expect(headers[1]!.text()).toContain('secondary-repo')
+    expect(headers[1]!.text()).not.toContain('ariadne/demo')
+    expect(headers[1]!.text()).not.toContain('→')
+    const treeRepoNodes = wrapper.findAll('.file-row.is-repo')
+    expect(treeRepoNodes).toHaveLength(3)
+    expect(treeRepoNodes[1]!.text()).not.toContain('ariadne/demo')
+    expect(treeRepoNodes[2]!.text()).toContain('vendor/sdk')
+    expect(treeRepoNodes[2]!.text()).toContain('dev')
     wrapper.unmount()
   })
 })

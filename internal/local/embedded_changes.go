@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -487,18 +488,46 @@ func pinSnapshotObject(ctx context.Context, git GitRun, cwd, threadID, sha strin
 	_ = git(ctx, []string{"update-ref", ref, sha}, GitOptions{Directory: cwd})
 }
 
-func dropEmbeddedSnapshots(ctx context.Context, worktreeDir, threadID string) {
+func collectExternalEmbeddedCommonDirs(ctx context.Context, worktreeDir string) []string {
 	repos, err := DiscoverEmbeddedRepos(ctx, worktreeDir)
-	if err != nil {
-		return
+	if err != nil || len(repos) == 0 {
+		return nil
 	}
+	seen := make(map[string]struct{}, len(repos))
+	var commonDirs []string
 	for _, repo := range repos {
-		if repo.GitDir == "" {
+		if repo.ObjectStoreInsideWorktree || repo.GitDir == "" || repo.CommonDir == "" {
 			continue
 		}
 		repoGit := NewGit(repo.Path, "file")
 		if valid, err := verifyEmbeddedGitDir(ctx, repoGit, repo.GitDir); err != nil || !valid {
 			continue
+		}
+		key := cleanPathKey(repo.CommonDir)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		commonDirs = append(commonDirs, repo.CommonDir)
+	}
+	return commonDirs
+}
+
+func dropSnapshotsInCommonDirs(ctx context.Context, commonDirs []string, threadID string) {
+	for _, commonDir := range commonDirs {
+		if commonDir == "" {
+			continue
+		}
+		info, err := os.Stat(commonDir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		baseGit := NewGit(commonDir, "file")
+		repoGit := func(ctx context.Context, args []string, options GitOptions) sdk.ExecResult {
+			env := map[string]string{"GIT_DIR": commonDir}
+			maps.Copy(env, options.Env)
+			options.Env = env
+			return baseGit(ctx, args, options)
 		}
 		_ = DropSnapshots(ctx, repoGit, threadID)
 	}
