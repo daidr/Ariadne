@@ -550,3 +550,328 @@ func TestRemoveWorktreeDiscardCleansDirtyNestedWorktreeWithoutDangling(t *testin
 		t.Fatal("host branch lost")
 	}
 }
+
+func TestInspectEmbeddedRepoCustomDefaultBranchAndRemote(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	t.Run("linked worktree on develop remote without origin HEAD protects pushed feature branch", func(t *testing.T) {
+		bareRemote := t.TempDir()
+		bareGit := NewGit(bareRemote, "file")
+		gitOK(t, bareGit, "init", "--bare", "-b", "develop")
+
+		hostDir := t.TempDir()
+		hostGit := NewGit(hostDir, "file")
+		gitOK(t, hostGit, "init", "-b", "develop")
+		gitOK(t, hostGit, "config", "user.name", "Test")
+		gitOK(t, hostGit, "config", "user.email", "test@example.com")
+		writeGit(t, hostDir, "base.txt", "develop base\n")
+		gitCommit(t, hostGit, "develop base")
+		gitOK(t, hostGit, "remote", "add", "origin", bareRemote)
+		gitOK(t, hostGit, "push", "-u", "origin", "develop")
+		// Ensure refs/remotes/origin/HEAD is absent.
+		_ = hostGit(ctx, []string{"symbolic-ref", "-d", "refs/remotes/origin/HEAD"}, GitOptions{})
+
+		workspace := t.TempDir()
+		nested := filepath.Join(workspace, "sub-wt")
+		gitOK(t, hostGit, "worktree", "add", "-qb", "feat/work", nested)
+		nestedGit := NewGit(nested, "file")
+		writeGit(t, nested, "feat.txt", "feature work\n")
+		gitCommit(t, nestedGit, "feature commit")
+		gitOK(t, nestedGit, "push", "-u", "origin", "feat/work")
+
+		repos, err := DiscoverEmbeddedRepos(ctx, workspace)
+		if err != nil || len(repos) != 1 {
+			t.Fatalf("DiscoverEmbeddedRepos = %+v, %v", repos, err)
+		}
+		status, err := InspectEmbeddedRepo(ctx, repos[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !status.Unmerged {
+			t.Fatalf("pushed unmerged feat/work must be Unmerged: %+v", status)
+		}
+
+		// Merge feat/work on the remote develop branch and fetch without fast-forwarding local host develop.
+		mergerDir := t.TempDir()
+		gitOK(t, NewGit(mergerDir, "file"), "clone", "-b", "develop", bareRemote, mergerDir)
+		mergerGit := NewGit(mergerDir, "file")
+		gitOK(t, mergerGit, "config", "user.name", "Test")
+		gitOK(t, mergerGit, "config", "user.email", "test@example.com")
+		gitOK(t, mergerGit, "fetch", "origin", "feat/work")
+		gitOK(t, mergerGit, "merge", "--ff-only", "FETCH_HEAD")
+		gitOK(t, mergerGit, "push", "origin", "develop")
+		gitOK(t, hostGit, "fetch", "origin")
+
+		status, err = InspectEmbeddedRepo(ctx, repos[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Dirty || status.Unmerged || status.Unpushed {
+			t.Fatalf("merged feat/work on origin/develop should be clean & merged: %+v", status)
+		}
+	})
+
+	t.Run("standalone clone without origin HEAD protects pushed feature branch on develop", func(t *testing.T) {
+		bareRemote := t.TempDir()
+		gitOK(t, NewGit(bareRemote, "file"), "init", "--bare", "-b", "develop")
+
+		workspace := t.TempDir()
+		repoDir := filepath.Join(workspace, "sub-standalone")
+		if err := os.MkdirAll(repoDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		repoGit := NewGit(repoDir, "file")
+		gitOK(t, repoGit, "init", "-b", "develop")
+		gitOK(t, repoGit, "config", "user.name", "Test")
+		gitOK(t, repoGit, "config", "user.email", "test@example.com")
+		writeGit(t, repoDir, "base.txt", "base\n")
+		gitCommit(t, repoGit, "base")
+		gitOK(t, repoGit, "remote", "add", "origin", bareRemote)
+		gitOK(t, repoGit, "push", "-u", "origin", "develop")
+
+		gitOK(t, repoGit, "checkout", "-b", "feat/work")
+		writeGit(t, repoDir, "feat.txt", "feature\n")
+		gitCommit(t, repoGit, "feature commit")
+		gitOK(t, repoGit, "push", "-u", "origin", "feat/work")
+
+		repos, err := DiscoverEmbeddedRepos(ctx, workspace)
+		if err != nil || len(repos) != 1 {
+			t.Fatalf("DiscoverEmbeddedRepos = %+v, %v", repos, err)
+		}
+		status, err := InspectEmbeddedRepo(ctx, repos[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Unpushed || !status.Unmerged {
+			t.Fatalf("expected pushed but unmerged feat/work, got %+v", status)
+		}
+
+		// Even if local develop branch is deleted, refs/remotes/origin/develop still exists.
+		gitOK(t, repoGit, "branch", "-D", "develop")
+		status, err = InspectEmbeddedRepo(ctx, repos[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !status.Unmerged {
+			t.Fatalf("expected Unmerged when origin/develop exists without origin/HEAD, got %+v", status)
+		}
+	})
+
+	t.Run("non-origin remote upstream checks upstream/main without HEAD", func(t *testing.T) {
+		bareRemote := t.TempDir()
+		gitOK(t, NewGit(bareRemote, "file"), "init", "--bare", "-b", "main")
+
+		workspace := t.TempDir()
+		repoDir := filepath.Join(workspace, "sub-upstream")
+		if err := os.MkdirAll(repoDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		repoGit := NewGit(repoDir, "file")
+		gitOK(t, repoGit, "init", "-b", "main")
+		gitOK(t, repoGit, "config", "user.name", "Test")
+		gitOK(t, repoGit, "config", "user.email", "test@example.com")
+		writeGit(t, repoDir, "base.txt", "base\n")
+		gitCommit(t, repoGit, "base")
+		gitOK(t, repoGit, "remote", "add", "upstream", bareRemote)
+		gitOK(t, repoGit, "push", "-u", "upstream", "main")
+
+		gitOK(t, repoGit, "checkout", "-b", "feat/pr")
+		writeGit(t, repoDir, "pr.txt", "pr\n")
+		gitCommit(t, repoGit, "pr commit")
+		gitOK(t, repoGit, "push", "-u", "upstream", "feat/pr")
+
+		repos, err := DiscoverEmbeddedRepos(ctx, workspace)
+		if err != nil || len(repos) != 1 {
+			t.Fatalf("DiscoverEmbeddedRepos = %+v, %v", repos, err)
+		}
+		status, err := InspectEmbeddedRepo(ctx, repos[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !status.Unmerged {
+			t.Fatalf("unmerged feat/pr on upstream remote must be Unmerged: %+v", status)
+		}
+
+		// Merge feat/pr into upstream/main and fetch.
+		gitOK(t, repoGit, "push", "upstream", "feat/pr:main")
+		gitOK(t, repoGit, "fetch", "upstream")
+		status, err = InspectEmbeddedRepo(ctx, repos[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Dirty || status.Unpushed || status.Unmerged {
+			t.Fatalf("merged feat/pr on upstream/main should be merged: %+v", status)
+		}
+	})
+
+	t.Run("pure single-branch readonly clone without origin HEAD is considered merged", func(t *testing.T) {
+		bareRemote := t.TempDir()
+		gitOK(t, NewGit(bareRemote, "file"), "init", "--bare", "-b", "trunk")
+
+		seed := t.TempDir()
+		seedGit := NewGit(seed, "file")
+		gitOK(t, seedGit, "init", "-b", "trunk")
+		gitOK(t, seedGit, "config", "user.name", "Test")
+		gitOK(t, seedGit, "config", "user.email", "test@example.com")
+		writeGit(t, seed, "readme.txt", "readonly\n")
+		gitCommit(t, seedGit, "seed")
+		gitOK(t, seedGit, "remote", "add", "origin", bareRemote)
+		gitOK(t, seedGit, "push", "origin", "trunk")
+
+		workspace := t.TempDir()
+		cloneDir := filepath.Join(workspace, "readonly-trunk")
+		gitOK(t, NewGit(workspace, "file"), "clone", "--single-branch", "-b", "trunk", bareRemote, cloneDir)
+		cloneGit := NewGit(cloneDir, "file")
+		_ = cloneGit(ctx, []string{"symbolic-ref", "-d", "refs/remotes/origin/HEAD"}, GitOptions{})
+
+		repos, err := DiscoverEmbeddedRepos(ctx, workspace)
+		if err != nil || len(repos) != 1 {
+			t.Fatalf("DiscoverEmbeddedRepos = %+v, %v", repos, err)
+		}
+		status, err := InspectEmbeddedRepo(ctx, repos[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Dirty || status.Unpushed || status.Unmerged {
+			t.Fatalf("clean single-branch clone should be landed, got %+v", status)
+		}
+	})
+}
+
+func TestRemoveWorktreeLockedNestedWorktreeNoPartialDelete(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	outer, outerGit := initGit(t)
+	writeGit(t, outer, ".gitignore", "nested/\n")
+	gitCommit(t, outerGit, "ignore nested")
+
+	host1, host1Git := initGit(t)
+	writeGit(t, host1, ".gitignore", "inner/\n")
+	gitCommit(t, host1Git, "ignore inner")
+	_, host2Git := initGit(t)
+
+	factory := newFactory(t, FactoryOptions{Path: outer, DataDir: t.TempDir(), DisableClone: true})
+	ws, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_locked_nested"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := ws.Info()
+	dir := info.Label
+	ws.Close()
+
+	nested1 := filepath.Join(dir, "nested", "level1")
+	gitOK(t, host1Git, "worktree", "add", "-qb", "feat/locked1", nested1)
+	nested2 := filepath.Join(nested1, "inner", "level2")
+	gitOK(t, host2Git, "worktree", "add", "-qb", "feat/unlocked2", nested2)
+
+	// Lock the shallower nested worktree while the deeper one is clean, merged, and unlocked.
+	gitOK(t, host1Git, "worktree", "lock", nested1)
+
+	repos, err := DiscoverEmbeddedRepos(ctx, dir)
+	if err != nil || len(repos) != 2 {
+		t.Fatalf("DiscoverEmbeddedRepos = %+v, %v", repos, err)
+	}
+	var lockedStatus EmbeddedRepoStatus
+	for _, repo := range repos {
+		if repo.RelPath == "nested/level1" {
+			lockedStatus, err = InspectEmbeddedRepo(ctx, repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if !lockedStatus.Dirty {
+		t.Fatalf("locked nested worktree must be marked Dirty: %+v", lockedStatus)
+	}
+
+	if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_locked_nested", Branch: *info.Branch}, *info.Base); err != nil || merged {
+		t.Fatalf("locked nested worktree must prevent Merged=true: %t, %v", merged, err)
+	}
+	if removed, err := factory.Remove(ctx, "thr_locked_nested", RemoveOptions{Merged: true}); err != nil || removed {
+		t.Fatalf("locked nested worktree must block Remove: %t, %v", removed, err)
+	}
+	if _, err := os.Stat(nested2); err != nil {
+		t.Fatalf("deeper unlocked nested worktree was partially deleted: %v", err)
+	}
+	if _, err := os.Stat(nested1); err != nil {
+		t.Fatalf("locked nested worktree disappeared: %v", err)
+	}
+
+	// Unlock -> now clean merged removal succeeds completely without dangling worktrees.
+	gitOK(t, host1Git, "worktree", "unlock", nested1)
+	if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_locked_nested", Branch: *info.Branch}, *info.Base); err != nil || !merged {
+		t.Fatalf("unlocked clean nested worktrees should be merged: %t, %v", merged, err)
+	}
+	if removed, err := factory.Remove(ctx, "thr_locked_nested", RemoveOptions{Merged: true}); err != nil || !removed {
+		t.Fatalf("unlocked clean nested worktrees should be removed: %t, %v", removed, err)
+	}
+	if got := registeredWorktreeCount(t, host1Git); got != 1 {
+		t.Fatalf("host1 left dangling worktree: count=%d", got)
+	}
+	if got := registeredWorktreeCount(t, host2Git); got != 1 {
+		t.Fatalf("host2 left dangling worktree: count=%d", got)
+	}
+}
+
+func TestInspectEmbeddedRepoCorruptedGitDirFailsClosed(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	outer, outerGit := initGit(t)
+	writeGit(t, outer, ".gitignore", "broken/\n")
+	gitCommit(t, outerGit, "ignore broken")
+
+	factory := newFactory(t, FactoryOptions{Path: outer, DataDir: t.TempDir(), DisableClone: true})
+	ws, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_corrupt_gitdir"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := ws.Info()
+	dir := info.Label
+	ws.Close()
+
+	// Corrupted .git directory missing HEAD (git would walk up to outer worktree's .git).
+	missingHead := filepath.Join(dir, "broken", "missing-head", ".git")
+	if err := os.MkdirAll(filepath.Join(missingHead, "objects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(missingHead, "refs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Corrupted .git directory missing objects/.
+	missingObjects := filepath.Join(dir, "broken", "missing-objects", ".git")
+	if err := os.MkdirAll(filepath.Join(missingObjects, "refs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeGit(t, filepath.Dir(missingObjects), filepath.Join(".git", "HEAD"), "ref: refs/heads/main\n")
+
+	repos, err := DiscoverEmbeddedRepos(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("expected 2 broken repos, got %+v", repos)
+	}
+	for _, repo := range repos {
+		status, err := InspectEmbeddedRepo(ctx, repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !status.Dirty || !status.Unmerged || !status.Unpushed {
+			t.Fatalf("corrupted embedded .git dir %s must fail closed, got %+v", repo.RelPath, status)
+		}
+	}
+
+	if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_corrupt_gitdir", Branch: *info.Branch}, *info.Base); err != nil || merged {
+		t.Fatalf("corrupted embedded .git dir must block Merged: %t, %v", merged, err)
+	}
+	if removed, err := factory.Remove(ctx, "thr_corrupt_gitdir", RemoveOptions{Merged: true}); err != nil || removed {
+		t.Fatalf("corrupted embedded .git dir must block Remove: %t, %v", removed, err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("outer worktree was deleted despite corrupted embedded .git dir: %v", err)
+	}
+}

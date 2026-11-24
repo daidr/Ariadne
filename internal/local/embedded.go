@@ -310,6 +310,29 @@ func isPathWithin(target, root string) bool {
 	return within(cleanPathKey(resolvedTarget), cleanPathKey(resolvedRoot))
 }
 
+func verifyEmbeddedGitDir(ctx context.Context, repoGit GitRun, expectedGitDir string) (bool, error) {
+	expectedInfo, err := os.Stat(expectedGitDir)
+	if err != nil || !expectedInfo.IsDir() {
+		return false, nil
+	}
+	res := repoGit(ctx, []string{"rev-parse", "--path-format=absolute", "--git-dir"}, GitOptions{})
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if res.ExitCode != 0 {
+		return false, nil
+	}
+	actualPath := filepath.FromSlash(strings.TrimSpace(res.Stdout))
+	if actualPath == "" {
+		return false, nil
+	}
+	actualInfo, err := os.Stat(actualPath)
+	if err != nil || !actualInfo.IsDir() {
+		return false, nil
+	}
+	return os.SameFile(expectedInfo, actualInfo), nil
+}
+
 // InspectEmbeddedRepo evaluates whether an embedded repository has uncommitted
 // work, in-progress Git operations, unpushed commits in an in-worktree object
 // store, or commits not yet merged into its base/default branch.
@@ -318,11 +341,22 @@ func InspectEmbeddedRepo(ctx context.Context, repo EmbeddedRepo) (EmbeddedRepoSt
 		return EmbeddedRepoStatus{}, err
 	}
 	status := EmbeddedRepoStatus{Repo: repo}
-	if repo.GitDir == "" || (repo.Kind == EmbeddedWorktree && repo.RegisteredWorktreePath == "") {
+	failClosed := func() EmbeddedRepoStatus {
 		status.Dirty = true
 		status.Unmerged = true
 		status.Unpushed = repo.ObjectStoreInsideWorktree
-		return status, nil
+		return status
+	}
+	if repo.GitDir == "" || (repo.Kind == EmbeddedWorktree && repo.RegisteredWorktreePath == "") {
+		return failClosed(), nil
+	}
+	repoGit := NewGit(repo.Path, "file")
+	validGitDir, err := verifyEmbeddedGitDir(ctx, repoGit, repo.GitDir)
+	if err != nil {
+		return EmbeddedRepoStatus{}, err
+	}
+	if !validGitDir {
+		return failClosed(), nil
 	}
 	for _, marker := range inProgressGitMarkers {
 		if _, err := os.Lstat(filepath.Join(repo.GitDir, marker)); err == nil || !os.IsNotExist(err) {
@@ -330,8 +364,12 @@ func InspectEmbeddedRepo(ctx context.Context, repo EmbeddedRepo) (EmbeddedRepoSt
 			break
 		}
 	}
+	if repo.Kind == EmbeddedWorktree {
+		if _, err := os.Lstat(filepath.Join(repo.GitDir, "locked")); err == nil || !os.IsNotExist(err) {
+			status.Dirty = true
+		}
+	}
 
-	repoGit := NewGit(repo.Path, "file")
 	sym := repoGit(ctx, []string{"symbolic-ref", "-q", "HEAD"}, GitOptions{})
 	if err := ctx.Err(); err != nil {
 		return EmbeddedRepoStatus{}, err
@@ -405,7 +443,12 @@ func embeddedBranchMerged(ctx context.Context, git GitRun, repo EmbeddedRepo, br
 		return git(ctx, []string{"merge-base", "--is-ancestor", headSHA, targetSHA}, GitOptions{}).ExitCode == 0
 	}
 
-	remoteDefault := resolveRemoteDefaultRef(ctx, git)
+	upstreamRef := resolveUpstreamRef(ctx, git, "")
+	upstreamRemote, upstreamShort, hasRemoteUpstream := remoteNameAndBranch(upstreamRef)
+
+	// 1. Explicit remote default branch (refs/remotes/<remote>/HEAD), preferring
+	//    the current branch's remote, then origin, then any remote HEAD.
+	remoteDefault := resolveRemoteDefaultRef(ctx, git, upstreamRemote)
 	if remoteDefault != "" {
 		if isAncestor(remoteDefault) {
 			return true
@@ -417,60 +460,212 @@ func embeddedBranchMerged(ctx context.Context, git GitRun, repo EmbeddedRepo, br
 		}
 	}
 
-	upstream := git(ctx, []string{"rev-parse", "--symbolic-full-name", "--quiet", "@{upstream}"}, GitOptions{})
-	if upstream.ExitCode == 0 {
-		upstreamRef := strings.TrimSpace(upstream.Stdout)
-		if upstreamRef != "" {
-			branchShort := strings.TrimPrefix(branchRef, "refs/heads/")
-			upstreamShort := shortBranchName(upstreamRef)
-			if upstreamShort != branchShort {
-				if isAncestor(upstreamRef) {
+	// 2. For external object stores (linked worktrees / submodules sharing host
+	//    git dir), check the host repo's HEAD branch and its remote counterpart.
+	hostRef := ""
+	hostHasCommit := false
+	if !repo.ObjectStoreInsideWorktree {
+		hostRef = readCommonHeadRef(repo.CommonDir)
+		if hostRef != "" {
+			if commitSHA(ctx, git, hostRef, "") != "" {
+				hostHasCommit = true
+			}
+			if isAncestor(hostRef) {
+				return true
+			}
+			if hostUpstream := resolveUpstreamRef(ctx, git, hostRef); isAncestor(hostUpstream) {
+				return true
+			}
+			if hostShort, ok := strings.CutPrefix(hostRef, "refs/heads/"); ok && hostShort != "" {
+				if hasRemoteUpstream && isAncestor("refs/remotes/"+upstreamRemote+"/"+hostShort) {
 					return true
 				}
-			} else if isAncestor(upstreamRef) {
-				if remoteDefault == "" {
-					hasKnownRemoteDefault := false
-					for _, candidate := range []string{"refs/remotes/origin/main", "refs/remotes/origin/master"} {
-						if commitSHA(ctx, git, candidate, "") != "" {
-							hasKnownRemoteDefault = true
-							if isAncestor(candidate) {
-								return true
-							}
-						}
-					}
-					if !hasKnownRemoteDefault {
-						return true
-					}
+				if isAncestor("refs/remotes/origin/" + hostShort) {
+					return true
 				}
 			}
 		}
 	}
 
-	if !repo.ObjectStoreInsideWorktree {
-		if hostRef := readCommonHeadRef(repo.CommonDir); isAncestor(hostRef) {
-			return true
+	// 3. Fallback default branch names (main / master) on the current branch's
+	//    remote, origin, a sole configured remote, and (for external object
+	//    stores) local branches.
+	hasExplicitDefaultCandidate := remoteDefault != "" || (hostHasCommit && hostRef != branchRef)
+	checkedCandidates := make(map[string]bool)
+	checkCandidate := func(candidate string) bool {
+		if candidate == "" || checkedCandidates[candidate] {
+			return false
 		}
+		checkedCandidates[candidate] = true
+		if commitSHA(ctx, git, candidate, "") == "" {
+			return false
+		}
+		hasExplicitDefaultCandidate = true
+		return isAncestor(candidate)
 	}
 
-	for _, candidate := range []string{"refs/remotes/origin/main", "refs/remotes/origin/master"} {
-		if isAncestor(candidate) {
+	if hasRemoteUpstream {
+		if checkCandidate("refs/remotes/"+upstreamRemote+"/main") ||
+			checkCandidate("refs/remotes/"+upstreamRemote+"/master") {
 			return true
 		}
 	}
-	if !repo.ObjectStoreInsideWorktree {
-		for _, candidate := range []string{"refs/heads/main", "refs/heads/master"} {
-			if isAncestor(candidate) {
+	if checkCandidate("refs/remotes/origin/main") || checkCandidate("refs/remotes/origin/master") {
+		return true
+	}
+	if !hasExplicitDefaultCandidate {
+		if onlyRemote := soleRemoteName(ctx, git); onlyRemote != "" {
+			if checkCandidate("refs/remotes/"+onlyRemote+"/main") ||
+				checkCandidate("refs/remotes/"+onlyRemote+"/master") {
 				return true
 			}
 		}
 	}
+	if !repo.ObjectStoreInsideWorktree {
+		if checkCandidate("refs/heads/main") || checkCandidate("refs/heads/master") {
+			return true
+		}
+	}
+
+	// 4. Current branch's own upstream tracking ref:
+	//    - If tracking a differently named branch (e.g. feat/work -> origin/develop),
+	//      being an ancestor of that upstream means no unmerged commits over its base.
+	//    - If tracking a same-named remote branch (e.g. feat/work -> origin/feat/work),
+	//      only treat it as merged when no default branch or host HEAD conflicts
+	//      and this is a pure single-branch clone with no other branches.
+	if upstreamRef != "" {
+		branchShort := strings.TrimPrefix(branchRef, "refs/heads/")
+		if !hasRemoteUpstream {
+			upstreamShort = shortBranchName(upstreamRef)
+		}
+		if upstreamShort != branchShort {
+			if isAncestor(upstreamRef) {
+				return true
+			}
+		} else if hasRemoteUpstream && !hasExplicitDefaultCandidate && isAncestor(upstreamRef) {
+			if isPureSingleBranchTracking(ctx, git, repo, branchRef, upstreamRef, upstreamRemote, hostRef, hostHasCommit) {
+				return true
+			}
+		}
+	}
+
 	return false
 }
 
-func resolveRemoteDefaultRef(ctx context.Context, git GitRun) string {
-	origin := git(ctx, []string{"symbolic-ref", "-q", "refs/remotes/origin/HEAD"}, GitOptions{})
-	if origin.ExitCode == 0 {
-		if ref := strings.TrimSpace(origin.Stdout); ref != "" {
+func resolveUpstreamRef(ctx context.Context, git GitRun, branchRef string) string {
+	if branchRef == "" {
+		res := git(ctx, []string{"rev-parse", "--symbolic-full-name", "--quiet", "@{upstream}"}, GitOptions{})
+		if res.ExitCode != 0 {
+			return ""
+		}
+		return strings.TrimSpace(res.Stdout)
+	}
+	res := git(ctx, []string{"for-each-ref", "--format=%(refname)\t%(upstream)", branchRef}, GitOptions{Whole: true})
+	if res.ExitCode != 0 {
+		return ""
+	}
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		name, upstream, ok := strings.Cut(strings.TrimRight(line, "\r"), "\t")
+		if ok && name == branchRef {
+			return strings.TrimSpace(upstream)
+		}
+	}
+	return ""
+}
+
+func remoteNameAndBranch(ref string) (remote, branch string, ok bool) {
+	rest, ok := strings.CutPrefix(ref, "refs/remotes/")
+	if !ok {
+		return "", "", false
+	}
+	remote, branch, ok = strings.Cut(rest, "/")
+	if !ok || remote == "" || branch == "" {
+		return "", "", false
+	}
+	return remote, branch, true
+}
+
+func soleRemoteName(ctx context.Context, git GitRun) string {
+	refs := git(ctx, []string{"for-each-ref", "--format=%(refname)", "refs/remotes"}, GitOptions{Whole: true})
+	if refs.ExitCode != 0 {
+		return ""
+	}
+	sole := ""
+	for _, line := range strings.Split(refs.Stdout, "\n") {
+		remote, _, ok := remoteNameAndBranch(strings.TrimSpace(line))
+		if !ok {
+			continue
+		}
+		if sole == "" {
+			sole = remote
+		} else if sole != remote {
+			return ""
+		}
+	}
+	return sole
+}
+
+func isPureSingleBranchTracking(ctx context.Context, git GitRun, repo EmbeddedRepo, branchRef, upstreamRef, upstreamRemote, hostRef string, hostHasCommit bool) bool {
+	if !repo.ObjectStoreInsideWorktree {
+		if hostHasCommit && hostRef != "" && hostRef != branchRef {
+			return false
+		}
+	} else {
+		localRefs := git(ctx, []string{"for-each-ref", "--format=%(refname)", "refs/heads"}, GitOptions{Whole: true})
+		if localRefs.ExitCode != 0 {
+			return false
+		}
+		for _, line := range strings.Split(localRefs.Stdout, "\n") {
+			name := strings.TrimSpace(line)
+			if name == "" {
+				continue
+			}
+			if name != branchRef {
+				return false
+			}
+		}
+	}
+	remoteRefs := git(ctx, []string{"for-each-ref", "--format=%(refname)", "refs/remotes"}, GitOptions{Whole: true})
+	if remoteRefs.ExitCode != 0 {
+		return false
+	}
+	branchShort := strings.TrimPrefix(branchRef, "refs/heads/")
+	upstreamPrefix := "refs/remotes/" + upstreamRemote + "/"
+	for _, line := range strings.Split(remoteRefs.Stdout, "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" || strings.HasSuffix(name, "/HEAD") {
+			continue
+		}
+		if strings.HasPrefix(name, upstreamPrefix) {
+			if name != upstreamRef {
+				return false
+			}
+			continue
+		}
+		if shortBranchName(name) != branchShort {
+			return false
+		}
+	}
+	return true
+}
+
+func resolveRemoteDefaultRef(ctx context.Context, git GitRun, preferredRemote string) string {
+	tryHead := func(headRef string) string {
+		sym := git(ctx, []string{"symbolic-ref", "-q", headRef}, GitOptions{})
+		if sym.ExitCode == 0 {
+			if ref := strings.TrimSpace(sym.Stdout); ref != "" {
+				return ref
+			}
+		}
+		return ""
+	}
+	if preferredRemote != "" {
+		if ref := tryHead("refs/remotes/" + preferredRemote + "/HEAD"); ref != "" {
+			return ref
+		}
+	}
+	if preferredRemote != "origin" {
+		if ref := tryHead("refs/remotes/origin/HEAD"); ref != "" {
 			return ref
 		}
 	}
@@ -483,11 +678,8 @@ func resolveRemoteDefaultRef(ctx context.Context, git GitRun) string {
 		if name == "" {
 			continue
 		}
-		sym := git(ctx, []string{"symbolic-ref", "-q", name}, GitOptions{})
-		if sym.ExitCode == 0 {
-			if ref := strings.TrimSpace(sym.Stdout); ref != "" {
-				return ref
-			}
+		if ref := tryHead(name); ref != "" {
+			return ref
 		}
 	}
 	return ""
