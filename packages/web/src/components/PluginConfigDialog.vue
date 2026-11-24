@@ -15,24 +15,28 @@ const browse = (_key: string, path: string) =>
 const message = (cause: unknown) =>
   cause instanceof ApiError ? tm(cause.localized) : String(cause)
 
-watch(activePlugin, async (id, _before, onCleanup) => {
-  config.value = null
-  error.value = null
-  values.value = {}
-  if (!id) return
-  let current = true
-  onCleanup(() => {
-    current = false
-  })
-  try {
-    const loaded = await api.getPluginConfig(id)
-    if (!current) return
-    values.value = { ...loaded.values }
-    config.value = loaded
-  } catch (cause) {
-    if (current) error.value = message(cause)
-  }
-})
+watch(
+  activePlugin,
+  async (id, _before, onCleanup) => {
+    config.value = null
+    error.value = null
+    values.value = {}
+    if (!id) return
+    let current = true
+    onCleanup(() => {
+      current = false
+    })
+    try {
+      const loaded = await api.getPluginConfig(id)
+      if (!current) return
+      values.value = { ...loaded.values }
+      config.value = loaded
+    } catch (cause) {
+      if (current) error.value = message(cause)
+    }
+  },
+  { immediate: true },
+)
 
 const schema = computed(() => {
   if (!config.value) return null

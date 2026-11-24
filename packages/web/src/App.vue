@@ -10,27 +10,32 @@ import {
   useColorMode,
   type ComponentDefaults,
 } from 'dou-ui'
-import { computed, onScopeDispose, provide, ref, watch, watchEffect } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  onScopeDispose,
+  provide,
+  ref,
+  watch,
+  watchEffect,
+} from 'vue'
 import { defineAsyncView } from './components/async-view'
 import ConversationPanel from './components/ConversationPanel.vue'
-import DuoSafeAreaRail from './components/DuoSafeAreaRail.vue'
-import ModelSettings, { type SettingsTab } from './components/ModelSettings.vue'
+import type { SettingsTab } from './components/ModelSettings.vue'
 import ProjectList from './components/ProjectList.vue'
-import ShortcutSheet from './components/ShortcutSheet.vue'
 import StartScreen from './components/StartScreen.vue'
-import ProjectSettings from './components/ProjectSettings.vue'
-import PluginConfigDialog from './components/PluginConfigDialog.vue'
 import UnauthorizedScreen from './components/UnauthorizedScreen.vue'
 import WorkspaceHeader from './components/WorkspaceHeader.vue'
-import SideLayout from './side/SideLayout.vue'
 import FullView from './full/FullView.vue'
-import FilePreview from './files/FilePreview.vue'
+import SideLayout from './side/SideLayout.vue'
+import { activePlugin } from './plugin-config'
+import { previewFile } from './files/preview'
 import { douLocale, t } from './i18n'
 import { highlightCodeBlock } from './highlighting/code-block'
 import { onLiveEvent, state } from './store'
 import { notifyAbout } from './notify'
 import { COLOR_MODE_KEY, watchThemeColor } from './color-mode'
-import { useShortcuts } from './shortcuts'
+import { sheetOpen, useShortcuts } from './shortcuts'
 import { openSettingsKey } from './open-settings'
 import { useSidebarLayout } from './sidebar-layout'
 import { foldLayoutKey, usePwaEnvironment } from './pwa'
@@ -146,6 +151,57 @@ const PlanMain = defineAsyncView(() => import('./plan/PlanMain.vue'))
 const ArtifactsOverview = defineAsyncView(() => import('./artifacts/ArtifactsOverview.vue'))
 const TraceView = defineAsyncView(() => import('./trace/TraceView.vue'))
 
+// Modal dialogs and secondary overlays are loaded lazily on first use.
+const DuoSafeAreaRail = defineAsyncComponent(() => import('./components/DuoSafeAreaRail.vue'))
+const ModelSettings = defineAsyncComponent(() => import('./components/ModelSettings.vue'))
+const ProjectSettings = defineAsyncComponent(() => import('./components/ProjectSettings.vue'))
+const PluginConfigDialog = defineAsyncComponent(() => import('./components/PluginConfigDialog.vue'))
+const ShortcutSheet = defineAsyncComponent(() => import('./components/ShortcutSheet.vue'))
+const FilePreview = defineAsyncComponent(() => import('./files/FilePreview.vue'))
+
+// Latch each overlay once opened so close animations finish cleanly and subsequent opens are instant.
+const settingsMounted = ref(false)
+const projectSettingsMounted = ref(false)
+const pluginConfigMounted = ref(false)
+const shortcutSheetMounted = ref(false)
+const filePreviewMounted = ref(false)
+
+watch(
+  settingsOpen,
+  (open) => {
+    if (open) settingsMounted.value = true
+  },
+  { immediate: true },
+)
+watch(
+  () => state.projectSettingsOpen,
+  (open) => {
+    if (open) projectSettingsMounted.value = true
+  },
+  { immediate: true },
+)
+watch(
+  activePlugin,
+  (id) => {
+    if (id) pluginConfigMounted.value = true
+  },
+  { immediate: true },
+)
+watch(
+  sheetOpen,
+  (open) => {
+    if (open) shortcutSheetMounted.value = true
+  },
+  { immediate: true },
+)
+watch(
+  previewFile,
+  (file) => {
+    if (file) filePreviewMounted.value = true
+  },
+  { immediate: true },
+)
+
 // The tab says how many things wait on the user, across projects.
 watchEffect(() => {
   const waiting = state.projects.reduce((sum, project) => sum + project.needsMe, 0)
@@ -254,15 +310,16 @@ watchEffect(() => {
     />
     <template v-if="!unauthorized">
       <ModelSettings
+        v-if="settingsMounted"
         v-model:open="settingsOpen"
         v-model:tab="settingsTab"
         :layout-mode="layoutMode"
       />
-      <PluginConfigDialog />
-      <ShortcutSheet />
-      <ProjectSettings :layout-mode="layoutMode" />
+      <PluginConfigDialog v-if="pluginConfigMounted" />
+      <ShortcutSheet v-if="shortcutSheetMounted" />
+      <ProjectSettings v-if="projectSettingsMounted" :layout-mode="layoutMode" />
       <FullView :compact="isNarrow" />
-      <FilePreview />
+      <FilePreview v-if="filePreviewMounted" />
     </template>
     <DouToastViewport />
   </DouConfigProvider>

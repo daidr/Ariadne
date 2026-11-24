@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./core": "./src/core.ts",
+    "./locales/zh-CN": "./src/locales/zh-CN.ts",
+    "./locales/en": "./src/locales/en.ts"
   }
 }

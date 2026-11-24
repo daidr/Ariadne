@@ -155,6 +155,7 @@ const mcpOptions = computed(() =>
   mcpServers.value.map((server) => ({ value: server.id, label: server.name })),
 )
 
+const now = ref(Date.now())
 const loadedProjectId = ref<string | null>(null)
 const savedSnapshot = ref('')
 
@@ -233,13 +234,13 @@ watch(
       error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
     }
   },
+  { immediate: true },
 )
 
 // A routine's days as tags, Monday first; its next run as it would be once saved.
 const dayOptions = computed(() =>
   WEEK.map((day) => ({ value: day, label: t(`routine.day.${day}`) })),
 )
-const now = ref(Date.now())
 function nextText(routine: ProjectSettings['routines'][number]): string {
   if (!routine.enabled) return t('routine.off')
   const next = nextRunOf(routine, now.value)

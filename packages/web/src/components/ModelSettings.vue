@@ -460,31 +460,35 @@ async function reloadKinds() {
   }
 }
 
-watch(open, async (isOpen) => {
-  if (!isOpen) {
-    if (!hasUnsavedChanges.value) {
-      mounted.value = false
-      savedModelDraft.value = ''
-      error.value = null
-      problems.value = []
+watch(
+  open,
+  async (isOpen) => {
+    if (!isOpen) {
+      if (!hasUnsavedChanges.value) {
+        mounted.value = false
+        savedModelDraft.value = ''
+        error.value = null
+        problems.value = []
+      }
+      return
     }
-    return
-  }
-  if (mounted.value && hasUnsavedChanges.value) return
-  mounted.value = true
-  error.value = null
-  problems.value = []
-  // Not loaded yet: saving now would send an empty list over the saved one.
-  hiddenRoles.value = null
-  try {
-    const [saved, slots] = await Promise.all([api.getModelSettings(), api.getConcurrency()])
-    load(saved)
-    concurrency.value = slots
-    savedModelDraft.value = modelDraft()
-  } catch (cause) {
-    error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
-  }
-})
+    if (mounted.value && hasUnsavedChanges.value) return
+    mounted.value = true
+    error.value = null
+    problems.value = []
+    // Not loaded yet: saving now would send an empty list over the saved one.
+    hiddenRoles.value = null
+    try {
+      const [saved, slots] = await Promise.all([api.getModelSettings(), api.getConcurrency()])
+      load(saved)
+      concurrency.value = slots
+      savedModelDraft.value = modelDraft()
+    } catch (cause) {
+      error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
+    }
+  },
+  { immediate: true },
+)
 
 const newId = (prefix: string) => `${prefix}_${Date.now().toString(36)}`
 

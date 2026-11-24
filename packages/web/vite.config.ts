@@ -6,8 +6,9 @@ import { colorModeScript } from 'dou-ui'
 import type { Plugin } from 'vite'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
-import { sharedShikiPlugin } from './shiki-bundle-plugin'
-import { COLOR_MODE_KEY, THEME_COLORS, themeColorScript } from './src/color-mode'
+import { douUiOnDemandStylesPlugin } from './dou-ui-style-plugin.ts'
+import { sharedShikiPlugin } from './shiki-bundle-plugin.ts'
+import { COLOR_MODE_KEY, THEME_COLORS, themeColorScript } from './src/color-mode.ts'
 
 const PRECOMPRESS_MIN_BYTES = 256
 const PRECOMPRESS_TEXT_EXTS = new Set([
@@ -79,9 +80,44 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: 'vendor-vue',
+              tags: ['$initial'],
+              test: /[\\/]node_modules[\\/].*(?:vue|@vue[\\/]|vue-router)[\\/]/,
+              priority: 40,
+            },
+            {
+              name: 'vendor-rpc',
+              tags: ['$initial'],
+              test: /[\\/]node_modules[\\/].*(?:@bufbuild[\\/]|@connectrpc[\\/])|[\\/]packages[\\/]proto[\\/]/,
+              priority: 35,
+            },
+            {
+              name: 'vendor-dou-ui',
+              tags: ['$initial'],
+              test: /[\\/]node_modules[\\/].*(?:dou-ui|@dou-ui[\\/])/,
+              priority: 30,
+            },
+            {
+              name: 'app-shared',
+              tags: ['$initial'],
+              minShareCount: 2,
+              priority: 10,
+            },
+          ],
+        },
+      },
+    },
+  },
   plugins: [
     sharedShikiPlugin(),
     vue(),
+    douUiOnDemandStylesPlugin(),
     {
       // Write data-dou-theme before the first paint, so dark mode does not flash light.
       name: 'ariadne-color-mode',
