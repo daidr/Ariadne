@@ -43,12 +43,18 @@ export const DEFAULT_REF_PROPS: RefBlockProps = {
   label: '',
 }
 
-/** Deterministic short fallback ID when an inline <ask> omits id. */
-function fallbackAskId(question: string): string {
-  let hash = 2166136261
-  for (let i = 0; i < question.length; i++) {
-    hash ^= question.charCodeAt(i)
-    hash = Math.imul(hash, 16777619)
+const utf8Encoder = new TextEncoder()
+
+/**
+ * Deterministic short fallback ID when an inline <ask> omits id.
+ * Uses 32-bit FNV-1a over UTF-8 bytes to match backend core.FallbackAskID.
+ */
+export function fallbackAskId(question: string): string {
+  const bytes = utf8Encoder.encode(question)
+  let hash = 0x811c9dc5
+  for (let i = 0; i < bytes.length; i++) {
+    hash ^= bytes[i]!
+    hash = Math.imul(hash, 0x01000193)
   }
   return `ask-${(hash >>> 0).toString(16).padStart(8, '0')}`
 }

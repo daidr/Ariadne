@@ -19,7 +19,10 @@ function fetchReferencedArtifact(
   const pending = api
     .getArtifact(id, { versions: false })
     .then((res) => res.artifact)
-    .catch(() => null)
+    .catch(() => {
+      if (detailCache.get(key) === pending) detailCache.delete(key)
+      return null
+    })
   detailCache.set(key, pending)
   return pending
 }
@@ -52,6 +55,7 @@ const summary = computed(() => {
 const detail = ref<ArtifactView | null>(null)
 const loading = ref(false)
 const missing = ref(false)
+let loadSeq = 0
 
 watch(
   () => ({
@@ -61,13 +65,16 @@ watch(
     needsBoard: !!(refProps.value?.groupId || refProps.value?.optionId),
   }),
   async ({ id, version, needsBoard }) => {
+    const seq = ++loadSeq
     if (!id) {
+      loading.value = false
       detail.value = null
       missing.value = true
       return
     }
     // Always fetch when targeting a board group/option or when the summary is not in store yet.
     if (!needsBoard && summary.value) {
+      loading.value = false
       detail.value = null
       missing.value = false
       return
@@ -75,7 +82,7 @@ watch(
     loading.value = true
     missing.value = false
     const loaded = await fetchReferencedArtifact(id, version)
-    if (refProps.value?.artifactId !== id) return
+    if (seq !== loadSeq) return
     loading.value = false
     if (!loaded) {
       detail.value = null

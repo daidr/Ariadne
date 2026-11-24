@@ -634,6 +634,7 @@ export const en: Record<MessageKey, string> = {
   'notice.feedback.board': 'Changed the board',
   'notice.feedback.verifyApproved': 'Approved: {titles}',
   'notice.feedback.verifyChanges': 'Needs changes: {titles}',
+  'notice.feedback.noVerify': 'Cleared verification verdicts',
   'notice.feedback.answer': 'Answered “{question}”: {answer}',
   'notice.feedback.answerEmpty': 'Updated answer for “{question}”',
   'artifact.option.choose': 'Pick this',

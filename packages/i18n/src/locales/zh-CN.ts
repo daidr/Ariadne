@@ -605,6 +605,7 @@ export const zhCN = {
   'notice.feedback.board': '改了画板',
   'notice.feedback.verifyApproved': '验收通过：{titles}',
   'notice.feedback.verifyChanges': '验收需修改：{titles}',
+  'notice.feedback.noVerify': '清空了验收结论',
   'notice.feedback.answer': '回答了「{question}」：{answer}',
   'notice.feedback.answerEmpty': '更新了「{question}」的回答',
   'artifact.option.choose': '选这个',

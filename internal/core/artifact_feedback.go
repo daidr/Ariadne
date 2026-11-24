@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -157,8 +156,6 @@ func HasPendingDecisionGroups(content string) bool {
 	return false
 }
 
-var documentAskFence = regexp.MustCompile("(?ms)^```ask[ \t]*\\r?\\n(.*?)\\r?\\n```[ \t]*$")
-
 type parsedDocumentAsk struct {
 	id        string
 	question  string
@@ -170,57 +167,35 @@ type parsedDocumentAsk struct {
 
 func parseDocumentAsks(content string) ([]parsedDocumentAsk, string) {
 	var asks []parsedDocumentAsk
-	normalized := documentAskFence.ReplaceAllStringFunc(content, func(match string) string {
-		parts := documentAskFence.FindStringSubmatch(match)
-		if len(parts) < 2 {
+	normalized := documentAskBlockPattern.ReplaceAllStringFunc(content, func(match string) string {
+		norm, ok := parseAskMatch(match)
+		if !ok {
 			return match
 		}
-		var raw map[string]any
-		if err := json.Unmarshal([]byte(strings.TrimSpace(parts[1])), &raw); err != nil {
-			return match
-		}
-		question, _ := raw["question"].(string)
-		question = strings.TrimSpace(question)
-		if question == "" {
-			return match
-		}
-		id, _ := raw["id"].(string)
-		id = strings.TrimSpace(id)
-		if id == "" {
-			sum := sha256.Sum256([]byte(question))
-			id = "ask-" + hex.EncodeToString(sum[:4])
-		}
+		id, _ := norm["id"].(string)
+		question, _ := norm["question"].(string)
 		optLabels := map[string]string{}
-		if list, ok := raw["options"].([]any); ok {
-			for i, item := range list {
-				switch v := item.(type) {
-				case string:
-					optLabels[fmt.Sprintf("opt-%d", i+1)] = strings.TrimSpace(v)
-				case map[string]any:
-					oid, _ := v["id"].(string)
-					label, _ := v["label"].(string)
-					oid, label = strings.TrimSpace(oid), strings.TrimSpace(label)
-					if oid == "" {
-						oid = fmt.Sprintf("opt-%d", i+1)
-					}
-					if label != "" {
+		if list, ok := norm["options"].([]any); ok {
+			for _, item := range list {
+				if entry, ok := item.(map[string]any); ok {
+					oid, _ := entry["id"].(string)
+					label, _ := entry["label"].(string)
+					if oid != "" && label != "" {
 						optLabels[oid] = label
 					}
 				}
 			}
 		}
 		selected := []string{}
-		if list, ok := raw["selected"].([]any); ok {
+		if list, ok := norm["selected"].([]any); ok {
 			for _, item := range list {
-				if s, ok := item.(string); ok {
-					if trimmed := strings.TrimSpace(s); trimmed != "" {
-						selected = append(selected, trimmed)
-					}
+				if s, ok := item.(string); ok && s != "" {
+					selected = append(selected, s)
 				}
 			}
 		}
-		note, _ := raw["note"].(string)
-		confirmed, _ := raw["confirmed"].(bool)
+		note, _ := norm["note"].(string)
+		confirmed, _ := norm["confirmed"].(bool)
 		asks = append(asks, parsedDocumentAsk{
 			id:        id,
 			question:  question,
@@ -229,21 +204,12 @@ func parseDocumentAsks(content string) ([]parsedDocumentAsk, string) {
 			note:      strings.TrimSpace(note),
 			confirmed: confirmed,
 		})
-		// Strip user answer fields and default-valued flags when comparing plain prose diffs
-		// so answering an inline question does not also emit a noisy raw JSON edit diff.
-		delete(raw, "selected")
-		delete(raw, "note")
-		if allowNote, ok := raw["allowNote"].(bool); ok && allowNote {
-			delete(raw, "allowNote")
-		}
-		if desc, ok := raw["description"].(string); ok && strings.TrimSpace(desc) == "" {
-			delete(raw, "description")
-		}
-		if !confirmed {
-			delete(raw, "confirmed")
-		}
-		if encoded, err := json.Marshal(raw); err == nil {
-			return "```ask\n" + string(encoded) + "\n```"
+		// Re-serialize into the canonical ```ask block shape with user answer
+		// fields stripped so answering an inline question (even when created via
+		// <ask> tags or shorthand options/omitted defaults) does not emit a noisy
+		// raw JSON edit diff alongside the structured answer item.
+		if encoded, err := MarshalCanonicalAsk(norm, true); err == nil {
+			return "```ask\n" + encoded + "\n```"
 		}
 		return match
 	})

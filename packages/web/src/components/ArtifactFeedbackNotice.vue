@@ -69,6 +69,9 @@ function line(item: ArtifactFeedbackItem): string[] {
       if (changes.length) {
         out.push(t('notice.feedback.verifyChanges', { titles: list(changes) }))
       }
+      if (out.length === 0) {
+        out.push(t('notice.feedback.noVerify'))
+      }
       return out
     }
     case 'answer':
