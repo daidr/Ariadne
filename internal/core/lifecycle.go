@@ -384,7 +384,7 @@ func conversationEvent(w *projectionWriter, e eventstore.Event, d object) {
 }
 
 func addEntry(w *projectionWriter, e eventstore.Event, conversationID any, kind string, ref, payload any, wake bool) {
-	w.run("INSERT INTO transcript (project_id, conversation_id, seq, kind, ref, payload) VALUES (?, ?, ?, ?, ?, ?)", e.ProjectID, conversationID, e.Seq, kind, ref, nullableJSON(payload))
+	w.run("INSERT INTO transcript (project_id, conversation_id, seq, kind, ref, payload, woke) VALUES (?, ?, ?, ?, ?, ?, ?)", e.ProjectID, conversationID, e.Seq, kind, ref, nullableJSON(payload), boolean(wake))
 	if wake {
 		w.run("UPDATE conversations SET pending_seq = ?1, pending_since = CASE WHEN pending_since = 0 THEN ?1 ELSE pending_since END WHERE id = ?2", e.Seq, conversationID)
 	}

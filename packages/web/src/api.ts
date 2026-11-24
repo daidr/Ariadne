@@ -1539,6 +1539,7 @@ export const api = {
           body: JSON.stringify({ artifactId: id, images: [] }),
         }).catch(() => {})
       : domain2Api.sendArtifactFeedback(id, images),
+  withdrawFeedback: (id: string, round: number) => domain2Api.withdrawArtifactFeedback(id, round),
   /** Where a page joins an artifact's room, and the query that lets it in. */
   sharedRoom: (id: string) => ({
     server: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/artifacts`,

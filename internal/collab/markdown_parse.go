@@ -126,7 +126,7 @@ func parseDocumentBlock(node *html.Node, depth int) ([]documentBlock, bool, erro
 	case "script", "style", "iframe", "noscript":
 		return nil, true, nil
 	case "p":
-		if child := onlyElement(node); child != nil && child.Data == "pending" {
+		if child := onlyElement(node); child != nil && (child.Data == "pending" || child.Data == "ask" || child.Data == "ref") {
 			return parseDocumentBlock(child, depth)
 		}
 		block.kind = "paragraph"
@@ -137,6 +137,18 @@ func parseDocumentBlock(node *html.Node, depth int) ([]documentBlock, bool, erro
 		block.props["align"] = validAlign(styleValue(node, "text-align"))
 	case "pending":
 		block.kind = "pending"
+	case "ask":
+		parsed, ok, err := parseAskTag(node)
+		if err != nil || !ok {
+			return nil, false, err
+		}
+		return []documentBlock{parsed}, true, nil
+	case "ref":
+		parsed, ok, err := parseRefTag(node)
+		if err != nil || !ok {
+			return nil, false, err
+		}
+		return []documentBlock{parsed}, true, nil
 	case "hr":
 		block.kind, content = "divider", nil
 	case "pre":
@@ -169,6 +181,18 @@ func parseDocumentBlock(node *html.Node, depth int) ([]documentBlock, bool, erro
 		case "whiteboard":
 			board, err := parseDocumentBoard(attribute(node, "data-prop-board"), attribute(node, "data-prop-height"))
 			return []documentBlock{board}, true, err
+		case "ask":
+			parsed, err := parseAskBlock(attribute(node, "data-prop-ask"))
+			if err != nil {
+				return nil, false, nil
+			}
+			return []documentBlock{parsed}, true, nil
+		case "ref":
+			parsed, err := parseRefBlock(attribute(node, "data-prop-ref"))
+			if err != nil {
+				return nil, false, nil
+			}
+			return []documentBlock{parsed}, true, nil
 		default:
 			blocks, err := parseDocumentNodes(node.FirstChild, depth+1)
 			return blocks, true, err
@@ -221,6 +245,16 @@ func parseCodeBlock(node *html.Node) ([]documentBlock, bool, error) {
 				board.props["height"] = boardHeight(input.Height)
 				return []documentBlock{board}, true, nil
 			}
+		}
+	}
+	if lang == "ask" {
+		if parsed, err := parseAskBlock(words); err == nil {
+			return []documentBlock{parsed}, true, nil
+		}
+	}
+	if lang == "ref" {
+		if parsed, err := parseRefBlock(words); err == nil {
+			return []documentBlock{parsed}, true, nil
 		}
 	}
 	var language any

@@ -79,15 +79,54 @@ func (board whiteboard) summary(positions bool) (items, connectors []args) {
 			}
 		}
 		switch kind {
+		case "group":
+			if title := text(data, "label"); title != "" {
+				item["title"] = title
+			}
+			for _, key := range []string{"note", "pick"} {
+				if value := text(data, key); value != "" {
+					item[key] = value
+				}
+			}
+			if round := int(asNumber(data["round"])); round > 0 {
+				item["round"] = round
+			}
+			if confirmed, ok := data["confirmed"].(bool); ok && confirmed {
+				item["confirmed"] = true
+			}
 		case "option":
-			for _, key := range []string{"title", "note", "chosen"} {
-				if value := data[key]; value != nil && value != false {
+			for _, key := range []string{"title", "note", "chosen", "group", "recommended", "pick"} {
+				if value := data[key]; value != nil && value != false && value != "" {
 					item[key] = value
 				}
 			}
 		case "image":
+			if src := text(data, "src"); src != "" {
+				item["src"] = src
+			}
 			if alt := text(data, "alt"); alt != "" {
 				item["alt"] = alt
+			}
+		case "prototype":
+			for _, key := range []string{"title", "note", "src", "preview"} {
+				if value := text(data, key); value != "" {
+					item[key] = value
+				}
+			}
+			if html := text(data, "html"); html != "" {
+				item["htmlBytes"] = len(html)
+			}
+			if vw := int(asNumber(data["viewportWidth"])); vw > 0 {
+				item["viewportWidth"] = vw
+			}
+			if vh := int(asNumber(data["viewportHeight"])); vh > 0 {
+				item["viewportHeight"] = vh
+			}
+			if tweaks, ok := data["tweaks"].([]any); ok && len(tweaks) > 0 {
+				item["tweaks"] = tweaks
+			}
+			if tweakValues, ok := data["tweakValues"].(map[string]any); ok && len(tweakValues) > 0 {
+				item["tweakValues"] = tweakValues
 			}
 		case "node":
 			if label := text(data, "label"); label != "" {
@@ -372,7 +411,7 @@ func rewriteEmbeddedBoard(stored embeddedBoard, spec boardFenceSpec) (string, er
 			removeEdges = append(removeEdges, id)
 		}
 	}
-	if err := board.change(spec.Items, spec.Connectors, removeItems, removeEdges, spec.Direction, spec.Relayout); err != nil {
+	if err := board.change(spec.Items, spec.Connectors, removeItems, removeEdges, spec.Direction, spec.Relayout, nil, nil); err != nil {
 		return "", err
 	}
 	if spec.Height != 0 {

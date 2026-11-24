@@ -1,12 +1,14 @@
 import { defineFlowExtension, flowKit } from '@dou-ui/flow'
 import { whiteboardKit, type WhiteboardUpload } from '@dou-ui/flow/whiteboard'
+import { decisionGroupNode } from './decision-group-node'
 import { optionNode } from './option-node'
 import { pendingNode } from './pending-node'
+import { prototypeNode } from './prototype-node'
 
-/** Options the agent lays out for the user to compare and pick, and its placeholders. */
+/** Options the agent lays out for the user to compare and pick, prototypes, and placeholders. */
 const options = defineFlowExtension({
   name: 'ariadne-options',
-  nodeTypes: [optionNode, pendingNode],
+  nodeTypes: [optionNode, pendingNode, prototypeNode],
 })
 
 /**
@@ -15,5 +17,8 @@ const options = defineFlowExtension({
  * into the address the board keeps.
  */
 export function whiteboardExtensions(upload?: WhiteboardUpload) {
-  return [flowKit(), whiteboardKit(upload ? { upload } : {}), options]
+  const kit = flowKit().map((extension) =>
+    extension.name === 'groups' ? { ...extension, nodeTypes: [decisionGroupNode] } : extension,
+  )
+  return [kit, whiteboardKit(upload ? { upload } : {}), options]
 }

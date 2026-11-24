@@ -150,6 +150,19 @@ func TestLegacyV67StaticSQLiteUpgradesAndPreservesData(t *testing.T) {
 	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT 1 FROM pragma_table_info('threads') WHERE name = 'effort'").Scan(&hasEffortCol); err != nil || hasEffortCol != 1 {
 		t.Fatalf("threads.effort missing after v67 upgrade: has=%d err=%v", hasEffortCol, err)
 	}
+	for _, col := range []struct{ table, name string }{
+		{"artifact_comments", "reopened_by"},
+		{"artifact_comments", "reopened_at"},
+		{"artifact_feedback", "fingerprints"},
+		{"artifact_feedback", "withdrawn_at"},
+		{"artifact_feedback", "event_seq"},
+		{"transcript", "woke"},
+	} {
+		var exists int
+		if err := repo.Store.DB().QueryRowContext(ctx, "SELECT 1 FROM pragma_table_info(?) WHERE name = ?", col.table, col.name).Scan(&exists); err != nil || exists != 1 {
+			t.Fatalf("%s.%s missing after v67 upgrade: exists=%d err=%v", col.table, col.name, exists, err)
+		}
+	}
 
 	var payloadLen int
 	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT length(payload) FROM transcript WHERE seq = 4").Scan(&payloadLen); err != nil || payloadLen > 300 {
@@ -172,13 +185,24 @@ func TestLegacyV67StaticSQLiteUpgradesAndPreservesData(t *testing.T) {
 		t.Fatalf("plugin table lost: %q %v", pluginValue, err)
 	}
 
-	// Appending new events and taking a backup work cleanly on the upgraded database.
+	// Appending new events (including transcript writes) and taking a backup work cleanly on the upgraded database.
 	if _, err := repo.Store.Append(ctx, []eventstore.NewEvent{{
 		Type:      "project.renamed",
 		ProjectID: "prj_legacy",
 		Data:      json.RawMessage(`{"name":"升级后的项目"}`),
 	}}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := repo.Store.Append(ctx, []eventstore.NewEvent{{
+		Type:      "message.posted",
+		ProjectID: "prj_legacy",
+		Data:      json.RawMessage(`{"conversationId":"thr_legacy","messageId":"msg_after_upgrade","author":"user","kind":"chat","content":"升级后消息"}`),
+	}}); err != nil {
+		t.Fatalf("append message.posted after v67 upgrade: %v", err)
+	}
+	var upgradedWoke int
+	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT woke FROM transcript WHERE conversation_id = 'thr_legacy' AND ref = 'msg_after_upgrade'").Scan(&upgradedWoke); err != nil || upgradedWoke != 1 {
+		t.Fatalf("upgraded transcript woke = %d, want 1 (err=%v)", upgradedWoke, err)
 	}
 	project, err := repo.Reader.GetProject(ctx, "prj_legacy")
 	if err != nil || project.Name != "升级后的项目" {
@@ -270,5 +294,75 @@ func TestLegacyPreV67StaticSQLiteReplaysAndRepairsStaleProjections(t *testing.T)
 	var pluginValue string
 	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT value FROM plugin_fixture").Scan(&pluginValue); err != nil || pluginValue != "keep" {
 		t.Fatalf("plugin table lost on replay: %q %v", pluginValue, err)
+	}
+}
+
+func TestLegacyV71UpgradeBackfillsTranscriptWokeAndSupportsWrites(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "legacy-v71.sqlite")
+	db := initLegacySchemaDB(t, path, 71)
+
+	for _, stmt := range []string{
+		`ALTER TABLE threads ADD COLUMN workspace_source_id TEXT`,
+		`ALTER TABLE threads ADD COLUMN changed_seq INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE threads ADD COLUMN effort TEXT`,
+		`ALTER TABLE plan_nodes ADD COLUMN group_name TEXT NOT NULL DEFAULT ''`,
+		`INSERT INTO events (seq, id, type, project_id, data, at) VALUES
+			 (1, 'evt_1', 'project.created', 'prj_v71', '{"name":"V71项目","coordinatorId":"crd_v71"}', 1800000000000),
+			 (2, 'evt_2', 'message.posted', 'prj_v71', '{"conversationId":"crd_v71","messageId":"msg_old","author":"user","content":"旧消息"}', 1800000000001),
+			 (3, 'evt_3', 'turn.step', 'prj_v71', '{"conversationId":"crd_v71","text":"已处理","sawSeq":2,"finish":"stop","input":{}}', 1800000000002),
+			 (4, 'evt_4', 'message.posted', 'prj_v71', '{"conversationId":"crd_v71","messageId":"msg_pending","author":"user","content":"待处理消息"}', 1800000000003),
+			 (5, 'evt_5', 'message.reacted', 'prj_v71', '{"conversationId":"crd_v71","messageId":"msg_pending","by":"user","emoji":"👍"}', 1800000000004),
+			 (6, 'evt_6', 'artifact.feedback', 'prj_v71', '{"artifactId":"art_v71","round":1,"notify":"crd_v71","items":[],"images":[]}', 1800000000005)`,
+		`INSERT INTO projects (id, name, coordinator_id, created_at, updated_at) VALUES ('prj_v71', 'V71项目', 'crd_v71', 1800000000000, 1800000000005)`,
+		`INSERT INTO conversations (id, project_id, role, pending_seq, pending_since) VALUES ('crd_v71', 'prj_v71', 'coordinator', 6, 4)`,
+		`INSERT INTO transcript (project_id, conversation_id, seq, kind, ref, payload) VALUES
+			 ('prj_v71', 'crd_v71', 2, 'message', 'msg_old', NULL),
+			 ('prj_v71', 'crd_v71', 3, 'step', NULL, '{"text":"已处理","sawSeq":2}'),
+			 ('prj_v71', 'crd_v71', 4, 'message', 'msg_pending', NULL),
+			 ('prj_v71', 'crd_v71', 5, 'note', NULL, '{"type":"user-reacted","messageId":"msg_pending","emoji":"👍"}'),
+			 ('prj_v71', 'crd_v71', 6, 'note', NULL, '{"type":"artifact-feedback","artifactId":"art_v71","round":1}')`,
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("seed v71 db (%s): %v", stmt, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	repo, err := core.Open(ctx, core.Options{
+		Path: path,
+		Now:  func() time.Time { return time.UnixMilli(1800000000010) },
+	})
+	if err != nil {
+		t.Fatalf("open v71 db: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	var version int
+	if err := repo.Store.DB().QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != schema.Version {
+		t.Fatalf("user_version = %d, want %d (err=%v)", version, schema.Version, err)
+	}
+
+	wantWoke := map[int64]int{2: 0, 3: 0, 4: 1, 5: 0, 6: 1}
+	for seq, want := range wantWoke {
+		var got int
+		if err := repo.Store.DB().QueryRowContext(ctx, "SELECT woke FROM transcript WHERE conversation_id = 'crd_v71' AND seq = ?", seq).Scan(&got); err != nil || got != want {
+			t.Fatalf("seq %d woke = %d, want %d (err=%v)", seq, got, want, err)
+		}
+	}
+
+	// Writing new transcript entries after upgrading from v71 works without SQL errors.
+	if _, err := repo.Store.Append(ctx, []eventstore.NewEvent{{
+		Type:      "message.posted",
+		ProjectID: "prj_v71",
+		Data:      json.RawMessage(`{"conversationId":"crd_v71","messageId":"msg_v72","author":"user","kind":"chat","content":"v72新消息"}`),
+	}}); err != nil {
+		t.Fatalf("append message.posted after v71 upgrade: %v", err)
+	}
+	var newWoke int
+	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT woke FROM transcript WHERE conversation_id = 'crd_v71' AND ref = 'msg_v72'").Scan(&newWoke); err != nil || newWoke != 1 {
+		t.Fatalf("new message woke = %d, want 1 (err=%v)", newWoke, err)
 	}
 }

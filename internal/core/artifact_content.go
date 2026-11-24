@@ -16,8 +16,9 @@ import (
 
 const maxArtifactJSON = 8 * 1024 * 1024
 
-var whiteboardNodeTypes = []string{"shape", "sticky", "text", "ink", "image", "default", "group", "option", "pending"}
+var whiteboardNodeTypes = []string{"shape", "sticky", "text", "ink", "image", "default", "group", "option", "pending", "prototype"}
 var dashboardWidgetTypes = []string{"stat", "text", "table", "chart", "pivot", "pending"}
+var prototypeFileURLRe = regexp.MustCompile(`^/api/files/fil_[\w-]+$`)
 
 // ECMAScript whitespace also includes NBSP and FEFF, but excludes U+0085.
 const jsSpace = `[\t\n\v\f\r \x{00a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]`
@@ -177,6 +178,27 @@ func checkWhiteboard(raw any) error {
 		if node.str("type") == "option" {
 			if _, ok := node.obj("data")["title"].(string); !ok {
 				return artifactInvalid(fmt.Sprintf("option %q needs data.title", id))
+			}
+		}
+		if node.str("type") == "prototype" {
+			data := node.obj("data")
+			html := data.str("html")
+			src := data.str("src")
+			if html == "" && src == "" {
+				return artifactInvalid(fmt.Sprintf("prototype %q needs data.html or data.src", id))
+			}
+			if src != "" && !prototypeFileURLRe.MatchString(src) {
+				return artifactInvalid(fmt.Sprintf("prototype %q data.src must be a project file URL", id))
+			}
+			if rawW, has := data["viewportWidth"]; has {
+				if w, ok := number(rawW); !ok || w <= 0 || w > 10000 {
+					return artifactInvalid(fmt.Sprintf("prototype %q data.viewportWidth must be a positive number", id))
+				}
+			}
+			if rawH, has := data["viewportHeight"]; has {
+				if h, ok := number(rawH); !ok || h <= 0 || h > 10000 {
+					return artifactInvalid(fmt.Sprintf("prototype %q data.viewportHeight must be a positive number", id))
+				}
 			}
 		}
 		if node.str("type") == "group" || node.str("type") == "option" {

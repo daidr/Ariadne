@@ -49,9 +49,15 @@ func artifactEvent(w *projectionWriter, e eventstore.Event, d object) {
 	case "artifact.commented":
 		applyComment(w, d["artifactId"], d["by"], d.obj("action"), e.At)
 	case "artifact.feedback":
-		w.run("INSERT INTO artifact_feedback (artifact_id, round, version, notify, items, images, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", d["artifactId"], d["round"], d["version"], d["notify"], encoded(d["items"]), encoded(d["images"]), e.At)
+		fingerprints := d["fingerprints"]
+		if fingerprints == nil {
+			fingerprints = []any{}
+		}
+		w.run("INSERT INTO artifact_feedback (artifact_id, round, version, notify, items, images, fingerprints, event_seq, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", d["artifactId"], d["round"], d["version"], d["notify"], encoded(d["items"]), encoded(d["images"]), encoded(fingerprints), e.Seq, e.At)
 	case "artifact.feedback_done":
 		w.run("UPDATE artifact_feedback SET done_by = ?, done_at = ?, summary = ? WHERE artifact_id = ? AND round = ?", d["by"], e.At, d["summary"], d["artifactId"], d["round"])
+	case "artifact.feedback_withdrawn":
+		w.run("UPDATE artifact_feedback SET withdrawn_at = ? WHERE artifact_id = ? AND round = ?", e.At, d["artifactId"], d["round"])
 	}
 }
 func applyComment(w *projectionWriter, artifactID, by any, action object, at int64) {
@@ -88,9 +94,9 @@ func applyComment(w *projectionWriter, artifactID, by any, action object, at int
 		}
 		save(next)
 	case "resolve":
-		w.run("UPDATE artifact_comments SET resolved_by = ?, resolved_at = ? WHERE id = ?", by, at, action["threadId"])
+		w.run("UPDATE artifact_comments SET resolved_by = ?, resolved_at = ?, reopened_by = NULL, reopened_at = NULL WHERE id = ?", by, at, action["threadId"])
 	case "reopen":
-		w.run("UPDATE artifact_comments SET resolved_by = NULL, resolved_at = NULL WHERE id = ?", action["threadId"])
+		w.run("UPDATE artifact_comments SET resolved_by = NULL, resolved_at = NULL, reopened_by = ?, reopened_at = ? WHERE id = ?", by, at, action["threadId"])
 	case "remove":
 		w.run("DELETE FROM artifact_comments WHERE id = ?", action["threadId"])
 	}

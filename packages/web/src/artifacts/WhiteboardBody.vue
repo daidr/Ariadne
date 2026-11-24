@@ -1,18 +1,34 @@
 <script setup lang="ts">
-import type { ArtifactCommentThreadView, WhiteboardContent } from '@ariadne/core'
+import type {
+  ArtifactCommentAnchor,
+  ArtifactCommentThreadView,
+  WhiteboardContent,
+} from '@ariadne/core'
 import {
   DouFlowControls,
   DouFlowEditor,
   renderFlowPNG,
   type FlowDocument,
   type FlowNode,
+  type FlowViewport,
 } from '@dou-ui/flow'
 import { collaboration } from '@dou-ui/flow/collaboration'
 import '@dou-ui/flow/style.css'
-import type { CommentAction, CommentThread } from 'dou-ui'
-import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { CloseIcon, LocateFixedIcon } from '@dou-ui/icons'
+import { DouButton, DouText, type CommentAction, type CommentThread } from 'dou-ui'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
+import { t } from '../i18n'
+import { artifactFocusTarget, clearArtifactFocus } from './artifact-focus'
 import { commentAuthor, toCommentThread } from './comment-threads'
+import {
+  areNodesOutsideViewport,
+  collectAutoRecommendedOptionIds,
+  summarizeDecisionGroups,
+  type DecisionGroupData,
+  type DecisionGroupSummary,
+} from './decision-groups'
+import { inspectPrototypePoint, resolvePrototypeViewportPoint } from './prototype-bridge'
 import type { SharedArtifact } from './shared'
 import { whiteboardExtensions } from './whiteboard-extensions'
 
@@ -21,6 +37,7 @@ import { whiteboardExtensions } from './whiteboard-extensions'
  * together through `shared`; an older one is shown read-only from `content`.
  */
 const props = defineProps<{
+  artifactId?: string
   content: string
   projectId: string
   readonly: boolean
@@ -30,7 +47,8 @@ const props = defineProps<{
   comments?: ArtifactCommentThreadView[]
 }>()
 const emit = defineEmits<{
-  comment: [action: CommentAction, anchor: { node: string } | { edge: string } | null]
+  comment: [action: CommentAction, anchor: ArtifactCommentAnchor | null]
+  decisionSummary: [summary: DecisionGroupSummary]
 }>()
 const active = defineModel<string | null>('activeComment', { default: null })
 
@@ -51,6 +69,8 @@ const extensions = props.shared
   : base
 
 const board = shallowRef<FlowDocument>({ version: 1, nodes: [], edges: [] })
+const viewport = ref<FlowViewport>({ x: 0, y: 0, zoom: 1 })
+const container = useTemplateRef<HTMLElement>('container')
 const editor = useTemplateRef<InstanceType<typeof DouFlowEditor>>('editor')
 watch(
   () => props.content,
@@ -70,18 +90,148 @@ watch(
 
 const anchorOf = (id: string) => editor.value?.getCommentAnchors()[id] ?? null
 
-function onComment(action: CommentAction) {
+async function onComment(action: CommentAction) {
   if (action.type !== 'create') return emit('comment', action, null)
   const anchor = anchorOf(action.thread.id)
+  if (!anchor) return emit('comment', action, null)
+  if ('edge' in anchor) return emit('comment', action, { edge: anchor.edge })
+
+  const out: ArtifactCommentAnchor = { node: anchor.node }
+  const targetNode = board.value.nodes.find((n) => n.id === anchor.node)
+  const pins = targetNode?.commentPins as Record<string, { x: number; y: number }> | undefined
+  const pin = anchor.at ?? pins?.[action.thread.id]
+  if (pin && typeof pin.x === 'number' && typeof pin.y === 'number') {
+    const hit = resolvePrototypeViewportPoint(board.value, anchor.node, pin.x, pin.y)
+    if (hit) {
+      const element = await inspectPrototypePoint(hit.prototypeNodeId, hit.viewportX, hit.viewportY)
+      if (element) out.element = element
+    }
+  }
   // Where on the item it is pinned stays in the board itself (its commentPins).
-  emit(
-    'comment',
-    action,
-    anchor && ('node' in anchor ? { node: anchor.node } : { edge: anchor.edge }),
-  )
+  emit('comment', action, out)
 }
 
 const ready = computed(() => !props.shared || props.shared.ready.value)
+
+// ---- decision groups & offscreen AI additions ----
+
+const decisionSummary = computed<DecisionGroupSummary>(() => summarizeDecisionGroups(board.value))
+watch(decisionSummary, (summary) => emit('decisionSummary', summary), { immediate: true })
+
+interface OffscreenUpdate {
+  nodeIds: string[]
+  round?: number
+}
+
+const offscreenUpdate = ref<OffscreenUpdate | null>(null)
+const knownNodeIds = new Set<string>()
+let pendingRemoteCheck = false
+
+function onDocUpdate(_update: Uint8Array, origin: unknown) {
+  if (ready.value && origin === props.shared?.provider.value) {
+    pendingRemoteCheck = true
+  }
+}
+
+props.shared?.doc.on('update', onDocUpdate)
+onBeforeUnmount(() => {
+  props.shared?.doc.off('update', onDocUpdate)
+})
+
+watch(
+  ready,
+  (now) => {
+    if (!now) return
+    knownNodeIds.clear()
+    for (const node of board.value.nodes) knownNodeIds.add(node.id)
+  },
+  { immediate: true },
+)
+
+watch(
+  () => board.value.nodes,
+  (nodes) => {
+    if (!ready.value) return
+    const added: FlowNode[] = []
+    const currentIds = new Set<string>()
+    for (const node of nodes) {
+      currentIds.add(node.id)
+      if (!knownNodeIds.has(node.id)) added.push(node)
+    }
+    knownNodeIds.clear()
+    for (const id of currentIds) knownNodeIds.add(id)
+
+    if (!pendingRemoteCheck) return
+    pendingRemoteCheck = false
+    if (!added.length || !container.value) return
+    const canvasSize = {
+      width: container.value.clientWidth,
+      height: container.value.clientHeight,
+    }
+    if (!areNodesOutsideViewport(added, viewport.value, canvasSize)) return
+
+    let round: number | undefined
+    for (const node of added) {
+      if (node.type !== 'group') continue
+      const r = (node.data as DecisionGroupData | undefined)?.round
+      if (typeof r === 'number' && r > (round ?? 0)) round = r
+    }
+    offscreenUpdate.value = { nodeIds: added.map((n) => n.id), round }
+  },
+)
+
+// Dismiss the offscreen prompt automatically once the user pans those nodes into view.
+watch(viewport, (vp) => {
+  const pending = offscreenUpdate.value
+  if (!pending || !container.value) return
+  const byId = new Map(board.value.nodes.map((n) => [n.id, n]))
+  const targets = pending.nodeIds
+    .map((id) => byId.get(id))
+    .filter((n): n is FlowNode => n !== undefined)
+  if (!targets.length) {
+    offscreenUpdate.value = null
+    return
+  }
+  const outside = areNodesOutsideViewport(targets, vp, {
+    width: container.value.clientWidth,
+    height: container.value.clientHeight,
+  })
+  if (!outside) offscreenUpdate.value = null
+})
+
+function locateOffscreen() {
+  const pending = offscreenUpdate.value
+  if (!pending) return
+  editor.value?.fit(pending.nodeIds)
+  offscreenUpdate.value = null
+}
+
+// Focus a specific group or option when opened via a cross-artifact reference card.
+watch(
+  [artifactFocusTarget, ready, () => board.value.nodes.length],
+  ([target, isReady]) => {
+    if (!target || !isReady) return
+    const currentId = props.artifactId
+    if (!currentId || target.artifactId !== currentId) return
+    if (!board.value.nodes.some((n) => n.id === target.nodeId)) return
+    const seq = target.seq
+    const nodeId = target.nodeId
+    clearArtifactFocus(seq)
+    void nextTick(() => {
+      editor.value?.fit([nodeId])
+    })
+  },
+  { immediate: true },
+)
+
+function applyRecommendedPicks(): number {
+  const ids = collectAutoRecommendedOptionIds(board.value)
+  if (!ids.length) return 0
+  editor.value?.transact((tr) => {
+    for (const id of ids) tr.updateData(id, { chosen: true })
+  })
+  return ids.length
+}
 
 // ---- pictures of what the user marked, for the agent ----
 
@@ -92,6 +242,18 @@ const nodesOf = (doc: FlowDocument) => new Map(doc.nodes.map((n) => [n.id, JSON.
 /** Start counting the user's marks from the board as it is now. */
 function markHeard() {
   heard = JSON.stringify(board.value)
+}
+
+function getHeard() {
+  return heard
+}
+
+function setHeard(snapshot: string) {
+  heard = snapshot
+}
+
+function currentSnapshot() {
+  return JSON.stringify(board.value)
 }
 watch(ready, (now) => now && markHeard(), { immediate: true })
 
@@ -137,15 +299,23 @@ async function markedPictures(): Promise<Blob[]> {
   return pictures
 }
 
-defineExpose({ markedPictures, markHeard })
+defineExpose({
+  markedPictures,
+  markHeard,
+  getHeard,
+  setHeard,
+  currentSnapshot,
+  applyRecommendedPicks,
+})
 </script>
 
 <template>
-  <div class="whiteboard">
+  <div ref="container" class="whiteboard">
     <DouFlowEditor
       v-if="ready"
       ref="editor"
       v-model="board"
+      v-model:viewport="viewport"
       v-model:active-comment="active"
       :extensions="extensions"
       :readonly="readonly"
@@ -160,11 +330,33 @@ defineExpose({ markedPictures, markHeard })
     >
       <DouFlowControls :tidy="false" placement="bottom-left" />
     </DouFlowEditor>
+    <div v-if="offscreenUpdate" class="whiteboard-offscreen" role="status" aria-live="polite">
+      <DouText size="sm">
+        {{
+          offscreenUpdate.round
+            ? t('artifact.board.newRoundAdded', { round: offscreenUpdate.round })
+            : t('artifact.board.newContentAdded')
+        }}
+      </DouText>
+      <DouButton size="sm" variant="soft" tone="primary" @click="locateOffscreen">
+        <template #leading><LocateFixedIcon /></template>
+        {{ t('artifact.board.locate') }}
+      </DouButton>
+      <DouButton
+        size="sm"
+        variant="ghost"
+        :aria-label="t('view.close')"
+        @click="offscreenUpdate = null"
+      >
+        <CloseIcon />
+      </DouButton>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .whiteboard {
+  position: relative;
   height: 100%;
   min-height: 0;
 }
@@ -172,5 +364,20 @@ defineExpose({ markedPictures, markHeard })
 .whiteboard-editor {
   width: 100%;
   height: 100%;
+}
+
+.whiteboard-offscreen {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--dou-color-border);
+  border-radius: var(--dou-radius-lg, 10px);
+  background: var(--dou-color-surface, var(--dou-color-bg));
+  box-shadow: var(--dou-shadow-md, 0 4px 12px rgb(0 0 0 / 0.08));
 }
 </style>

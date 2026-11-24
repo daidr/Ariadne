@@ -393,6 +393,10 @@ func renderDocumentBlock(block documentBlock, index int) string {
 		return combineMarkdown("```dou-whiteboard\n"+string(data)+"\n```", children)
 	case "pending":
 		return combineMarkdown("<pending>"+renderInlines(block.inline, true)+"</pending>", children)
+	case "ask":
+		return combineMarkdown(renderAskBlock(block.props), children)
+	case "ref":
+		return combineMarkdown(renderRefBlock(block.props), children)
 	case "toggle":
 		summary := "<details>\n<summary>" + renderInlines(block.inline, true) + "</summary>\n\n"
 		if children != "" {

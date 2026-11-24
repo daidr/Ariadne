@@ -134,7 +134,7 @@ func (turn *turn) previewArtifact(ctx context.Context, call *int, name, body str
 		}
 	case "whiteboard":
 		var change func(string) (string, error)
-		change, err = turn.whiteboardChange(ctx, input)
+		change, err = turn.whiteboardChange(ctx, input, draft.Base)
 		if err == nil {
 			next, err = change(draft.Base)
 		}

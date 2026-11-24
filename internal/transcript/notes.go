@@ -239,16 +239,29 @@ func describeFeedback(note map[string]any) string {
 				chosen := []string{}
 				for _, raw := range arr(item["chosen"]) {
 					value := obj(raw)
-					chosen = append(chosen, `"`+text(value["title"])+`" (`+text(value["id"])+`)`)
+					label := `"` + text(value["title"]) + `" (` + text(value["id"]) + `)`
+					if groupTitle := text(value["groupTitle"]); groupTitle != "" {
+						label = "[" + groupTitle + "] " + label
+					} else if groupID := text(value["group"]); groupID != "" {
+						label = "[" + groupID + "] " + label
+					}
+					chosen = append(chosen, label)
 				}
 				lines = append(lines, "- They picked: "+strings.Join(chosen, ", "))
 			}
 		case "comment":
-			kind := "Reply"
-			if item["action"] == "create" {
-				kind = "New comment"
+			switch item["action"] {
+			case "reopen":
+				lines = append(lines, fmt.Sprintf("- Reopened comment_thread %s, %s.", text(item["threadId"]), text(item["where"])))
+			case "edit":
+				lines = append(lines, fmt.Sprintf("- Edited comment in comment_thread %s, %s: %s", text(item["threadId"]), text(item["where"]), text(item["body"])))
+			default:
+				kind := "Reply"
+				if item["action"] == "create" {
+					kind = "New comment"
+				}
+				lines = append(lines, fmt.Sprintf("- %s in comment_thread %s, %s: %s", kind, text(item["threadId"]), text(item["where"]), text(item["body"])))
 			}
-			lines = append(lines, fmt.Sprintf("- %s in comment_thread %s, %s: %s", kind, text(item["threadId"]), text(item["where"]), text(item["body"])))
 		case "mark":
 			extra := ""
 			if yes(item["text"]) {
@@ -257,6 +270,51 @@ func describeFeedback(note map[string]any) string {
 			lines = append(lines, fmt.Sprintf("- They put a %s (%s) %s%s", text(item["type"]), text(item["nodeId"]), text(item["where"]), extra))
 		case "board":
 			lines = append(lines, "- "+joined(item["changes"], "\n- "))
+		case "answer":
+			for _, raw := range arr(item["answers"]) {
+				value := obj(raw)
+				parts := []string{}
+				if vals := arr(value["values"]); len(vals) > 0 {
+					parts = append(parts, joined(vals, ", "))
+				}
+				if noteText := text(value["note"]); noteText != "" {
+					parts = append(parts, "note: "+noteText)
+				}
+				answerText := "(cleared)"
+				if len(parts) > 0 {
+					answerText = strings.Join(parts, " | ")
+				}
+				lines = append(lines, fmt.Sprintf("- Answered %q (%s): %s", text(value["question"]), text(value["id"]), answerText))
+			}
+		case "tweak":
+			for _, raw := range arr(item["tweaks"]) {
+				entry := obj(raw)
+				where := fmt.Sprintf("prototype %q (%s)", text(entry["title"]), text(entry["nodeId"]))
+				if optTitle := text(entry["optionTitle"]); optTitle != "" {
+					where += fmt.Sprintf(" in option %q (%s)", optTitle, text(entry["optionId"]))
+				}
+				parts := []string{}
+				for _, chRaw := range arr(entry["changes"]) {
+					ch := obj(chRaw)
+					key := text(ch["key"])
+					label := text(ch["label"])
+					unit := text(ch["unit"])
+					val := text(ch["value"]) + unit
+					prev := text(ch["previous"])
+					name := key
+					if label != "" && label != key {
+						name = fmt.Sprintf("%s (%s)", label, key)
+					}
+					if prev != "" {
+						parts = append(parts, fmt.Sprintf("%s = %s (was %s%s)", name, val, prev, unit))
+					} else {
+						parts = append(parts, fmt.Sprintf("%s = %s", name, val))
+					}
+				}
+				if len(parts) > 0 {
+					lines = append(lines, fmt.Sprintf("- Adjusted %s: %s", where, strings.Join(parts, ", ")))
+				}
+			}
 		}
 	}
 	pictures := ""

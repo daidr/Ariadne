@@ -96,7 +96,7 @@ func TestBoardLayoutRanksAndRoutesPastIntermediateItems(t *testing.T) {
 	board := whiteboard{Version: 1, Nodes: []args{}, Edges: []args{}}
 	err := board.change([]args{{"id": "review"}, {"id": "publish"}, {"id": "draft"}},
 		[]args{{"id": "skip", "from": "draft", "to": "publish"}, {"from": "draft", "to": "review"}, {"from": "review", "to": "publish"}},
-		nil, nil, "down", false)
+		nil, nil, "down", false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

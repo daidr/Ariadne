@@ -19,6 +19,39 @@ func commentText(body string) (string, error) {
 	}
 	return clean, nil
 }
+
+func cleanCommentElement(raw any) object {
+	elem := asObject(raw)
+	if elem == nil {
+		return nil
+	}
+	clean := object{}
+	if label := utf16Slice(textutil.Trim(elem.str("label")), 0, 120); label != "" {
+		clean["label"] = label
+	}
+	if role := utf16Slice(textutil.Trim(elem.str("role")), 0, 40); role != "" {
+		clean["role"] = role
+	}
+	if tag := utf16Slice(strings.ToLower(textutil.Trim(elem.str("tag"))), 0, 40); tag != "" {
+		clean["tag"] = tag
+	}
+	if selector := utf16Slice(textutil.Trim(elem.str("selector")), 0, 240); selector != "" {
+		clean["selector"] = selector
+	}
+	if len(clean) == 0 {
+		return nil
+	}
+	if rect := asObject(elem["rect"]); rect != nil {
+		x, okX := number(rect["x"])
+		y, okY := number(rect["y"])
+		w, okW := number(rect["w"])
+		h, okH := number(rect["h"])
+		if okX && okY && okW && okH && w >= 0 && h >= 0 && x >= -0.1 && x <= 1.1 && y >= -0.1 && y <= 1.1 && w <= 1.1 && h <= 1.1 {
+			clean["rect"] = object{"x": x, "y": y, "w": w, "h": h}
+		}
+	}
+	return clean
+}
 func checkedComment(kind, by string, action, thread object) (object, error) {
 	checked := except(action, "")
 	if action.str("type") == "create" {
@@ -61,6 +94,11 @@ func checkedComment(kind, by string, action, thread object) (object, error) {
 			}
 			if truthy(block) {
 				cleanAnchor["block"] = block
+			}
+			if isNode {
+				if elem := cleanCommentElement(anchor["element"]); elem != nil {
+					cleanAnchor["element"] = elem
+				}
 			}
 			return object{"type": "create", "threadId": action["threadId"], "commentId": action["commentId"], "quote": quote, "body": body, "anchor": cleanAnchor}, nil
 		}
@@ -183,8 +221,8 @@ type ArtifactFeedback struct {
 }
 
 func (repo *Repository) SendArtifactFeedback(ctx context.Context, artifactID string, input ArtifactFeedback) (result object, err error) {
-	return repo.sendArtifactFeedback(ctx, artifactID, input.Images, func(_ *projectionWriter, _ ArtifactView) ([]any, error) {
-		return input.Items, nil
+	return repo.sendArtifactFeedback(ctx, artifactID, input.Images, func(_ *projectionWriter, _ ArtifactView) ([]any, []string, error) {
+		return input.Items, nil, nil
 	})
 }
 
@@ -192,7 +230,22 @@ func (repo *Repository) SendPendingArtifactFeedback(ctx context.Context, artifac
 	return repo.sendArtifactFeedback(ctx, artifactID, images, pendingArtifactFeedback)
 }
 
-func (repo *Repository) sendArtifactFeedback(ctx context.Context, artifactID string, fileIDs []string, itemsOf func(*projectionWriter, ArtifactView) ([]any, error)) (result object, err error) {
+// SendAutoPendingArtifactFeedback is used by background idle fallback; it skips
+// whiteboards with active decision groups and documents with active inline ask
+// blocks so structured rounds are submitted explicitly.
+func (repo *Repository) SendAutoPendingArtifactFeedback(ctx context.Context, artifactID string, images []string) (object, error) {
+	return repo.sendArtifactFeedback(ctx, artifactID, images, func(w *projectionWriter, artifact ArtifactView) ([]any, []string, error) {
+		if artifact.Kind == "whiteboard" && HasPendingDecisionGroups(artifact.Content) {
+			return nil, nil, nil
+		}
+		if artifact.Kind == "document" && HasPendingDocumentAsks(artifact.Content) {
+			return nil, nil, nil
+		}
+		return pendingArtifactFeedback(w, artifact)
+	})
+}
+
+func (repo *Repository) sendArtifactFeedback(ctx context.Context, artifactID string, fileIDs []string, itemsOf func(*projectionWriter, ArtifactView) ([]any, []string, error)) (result object, err error) {
 	err = repo.Store.Within(ctx, func(tx *eventstore.Transaction) error {
 		artifact, err := getArtifact(ctx, tx.SQL(), artifactID, nil)
 		if err != nil {
@@ -206,7 +259,7 @@ func (repo *Repository) sendArtifactFeedback(ctx context.Context, artifactID str
 		if notify == nil {
 			return nil
 		}
-		items, err := itemsOf(w, artifact)
+		items, fingerprints, err := itemsOf(w, artifact)
 		if err != nil || len(items) == 0 {
 			return err
 		}
@@ -227,7 +280,10 @@ func (repo *Repository) sendArtifactFeedback(ctx context.Context, artifactID str
 		if w.err != nil {
 			return w.err
 		}
-		data := object{"artifactId": artifactID, "round": latest.integer("round") + 1, "version": artifact.Version, "notify": notify, "items": items, "images": images}
+		if fingerprints == nil {
+			fingerprints = []string{}
+		}
+		data := object{"artifactId": artifactID, "round": latest.integer("round") + 1, "version": artifact.Version, "notify": notify, "items": items, "images": images, "fingerprints": fingerprints}
 		if err := appendChanges(tx, artifact.ProjectID, []change{{"artifact.feedback", data}}); err != nil {
 			return err
 		}
@@ -238,6 +294,72 @@ func (repo *Repository) sendArtifactFeedback(ctx context.Context, artifactID str
 		if len(feedback) > 0 {
 			result = feedback[0]
 		}
+		return nil
+	})
+	return
+}
+
+// WithdrawArtifactFeedback cancels a submitted feedback round if the notified
+// conversation has not yet started a turn that consumes it.
+func (repo *Repository) WithdrawArtifactFeedback(ctx context.Context, artifactID string, round int64) (withdrawn bool, err error) {
+	err = repo.Store.Within(ctx, func(tx *eventstore.Transaction) error {
+		artifact, err := getArtifact(ctx, tx.SQL(), artifactID, nil)
+		if err != nil {
+			return err
+		}
+		w := &projectionWriter{ctx: ctx, tx: tx.SQL()}
+		row := w.one("SELECT round, notify, done_at, withdrawn_at, event_seq FROM artifact_feedback WHERE artifact_id = ? AND round = ?", artifactID, round)
+		if w.err != nil {
+			return w.err
+		}
+		if row == nil {
+			return domainerr.NotFound(fmt.Sprintf("%s round %d", artifactID, round))
+		}
+		if row["withdrawn_at"] != nil {
+			withdrawn = true
+			return nil
+		}
+		if row["done_at"] != nil {
+			return nil
+		}
+		eventSeq := row.integer("event_seq")
+		notify := row.text("notify")
+		if eventSeq <= 0 || notify == "" {
+			return nil
+		}
+		conv := w.one("SELECT turn_started_seq, pending_seq, pending_since FROM conversations WHERE id = ?", notify)
+		if w.err != nil {
+			return w.err
+		}
+		if conv != nil {
+			if conv.integer("turn_started_seq") >= eventSeq {
+				return nil
+			}
+			pendingSeq := conv.integer("pending_seq")
+			pendingSince := conv.integer("pending_since")
+			if pendingSeq < eventSeq || (pendingSince > 0 && pendingSince > eventSeq) {
+				return nil
+			}
+		}
+		seen := w.one("SELECT coalesce(max(CAST(json_extract(payload, '$.sawSeq') AS INTEGER)), 0) AS saw FROM transcript WHERE conversation_id = ? AND kind = 'step'", notify)
+		if w.err != nil {
+			return w.err
+		}
+		if seen != nil && seen.integer("saw") >= eventSeq {
+			return nil
+		}
+		reminded := w.one("SELECT 1 AS one FROM transcript WHERE conversation_id = ? AND seq > ? AND kind = 'note' AND json_extract(payload, '$.type') = 'artifact-feedback-reminder' LIMIT 1", notify, eventSeq)
+		if w.err != nil {
+			return w.err
+		}
+		if reminded != nil {
+			return nil
+		}
+		data := object{"artifactId": artifactID, "round": round, "notify": notify, "eventSeq": eventSeq}
+		if err := appendChanges(tx, artifact.ProjectID, []change{{"artifact.feedback_withdrawn", data}}); err != nil {
+			return err
+		}
+		withdrawn = true
 		return nil
 	})
 	return
@@ -258,6 +380,14 @@ func (repo *Repository) FinishArtifactFeedback(ctx context.Context, artifactID s
 		}
 		if result == nil {
 			return domainerr.NotFound(fmt.Sprintf("%s round %d", artifactID, round))
+		}
+		w := &projectionWriter{ctx: ctx, tx: tx.SQL()}
+		statusRow := w.one("SELECT withdrawn_at FROM artifact_feedback WHERE artifact_id = ? AND round = ?", artifactID, round)
+		if w.err != nil {
+			return w.err
+		}
+		if statusRow != nil && statusRow["withdrawn_at"] != nil {
+			return domainerr.New("error.invalidBody", map[string]any{"reason": "feedback round was withdrawn"})
 		}
 		if result["doneAt"] != nil {
 			return nil
@@ -288,7 +418,7 @@ func (repo *Repository) FinishArtifactFeedback(ctx context.Context, artifactID s
 func requireFeedbackReplies(ctx context.Context, db queryer, artifactID string, round object) error {
 	items := map[string][]object{}
 	for _, item := range objects(round["items"]) {
-		if id := item.str("threadId"); item.str("kind") == "comment" && id != "" {
+		if id := item.str("threadId"); item.str("kind") == "comment" && id != "" && item.str("action") != "reopen" {
 			items[id] = append(items[id], item)
 		}
 	}

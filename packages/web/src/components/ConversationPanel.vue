@@ -458,6 +458,8 @@ const timeline = computed(() =>
     ...view.value.notices
       // Only a removal the user made is worth a line: the others follow from what they see.
       .filter((notice) => notice.kind !== 'worktree-removed' || notice.reason === 'user')
+      // Hide withdrawn artifact feedback notices once rolled back before consumption.
+      .filter((notice) => notice.kind !== 'artifact-feedback' || !notice.withdrawn)
       // A newer recap takes the place of the one before it.
       .filter((notice) => notice.kind !== 'recap' || notice.id === recap.value)
       .map((notice) => ({

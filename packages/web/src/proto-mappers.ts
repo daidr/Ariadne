@@ -719,13 +719,18 @@ function fromProtoFeedbackItem(item: ProtoArtifactFeedbackItem): ArtifactFeedbac
     case 'choice':
       return {
         kind: 'choice',
-        chosen: item.item.value.chosen.map((c) => ({ id: c.id, title: c.title })),
+        chosen: item.item.value.chosen.map((c) => ({
+          id: c.id,
+          title: c.title,
+          ...(c.group ? { group: c.group } : {}),
+          ...(c.groupTitle ? { groupTitle: c.groupTitle } : {}),
+        })),
       }
     case 'comment':
       return {
         kind: 'comment',
         threadId: item.item.value.threadId,
-        action: item.item.value.action as 'create' | 'reply',
+        action: item.item.value.action as 'create' | 'reply' | 'edit' | 'reopen',
         body: item.item.value.body,
         where: item.item.value.where,
       }
@@ -739,6 +744,33 @@ function fromProtoFeedbackItem(item: ProtoArtifactFeedbackItem): ArtifactFeedbac
       }
     case 'board':
       return { kind: 'board', changes: [...item.item.value.changes] }
+    case 'answer':
+      return {
+        kind: 'answer',
+        answers: item.item.value.answers.map((a) => ({
+          id: a.id,
+          question: a.question,
+          values: [...a.values],
+          ...(a.note ? { note: a.note } : {}),
+        })),
+      }
+    case 'tweak':
+      return {
+        kind: 'tweak',
+        tweaks: item.item.value.tweaks.map((entry) => ({
+          nodeId: entry.nodeId,
+          title: entry.title,
+          ...(entry.optionId ? { optionId: entry.optionId } : {}),
+          ...(entry.optionTitle ? { optionTitle: entry.optionTitle } : {}),
+          changes: entry.changes.map((c) => ({
+            key: c.key,
+            label: c.label,
+            value: c.value,
+            ...(c.previous !== undefined ? { previous: c.previous } : {}),
+            ...(c.unit ? { unit: c.unit } : {}),
+          })),
+        })),
+      }
     default:
       return null
   }
@@ -913,6 +945,7 @@ export function fromProtoNoticeView(n: ProtoNoticeView): NoticeView | null {
         items,
         done: p.done,
         summary: p.summary ?? null,
+        ...(p.withdrawn ? { withdrawn: true } : {}),
       }
     }
     case 'artifactComment': {

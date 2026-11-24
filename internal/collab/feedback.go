@@ -25,7 +25,7 @@ func (rooms *Rooms) RunFeedback(ctx context.Context) {
 				if ctx.Err() != nil {
 					return
 				}
-				if _, err := rooms.repo.SendPendingArtifactFeedback(ctx, id, nil); err != nil && ctx.Err() == nil {
+				if _, err := rooms.repo.SendAutoPendingArtifactFeedback(ctx, id, nil); err != nil && ctx.Err() == nil {
 					rooms.report(err)
 				}
 				after = id

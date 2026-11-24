@@ -75,7 +75,38 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 			return err
 		}
 	}
-	if version == schema.Version || version == 67 || version == 68 || version == 69 || version == 70 || version == 71 {
+	if version == 67 || version == 68 || version == 69 || version == 70 || version == 71 {
+		for _, col := range []struct {
+			table, name, def string
+		}{
+			{"artifact_comments", "reopened_by", "TEXT"},
+			{"artifact_comments", "reopened_at", "INTEGER"},
+			{"artifact_feedback", "fingerprints", "TEXT NOT NULL DEFAULT '[]'"},
+			{"artifact_feedback", "withdrawn_at", "INTEGER"},
+			{"artifact_feedback", "event_seq", "INTEGER NOT NULL DEFAULT 0"},
+			{"transcript", "woke", "INTEGER NOT NULL DEFAULT 0"},
+		} {
+			if err := addColumnIfMissing(ctx, tx, col.table, col.name, col.def); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE transcript SET woke = 1
+		 WHERE woke = 0
+		  AND (kind = 'message' OR (kind = 'note' AND coalesce(json_extract(payload, '$.type'), '') NOT IN (
+		   'user-reacted', 'instructions-changed', 'thread-stopped-by-user', 'thread-auto-started',
+		   'thread-reviewed', 'reference-ended', 'artifact-feedback-reminder', 'artifact-edited'
+		  )))
+		  AND EXISTS (
+		   SELECT 1 FROM conversations c
+		   WHERE c.id = transcript.conversation_id
+		    AND c.pending_seq > 0
+		    AND transcript.seq >= c.pending_since
+		    AND transcript.seq <= c.pending_seq
+		  )`); err != nil {
+			return err
+		}
+	}
+	if version == schema.Version || version == 67 || version == 68 || version == 69 || version == 70 || version == 71 || version == 72 {
 		return schema.Create(ctx, tx)
 	}
 	if err := dropProjectionTables(ctx, tx); err != nil {
