@@ -74,6 +74,7 @@ import {
   keepThreadReference,
   setThreadModel,
   stopTurn,
+  threadsById,
   undoMerge,
   undoNotice,
 } from '../store'
@@ -186,14 +187,12 @@ const ownReference = (attentionId: string) =>
 const endedReference = (attentionId: string) =>
   thread.value?.endedReferences.findLast((ended) => ended.attentionId === attentionId) ?? null
 const thread = computed(() =>
-  props.threadId
-    ? (state.detail?.threads.find((item) => item.id === props.threadId) ?? null)
-    : null,
+  props.threadId ? (threadsById.value.get(props.threadId) ?? null) : null,
 )
 /** For a reviewing thread: the thread whose changes it reviews. */
 const reviewed = computed(() => {
   const id = thread.value?.reviewOf
-  return id ? (state.detail?.threads.find((item) => item.id === id) ?? null) : null
+  return id ? (threadsById.value.get(id) ?? null) : null
 })
 /** The brief the autopilot opened this thread with: its very first message. */
 const autoBrief = computed(() =>
@@ -591,7 +590,7 @@ const threadIdOf = (notice: NoticeView) =>
   notice.kind === 'thread-auto-started' ? notice.threadId : ''
 const titleOf = (notice: NoticeView) =>
   notice.kind === 'thread-auto-started'
-    ? (state.detail?.threads.find((item) => item.id === notice.threadId)?.title ?? notice.title)
+    ? (threadsById.value.get(notice.threadId)?.title ?? notice.title)
     : ''
 
 function memoryNotice(notice: Extract<NoticeView, { kind: 'memory' | 'memory-everywhere' }>) {

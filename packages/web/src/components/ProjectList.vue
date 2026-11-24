@@ -1,24 +1,26 @@
 <script setup lang="ts">
+import type { ProjectView } from '@ariadne/core'
 import {
-  DouBadge,
   DouButton,
   DouContextMenu,
   DouEmpty,
   DouSortable,
-  DouSpinner,
   DouText,
+  DouVirtualList,
   useDialog,
+  useLocale,
+  useSortable,
+  type VirtualListExpose,
 } from 'dou-ui'
 import {
   DownloadIcon,
-  FolderIcon,
   ListTreeIcon,
   PencilIcon,
   PlusIcon,
   SettingsIcon,
   TrashIcon,
 } from '@dou-ui/icons'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
 import {
@@ -33,7 +35,11 @@ import {
   state,
   openProjectSettings,
 } from '../store'
-import ProjectActivityPopover from './ProjectActivityPopover.vue'
+import ProjectRow from './ProjectRow.vue'
+
+/** Switch from plain sortable list to virtualized sortable list above this threshold. */
+const PROJECT_VIRTUALIZE_THRESHOLD = 40
+const ROW_GAP = 8
 
 const props = withDefaults(
   defineProps<{ compact?: boolean; active?: boolean; surface?: 'sidebar' | 'popover' }>(),
@@ -45,12 +51,49 @@ const props = withDefaults(
 const emit = defineEmits<{ select: [] }>()
 
 const dialog = useDialog()
+const { t: douT } = useLocale()
 const canReorder = computed(() => state.projects.length > 1)
 const menuOpen = ref(false)
 const inspecting = ref<string>()
 const inPopover = computed(() => props.surface === 'popover')
+const virtualized = computed(() => state.projects.length > PROJECT_VIRTUALIZE_THRESHOLD)
+const rowStride = computed(() => (props.compact ? 44 : inPopover.value ? 36 : 32) + ROW_GAP)
+
+const virtualList = useTemplateRef<VirtualListExpose>('virtualList')
+const sortableItems = computed<ProjectView[]>({
+  get: () => state.projects,
+  set: (projects) => reorderProjects(projects.map((project) => project.id)),
+})
+const virtualSortable = useSortable({
+  items: sortableItems,
+  key: (project) => project.id,
+  handle: () => true,
+  disabled: () => !virtualized.value || !canReorder.value,
+  direction: () => 'vertical',
+  label: (project) => project.name,
+  messages: () => ({
+    item: douT('sortable.item'),
+    lifted: (label, position, total) => douT('sortable.lifted', { label, position, total }),
+    moved: (label, position, total) => douT('sortable.moved', { label, position, total }),
+    dropped: (label, position, total) => douT('sortable.dropped', { label, position, total }),
+    canceled: (label) => douT('sortable.canceled', { label }),
+  }),
+})
 const activityDisabled = computed(
-  () => !!props.compact || inPopover.value || !props.active || menuOpen.value,
+  () =>
+    !!props.compact ||
+    inPopover.value ||
+    !props.active ||
+    menuOpen.value ||
+    virtualSortable.dragging.value !== null,
+)
+
+watch(
+  [virtualized, virtualList],
+  ([isVirtual, list]) => {
+    virtualSortable.container.value = isVirtual ? (list?.el() ?? null) : null
+  },
+  { flush: 'post', immediate: true },
 )
 
 function inspectProject(id: string, open: boolean) {
@@ -58,8 +101,7 @@ function inspectProject(id: string, open: boolean) {
   else if (inspecting.value === id) inspecting.value = undefined
 }
 
-function selectProject(id: string, dismiss?: () => void) {
-  dismiss?.()
+function selectProject(id: string) {
   inspecting.value = undefined
   if (state.detail?.project.id === id) openMain({ kind: 'conversation' })
   else void openProject(id)
@@ -94,7 +136,16 @@ async function moveProject(event: KeyboardEvent, id: string, offset: number) {
   ids.splice(to, 0, id)
   reorderProjects(ids)
   await nextTick()
-  row.focus({ preventScroll: true })
+  if (virtualized.value) {
+    virtualList.value?.scrollToIndex(to, 'nearest')
+    await nextTick()
+    const targetButton = virtualList.value
+      ?.el()
+      ?.querySelector<HTMLButtonElement>(`button[data-project-id="${CSS.escape(id)}"]`)
+    targetButton?.focus({ preventScroll: true })
+  } else {
+    row.focus({ preventScroll: true })
+  }
 }
 
 /** The project the context menu was opened on; away from a project the page's own menu stays. */
@@ -169,7 +220,14 @@ async function confirmDelete(id: string) {
 </script>
 
 <template>
-  <div class="projects" :class="{ 'projects-compact': compact, 'projects-popover': inPopover }">
+  <div
+    class="projects"
+    :class="{
+      'projects-compact': compact,
+      'projects-popover': inPopover,
+      'projects-virtualized': virtualized,
+    }"
+  >
     <div class="projects-head">
       <DouText variant="secondary" size="sm">{{ t('nav.projects') }}</DouText>
       <DouButton
@@ -190,8 +248,40 @@ async function confirmDelete(id: string) {
       :before-open="targetProject"
       @select="(key) => target && act(key, target)"
     >
-      <nav :aria-label="t('nav.projects')">
+      <nav class="projects-nav" :aria-label="t('nav.projects')">
+        <DouVirtualList
+          v-if="virtualized"
+          ref="virtualList"
+          class="projects-virtual"
+          :items="virtualSortable.list.value"
+          item-key="id"
+          :item-size="rowStride"
+          :overscan="6"
+          v-bind="virtualSortable.listAttrs.value"
+          @scroll="inspecting = undefined"
+        >
+          <template #default="{ item, index }">
+            <div class="projects-virtual-slot">
+              <div
+                class="dou-sortable__item is-handle"
+                v-bind="virtualSortable.itemAttrs(item, index)"
+              >
+                <ProjectRow
+                  :project="item"
+                  :current="state.currentId === item.id && !state.starting"
+                  :can-reorder="canReorder"
+                  :inspecting="inspecting === item.id"
+                  :activity-disabled="activityDisabled"
+                  @select="selectProject"
+                  @inspect="inspectProject"
+                  @move="moveProject"
+                />
+              </div>
+            </div>
+          </template>
+        </DouVirtualList>
         <DouSortable
+          v-else
           :model-value="state.projects"
           :item-label="(project) => project.name"
           :disabled="!canReorder"
@@ -199,43 +289,16 @@ async function confirmDelete(id: string) {
           @update:model-value="(projects) => reorderProjects(projects.map((project) => project.id))"
         >
           <template #default="{ item }">
-            <ProjectActivityPopover
-              v-slot="{ inspect, dismiss }"
-              :project-id="item.id"
-              :name="item.name"
-              :open="inspecting === item.id"
-              :disabled="activityDisabled"
-              @update:open="(open) => inspectProject(item.id, open)"
-            >
-              <button
-                type="button"
-                class="projects-open"
-                :data-project-id="item.id"
-                :data-dou-sortable-handle="canReorder ? '' : undefined"
-                :aria-current="state.currentId === item.id && !state.starting ? 'page' : undefined"
-                :aria-expanded="activityDisabled ? undefined : inspecting === item.id"
-                :aria-keyshortcuts="canReorder ? 'Alt+ArrowUp Alt+ArrowDown' : undefined"
-                @click="selectProject(item.id, dismiss)"
-                @focus="inspect"
-                @blur="dismiss"
-                @keydown.esc="dismiss"
-                @keydown.enter.space.stop
-                @keydown.alt.up.prevent="moveProject($event, item.id, -1)"
-                @keydown.alt.down.prevent="moveProject($event, item.id, 1)"
-              >
-                <span class="projects-folder">
-                  <FolderIcon aria-hidden="true" />
-                  <span v-if="item.runningTurns" class="projects-running">
-                    <DouSpinner
-                      :size="8"
-                      :label="t('project.running', { count: item.runningTurns })"
-                    />
-                  </span>
-                </span>
-                <span class="projects-name">{{ item.name }}</span>
-                <DouBadge class="projects-count" :value="item.needsMe" tone="warning" />
-              </button>
-            </ProjectActivityPopover>
+            <ProjectRow
+              :project="item"
+              :current="state.currentId === item.id && !state.starting"
+              :can-reorder="canReorder"
+              :inspecting="inspecting === item.id"
+              :activity-disabled="activityDisabled"
+              @select="selectProject"
+              @inspect="inspectProject"
+              @move="moveProject"
+            />
           </template>
         </DouSortable>
       </nav>
@@ -247,6 +310,7 @@ async function confirmDelete(id: string) {
 <style scoped>
 .projects {
   --project-row-base: var(--dou-color-bg-canvas);
+  --project-row-min-height: 32px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -256,103 +320,56 @@ async function confirmDelete(id: string) {
   padding-bottom: var(--ariadne-safe-bottom);
 }
 
-.projects-popover {
-  --project-row-base: var(--dou-popover-bg, var(--dou-color-bg-surface));
+.projects-virtualized:not(.projects-popover) {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.projects-popover nav {
+.projects-popover {
+  --project-row-base: var(--dou-popover-bg, var(--dou-color-bg-surface));
+  --project-row-min-height: 36px;
+}
+
+.projects-compact {
+  --project-row-min-height: 44px;
+}
+
+.projects-popover .projects-nav {
   max-height: min(60vh, 420px);
   overflow-y: auto;
 }
 
+.projects-popover.projects-virtualized .projects-nav {
+  display: flex;
+  flex-direction: column;
+  height: min(60vh, 420px);
+  overflow: hidden;
+}
+
+.projects-virtualized .projects-nav {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.projects-virtual {
+  flex: 1;
+  min-height: 0;
+}
+
+.projects-virtual-slot {
+  box-sizing: border-box;
+  padding-bottom: 8px;
+}
+
 .projects-head {
   display: flex;
+  flex: none;
   padding-inline-start: 8px;
   align-items: center;
   justify-content: space-between;
-}
-
-.projects-compact .projects-open {
-  min-height: 44px;
-}
-
-.projects-popover .projects-open {
-  min-height: 36px;
-}
-
-.projects-open {
-  --project-row-bg: var(--project-row-base);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: var(--dou-radius-control);
-  background: var(--project-row-bg);
-  color: var(--dou-color-text-secondary);
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
-}
-
-.projects-open[data-dou-sortable-handle] {
-  cursor: grab;
-}
-
-.projects-open:hover {
-  --project-row-bg: color-mix(in oklab, var(--dou-color-text) 6%, var(--project-row-base));
-  color: var(--dou-color-text);
-}
-
-.projects-open[aria-current] {
-  --project-row-bg: color-mix(in oklab, var(--dou-color-text) 8%, var(--project-row-base));
-  color: var(--dou-color-text);
-  font-weight: var(--dou-font-weight-medium);
-}
-
-.projects-open:focus-visible {
-  outline: 2px solid var(--dou-color-focus);
-  outline-offset: -2px;
-}
-
-.projects-folder {
-  position: relative;
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 16px;
-  height: 16px;
-  font-size: 16px;
-}
-
-.projects-running {
-  position: absolute;
-  right: -3px;
-  bottom: -2px;
-  display: flex;
-  padding: 1px;
-  border-radius: 50%;
-  background: var(--project-row-bg);
-  color: var(--dou-color-primary-text);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .projects-running :deep(.dou-spinner) {
-    animation: none;
-  }
-}
-
-.projects-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.projects-count {
-  flex: none;
 }
 </style>

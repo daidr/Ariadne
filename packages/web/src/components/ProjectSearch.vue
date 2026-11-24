@@ -37,6 +37,7 @@ import {
   report,
   startNewProject,
   state,
+  threadsById,
 } from '../store'
 import { openSettingsKey } from '../open-settings'
 import { sheetOpen } from '../shortcuts'
@@ -99,7 +100,7 @@ function retrySearch() {
 }
 
 const stageOf = (threadId: string): ThreadStage | null =>
-  state.detail?.threads.find((thread) => thread.id === threadId)?.stage ?? null
+  threadsById.value.get(threadId)?.stage ?? null
 
 const time = (at: number) =>
   new Date(at).toLocaleString(locale.value, {

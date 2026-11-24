@@ -1,5 +1,5 @@
 import type { TraceRequest, TraceRequestFailure, TraceToolCall, TraceTurn } from '@ariadne/core'
-import { t, tm } from '../i18n'
+import { locale, t, tm } from '../i18n'
 
 /** One line of the trace table: a turn, a request in it, a tool call of that request, … */
 export interface TraceRow {
@@ -100,98 +100,109 @@ function requestRow(turn: TraceTurn, item: TraceRequest): TraceRow {
   }
 }
 
+const turnRowCache = new WeakMap<TraceTurn, { locale: string; row: TraceRow }>()
+
+function buildTurnRow(turn: TraceTurn): TraceRow {
+  const children: TraceRow[] = []
+  for (const [index, item] of turn.items.entries()) {
+    const key = `${turn.turnId}:${index}`
+    switch (item.kind) {
+      case 'request':
+        children.push(requestRow(turn, item))
+        break
+      case 'request-failed':
+        children.push({
+          ...base(turn, String(item.seq), item.startedAt, item.finishedAt),
+          kind: 'request-failed',
+          event: t('trace.kind.requestFailed'),
+          content: oneLine(item.detail),
+          tone: item.willRetry ? 'warning' : 'danger',
+          failure: item,
+        })
+        break
+      case 'retry':
+        children.push({
+          ...base(turn, key, item.at, item.at + item.delayMs),
+          kind: 'retry',
+          event: t('trace.kind.retry'),
+          content: oneLine(item.detail),
+          tone: 'warning',
+          retry: { attempt: item.attempt, delayMs: item.delayMs, detail: item.detail },
+        })
+        break
+      case 'fallback':
+        children.push({
+          ...base(turn, key, item.at, item.at),
+          kind: 'fallback',
+          event: t('trace.kind.fallback'),
+          content: t('trace.fallback', {
+            from: item.from,
+            to: item.to,
+            detail: oneLine(item.detail),
+          }),
+          tone: 'warning',
+        })
+        break
+      case 'compaction-failed':
+        children.push({
+          ...base(turn, key, item.at, item.at),
+          kind: 'compaction-failed',
+          event: t('trace.kind.compactionFailed'),
+          content: oneLine(item.detail),
+          tone: 'warning',
+        })
+        break
+      case 'results-cleared':
+        children.push({
+          ...base(turn, key, item.at, item.at),
+          kind: 'results-cleared',
+          event: t('trace.kind.resultsCleared'),
+          content: t('trace.resultsCleared'),
+        })
+        break
+      case 'instructions':
+        children.push({
+          ...base(turn, key, item.at, item.at),
+          kind: 'instructions',
+          event: t('trace.kind.instructions'),
+          content:
+            t(
+              item.removed
+                ? 'trace.instructionsRemoved'
+                : item.changed
+                  ? 'trace.instructionsChanged'
+                  : 'trace.instructions',
+              { path: item.path },
+            ) + (item.uncommitted ? t('trace.instructionsUncommitted') : ''),
+        })
+        break
+    }
+  }
+  const outcome = turn.outcome ? t(`trace.outcome.${turn.outcome}`) : t('trace.running')
+  return {
+    ...base(turn, turn.turnId, turn.startedAt, turn.finishedAt),
+    kind: 'turn',
+    event: t('trace.kind.turn'),
+    content: [turn.model, outcome, turn.error ? tm(turn.error) : ''].filter(Boolean).join(' · '),
+    tone: turn.outcome === 'failed' ? 'danger' : null,
+    input: turn.usage.input,
+    cached: turn.usage.cached ?? null,
+    cacheWrite: turn.usage.cacheWrite ?? null,
+    output: turn.usage.output,
+    reasoning: turn.usage.reasoning ?? null,
+    ...(children.length ? { children } : {}),
+  }
+}
+
 /** The turns as a tree: turns, then their requests and other events, then tool calls. */
-export function traceRows(turns: TraceTurn[]): TraceRow[] {
+export function traceRows(turns: readonly TraceTurn[]): TraceRow[] {
+  const currentLocale = locale.value
   return turns.map((turn) => {
-    const children: TraceRow[] = []
-    for (const [index, item] of turn.items.entries()) {
-      const key = `${turn.turnId}:${index}`
-      switch (item.kind) {
-        case 'request':
-          children.push(requestRow(turn, item))
-          break
-        case 'request-failed':
-          children.push({
-            ...base(turn, String(item.seq), item.startedAt, item.finishedAt),
-            kind: 'request-failed',
-            event: t('trace.kind.requestFailed'),
-            content: oneLine(item.detail),
-            tone: item.willRetry ? 'warning' : 'danger',
-            failure: item,
-          })
-          break
-        case 'retry':
-          children.push({
-            ...base(turn, key, item.at, item.at + item.delayMs),
-            kind: 'retry',
-            event: t('trace.kind.retry'),
-            content: oneLine(item.detail),
-            tone: 'warning',
-            retry: { attempt: item.attempt, delayMs: item.delayMs, detail: item.detail },
-          })
-          break
-        case 'fallback':
-          children.push({
-            ...base(turn, key, item.at, item.at),
-            kind: 'fallback',
-            event: t('trace.kind.fallback'),
-            content: t('trace.fallback', {
-              from: item.from,
-              to: item.to,
-              detail: oneLine(item.detail),
-            }),
-            tone: 'warning',
-          })
-          break
-        case 'compaction-failed':
-          children.push({
-            ...base(turn, key, item.at, item.at),
-            kind: 'compaction-failed',
-            event: t('trace.kind.compactionFailed'),
-            content: oneLine(item.detail),
-            tone: 'warning',
-          })
-          break
-        case 'results-cleared':
-          children.push({
-            ...base(turn, key, item.at, item.at),
-            kind: 'results-cleared',
-            event: t('trace.kind.resultsCleared'),
-            content: t('trace.resultsCleared'),
-          })
-          break
-        case 'instructions':
-          children.push({
-            ...base(turn, key, item.at, item.at),
-            kind: 'instructions',
-            event: t('trace.kind.instructions'),
-            content:
-              t(
-                item.removed
-                  ? 'trace.instructionsRemoved'
-                  : item.changed
-                    ? 'trace.instructionsChanged'
-                    : 'trace.instructions',
-                { path: item.path },
-              ) + (item.uncommitted ? t('trace.instructionsUncommitted') : ''),
-          })
-          break
-      }
-    }
-    const outcome = turn.outcome ? t(`trace.outcome.${turn.outcome}`) : t('trace.running')
-    return {
-      ...base(turn, turn.turnId, turn.startedAt, turn.finishedAt),
-      kind: 'turn',
-      event: t('trace.kind.turn'),
-      content: [turn.model, outcome, turn.error ? tm(turn.error) : ''].filter(Boolean).join(' · '),
-      tone: turn.outcome === 'failed' ? 'danger' : null,
-      input: turn.usage.input,
-      cached: turn.usage.cached ?? null,
-      cacheWrite: turn.usage.cacheWrite ?? null,
-      output: turn.usage.output,
-      reasoning: turn.usage.reasoning ?? null,
-      ...(children.length ? { children } : {}),
-    }
+    const cached = turnRowCache.get(turn)
+    if (cached && cached.locale === currentLocale) return cached.row
+    const row = buildTurnRow(turn)
+    turnRowCache.set(turn, { locale: currentLocale, row })
+    return row
   })
 }
 

@@ -13,9 +13,16 @@ import ConversationBar from './ConversationBar.vue'
 const mocks = vi.hoisted(() => ({ openView: vi.fn() }))
 vi.mock('../api', () => ({ api: { streamCommandOutput: vi.fn() } }))
 vi.mock('../store', async () => {
-  const { reactive } = await import('vue')
+  const { computed, reactive } = await import('vue')
+  const mockState = reactive({
+    stream: 'open',
+    detail: null as { threads: { id: string }[] } | null,
+  })
   return {
-    state: reactive({ stream: 'open', detail: null as { threads: { id: string }[] } | null }),
+    state: mockState,
+    threadsById: computed(
+      () => new Map((mockState.detail?.threads ?? []).map((item) => [item.id, item])),
+    ),
     stopBackground: vi.fn(),
     report: vi.fn(),
     endWait: vi.fn(),

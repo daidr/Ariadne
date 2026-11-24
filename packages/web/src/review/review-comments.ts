@@ -4,7 +4,7 @@ import { ScanSearchIcon } from '@dou-ui/icons'
 import type { CommentAuthor, CommentThread } from 'dou-ui'
 import { computed, h, type ComputedRef } from 'vue'
 import { t } from '../i18n'
-import { state } from '../store'
+import { threadsById } from '../store'
 import ReviewCommentWidget from './ReviewCommentWidget.vue'
 
 /** One reviewer comment with its round, what the author answered, and when. */
@@ -110,7 +110,7 @@ export function useReviewComments(
   })
   const authorOf = (): CommentAuthor => ({
     id: authorId(),
-    name: state.detail?.threads.find((thread) => thread.id === authorId())?.title ?? '',
+    name: threadsById.value.get(authorId())?.title ?? '',
   })
   const gutter = computed<CodeDiffGutter>(() => ({
     name: 'review-comments',
