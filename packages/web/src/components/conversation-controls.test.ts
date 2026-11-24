@@ -184,6 +184,113 @@ test('changes capsule hides zero-file diffs and falls back to label alongside a 
   expect(mocks.openView).toHaveBeenCalledWith({ kind: 'changes', threadId: 'thr-1' })
 })
 
+test('conversation bar converts vertical wheel to horizontal scroll and toggles edge fades', async () => {
+  const observerState: { callback: ResizeObserverCallback | null } = { callback: null }
+  const OriginalResizeObserver = globalThis.ResizeObserver
+  globalThis.ResizeObserver = class MockResizeObserver {
+    constructor(cb: ResizeObserverCallback) {
+      observerState.callback = cb
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver
+
+  try {
+    const artifact = { id: 'art-1', kind: 'document', title: '验收记录' } as ArtifactSummary
+    const wrapper = mount(ConversationBar, {
+      props: {
+        conversationId: 'thr-1',
+        changes: { threadId: 'thr-1', totals: { added: 12, removed: 4, files: 2 } },
+        artifacts: [artifact],
+        background: commands,
+      },
+      attachTo: document.body,
+      global,
+    })
+    wrappers.push(wrapper)
+
+    const bar = wrapper.get<HTMLElement>('[data-conversation-bar]').element
+    let scrollWidth = 200
+    let clientWidth = 200
+    let scrollLeft = 0
+    Object.defineProperties(bar, {
+      scrollWidth: { configurable: true, get: () => scrollWidth },
+      clientWidth: { configurable: true, get: () => clientWidth },
+      scrollLeft: {
+        configurable: true,
+        get: () => scrollLeft,
+        set: (value: number) => {
+          scrollLeft = value
+        },
+      },
+    })
+
+    // Non-overflowing bar has no fades and does not hijack vertical wheel scrolling.
+    observerState.callback?.([], {} as ResizeObserver)
+    await flushPromises()
+    expect(bar.classList.contains('is-scrollable')).toBe(false)
+    expect(bar.classList.contains('is-fade-left')).toBe(false)
+    expect(bar.classList.contains('is-fade-right')).toBe(false)
+    const nonOverflowWheel = new WheelEvent('wheel', { deltaY: 60, cancelable: true })
+    bar.dispatchEvent(nonOverflowWheel)
+    expect(nonOverflowWheel.defaultPrevented).toBe(false)
+    expect(scrollLeft).toBe(0)
+
+    // Overflowing bar at start shows only right edge fade.
+    scrollWidth = 420
+    clientWidth = 200
+    observerState.callback?.([], {} as ResizeObserver)
+    await flushPromises()
+    expect(bar.classList.contains('is-scrollable')).toBe(true)
+    expect(bar.classList.contains('is-fade-left')).toBe(false)
+    expect(bar.classList.contains('is-fade-right')).toBe(true)
+
+    // Vertical mouse wheel scrolls horizontally and reveals both edge fades in the middle.
+    const wheelRight = new WheelEvent('wheel', { deltaY: 100, cancelable: true })
+    bar.dispatchEvent(wheelRight)
+    await flushPromises()
+    expect(wheelRight.defaultPrevented).toBe(true)
+    expect(scrollLeft).toBe(100)
+    expect(bar.classList.contains('is-fade-left')).toBe(true)
+    expect(bar.classList.contains('is-fade-right')).toBe(true)
+
+    // Trackpad horizontal scroll (deltaX !== 0) and pinch-zoom (ctrlKey) are left to native handling.
+    const trackpadWheel = new WheelEvent('wheel', { deltaX: 24, deltaY: 4, cancelable: true })
+    bar.dispatchEvent(trackpadWheel)
+    expect(trackpadWheel.defaultPrevented).toBe(false)
+    expect(scrollLeft).toBe(100)
+
+    const zoomWheel = new WheelEvent('wheel', { deltaY: 40, cancelable: true })
+    Object.defineProperty(zoomWheel, 'ctrlKey', { value: true })
+    bar.dispatchEvent(zoomWheel)
+    expect(zoomWheel.defaultPrevented).toBe(false)
+    expect(scrollLeft).toBe(100)
+
+    // Line-mode wheel scrolls to the end and clears the right edge fade.
+    const wheelEnd = new WheelEvent('wheel', {
+      deltaY: 10,
+      deltaMode: WheelEvent.DOM_DELTA_LINE,
+      cancelable: true,
+    })
+    bar.dispatchEvent(wheelEnd)
+    await flushPromises()
+    expect(wheelEnd.defaultPrevented).toBe(true)
+    expect(scrollLeft).toBe(220)
+    expect(bar.classList.contains('is-fade-left')).toBe(true)
+    expect(bar.classList.contains('is-fade-right')).toBe(false)
+
+    // Native scroll back to start clears the left edge fade.
+    scrollLeft = 0
+    bar.dispatchEvent(new Event('scroll'))
+    await flushPromises()
+    expect(bar.classList.contains('is-fade-left')).toBe(false)
+    expect(bar.classList.contains('is-fade-right')).toBe(true)
+  } finally {
+    globalThis.ResizeObserver = OriginalResizeObserver
+  }
+})
+
 test('the status slot survives working, queued, and idle states', async () => {
   const wrapper = mount(ConversationActivity, {
     props: {
