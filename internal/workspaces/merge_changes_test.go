@@ -289,3 +289,55 @@ func TestSyncBranchChangesSkipsZeroFallbackWhenUncommittedSnapshotFails(t *testi
 		t.Fatalf("expected uncommitted snapshot retry to populate totals, got %#v", afterRetry.Changes)
 	}
 }
+
+func TestThreadChangesSinceFastPathSelfHealsStaleTotalsWhenOuterEmpty(t *testing.T) {
+	ctx := t.Context()
+	repo, manager, project, _ := initHostedChangesRepo(t)
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Self-heal stale totals"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.ForThread(ctx, project.ID, thread.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Capture the clean outer repo's revisions (Head == BaseHead, 0 outer changes).
+	initial, err := manager.ThreadChanges(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initial.Changes == nil || initial.Changes.Head == "" || initial.Changes.Head != initial.Changes.BaseHead {
+		t.Fatalf("expected clean outer repo with Head==BaseHead, got %+v", initial.Changes)
+	}
+	known := &sdk.BranchRevisions{Head: initial.Changes.Head, BaseHead: initial.Changes.BaseHead}
+
+	// Seed stale non-zero totals (simulating pre-fix false embedded diff persisted in threads.changes).
+	if err := repo.SyncBranchChanges(ctx, thread.ID, core.ChangeTotals{Files: 500, Added: 10000, Removed: 2000}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Polling with matching known revisions must not stay stuck on Unchanged=true; it must self-heal totals to 0.
+	healed, err := manager.ThreadChangesSince(ctx, thread.ID, known)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if healed.Unchanged {
+		t.Fatalf("expected stale non-zero totals on empty outer repo to bypass Unchanged fast path")
+	}
+	afterHeal, err := repo.GetThread(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !core.SameChangeTotals(afterHeal.Changes, core.ChangeTotals{}) {
+		t.Fatalf("expected thread.Changes to be reconciled to zero, got %#v", afterHeal.Changes)
+	}
+
+	// Subsequent poll with matching known revisions now takes the Unchanged fast path.
+	nextPoll, err := manager.ThreadChangesSince(ctx, thread.ID, known)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !nextPoll.Unchanged {
+		t.Fatalf("expected Unchanged=true once stale totals are cleared, got %+v", nextPoll)
+	}
+}

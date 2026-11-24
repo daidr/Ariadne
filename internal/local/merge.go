@@ -255,6 +255,11 @@ func outerWorktreeBlocked(ctx context.Context, git GitRun, directory string) (bo
 		if _, err := os.Lstat(filepath.Join(outerGitDir, "locked")); err == nil || !os.IsNotExist(err) {
 			return true, nil
 		}
+		for _, marker := range inProgressGitMarkers {
+			if _, err := os.Lstat(filepath.Join(outerGitDir, marker)); err == nil || !os.IsNotExist(err) {
+				return true, nil
+			}
+		}
 	}
 	statusArgs := append(worktreeConfigArgs(ctx, directory), "status", "--porcelain=v1", "-z", "--untracked-files=normal")
 	status := git(ctx, statusArgs, GitOptions{Directory: directory, Whole: true})
@@ -287,6 +292,7 @@ func RemoveWorktree(ctx context.Context, git GitRun, directory string, options R
 		}
 		embedded = nil
 	}
+	outerHasSubmodule := hasDirectSubmodule(embedded, directory)
 	if !options.Discard && len(embedded) > 0 {
 		for _, repo := range embedded {
 			status, err := InspectEmbeddedRepo(ctx, repo)
@@ -297,7 +303,7 @@ func RemoveWorktree(ctx context.Context, git GitRun, directory string, options R
 				return false, nil
 			}
 		}
-		if len(nestedWorktreesDeepestFirst(embedded)) > 0 {
+		if outerHasSubmodule || len(nestedWorktreesDeepestFirst(embedded)) > 0 {
 			blocked, err := outerWorktreeBlocked(ctx, git, directory)
 			if err != nil {
 				return false, err
@@ -319,6 +325,8 @@ func RemoveWorktree(ctx context.Context, git GitRun, directory string, options R
 	args := []string{"worktree", "remove"}
 	if options.Discard {
 		args = append(args, "--force", "--force")
+	} else if outerHasSubmodule {
+		args = append(args, "--force")
 	}
 	args = append(args, "--", directory)
 	result := git(ctx, args, GitOptions{})
@@ -326,7 +334,7 @@ func RemoveWorktree(ctx context.Context, git GitRun, directory string, options R
 		return true, nil
 	}
 	lower := strings.ToLower(result.Stderr)
-	if strings.Contains(lower, "modified or untracked") || strings.Contains(lower, "use --force") || strings.Contains(lower, "locked") {
+	if strings.Contains(lower, "modified or untracked") || strings.Contains(lower, "use --force") || strings.Contains(lower, "locked") || strings.Contains(lower, "submodules") {
 		return false, nil
 	}
 	return false, gitFailure(result, "git worktree remove")
