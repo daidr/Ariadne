@@ -208,6 +208,17 @@ func (turn *turn) isReviewThread(ctx context.Context) bool {
 	return turn.isReview
 }
 
+func (turn *turn) compactionState(ctx context.Context, entries []transcript.Entry, upTo float64) (string, error) {
+	if transcript.HasSucceededUpdateTodoAfter(entries, upTo) {
+		return "", nil
+	}
+	todo, err := turn.Repository.GetTodo(ctx, turn.conversation.ID)
+	if err != nil {
+		return "", err
+	}
+	return transcript.FormatTodoState(transcript.ParseTodoItems(todo["items"]), transcript.CompactionTodoLead), nil
+}
+
 func (turn *turn) todoHint(ctx context.Context, state *todoHintState) (string, error) {
 	todo, err := turn.Repository.GetTodo(ctx, turn.conversation.ID)
 	if err != nil {
@@ -222,6 +233,12 @@ func (turn *turn) todoHint(ctx context.Context, state *todoHintState) (string, e
 			break
 		}
 	}
+	withCurrentTodo := func(hint string) string {
+		if block := transcript.FormatTodoState(transcript.ParseTodoItems(todo["items"]), transcript.CurrentTodoLead); block != "" {
+			return hint + "\n" + block
+		}
+		return hint
+	}
 	coordinator := turn.conversation.Role == "coordinator"
 	clearedThisTurn := coordinator && len(items) == 0 && state.todoThisTurn
 	if (len(items) == 0 && !clearedThisTurn) || (finished && !state.todoThisTurn) {
@@ -231,9 +248,9 @@ func (turn *turn) todoHint(ctx context.Context, state *todoHintState) (string, e
 		state.hintedMissing = true
 		if len(items) > 0 {
 			if coordinator {
-				return coordinatorTodoFinishedHint, nil
+				return withCurrentTodo(coordinatorTodoFinishedHint), nil
 			}
-			return todoFinishedHint, nil
+			return withCurrentTodo(todoFinishedHint), nil
 		}
 		if coordinator {
 			return coordinatorTodoMissingHint, nil
@@ -245,9 +262,9 @@ func (turn *turn) todoHint(ctx context.Context, state *todoHintState) (string, e
 	}
 	state.hintedStale = true
 	if coordinator {
-		return coordinatorTodoStaleHint, nil
+		return withCurrentTodo(coordinatorTodoStaleHint), nil
 	}
-	return todoStaleHint, nil
+	return withCurrentTodo(todoStaleHint), nil
 }
 
 func (runner *Runner) Resolve(ctx context.Context, conversation core.ConversationView) (*settings.ResolvedModel, error) {
@@ -510,7 +527,11 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 					return err
 				}
 				if summary.OK {
-					if err := turn.Repository.CompactConversation(ctx, conversation.ID, turn.id, core.Compaction{Summary: summary.Text, UpTo: *cut, SawSeq: saw, Usage: modelstep.WithCost(summary.Usage, price), Call: string(encoded), Timing: summary.Timing, Reasoning: summary.Reasoning, UserTokens: int64(budget)}); err != nil {
+					state, err := turn.compactionState(ctx, entries, *cut)
+					if err != nil {
+						return err
+					}
+					if err := turn.Repository.CompactConversation(ctx, conversation.ID, turn.id, core.Compaction{Summary: summary.Text, UpTo: *cut, SawSeq: saw, Usage: modelstep.WithCost(summary.Usage, price), Call: string(encoded), Timing: summary.Timing, Reasoning: summary.Reasoning, UserTokens: int64(budget), State: state}); err != nil {
 						return err
 					}
 					turn.fileTracker().forgetReads(conversation.ID)

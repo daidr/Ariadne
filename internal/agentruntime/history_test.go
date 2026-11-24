@@ -359,3 +359,162 @@ func TestRenderHistoryMidTurnCompactionKeepsLatestToolResultWhenSummaryFillsBudg
 		t.Fatalf("expected omission note for dropped earlier tool calls: %s", out.Text)
 	}
 }
+
+func TestRenderHistoryRecoversOmittedUpdateTodo(t *testing.T) {
+	messages := []sdk.Message{
+		{Role: "user", Content: "请安排这几件事"},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{
+			ID:        "todo_1",
+			Name:      "update_todo",
+			Arguments: `{"items":[{"label":"跟进 PR #229","status":"waiting","detail":"等 CI 通过"},{"label":"整理发布说明","status":"next"}]}`,
+		}}},
+		{Role: "tool", ToolCallID: "todo_1", Content: "Todo list updated."},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: "read_1", Name: "read_file", Arguments: `{"path":"a.go"}`}}},
+		{Role: "tool", ToolCallID: "read_1", Content: "OLD_PAYLOAD_" + strings.Repeat("A", 8000)},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: "read_2", Name: "read_file", Arguments: `{"path":"b.go"}`}}},
+		{Role: "tool", ToolCallID: "read_2", Content: "MID_PAYLOAD_" + strings.Repeat("B", 8000)},
+		{Role: "assistant", Content: "RECENT_ASSISTANT_REPLY"},
+		{Role: "user", Content: "讨论串刚回报完成了"},
+	}
+
+	out := RenderHistoryWithBudget(messages, 2048)
+	if !strings.Contains(out.Text, historyOmittedNote) {
+		t.Fatalf("expected earlier turns to be omitted: %s", out.Text)
+	}
+	if !strings.Contains(out.Text, "<current_todo>") ||
+		!strings.Contains(out.Text, "- [waiting] 跟进 PR #229 — 等 CI 通过") ||
+		!strings.Contains(out.Text, "- [next] 整理发布说明") {
+		t.Fatalf("expected recovered <current_todo> block when update_todo was omitted: %s", out.Text)
+	}
+	if strings.Index(out.Text, "<current_todo>") > strings.Index(out.Text, "讨论串刚回报完成了") {
+		t.Fatalf("expected <current_todo> before current user turn: %s", out.Text)
+	}
+}
+
+func TestRenderHistoryDoesNotDuplicateKeptUpdateTodo(t *testing.T) {
+	messages := []sdk.Message{
+		{Role: "user", Content: "开始任务"},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{
+			ID:        "read_old",
+			Name:      "read_file",
+			Arguments: `{"path":"old.go"}`,
+		}}},
+		{Role: "tool", ToolCallID: "read_old", Content: "OLD_" + strings.Repeat("X", 8000)},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{
+			ID:        "todo_recent",
+			Name:      "update_todo",
+			Arguments: `{"items":[{"label":"最近更新的任务","status":"doing"}]}`,
+		}}},
+		{Role: "tool", ToolCallID: "todo_recent", Content: "Todo list updated."},
+		{Role: "user", Content: "继续"},
+	}
+
+	out := RenderHistoryWithBudget(messages, 2048)
+	if !strings.Contains(out.Text, "最近更新的任务") {
+		t.Fatalf("expected recent update_todo to remain kept: %s", out.Text)
+	}
+	if strings.Contains(out.Text, "<current_todo>") {
+		t.Fatalf("must not duplicate <current_todo> when latest update_todo is already kept verbatim: %s", out.Text)
+	}
+}
+
+func TestRenderHistoryOverridesStalePinnedTodoWhenLaterUpdateOmitted(t *testing.T) {
+	summaryLead := "<history_summarised>Earlier turns summarised.</history_summarised>"
+	summaryNotes := "<your_notes>Earlier notes.</your_notes>\n<current_todo>\nTodo list when earlier history was summarised:\n- [waiting] 旧条目\n</current_todo>"
+	messages := []sdk.Message{
+		{Role: "user", Content: summaryLead},
+		{Role: "assistant", Content: summaryNotes},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{
+			ID:        "todo_new",
+			Name:      "update_todo",
+			Arguments: `{"items":[{"label":"新条目","status":"doing"}]}`,
+		}}},
+		{Role: "tool", ToolCallID: "todo_new", Content: "Todo list updated."},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: "read_1", Name: "read_file", Arguments: `{"path":"big.go"}`}}},
+		{Role: "tool", ToolCallID: "read_1", Content: "BIG_" + strings.Repeat("Z", 8000)},
+		{Role: "assistant", Content: "TAIL_NOTE"},
+		{Role: "user", Content: "请继续处理"},
+	}
+
+	out := RenderHistoryWithBudget(messages, 2048)
+	oldPos := strings.Index(out.Text, "- [waiting] 旧条目")
+	newPos := strings.Index(out.Text, "- [doing] 新条目")
+	if oldPos < 0 || newPos < 0 || newPos <= oldPos {
+		t.Fatalf("expected recovered newer <current_todo> after pinned summary todo: %s", out.Text)
+	}
+}
+
+func TestRenderHistoryMarksClearedTodoWhenPinnedHadTodoAndClearOmitted(t *testing.T) {
+	summaryLead := "<history_summarised>Earlier turns summarised.</history_summarised>"
+	summaryNotes := "<your_notes>Earlier notes.</your_notes>\n<current_todo>\nTodo list when earlier history was summarised:\n- [waiting] 已完成但旧的条目\n</current_todo>"
+	messages := []sdk.Message{
+		{Role: "user", Content: summaryLead},
+		{Role: "assistant", Content: summaryNotes},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{
+			ID:        "todo_clear",
+			Name:      "update_todo",
+			Arguments: `{"items":[]}`,
+		}}},
+		{Role: "tool", ToolCallID: "todo_clear", Content: "Todo list updated."},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: "read_1", Name: "read_file", Arguments: `{"path":"big.go"}`}}},
+		{Role: "tool", ToolCallID: "read_1", Content: "BIG_" + strings.Repeat("Z", 8000)},
+		{Role: "assistant", Content: "TAIL_NOTE"},
+		{Role: "user", Content: "还有待办吗"},
+	}
+
+	out := RenderHistoryWithBudget(messages, 2048)
+	if !strings.Contains(out.Text, "is currently empty (cleared after earlier notes)") {
+		t.Fatalf("expected explicit cleared-todo notice overriding pinned summary todo: %s", out.Text)
+	}
+}
+
+func TestRenderHistoryIgnoresFailedUpdateTodoAndUsesLastSucceeded(t *testing.T) {
+	messages := []sdk.Message{
+		{Role: "user", Content: "开始"},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{
+			ID:        "todo_good",
+			Name:      "update_todo",
+			Arguments: `{"items":[{"label":"有效条目","status":"doing"}]}`,
+		}}},
+		{Role: "tool", ToolCallID: "todo_good", Content: "Todo list updated."},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{
+			ID:        "todo_bad",
+			Name:      "update_todo",
+			Arguments: `{"items":[{"label":"失败条目","status":"invalid"}]}`,
+		}}},
+		{Role: "tool", ToolCallID: "todo_bad", Content: "item status must be doing, next, waiting or done", IsError: true},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: "read_1", Name: "read_file", Arguments: `{"path":"big.go"}`}}},
+		{Role: "tool", ToolCallID: "read_1", Content: "BIG_" + strings.Repeat("Q", 8000)},
+		{Role: "assistant", Content: "TAIL"},
+		{Role: "user", Content: "继续"},
+	}
+
+	out := RenderHistoryWithBudget(messages, 2048)
+	if !strings.Contains(out.Text, "- [doing] 有效条目") {
+		t.Fatalf("expected last succeeded update_todo to be recovered: %s", out.Text)
+	}
+	if strings.Contains(out.Text, "失败条目") {
+		t.Fatalf("failed update_todo must not be recovered: %s", out.Text)
+	}
+}
+
+func TestRenderHistoryRecoversTruncatedUpdateTodoArgs(t *testing.T) {
+	longDetail := strings.Repeat("D", 5000)
+	messages := []sdk.Message{
+		{Role: "user", Content: "开始"},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{
+			ID:        "todo_big",
+			Name:      "update_todo",
+			Arguments: `{"items":[{"label":"长详情任务","status":"doing","detail":"` + longDetail + `"},{"label":"后续步骤","status":"next"}]}`,
+		}}},
+		{Role: "tool", ToolCallID: "todo_big", Content: "Todo list updated."},
+		{Role: "user", Content: "继续"},
+	}
+
+	out := RenderHistoryWithBudget(messages, 4096)
+	if !strings.Contains(out.Text, "<current_todo>") ||
+		!strings.Contains(out.Text, "- [doing] 长详情任务 — ") ||
+		!strings.Contains(out.Text, "- [next] 后续步骤") {
+		t.Fatalf("expected compact <current_todo> recovery when update_todo args were truncated: %s", out.Text)
+	}
+}
