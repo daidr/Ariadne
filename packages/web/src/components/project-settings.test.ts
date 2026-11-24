@@ -134,4 +134,35 @@ describe('ProjectSettings', () => {
     expect(wrapper.text()).not.toContain('每个讨论串最多用')
     expect(wrapper.text()).not.toContain('整个项目最多用')
   })
+
+  test('loads settings immediately when mounted with projectSettingsOpen already true', async () => {
+    const getProjectSettings = vi
+      .spyOn(api, 'getProjectSettings')
+      .mockResolvedValue(makeProjectSettingsView())
+    vi.spyOn(api, 'getMcpSettings').mockResolvedValue({ servers: [], status: [] })
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+
+    state.projectSettingsOpen = true
+
+    const wrapper = mount(ProjectSettingsDialog, {
+      props: { layoutMode: 'wide' },
+      global: {
+        stubs: {
+          FileSourcesForm: true,
+          SourceNotes: true,
+          MemoryList: true,
+          ProjectUsage: true,
+          SecretPairs: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+
+    await flushPromises()
+
+    expect(getProjectSettings).toHaveBeenCalledTimes(1)
+    expect(getProjectSettings).toHaveBeenCalledWith('prj_test')
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(5)
+  })
 })
