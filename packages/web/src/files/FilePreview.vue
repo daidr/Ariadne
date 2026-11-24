@@ -31,65 +31,69 @@ watch(content, () => {
   imageViewport.reset()
 })
 
-watch(previewFile, async (file, _previous, cleanup) => {
-  content.value = null
-  problem.value = null
-  if (!file) return
+watch(
+  previewFile,
+  async (file, _previous, cleanup) => {
+    content.value = null
+    problem.value = null
+    if (!file) return
 
-  const controller = new AbortController()
-  const { signal } = controller
-  let objectUrl: string | undefined
-  cleanup(() => {
-    controller.abort()
-    if (objectUrl) URL.revokeObjectURL(objectUrl)
-  })
+    const controller = new AbortController()
+    const { signal } = controller
+    let objectUrl: string | undefined
+    cleanup(() => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    })
 
-  try {
-    let mime = file.mime
-    let size = file.size
-    if (!mime || size === undefined) {
-      const response = await fetchStoredFile(file.id, 'HEAD', signal)
-      mime = response.headers.get('content-type') ?? ''
-      size = Number(response.headers.get('content-length') ?? 0)
-    }
-    if (signal.aborted) return
-    const kind = previewKind(mime, file.name ?? '')
-    if (!kind) {
-      problem.value = 'unsupported'
-      return
-    }
-    if (size > maxFileBytes) {
-      problem.value = 'tooLarge'
-      return
-    }
-    if (kind === 'sheet') {
-      content.value = { kind: 'table', source: { fileId: file.id } }
-      return
-    }
+    try {
+      let mime = file.mime
+      let size = file.size
+      if (!mime || size === undefined) {
+        const response = await fetchStoredFile(file.id, 'HEAD', signal)
+        mime = response.headers.get('content-type') ?? ''
+        size = Number(response.headers.get('content-length') ?? 0)
+      }
+      if (signal.aborted) return
+      const kind = previewKind(mime, file.name ?? '')
+      if (!kind) {
+        problem.value = 'unsupported'
+        return
+      }
+      if (size > maxFileBytes) {
+        problem.value = 'tooLarge'
+        return
+      }
+      if (kind === 'sheet') {
+        content.value = { kind: 'table', source: { fileId: file.id } }
+        return
+      }
 
-    const response = await fetchStoredFile(file.id, 'GET', signal)
-    const blob = await response.blob()
-    if (signal.aborted) return
-    if (blob.size > maxFileBytes) {
-      problem.value = 'tooLarge'
-      return
+      const response = await fetchStoredFile(file.id, 'GET', signal)
+      const blob = await response.blob()
+      if (signal.aborted) return
+      if (blob.size > maxFileBytes) {
+        problem.value = 'tooLarge'
+        return
+      }
+      if (kind === 'image' || kind === 'video') {
+        if (previewKind(blob.type, file.name ?? '') !== kind) throw new Error('File type changed')
+        objectUrl = URL.createObjectURL(blob)
+        content.value = { kind, url: objectUrl }
+        return
+      }
+      const text = await blob.text()
+      if (signal.aborted) return
+      content.value =
+        kind === 'text'
+          ? { kind, text }
+          : { kind: 'table', source: parseDelimited(text, kind === 'csv' ? ',' : '\t') }
+    } catch {
+      if (!signal.aborted) problem.value = 'error'
     }
-    if (kind === 'image' || kind === 'video') {
-      if (previewKind(blob.type, file.name ?? '') !== kind) throw new Error('File type changed')
-      objectUrl = URL.createObjectURL(blob)
-      content.value = { kind, url: objectUrl }
-      return
-    }
-    const text = await blob.text()
-    if (signal.aborted) return
-    content.value =
-      kind === 'text'
-        ? { kind, text }
-        : { kind: 'table', source: parseDelimited(text, kind === 'csv' ? ',' : '\t') }
-  } catch {
-    if (!signal.aborted) problem.value = 'error'
-  }
-})
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

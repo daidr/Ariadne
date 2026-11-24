@@ -430,21 +430,25 @@ async function reloadKinds() {
   }
 }
 
-watch(open, async (isOpen) => {
-  if (!isOpen) return
-  error.value = null
-  problems.value = []
-  // Not loaded yet: saving now would send an empty list over the saved one.
-  hiddenRoles.value = null
-  try {
-    const [saved, slots] = await Promise.all([api.getModelSettings(), api.getConcurrency()])
-    load(saved)
-    concurrency.value = slots
-    savedModelDraft = modelDraft()
-  } catch (cause) {
-    error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
-  }
-})
+watch(
+  open,
+  async (isOpen) => {
+    if (!isOpen) return
+    error.value = null
+    problems.value = []
+    // Not loaded yet: saving now would send an empty list over the saved one.
+    hiddenRoles.value = null
+    try {
+      const [saved, slots] = await Promise.all([api.getModelSettings(), api.getConcurrency()])
+      load(saved)
+      concurrency.value = slots
+      savedModelDraft = modelDraft()
+    } catch (cause) {
+      error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
+    }
+  },
+  { immediate: true },
+)
 
 const newId = (prefix: string) => `${prefix}_${Date.now().toString(36)}`
 

@@ -188,6 +188,7 @@ watch(
       error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
     }
   },
+  { immediate: true },
 )
 
 // A routine's days as tags, Monday first; its next run as it would be once saved.

@@ -1,6 +1,6 @@
 import type { PlanPreview, PlanView } from '@ariadne/core'
 import { reactive, type InjectionKey } from 'vue'
-import { freshChanges } from './layout'
+import { freshChanges } from './helpers'
 
 /** Injection key allowing PlanGroupNode to toggle local collapse state inside PlanGraph. */
 export const PLAN_GROUP_TOGGLE: InjectionKey<(groupId: string) => void> =

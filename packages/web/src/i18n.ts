@@ -1,18 +1,29 @@
 import {
-  createTranslator,
+  createMessagesTranslator,
   defaultLocale,
   negotiateLocale,
   type Locale,
+  type LocaleMessages,
   type LocalizedMessage,
   type MessageKey,
   type MessageParams,
-} from '@ariadne/i18n'
-import { en as douEn, zhCN as douZhCN } from 'dou-ui'
+} from '@ariadne/i18n/core'
+import type { Locale as DouLocale } from 'dou-ui'
 import type { UsageTotals } from '@ariadne/core'
 import type { LocalizedText } from '@ariadne/plugin-sdk'
-import { computed, ref } from 'vue'
+import { computed, ref, shallowReactive, watch } from 'vue'
 
 const LOCALE_KEY = 'ariadne.locale'
+
+interface LocaleBundle {
+  messages: LocaleMessages
+  douLocale: DouLocale
+}
+
+const localeLoaders: Record<Locale, () => Promise<LocaleBundle>> = {
+  'zh-CN': () => import('./locales/zh-CN'),
+  en: () => import('./locales/en'),
+}
 
 function initialLocale(): Locale {
   try {
@@ -27,10 +38,69 @@ function initialLocale(): Locale {
 
 export const locale = ref<Locale>(initialLocale())
 
-const translate = computed(() => createTranslator(locale.value))
+const loadedBundles = shallowReactive<Partial<Record<Locale, LocaleBundle>>>({})
+const pendingLoads = new Map<Locale, Promise<void>>()
+// Keep rendering the last loaded locale while a newly selected locale chunk is in flight.
+const lastLoadedLocale = ref<Locale | null>(null)
+
+export function isLocaleLoaded(target: Locale): boolean {
+  return !!loadedBundles[target]
+}
+
+export function ensureLocale(target: Locale = locale.value): Promise<void> {
+  if (loadedBundles[target]) {
+    if (locale.value === target) lastLoadedLocale.value = target
+    return Promise.resolve()
+  }
+  const existing = pendingLoads.get(target)
+  if (existing) return existing
+
+  const task = localeLoaders[target]()
+    .then((bundle) => {
+      loadedBundles[target] = bundle
+      if (locale.value === target) {
+        lastLoadedLocale.value = target
+      }
+    })
+    .finally(() => {
+      pendingLoads.delete(target)
+    })
+
+  pendingLoads.set(target, task)
+  return task
+}
+
+export function resetLocaleCache(): void {
+  pendingLoads.clear()
+  delete loadedBundles['zh-CN']
+  delete loadedBundles.en
+  lastLoadedLocale.value = null
+}
+
+watch(locale, (next) => {
+  if (loadedBundles[next]) {
+    lastLoadedLocale.value = next
+    return
+  }
+  void ensureLocale(next)
+})
+
+const activeBundle = computed<LocaleBundle | undefined>(
+  () =>
+    loadedBundles[locale.value] ??
+    (lastLoadedLocale.value ? loadedBundles[lastLoadedLocale.value] : undefined) ??
+    loadedBundles[defaultLocale],
+)
+
+const translate = computed(() =>
+  createMessagesTranslator(
+    activeBundle.value?.messages ?? {},
+    loadedBundles[defaultLocale]?.messages,
+  ),
+)
 
 /** dou-ui's own strings follow the same locale. */
-export const douLocale = computed(() => (locale.value === 'en' ? douEn : douZhCN))
+export const douLocale = computed<DouLocale | undefined>(() => activeBundle.value?.douLocale)
 
 export function t(key: MessageKey, params?: MessageParams): string {
   return translate.value(key, params)
@@ -40,14 +110,17 @@ export function tm(message: LocalizedMessage): string {
   return t(message.key, message.params)
 }
 
-export function setLocale(next: Locale): void {
+export function setLocale(next: Locale): Promise<void> {
   locale.value = next
-  document.documentElement.lang = next
+  if (typeof document !== 'undefined') {
+    document.documentElement.lang = next
+  }
   try {
     localStorage.setItem(LOCALE_KEY, next)
   } catch {
     // Not remembered; still applies to this page.
   }
+  return ensureLocale(next)
 }
 
 /** Plugin text in the current locale, falling back to Chinese. */
