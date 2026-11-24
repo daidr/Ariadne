@@ -453,7 +453,6 @@ export const zhCN = {
   'error.projectBusy': '项目里还有回合没结束，请稍后再试',
   'error.invalidBody': '请求内容不合法：{reason}',
   'error.connection': '与本地服务的连接断开，正在重连',
-  'error.reconnected': '已重新连接到本地服务',
   'error.turnRunning': '正在工作，等它结束或先停止',
   'error.turnNotRunning': '这一回合已经结束',
   'error.noModel': '还没有配置模型，请先在设置里添加',
