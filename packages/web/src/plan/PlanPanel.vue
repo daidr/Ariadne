@@ -7,7 +7,7 @@ import { state } from '../store'
 import { partitionPlanNodes } from './layout'
 import PlanChangeBar from './PlanChangeBar.vue'
 import PlanNodeDetail from './PlanNodeDetail.vue'
-import { activePreview, setShowCompleted, showingCompleted, toggleShowCompleted } from './ui'
+import { activePreview, showingCompleted, toggleShowCompleted } from './ui'
 
 const PlanGraph = defineAsyncComponent(() => import('./PlanGraph.vue'))
 
@@ -71,20 +71,7 @@ const node = computed(() =>
         </DouButton>
       </div>
       <div class="plan-panel-graph">
-        <DouEmpty
-          v-if="allHiddenAsCompleted"
-          size="sm"
-          :description="t('plan.allCompleted', { count: completedCount })"
-        >
-          <DouButton
-            size="sm"
-            variant="outline"
-            @click="state.plan && setShowCompleted(state.plan.projectId, true)"
-          >
-            <template #leading><EyeIcon /></template>
-            {{ t('plan.showCompleted', { count: completedCount }) }}
-          </DouButton>
-        </DouEmpty>
+        <DouEmpty v-if="allHiddenAsCompleted" size="sm" :description="t('plan.allCompleted')" />
         <PlanGraph v-else v-model:selected="selected" :plan="state.plan" compact />
       </div>
       <div v-if="node" class="plan-panel-detail">

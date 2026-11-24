@@ -96,7 +96,7 @@ export const en: Record<MessageKey, string> = {
   'plan.noThread': 'No thread is working on it yet',
   'plan.showCompleted': 'Show completed ({count})',
   'plan.hideCompleted': 'Hide completed ({count})',
-  'plan.allCompleted': 'No active tasks right now; {count} completed',
+  'plan.allCompleted': 'No active plan items right now',
   'plan.group.collapse': 'Collapse group',
   'plan.group.expand': 'Expand group',
   'plan.op.add': 'Add "{title}"',

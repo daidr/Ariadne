@@ -17,7 +17,7 @@ import { partitionPlanNodes } from './layout'
 import PlanChangeBar from './PlanChangeBar.vue'
 import PlanGraph from './PlanGraph.vue'
 import PlanNodeDetail from './PlanNodeDetail.vue'
-import { activePreview, setShowCompleted, showingCompleted, toggleShowCompleted } from './ui'
+import { activePreview, showingCompleted, toggleShowCompleted } from './ui'
 
 const selected = ref<string | null>(null)
 const historyOpen = ref<string[]>([])
@@ -91,19 +91,7 @@ const time = (at: number) =>
     <div class="plan-main-body">
       <div class="plan-main-graph">
         <DouEmpty v-if="!state.plan?.nodes.length" :description="t('plan.empty')" />
-        <DouEmpty
-          v-else-if="allHiddenAsCompleted"
-          :description="t('plan.allCompleted', { count: completedCount })"
-        >
-          <DouButton
-            size="sm"
-            variant="outline"
-            @click="state.plan && setShowCompleted(state.plan.projectId, true)"
-          >
-            <template #leading><EyeIcon /></template>
-            {{ t('plan.showCompleted', { count: completedCount }) }}
-          </DouButton>
-        </DouEmpty>
+        <DouEmpty v-else-if="allHiddenAsCompleted" :description="t('plan.allCompleted')" />
         <PlanGraph v-else v-model:selected="selected" :plan="state.plan" />
       </div>
       <aside class="plan-main-side">
