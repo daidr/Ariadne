@@ -1,5 +1,19 @@
 # 更新日志
 
+## 0.1.0-alpha.19 (2026-11-24)
+
+- chore(web): 升级 DouUI 至 0.1.0-alpha.24 并接入 Diff 悬浮行动作 (#223)
+- fix(web): 文件无审查评论时不再占位空的 review-comments 行号槽 (#221)
+- fix(web): 网络连接恢复时仅关闭断连 loading toast，不再弹出成功提示 (#222)
+- fix(web): 改用 max() 计算底部安全区留白以消除移动端与 PWA 输入框下方多余空隙 (#220)
+- fix(settings): 优化工作区列表响应式布局并修复窄屏文字重叠 (#219)
+- refactor(runner): 按协调器与讨论串角色拆分 update_todo 工具描述与提示词 (#217)
+- feat(runner): support proactive coordinator routing for unrelated thread messages (#216)
+- refactor(settings): 移除每个讨论串与整个项目的用量上限设置 (#215)
+- fix(windows): 非管理员权限下改用 HKCU Run 注册用户级自启后台服务 (#212)
+- chore(web): 升级 DouUI 至 0.1.0-alpha.23 并补接用户消息发送中状态指示 (#213)
+- Merge pull request #204 from daidr/release/alpha
+
 ## 0.1.0-alpha.18 (2026-11-23)
 
 - feat(cli): cross-platform installers, global CLI, service management, and safe restart (#193)
