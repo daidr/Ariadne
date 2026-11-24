@@ -565,6 +565,11 @@ func (d *acpDriver) HistoryBudget(system string) int {
 	return max(agentruntime.MinHistoryReplayBytes, agentruntime.DefaultHistoryReplayBytes-overhead)
 }
 
+func (d *acpDriver) StatelessHistoryBudget(system string) int {
+	overhead := len("<instructions>\n") + len(system) + len("\n</instructions>\n\n")
+	return max(agentruntime.MinHistoryReplayBytes, agentruntime.DefaultStatelessReplayBytes-overhead)
+}
+
 func (d *acpDriver) recordSettledUsageLocked(u *TurnUsage) {
 	if u == nil {
 		return

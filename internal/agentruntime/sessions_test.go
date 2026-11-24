@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -458,11 +459,18 @@ func TestSessionForgetActiveAndCloseActive(t *testing.T) {
 
 type budgetedDrainingDriver struct {
 	*fakeDriver
-	budget  int
-	drained *Usage
+	budget          int
+	statelessBudget int
+	drained         *Usage
 }
 
 func (d *budgetedDrainingDriver) HistoryBudget(string) int { return d.budget }
+func (d *budgetedDrainingDriver) StatelessHistoryBudget(system string) int {
+	if d.statelessBudget > 0 {
+		return max(MinHistoryReplayBytes, d.statelessBudget-len(system))
+	}
+	return DefaultStatelessReplayBytes
+}
 func (d *budgetedDrainingDriver) DrainUsage() *Usage {
 	u := d.drained
 	d.drained = nil
@@ -495,6 +503,52 @@ func TestStatelessToolFreeRequestUsesExpandedReplayBudget(t *testing.T) {
 	}
 	if strings.Contains(seen.Text, historyOmittedNote) {
 		t.Fatalf("unexpected omission note in stateless summary payload")
+	}
+}
+
+func TestStatelessToolFreeRequestRespectsStatelessHistoryBudgeter(t *testing.T) {
+	var seen Input
+	m := newTestSessions(t, Kind{Name: "fake", Create: func(ctx DriverContext) (Driver, error) {
+		fd := &fakeDriver{ctx: ctx, onPrompt: func(f *fakeDriver, input Input) {
+			seen = input
+			f.ctx.Emit(Event{Type: "text", Text: "summary"})
+			f.ctx.Emit(Event{Type: "done"})
+		}}
+		return &budgetedDrainingDriver{
+			fakeDriver:      fd,
+			budget:          4 * 1024,
+			statelessBudget: 32 * 1024,
+		}, nil
+	}}, SessionOptions{})
+
+	system := "Summarise this conversation." + strings.Repeat("s", 2048)
+	messages := []sdk.Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: "<history_summarised>Earlier turns summarised.</history_summarised>"},
+		{Role: "assistant", Content: "<your_notes>PINNED_SUMMARY_NOTES</your_notes>"},
+	}
+	for i := 1; i <= 25; i++ {
+		callID := fmt.Sprintf("call_%02d", i)
+		messages = append(messages,
+			sdk.Message{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: callID, Name: "read_file", Arguments: `{"path":"a.go"}`}}},
+			sdk.Message{Role: "tool", ToolCallID: callID, Content: fmt.Sprintf("TOOL_%02d %s", i, strings.Repeat("x", 4000))},
+		)
+	}
+	messages = append(messages, sdk.Message{Role: "user", Content: "FINAL_SUMMARY_INSTRUCTION"})
+
+	lastPart(t, parts(m, sdk.Request{Messages: messages}), "stop")
+	wantBudget := 32*1024 - len(system)
+	if len(seen.Text) > wantBudget {
+		t.Fatalf("stateless summary payload exceeded driver stateless budget: %d > %d", len(seen.Text), wantBudget)
+	}
+	if !strings.Contains(seen.Text, "PINNED_SUMMARY_NOTES") {
+		t.Fatal("pinned summary notes were dropped")
+	}
+	if !strings.Contains(seen.Text, "TOOL_25") || !strings.Contains(seen.Text, "FINAL_SUMMARY_INSTRUCTION") {
+		t.Fatal("recent tool output or final summarisation instruction was dropped")
+	}
+	if strings.Contains(seen.Text, "TOOL_01") {
+		t.Fatal("oldest middle tool output should have been trimmed to stay within stateless budget")
 	}
 }
 

@@ -62,30 +62,32 @@ type Runner struct {
 
 type turn struct {
 	*Runner
-	conversation        core.ConversationView
-	id                  string
-	draft               *realtime.DraftHandle
-	draftCall           *int
-	draftTool           string
-	artifactDrafts      map[int]*collab.Draft
-	artifactPreviewAt   map[int]time.Time
-	skills              *skills.Set
-	external            []tool
-	instructionsDirty   atomic.Bool
-	handledBefore       int64
-	userSpoke           bool
-	directUserInput     bool
-	mergeRequestID      string
-	quiet               bool
-	quietThreads        map[string]bool
-	quietMessageThreads map[string]string
-	routedToOtherThread bool
-	statefulSession     bool
-	changes             *turnChanges
-	looks               coordinatorLookState
-	todo                todoHintState
-	reviewChecked       bool
-	isReview            bool
+	conversation          core.ConversationView
+	id                    string
+	draft                 *realtime.DraftHandle
+	draftCall             *int
+	draftTool             string
+	artifactDrafts        map[int]*collab.Draft
+	artifactPreviewAt     map[int]time.Time
+	skills                *skills.Set
+	external              []tool
+	instructionsDirty     atomic.Bool
+	handledBefore         int64
+	userSpoke             bool
+	directUserInput       bool
+	mergeRequestID        string
+	quiet                 bool
+	quietThreads          map[string]bool
+	quietMessageThreads   map[string]string
+	routedToOtherThread   bool
+	statefulSession       bool
+	changes               *turnChanges
+	looks                 coordinatorLookState
+	todo                  todoHintState
+	staleCompactions      int
+	pendingCompactionHint string
+	reviewChecked         bool
+	isReview              bool
 }
 
 const (
@@ -99,6 +101,8 @@ const (
 
 	todoMissingAfter            = 3
 	todoStaleAfter              = 10
+	compactionLoopHintAfter     = 2
+	compactionLoopLimit         = 3
 	todoMissingHint             = "[Ariadne: you are working without a todo list, so the user cannot see what you are doing or what comes next. Write your steps with update_todo now, before your next step, and keep it current as you go. A rough outline is enough; change it as you learn more.]"
 	todoFinishedHint            = "[Ariadne: your todo list is the finished one of earlier work, so the user cannot see what you are doing now. Write the steps of this work with update_todo now, before your next step (keep the earlier ones as done if they still matter), and keep it current as you go. A rough outline is enough; change it as you learn more.]"
 	todoStaleHint               = "[Ariadne: your todo list has not changed for many steps. If it no longer shows where you are, bring it up to date with update_todo: mark finished steps done and the one you are on as doing.]"
@@ -159,6 +163,25 @@ type todoHintState struct {
 	todoThisTurn  bool
 	hintedMissing bool
 	hintedStale   bool
+}
+
+func compactionLoopHint(count int) string {
+	if count >= compactionLoopLimit {
+		return fmt.Sprintf("[Ariadne: this turn has compacted context %d times in a row without file edits, artifact updates, a message to the user, or a report. One more compaction without concrete progress will stop this turn automatically. Act on your current notes now or report the blocker.]", count)
+	}
+	return fmt.Sprintf("[Ariadne: this turn has compacted context %d times in a row without file edits, artifact updates, a message to the user, or a report. Stop re-reading files you already inspected; act on what you found (make the edit, update an artifact, send a status update, or report your findings/blocker).]", count)
+}
+
+func countsAsCompactionProgress(name string, entry tool) bool {
+	if entry.readOnly {
+		return false
+	}
+	switch name {
+	case "update_todo", "run_command", "read_command_output", "stop_command", "browser", "research", "wait", "set_aside", "rename_thread", "refresh_dashboard", "sync_branch":
+		return false
+	default:
+		return true
+	}
 }
 
 func appendHint(content, hint string) string {
@@ -468,6 +491,9 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		if size := effectiveContextSize(lastInput, lastInputEstimate, estimate); size >= threshold {
 			cut := transcript.CompactionCut(entries, float64(threshold)/4)
 			if cut != nil && !compactionFailed && !compactedBeforeStep {
+				if turn.staleCompactions >= compactionLoopLimit {
+					return domainerr.New("error.compactionLoop", map[string]any{"count": turn.staleCompactions})
+				}
 				budget := transcript.UserWordBudget(float64(threshold))
 				ask := requestFor(model, "")
 				ask.Effort = ""
@@ -488,6 +514,11 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 						return err
 					}
 					turn.fileTracker().forgetReads(conversation.ID)
+					turn.todo.hintedStale = false
+					turn.staleCompactions++
+					if turn.staleCompactions >= compactionLoopHintAfter {
+						turn.pendingCompactionHint = compactionLoopHint(turn.staleCompactions)
+					}
 					lastInput, lastInputEstimate = 0, 0
 					compactedBeforeStep = true
 					continue
@@ -726,6 +757,7 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 	_, hasTodo := byName["update_todo"]
 	todoWatched := !turn.quiet && !turn.isReviewThread(ctx) && hasTodo
 	wroteTodo := false
+	madeCompactionProgress := false
 
 	hash := sha256.New()
 	progressed := false
@@ -785,6 +817,9 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 				if call.Name == "update_todo" && outcome.err == nil {
 					wroteTodo = true
 				}
+				if outcome.err == nil && countsAsCompactionProgress(call.Name, byName[call.Name]) {
+					madeCompactionProgress = true
+				}
 				outcome.isError = outcome.err != nil
 				if outcome.err != nil && outcome.content == "" {
 					hint := ""
@@ -801,6 +836,13 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 				outcome.content = appendHint(outcome.content, coordinatorLookHintText)
 			}
 			if index == len(calls)-1 {
+				if madeCompactionProgress {
+					turn.staleCompactions = 0
+					turn.pendingCompactionHint = ""
+				} else if turn.pendingCompactionHint != "" {
+					outcome.content = appendHint(outcome.content, turn.pendingCompactionHint)
+					turn.pendingCompactionHint = ""
+				}
 				turn.todo.workSteps++
 				if wroteTodo {
 					turn.todo.sinceTodo = 0

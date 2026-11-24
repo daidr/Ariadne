@@ -53,6 +53,9 @@ type HistorySeeder interface {
 type HistoryBudgeter interface {
 	HistoryBudget(system string) int
 }
+type StatelessHistoryBudgeter interface {
+	StatelessHistoryBudget(system string) int
+}
 type EffortConfigurer interface {
 	Configure(context.Context, string) error
 }

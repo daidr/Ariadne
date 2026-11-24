@@ -16,20 +16,22 @@ import (
 const (
 	// DefaultHistoryReplayBytes bounds the rendered replay prompt text so
 	// external CLI / ACP agents do not truncate the tail of an oversized single
-	// prompt (which would drop the newest turns and the triggering user message).
-	DefaultHistoryReplayBytes = 48 * 1024
+	// prompt (which would drop the newest turns and the triggering user message),
+	// while leaving enough headroom after large system prompts to preserve both
+	// a compaction summary and recent unsummarised turns.
+	DefaultHistoryReplayBytes = 128 * 1024
 	// MinHistoryReplayBytes guarantees a minimum budget for replayed history
 	// even when system instructions alone exceed DefaultHistoryReplayBytes.
 	MinHistoryReplayBytes = 24 * 1024
 	// DefaultStatelessReplayBytes gives stateless, tool-free requests (such as
-	// conversation summarisation) enough room to include the conversation being
-	// summarised instead of truncating most of it away.
-	DefaultStatelessReplayBytes = 256 * 1024
+	// conversation summarisation) a larger replay window while staying safely
+	// below single-prompt truncation limits enforced by external ACP agents.
+	DefaultStatelessReplayBytes = 144 * 1024
 	maxReplayToolResultBytes    = 3 * 1024
 	maxReplayToolArgsBytes      = 2 * 1024
 	maxReplayOldMessageBytes    = 6 * 1024
 
-	historyHeader         = "<history>\nThe conversation so far, from before this session started. Your earlier replies and tool calls are shown as they were; call the tools again yourself when you need them.\n\n"
+	historyHeader         = "<history>\nThe conversation so far, from before this session started. Earlier replies, notes, and tool calls are shown as they were; continue from these findings and only re-run a tool if you need fresh state or missing details.\n\n"
 	historyFooter         = "\n</history>\n\n"
 	historyOmittedNote    = "[Earlier messages were omitted to stay within the history replay limit.]"
 	historyContinueEnding = "Go on from where it ends; the calls above have already run."

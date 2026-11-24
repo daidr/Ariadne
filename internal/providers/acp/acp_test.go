@@ -301,6 +301,64 @@ func TestACPHistoryBudgetMinimumFloor(t *testing.T) {
 	if got := d.HistoryBudget(hugeSystem); got != agentruntime.MinHistoryReplayBytes {
 		t.Fatalf("expected MinHistoryReplayBytes (%d) when system prompt exceeds default replay budget, got %d", agentruntime.MinHistoryReplayBytes, got)
 	}
+	typicalSystem := strings.Repeat("S", 58*1024)
+	if got := d.HistoryBudget(typicalSystem); got < 64*1024 {
+		t.Fatalf("expected ample replay headroom after a 58 KiB system prompt, got %d", got)
+	}
+	if got := d.StatelessHistoryBudget(strings.Repeat("S", agentruntime.DefaultStatelessReplayBytes+8192)); got != agentruntime.MinHistoryReplayBytes {
+		t.Fatalf("expected MinHistoryReplayBytes (%d) for oversized stateless system prompt, got %d", agentruntime.MinHistoryReplayBytes, got)
+	}
+	summarySystem := "Summarise this conversation."
+	overhead := len("<instructions>\n") + len(summarySystem) + len("\n</instructions>\n\n")
+	if got := d.StatelessHistoryBudget(summarySystem); got != agentruntime.DefaultStatelessReplayBytes-overhead {
+		t.Fatalf("expected StatelessHistoryBudget=%d, got %d", agentruntime.DefaultStatelessReplayBytes-overhead, got)
+	}
+}
+
+func TestACPStatelessSummaryStaysWithinSinglePromptBudget(t *testing.T) {
+	command, log := acpChildCommand(t, "rejected")
+	m := newTestSessions(t, Kind(nil, nil), agentruntime.SessionOptions{DataDir: t.TempDir()})
+	settings := map[string]any{"command": command}
+
+	messages := []sdk.Message{
+		{Role: "system", Content: "Summarise this conversation. Answer with the summary only."},
+		{Role: "user", Content: "<history_summarised>Earlier turns summarised.</history_summarised>"},
+		{Role: "assistant", Content: "<your_notes>PREVIOUS_NOTES_VERBATIM</your_notes>"},
+	}
+	for i := 1; i <= 80; i++ {
+		callID := fmt.Sprintf("call_%02d", i)
+		messages = append(messages,
+			sdk.Message{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: callID, Name: "read_file", Arguments: fmt.Sprintf(`{"path":"file_%02d.go"}`, i)}}},
+			sdk.Message{Role: "tool", ToolCallID: callID, Content: fmt.Sprintf("RESULT_%02d %s", i, strings.Repeat("line\n", 800))},
+		)
+	}
+	messages = append(messages, sdk.Message{Role: "user", Content: "SUMMARY_REQUEST_TAIL_MARKER"})
+
+	out := collectParts(t, m, settings, sdk.Request{
+		Model:    "alternate",
+		Messages: messages,
+	})
+	lastPart(t, out, "stop")
+
+	var promptText string
+	for _, entry := range readLog(t, log) {
+		if entry["method"] == "session/prompt" {
+			promptBlocks := entry["params"].(map[string]any)["prompt"].([]any)
+			promptText = promptBlocks[0].(map[string]any)["text"].(string)
+		}
+	}
+	if promptText == "" {
+		t.Fatal("missing session/prompt call")
+	}
+	if len(promptText) > agentruntime.DefaultStatelessReplayBytes {
+		t.Fatalf("stateless ACP summary prompt (including <instructions>) exceeded budget: %d > %d", len(promptText), agentruntime.DefaultStatelessReplayBytes)
+	}
+	if !strings.Contains(promptText, "PREVIOUS_NOTES_VERBATIM") {
+		t.Fatal("previous summary notes were dropped from stateless summary prompt")
+	}
+	if !strings.Contains(promptText, "RESULT_80") || !strings.Contains(promptText, "SUMMARY_REQUEST_TAIL_MARKER") {
+		t.Fatal("newest tool result or tail summarisation instruction was dropped")
+	}
 }
 
 func TestACPRebuildAfterCancelDrainsSettledTurnUsage(t *testing.T) {
