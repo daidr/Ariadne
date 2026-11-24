@@ -14,6 +14,7 @@ export interface OptionNodeData {
   pick?: 'one' | 'many'
   group?: string
   recommended?: boolean
+  verdict?: 'approved' | 'changes_requested'
 }
 
 export const optionNode = defineNodeType<OptionNodeData>({
@@ -27,10 +28,16 @@ export const optionNode = defineNodeType<OptionNodeData>({
   draw(node, draw) {
     const title = draw.style('dou-flow-group-node__title')
     const chosen = node.data?.chosen === true
+    const verdict = node.data?.verdict
+    const prefix =
+      verdict === 'approved' ? '✓ ' : verdict === 'changes_requested' ? '! ' : chosen ? '✓ ' : ''
     return (
-      drawCard(draw, ['is-container'].concat(chosen ? ['is-chosen'] : [])) +
+      drawCard(
+        draw,
+        ['is-container'].concat(chosen || verdict === 'approved' ? ['is-chosen'] : []),
+      ) +
       draw.text(
-        `${chosen ? '✓ ' : ''}${node.data?.title ?? ''}`,
+        `${prefix}${node.data?.title ?? ''}`,
         { x: 12, y: 0, width: Math.max(0, draw.width - 24), height: 40 },
         {
           size: Number.parseFloat(title.fontSize) || 13,

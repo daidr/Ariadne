@@ -1,23 +1,36 @@
 <script setup lang="ts">
 import { useFlowEditor, type NodeViewProps } from '@dou-ui/flow'
-import { CheckCircleIcon } from '@dou-ui/icons'
+import { AlertTriangleIcon, CheckCircleIcon } from '@dou-ui/icons'
 import { DouButton, DouTag, DouText } from 'dou-ui'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { optionGroupId, optionPickMode, type DecisionGroupData } from './decision-groups'
+import {
+  optionGroupId,
+  optionGroupMode,
+  optionPickMode,
+  type DecisionGroupData,
+} from './decision-groups'
 import type { OptionNodeData } from './option-node'
 
-/** An option's frame: its title, optional recommendation badge, and the button that picks it. */
+/** An option's frame: its title, optional recommendation badge, and pick or verify actions. */
 const props = defineProps<NodeViewProps<OptionNodeData>>()
 const { doc, transact } = useFlowEditor()
 
 const byId = computed(() => new Map(doc.value.nodes.map((node) => [node.id, node])))
 const groupId = computed(() => optionGroupId(props.node, byId.value))
+const groupMode = computed(() => optionGroupMode(props.node, byId.value))
 const groupConfirmed = computed(() => {
   if (!groupId.value) return false
   const data = byId.value.get(groupId.value)?.data as DecisionGroupData | undefined
   return data?.confirmed === true
 })
+
+function setVerdict(next: 'approved' | 'changes_requested') {
+  const verdict = props.data.verdict === next ? undefined : next
+  transact((tr) => {
+    tr.updateData(props.node.id, { verdict })
+  })
+}
 
 function pick() {
   const chosen = !props.data.chosen
@@ -42,20 +55,55 @@ function pick() {
   <div
     class="option"
     :class="{
-      'is-chosen': data.chosen,
-      'is-recommended': data.recommended && !data.chosen,
-      'is-confirmed-dim': groupConfirmed && !data.chosen,
+      'is-chosen': groupMode === 'choose' && data.chosen,
+      'is-recommended': groupMode === 'choose' && data.recommended && !data.chosen,
+      'is-approved': groupMode === 'verify' && data.verdict === 'approved',
+      'is-changes-requested': groupMode === 'verify' && data.verdict === 'changes_requested',
+      'is-confirmed-dim':
+        groupConfirmed && (groupMode === 'verify' ? data.verdict !== 'approved' : !data.chosen),
     }"
   >
     <div class="option-head">
       <div class="option-title">
         <DouText weight="medium" truncate>{{ data.title }}</DouText>
-        <DouTag v-if="data.recommended" size="sm" tone="neutral" class="option-recommended-badge">
+        <DouTag
+          v-if="groupMode === 'choose' && data.recommended"
+          size="sm"
+          tone="neutral"
+          class="option-recommended-badge"
+        >
           {{ t('artifact.option.recommended') }}
         </DouTag>
         <DouText v-if="data.note" variant="tertiary" size="sm" truncate>{{ data.note }}</DouText>
       </div>
+      <div v-if="groupMode === 'verify'" class="option-verdicts">
+        <DouButton
+          size="sm"
+          :variant="data.verdict === 'approved' ? 'soft' : 'ghost'"
+          :tone="data.verdict === 'approved' ? 'success' : 'neutral'"
+          :disabled="readonly"
+          :aria-pressed="data.verdict === 'approved'"
+          @pointerdown.stop
+          @click.stop="setVerdict('approved')"
+        >
+          <template #leading><CheckCircleIcon /></template>
+          {{ t('artifact.verify.approve') }}
+        </DouButton>
+        <DouButton
+          size="sm"
+          :variant="data.verdict === 'changes_requested' ? 'soft' : 'ghost'"
+          :tone="data.verdict === 'changes_requested' ? 'danger' : 'neutral'"
+          :disabled="readonly"
+          :aria-pressed="data.verdict === 'changes_requested'"
+          @pointerdown.stop
+          @click.stop="setVerdict('changes_requested')"
+        >
+          <template #leading><AlertTriangleIcon /></template>
+          {{ t('artifact.verify.requestChanges') }}
+        </DouButton>
+      </div>
       <DouButton
+        v-else
         size="sm"
         :variant="data.chosen ? 'soft' : 'ghost'"
         :tone="data.chosen ? 'primary' : 'neutral'"
@@ -82,8 +130,23 @@ function pick() {
   box-shadow: inset 0 0 0 2px var(--dou-color-primary);
 }
 
+.option.is-approved {
+  box-shadow: inset 0 0 0 2px var(--dou-color-success);
+}
+
+.option.is-changes-requested {
+  box-shadow: inset 0 0 0 2px var(--dou-color-danger);
+}
+
 .option.is-confirmed-dim {
   opacity: 0.62;
+}
+
+.option-verdicts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
 }
 
 .option-head {

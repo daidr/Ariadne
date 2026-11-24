@@ -193,10 +193,14 @@ func (repo *Repository) SendPendingArtifactFeedback(ctx context.Context, artifac
 }
 
 // SendAutoPendingArtifactFeedback is used by background idle fallback; it skips
-// whiteboards with active decision groups so structured rounds are submitted explicitly.
+// whiteboards with active decision groups and documents with active inline ask
+// blocks so structured rounds are submitted explicitly.
 func (repo *Repository) SendAutoPendingArtifactFeedback(ctx context.Context, artifactID string, images []string) (object, error) {
 	return repo.sendArtifactFeedback(ctx, artifactID, images, func(w *projectionWriter, artifact ArtifactView) ([]any, []string, error) {
 		if artifact.Kind == "whiteboard" && HasPendingDecisionGroups(artifact.Content) {
+			return nil, nil, nil
+		}
+		if artifact.Kind == "document" && HasPendingDocumentAsks(artifact.Content) {
 			return nil, nil, nil
 		}
 		return pendingArtifactFeedback(w, artifact)

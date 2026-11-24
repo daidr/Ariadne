@@ -12,9 +12,10 @@ import { collaboration } from '@dou-ui/flow/collaboration'
 import '@dou-ui/flow/style.css'
 import { CloseIcon, LocateFixedIcon } from '@dou-ui/icons'
 import { DouButton, DouText, type CommentAction, type CommentThread } from 'dou-ui'
-import { computed, onBeforeUnmount, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
+import { artifactFocusTarget, clearArtifactFocus } from './artifact-focus'
 import { commentAuthor, toCommentThread } from './comment-threads'
 import {
   areNodesOutsideViewport,
@@ -31,6 +32,7 @@ import { whiteboardExtensions } from './whiteboard-extensions'
  * together through `shared`; an older one is shown read-only from `content`.
  */
 const props = defineProps<{
+  artifactId?: string
   content: string
   projectId: string
   readonly: boolean
@@ -188,6 +190,24 @@ function locateOffscreen() {
   editor.value?.fit(pending.nodeIds)
   offscreenUpdate.value = null
 }
+
+// Focus a specific group or option when opened via a cross-artifact reference card.
+watch(
+  [artifactFocusTarget, ready, () => board.value.nodes.length],
+  ([target, isReady]) => {
+    if (!target || !isReady) return
+    const currentId = props.artifactId
+    if (!currentId || target.artifactId !== currentId) return
+    if (!board.value.nodes.some((n) => n.id === target.nodeId)) return
+    const seq = target.seq
+    const nodeId = target.nodeId
+    clearArtifactFocus(seq)
+    void nextTick(() => {
+      editor.value?.fit([nodeId])
+    })
+  },
+  { immediate: true },
+)
 
 function applyRecommendedPicks(): number {
   const ids = collectAutoRecommendedOptionIds(board.value)

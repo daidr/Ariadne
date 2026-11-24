@@ -1213,6 +1213,37 @@ func toProtoArtifactFeedbackItem(raw any) *ariadnev1.ArtifactFeedbackItem {
 				},
 			},
 		}
+	case "verify":
+		verify := &ariadnev1.ArtifactFeedbackVerifyItem{}
+		for _, item := range protoSlice(m["verdicts"]) {
+			vm := protoMap(item)
+			if vm == nil {
+				continue
+			}
+			verify.Verdicts = append(verify.Verdicts, &ariadnev1.ArtifactFeedbackVerifyEntry{
+				Id:         protoStr(vm["id"]),
+				Title:      protoStr(vm["title"]),
+				Verdict:    protoStr(vm["verdict"]),
+				Group:      protoOptStr(vm["group"]),
+				GroupTitle: protoOptStr(vm["groupTitle"]),
+			})
+		}
+		return &ariadnev1.ArtifactFeedbackItem{Item: &ariadnev1.ArtifactFeedbackItem_Verify{Verify: verify}}
+	case "answer":
+		answer := &ariadnev1.ArtifactFeedbackAnswerItem{}
+		for _, item := range protoSlice(m["answers"]) {
+			am := protoMap(item)
+			if am == nil {
+				continue
+			}
+			answer.Answers = append(answer.Answers, &ariadnev1.ArtifactFeedbackAnswerEntry{
+				Id:       protoStr(am["id"]),
+				Question: protoStr(am["question"]),
+				Values:   protoStringSlice(am["values"]),
+				Note:     protoOptStr(am["note"]),
+			})
+		}
+		return &ariadnev1.ArtifactFeedbackItem{Item: &ariadnev1.ArtifactFeedbackItem_Answer{Answer: answer}}
 	}
 	return nil
 }

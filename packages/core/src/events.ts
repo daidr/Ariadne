@@ -389,6 +389,27 @@ export type ArtifactFeedbackItem =
   | { kind: 'mark'; nodeId: string; type: string; text: string; where: string }
   /** Other changes to a whiteboard, in words: moved, removed, retitled. */
   | { kind: 'board'; changes: string[] }
+  /** Verification verdicts recorded on whiteboard verification items. */
+  | {
+      kind: 'verify'
+      verdicts: {
+        id: string
+        title: string
+        verdict: 'approved' | 'changes_requested'
+        group?: string
+        groupTitle?: string
+      }[]
+    }
+  /** Structured answers recorded in inline document question blocks. */
+  | {
+      kind: 'answer'
+      answers: {
+        id: string
+        question: string
+        values: string[]
+        note?: string
+      }[]
+    }
 
 /** How the checks of a commit stand, all together. */
 export type ChecksState = 'none' | 'pending' | 'success' | 'failure'

@@ -1,13 +1,18 @@
 package runner
 
 import (
+	"bytes"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/collab"
 	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/internal/files"
 )
 
 func TestWhiteboardDecisionGroupsAndRounds(t *testing.T) {
@@ -116,9 +121,111 @@ func TestWhiteboardDecisionGroupsAndRounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"grp-nav", "grp-density", `"recommended":true`} {
-		if !strings.Contains(summary, want) {
-			t.Fatalf("expected readArtifact summary to contain %q, got:\n%s", want, summary)
+		for _, want := range []string{"grp-nav", "grp-density", `"recommended":true`} {
+			if !strings.Contains(summary, want) {
+				t.Fatalf("expected readArtifact summary to contain %q, got:\n%s", want, summary)
+			}
 		}
+	}
+
+func TestWhiteboardStandaloneImagesAndVerifyMode(t *testing.T) {
+	ctx := t.Context()
+	tmp := t.TempDir()
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(tmp, "app.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	rooms := collab.NewRooms(repo, nil)
+	defer rooms.Close()
+	store := files.Store{Events: repo.Store}
+
+	project, err := repo.CreateProject(ctx, new("Fixture"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Save a tiny valid PNG into the project file store.
+	img := image.NewRGBA(image.Rect(0, 0, 120, 80))
+	img.Set(0, 0, color.RGBA{R: 60, G: 130, B: 240, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.Save(ctx, project.ID, "image/png", buf.Bytes(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	agent := &turn{
+		Runner: &Runner{Repository: repo, Rooms: rooms},
+		conversation: core.ConversationView{
+			ID:        project.CoordinatorID,
+			ProjectID: project.ID,
+			Role:      "coordinator",
+		},
+	}
+
+	created, err := agent.createWhiteboard(ctx, args{
+		"title": "视觉验收与参考图",
+		"items": []any{
+			args{"id": "ref-shot", "kind": "image", "file": saved.ID, "alt": "设计参考截图"},
+		},
+		"groups": []any{
+			args{"id": "grp-verify", "title": "首页视觉验收", "mode": "verify", "round": float64(1), "note": "请核对实现截图"},
+		},
+		"options": []any{
+			args{
+				"id":             "v-hero",
+				"title":          "Hero 区域",
+				"group":          "grp-verify",
+				"baselineImages": []any{args{"file": saved.ID, "alt": "设计稿"}},
+				"images":         []any{args{"file": saved.ID, "alt": "当前实现"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("createWhiteboard failed: %v", err)
+	}
+	var createReply args
+	if err := json.Unmarshal([]byte(created), &createReply); err != nil {
+		t.Fatal(err)
+	}
+	artifactID := text(createReply, "artifactId")
+	artifact, err := repo.GetArtifact(ctx, artifactID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var doc struct {
+		Nodes []struct {
+			ID     string         `json:"id"`
+			Type   string         `json:"type"`
+			Parent string         `json:"parent"`
+			Width  float64        `json:"width"`
+			Height float64        `json:"height"`
+			Data   map[string]any `json:"data"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal([]byte(artifact.Content), &doc); err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]int{}
+	for i, n := range doc.Nodes {
+		byID[n.ID] = i
+	}
+	imgNode := doc.Nodes[byID["ref-shot"]]
+	if imgNode.Type != "image" {
+		t.Fatalf("expected ref-shot to be type image, got %+v", imgNode)
+	}
+	if src, _ := imgNode.Data["src"].(string); !strings.HasPrefix(src, "/api/files/") {
+		t.Fatalf("expected uploaded image src, got %q", src)
+	}
+	if alt, _ := imgNode.Data["alt"].(string); alt != "设计参考截图" {
+		t.Fatalf("expected alt to be preserved, got %q", alt)
+	}
+	verifyGroup := doc.Nodes[byID["grp-verify"]]
+	if mode, _ := verifyGroup.Data["mode"].(string); mode != "verify" {
+		t.Fatalf("expected grp-verify mode=verify, got %+v", verifyGroup.Data)
 	}
 }

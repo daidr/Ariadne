@@ -39,6 +39,7 @@ type boardOption struct {
 	recommended                           bool
 	hasRecommended                        bool
 	pictures                              []boardPicture
+	baselinePictures                      []boardPicture
 }
 
 func boardGroups(raw any) ([]boardGroup, error) {
@@ -117,6 +118,17 @@ func (turn *turn) boardOptions(ctx context.Context, raw any) ([]boardOption, err
 				return nil, err
 			}
 			option.pictures = append(option.pictures, picture)
+		}
+		baselineImages, err := artifactObjects(candidate["baselineImages"])
+		if err != nil || len(baselineImages) > 50 {
+			return nil, errors.New("an option can have up to 50 baseline image objects")
+		}
+		for _, input := range baselineImages {
+			picture, err := turn.boardPicture(ctx, input)
+			if err != nil {
+				return nil, err
+			}
+			option.baselinePictures = append(option.baselinePictures, picture)
 		}
 		result = append(result, option)
 	}
@@ -426,32 +438,83 @@ func (board *whiteboard) placeSingleOption(option boardOption, pick string, grou
 			}
 		}
 	}
-	mine := map[string]bool{option.id + "-text": true}
+	mine := map[string]bool{
+		option.id + "-text":           true,
+		option.id + "-baseline-label": true,
+		option.id + "-actual-label":   true,
+	}
 	for i := range 50 {
 		mine[fmt.Sprintf("%s-image-%d", option.id, i+1)] = true
+		mine[fmt.Sprintf("%s-baseline-%d", option.id, i+1)] = true
 	}
 	for id := range mine {
 		if node := nodes[id]; node != nil && text(node, "parent") != option.id {
 			return fmt.Errorf("the option's generated item %q already exists", id)
 		}
 	}
+	frameWidth := width
 	var inner []args
 	cursor := y + inset
-	for i, picture := range option.pictures {
-		const pictureWidth = width - 2*padding
-		height := math.Round(float64(picture.height) / float64(picture.width) * pictureWidth)
-		fields := args{"src": picture.src}
-		if picture.alt != "" {
-			fields["alt"] = picture.alt
+	if len(option.baselinePictures) > 0 && len(option.pictures) > 0 {
+		frameWidth = 720.0
+		colWidth := (frameWidth - 2*padding - gap) / 2
+		const labelHeight = 26.0
+		leftX := x + padding
+		rightX := x + padding + colWidth + gap
+		inner = append(inner,
+			args{"id": option.id + "-baseline-label", "type": "text", "parent": option.id, "x": leftX, "y": cursor, "width": colWidth, "height": labelHeight, "data": args{"text": "参考 / 改动前"}},
+			args{"id": option.id + "-actual-label", "type": "text", "parent": option.id, "x": rightX, "y": cursor, "width": colWidth, "height": labelHeight, "data": args{"text": "实机结果"}},
+		)
+		leftCursor := cursor + labelHeight + 6
+		for i, picture := range option.baselinePictures {
+			h := math.Round(float64(picture.height) / float64(picture.width) * colWidth)
+			fields := args{"src": picture.src}
+			if picture.alt != "" {
+				fields["alt"] = picture.alt
+			}
+			inner = append(inner, args{"id": fmt.Sprintf("%s-baseline-%d", option.id, i+1), "type": "image", "parent": option.id,
+				"x": leftX, "y": leftCursor, "width": colWidth, "height": h, "data": fields})
+			leftCursor += h + gap
 		}
-		inner = append(inner, args{"id": fmt.Sprintf("%s-image-%d", option.id, i+1), "type": "image", "parent": option.id,
-			"x": x + padding, "y": cursor, "width": pictureWidth, "height": height, "data": fields})
-		cursor += height + gap
+		rightCursor := cursor + labelHeight + 6
+		for i, picture := range option.pictures {
+			h := math.Round(float64(picture.height) / float64(picture.width) * colWidth)
+			fields := args{"src": picture.src}
+			if picture.alt != "" {
+				fields["alt"] = picture.alt
+			}
+			inner = append(inner, args{"id": fmt.Sprintf("%s-image-%d", option.id, i+1), "type": "image", "parent": option.id,
+				"x": rightX, "y": rightCursor, "width": colWidth, "height": h, "data": fields})
+			rightCursor += h + gap
+		}
+		cursor = max(leftCursor, rightCursor)
+	} else {
+		pictureWidth := frameWidth - 2*padding
+		for i, picture := range option.baselinePictures {
+			h := math.Round(float64(picture.height) / float64(picture.width) * pictureWidth)
+			fields := args{"src": picture.src}
+			if picture.alt != "" {
+				fields["alt"] = picture.alt
+			}
+			inner = append(inner, args{"id": fmt.Sprintf("%s-baseline-%d", option.id, i+1), "type": "image", "parent": option.id,
+				"x": x + padding, "y": cursor, "width": pictureWidth, "height": h, "data": fields})
+			cursor += h + gap
+		}
+		for i, picture := range option.pictures {
+			h := math.Round(float64(picture.height) / float64(picture.width) * pictureWidth)
+			fields := args{"src": picture.src}
+			if picture.alt != "" {
+				fields["alt"] = picture.alt
+			}
+			inner = append(inner, args{"id": fmt.Sprintf("%s-image-%d", option.id, i+1), "type": "image", "parent": option.id,
+				"x": x + padding, "y": cursor, "width": pictureWidth, "height": h, "data": fields})
+			cursor += h + gap
+		}
 	}
 	if option.text != "" {
-		height := boardLineCount(option.text, 16, width-2*padding-16)*22 + 8
+		height := boardLineCount(option.text, 16, frameWidth-2*padding-16)*22 + 8
 		inner = append(inner, args{"id": option.id + "-text", "type": "text", "parent": option.id, "x": x + padding, "y": cursor,
-			"width": width - 2*padding, "height": height, "data": args{"text": option.text}})
+			"width": frameWidth - 2*padding, "height": height, "data": args{"text": option.text}})
 		cursor += height + gap
 	}
 	if len(inner) > 0 {
@@ -489,7 +552,7 @@ func (board *whiteboard) placeSingleOption(option boardOption, pick string, grou
 	if groupID != "" {
 		existing["parent"] = groupID
 	}
-	existing["x"], existing["y"], existing["width"], existing["height"], existing["data"] = x, y, width, height, fields
+	existing["x"], existing["y"], existing["width"], existing["height"], existing["data"] = x, y, frameWidth, height, fields
 	board.Nodes = slices.DeleteFunc(board.Nodes, func(node args) bool { return mine[text(node, "id")] })
 	board.Nodes = append(board.Nodes, inner...)
 	active := boardItems(board.Nodes)

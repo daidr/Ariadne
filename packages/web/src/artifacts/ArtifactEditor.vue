@@ -36,6 +36,7 @@ import ViewActions from '../full/ViewActions.vue'
 import ArtifactHistory from './ArtifactHistory.vue'
 import CommentList from './CommentList.vue'
 import type { DecisionGroupSummary } from './decision-groups'
+import type { DocumentAskSummary } from './document-asks'
 import { kindIcon } from './kinds'
 import { useSharedArtifact, type SharedArtifact } from './shared'
 
@@ -167,12 +168,22 @@ const sentRound = ref<{
   previousHeard?: string
 } | null>(null)
 const decisionSummary = ref<DecisionGroupSummary | null>(null)
+const askSummary = ref<DocumentAskSummary | null>(null)
 
 const hasActiveDecisionGroups = computed(
   () =>
     artifact.value?.kind === 'whiteboard' &&
     !viewingOld.value &&
     !!decisionSummary.value?.hasActiveDecisionGroups,
+)
+
+const hasActiveDocumentAsks = computed(
+  () =>
+    artifact.value?.kind === 'document' && !viewingOld.value && !!askSummary.value?.hasActiveAsks,
+)
+
+const hasStructuredRound = computed(
+  () => hasActiveDecisionGroups.value || hasActiveDocumentAsks.value,
 )
 
 function clearSentRound() {
@@ -188,6 +199,7 @@ watch(
     menu.value = null
     artifact.value = null
     decisionSummary.value = null
+    askSummary.value = null
     clearSentRound()
     void load()
   },
@@ -258,7 +270,7 @@ watch(
 function scheduleQuietSend() {
   if (quiet) clearTimeout(quiet)
   quiet = null
-  if (hasActiveDecisionGroups.value) return
+  if (hasStructuredRound.value) return
   quiet = setTimeout(() => void sendFeedback(), QUIET_MS)
 }
 
@@ -279,19 +291,27 @@ function onDecisionSummary(summary: DecisionGroupSummary) {
   }
 }
 
+function onAskSummary(summary: DocumentAskSummary) {
+  askSummary.value = summary
+  if (summary.hasActiveAsks && quiet) {
+    clearTimeout(quiet)
+    quiet = null
+  }
+}
+
 async function sendFeedback(leaving = false, explicit = false) {
   if (quiet) clearTimeout(quiet)
   quiet = null
   if (!room) return
   if (leaving) {
-    if (!waiting.value || hasActiveDecisionGroups.value) return
+    if (!waiting.value || hasStructuredRound.value) return
     waiting.value = false
     pendingChanges.value = 0
     pendingNotes.value = 0
     return api.sendFeedback(room.id, [], true)
   }
   if (sending.value) return
-  if (!explicit && (!waiting.value || hasActiveDecisionGroups.value)) return
+  if (!explicit && (!waiting.value || hasStructuredRound.value)) return
 
   const id = room.id
   const initialPending = pendingChanges.value
@@ -300,7 +320,7 @@ async function sendFeedback(leaving = false, explicit = false) {
   let applied = 0
   sending.value = true
   try {
-    if (explicit && hasActiveDecisionGroups.value) {
+    if (explicit && hasStructuredRound.value) {
       applyingRecommended = true
       try {
         applied = body.value?.applyRecommendedPicks?.() ?? 0
@@ -390,10 +410,11 @@ async function withdrawSentFeedback() {
   }
 }
 
-const feedbackBarState = computed<'sent' | 'decision' | 'pending' | null>(() => {
+const feedbackBarState = computed<'sent' | 'decision' | 'ask' | 'pending' | null>(() => {
   if (!artifact.value || viewingOld.value || artifact.value.kind === 'dashboard') return null
   if (sentRound.value && sentRound.value.artifactId === artifact.value.id) return 'sent'
   if (hasActiveDecisionGroups.value) return 'decision'
+  if (hasActiveDocumentAsks.value) return 'ask'
   if (waiting.value && pendingChanges.value > 0) return 'pending'
   return null
 })
@@ -402,22 +423,44 @@ const decisionBarText = computed(() => {
   const s = decisionSummary.value
   if (!s) return ''
   let base: string
-  if (s.remainingGroups === 0 && s.pickedGroups === s.totalGroups) {
+  if (s.verifyGroups > 0 && s.chooseGroups === 0) {
+    if (s.verifyChangesRequested > 0) {
+      base = t('artifact.feedback.verifySummaryWithChanges', {
+        approved: s.verifyApproved,
+        changes: s.verifyChangesRequested,
+        total: s.verifyItemsTotal,
+      })
+    } else if (s.verifyApproved > 0) {
+      base = t('artifact.feedback.verifySummary', {
+        approved: s.verifyApproved,
+        total: s.verifyItemsTotal,
+      })
+    } else {
+      base = t('artifact.feedback.verifyPendingAll', { total: s.verifyItemsTotal })
+    }
+  } else if (s.verifyGroups > 0 && s.chooseGroups > 0) {
+    base = t('artifact.feedback.mixedSummary', {
+      picked: s.pickedGroups,
+      chooseTotal: s.chooseGroups,
+      reviewed: s.verifyApproved + s.verifyChangesRequested,
+      verifyTotal: s.verifyItemsTotal,
+    })
+  } else if (s.remainingGroups === 0 && s.pickedGroups === s.chooseGroups) {
     base = t('artifact.feedback.decisionAllPicked', {
       picked: s.pickedGroups,
-      total: s.totalGroups,
+      total: s.chooseGroups,
     })
   } else if (s.remainingGroups === 0 && s.pickedGroups > 0) {
     base = t('artifact.feedback.decisionWithRecommended', {
       picked: s.pickedGroups,
-      total: s.totalGroups,
+      total: s.chooseGroups,
     })
   } else if (s.remainingGroups === 0) {
-    base = t('artifact.feedback.decisionAllRecommended', { total: s.totalGroups })
+    base = t('artifact.feedback.decisionAllRecommended', { total: s.chooseGroups })
   } else {
     base = t('artifact.feedback.decisionRemaining', {
       picked: s.pickedGroups,
-      total: s.totalGroups,
+      total: s.chooseGroups,
       remaining: s.remainingGroups,
     })
   }
@@ -427,10 +470,58 @@ const decisionBarText = computed(() => {
   return base
 })
 
+const decisionSubmitLabel = computed(() => {
+  const s = decisionSummary.value
+  if (s && s.verifyGroups > 0 && s.chooseGroups === 0) {
+    return t('artifact.feedback.submitVerify')
+  }
+  return t('artifact.feedback.submitRound')
+})
+
 const canSubmitDecision = computed(() => {
   const s = decisionSummary.value
   if (!s || sending.value) return false
-  return s.pickedGroups > 0 || s.recommendedFallbackGroups > 0 || waiting.value
+  return (
+    s.pickedGroups > 0 ||
+    s.recommendedFallbackGroups > 0 ||
+    s.verifyApproved > 0 ||
+    s.verifyChangesRequested > 0 ||
+    waiting.value
+  )
+})
+
+const askBarText = computed(() => {
+  const s = askSummary.value
+  if (!s) return ''
+  let base: string
+  if (s.remainingAsks === 0 && s.answeredAsks === s.totalAsks) {
+    base = t('artifact.feedback.askProgress', {
+      answered: s.answeredAsks,
+      total: s.totalAsks,
+    })
+  } else if (s.remainingAsks === 0 && s.answeredAsks > 0) {
+    base = t('artifact.feedback.askWithRecommended', {
+      answered: s.answeredAsks,
+      total: s.totalAsks,
+    })
+  } else if (s.remainingAsks === 0 && s.recommendedFallbackAsks > 0) {
+    base = t('artifact.feedback.askAllRecommended', { total: s.totalAsks })
+  } else {
+    base = t('artifact.feedback.askProgress', {
+      answered: s.answeredAsks,
+      total: s.totalAsks,
+    })
+  }
+  if (pendingNotes.value > 0) {
+    base += t('artifact.feedback.withNotes', { count: pendingNotes.value })
+  }
+  return base
+})
+
+const canSubmitAsk = computed(() => {
+  const s = askSummary.value
+  if (!s || sending.value) return false
+  return s.answeredAsks > 0 || s.recommendedFallbackAsks > 0 || waiting.value
 })
 
 function leave() {
@@ -454,7 +545,7 @@ document.addEventListener('visibilitychange', hidden)
 // Closing the page cancels what is still being sent: what waits goes at once, without
 // pictures, in a request that outlives the page.
 function closing() {
-  if (!room || hasActiveDecisionGroups.value || (!waiting.value && !sending.value)) return
+  if (!room || hasStructuredRound.value || (!waiting.value && !sending.value)) return
   waiting.value = false
   pendingChanges.value = 0
   pendingNotes.value = 0
@@ -809,6 +900,7 @@ async function rename() {
         :readonly="viewingOld"
         :label="artifact.title"
         @decision-summary="onDecisionSummary"
+        @ask-summary="onAskSummary"
       />
     </div>
     <div v-if="feedbackBarState" class="artifact-feedback-bar" role="status" aria-live="polite">
@@ -834,7 +926,23 @@ async function rename() {
           @click="sendFeedback(false, true)"
         >
           <template #leading><SendIcon /></template>
-          {{ t('artifact.feedback.submitRound') }}
+          {{ decisionSubmitLabel }}
+        </DouButton>
+      </template>
+      <template v-else-if="feedbackBarState === 'ask'">
+        <DouText size="sm" variant="secondary" truncate class="artifact-feedback-text">
+          {{ askBarText }}
+        </DouText>
+        <DouButton
+          size="sm"
+          variant="soft"
+          tone="primary"
+          :loading="sending"
+          :disabled="!canSubmitAsk"
+          @click="sendFeedback(false, true)"
+        >
+          <template #leading><SendIcon /></template>
+          {{ t('artifact.feedback.submitAnswers') }}
         </DouButton>
       </template>
       <template v-else-if="feedbackBarState === 'pending'">

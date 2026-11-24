@@ -437,6 +437,19 @@ func UpdateDocument(doc *crdt.Doc, markdown string, origin any) error {
 
 func blockKey(block documentBlock) string {
 	block.children = nil
+	if block.kind == "ask" {
+		if id, _ := block.props["id"].(string); id != "" {
+			return "ask\x00" + id
+		}
+	}
+	if block.kind == "ref" {
+		artifactID, _ := block.props["artifactId"].(string)
+		if artifactID != "" {
+			groupID, _ := block.props["groupId"].(string)
+			optionID, _ := block.props["optionId"].(string)
+			return "ref\x00" + artifactID + "\x00" + groupID + "\x00" + optionID
+		}
+	}
 	return block.kind + "\x00" + renderDocumentBlock(block, 1)
 }
 

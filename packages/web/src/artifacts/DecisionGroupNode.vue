@@ -23,14 +23,27 @@ const groupState = computed(() => {
   const { optionsByGroup } = groupOptionsMap(doc.value)
   const decision = isDecisionGroupNode(props.node, optionsByGroup)
   const options = optionsByGroup.get(props.node.id) ?? []
+  const verify = props.data.mode === 'verify'
   let picked = 0
   let recommended = 0
+  let approved = 0
+  let changesRequested = 0
   for (const opt of options) {
     const data = opt.data as OptionNodeData | undefined
     if (data?.chosen) picked++
     if (data?.recommended) recommended++
+    if (data?.verdict === 'approved') approved++
+    if (data?.verdict === 'changes_requested') changesRequested++
   }
-  return { decision, picked, recommended, total: options.length }
+  return {
+    decision,
+    verify,
+    picked,
+    recommended,
+    approved,
+    changesRequested,
+    total: options.length,
+  }
 })
 
 function edit() {
@@ -118,7 +131,15 @@ function onKeydown(event: KeyboardEvent) {
         {{ data.label || messages.group }}
       </span>
       <DouTag
-        v-if="groupState.decision && data.pick === 'many'"
+        v-if="groupState.decision && groupState.verify"
+        size="sm"
+        :tone="data.confirmed ? 'neutral' : 'primary'"
+        class="decision-group-badge"
+      >
+        {{ t('artifact.group.verify') }}
+      </DouTag>
+      <DouTag
+        v-else-if="groupState.decision && data.pick === 'many'"
         size="sm"
         tone="neutral"
         class="decision-group-badge"
@@ -129,6 +150,39 @@ function onKeydown(event: KeyboardEvent) {
         <DouTag v-if="data.confirmed" size="sm" tone="neutral">
           {{ t('artifact.group.confirmed') }}
         </DouTag>
+        <template v-else-if="groupState.verify">
+          <DouText
+            v-if="groupState.changesRequested > 0"
+            tone="danger"
+            size="sm"
+            class="decision-group-picked"
+          >
+            {{
+              t('artifact.group.verifyProgressChanges', {
+                approved: groupState.approved,
+                changes: groupState.changesRequested,
+                total: groupState.total,
+              })
+            }}
+          </DouText>
+          <DouText
+            v-else-if="groupState.approved > 0"
+            tone="success"
+            size="sm"
+            class="decision-group-picked"
+          >
+            <CheckCircleIcon class="decision-group-status-icon" />
+            {{
+              t('artifact.group.verifyProgressApproved', {
+                approved: groupState.approved,
+                total: groupState.total,
+              })
+            }}
+          </DouText>
+          <DouText v-else-if="groupState.total > 0" variant="tertiary" size="sm">
+            {{ t('artifact.group.verifyPending', { total: groupState.total }) }}
+          </DouText>
+        </template>
         <template v-else-if="groupState.picked > 0">
           <DouText tone="primary" size="sm" class="decision-group-picked">
             <CheckCircleIcon class="decision-group-status-icon" />

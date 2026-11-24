@@ -270,6 +270,40 @@ func describeFeedback(note map[string]any) string {
 			lines = append(lines, fmt.Sprintf("- They put a %s (%s) %s%s", text(item["type"]), text(item["nodeId"]), text(item["where"]), extra))
 		case "board":
 			lines = append(lines, "- "+joined(item["changes"], "\n- "))
+		case "verify":
+			if len(arr(item["verdicts"])) == 0 {
+				lines = append(lines, "- They cleared all verification verdicts.")
+			} else {
+				entries := []string{}
+				for _, raw := range arr(item["verdicts"]) {
+					value := obj(raw)
+					verdict := text(value["verdict"])
+					label := `"` + text(value["title"]) + `" (` + text(value["id"]) + `): ` + verdict
+					if groupTitle := text(value["groupTitle"]); groupTitle != "" {
+						label = "[" + groupTitle + "] " + label
+					} else if groupID := text(value["group"]); groupID != "" {
+						label = "[" + groupID + "] " + label
+					}
+					entries = append(entries, label)
+				}
+				lines = append(lines, "- Verification verdicts: "+strings.Join(entries, "; "))
+			}
+		case "answer":
+			for _, raw := range arr(item["answers"]) {
+				value := obj(raw)
+				parts := []string{}
+				if vals := arr(value["values"]); len(vals) > 0 {
+					parts = append(parts, joined(vals, ", "))
+				}
+				if noteText := text(value["note"]); noteText != "" {
+					parts = append(parts, "note: "+noteText)
+				}
+				answerText := "(cleared)"
+				if len(parts) > 0 {
+					answerText = strings.Join(parts, " | ")
+				}
+				lines = append(lines, fmt.Sprintf("- Answered %q (%s): %s", text(value["question"]), text(value["id"]), answerText))
+			}
 		}
 	}
 	pictures := ""

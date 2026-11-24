@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -156,6 +157,152 @@ func HasPendingDecisionGroups(content string) bool {
 	return false
 }
 
+var documentAskFence = regexp.MustCompile("(?ms)^```ask[ \t]*\\r?\\n(.*?)\\r?\\n```[ \t]*$")
+
+type parsedDocumentAsk struct {
+	id        string
+	question  string
+	options   map[string]string
+	selected  []string
+	note      string
+	confirmed bool
+}
+
+func parseDocumentAsks(content string) ([]parsedDocumentAsk, string) {
+	var asks []parsedDocumentAsk
+	normalized := documentAskFence.ReplaceAllStringFunc(content, func(match string) string {
+		parts := documentAskFence.FindStringSubmatch(match)
+		if len(parts) < 2 {
+			return match
+		}
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(parts[1])), &raw); err != nil {
+			return match
+		}
+		question, _ := raw["question"].(string)
+		question = strings.TrimSpace(question)
+		if question == "" {
+			return match
+		}
+		id, _ := raw["id"].(string)
+		id = strings.TrimSpace(id)
+		if id == "" {
+			sum := sha256.Sum256([]byte(question))
+			id = "ask-" + hex.EncodeToString(sum[:4])
+		}
+		optLabels := map[string]string{}
+		if list, ok := raw["options"].([]any); ok {
+			for i, item := range list {
+				switch v := item.(type) {
+				case string:
+					optLabels[fmt.Sprintf("opt-%d", i+1)] = strings.TrimSpace(v)
+				case map[string]any:
+					oid, _ := v["id"].(string)
+					label, _ := v["label"].(string)
+					oid, label = strings.TrimSpace(oid), strings.TrimSpace(label)
+					if oid == "" {
+						oid = fmt.Sprintf("opt-%d", i+1)
+					}
+					if label != "" {
+						optLabels[oid] = label
+					}
+				}
+			}
+		}
+		selected := []string{}
+		if list, ok := raw["selected"].([]any); ok {
+			for _, item := range list {
+				if s, ok := item.(string); ok {
+					if trimmed := strings.TrimSpace(s); trimmed != "" {
+						selected = append(selected, trimmed)
+					}
+				}
+			}
+		}
+		note, _ := raw["note"].(string)
+		confirmed, _ := raw["confirmed"].(bool)
+		asks = append(asks, parsedDocumentAsk{
+			id:        id,
+			question:  question,
+			options:   optLabels,
+			selected:  selected,
+			note:      strings.TrimSpace(note),
+			confirmed: confirmed,
+		})
+		// Strip user answer fields and default-valued flags when comparing plain prose diffs
+		// so answering an inline question does not also emit a noisy raw JSON edit diff.
+		delete(raw, "selected")
+		delete(raw, "note")
+		if allowNote, ok := raw["allowNote"].(bool); ok && allowNote {
+			delete(raw, "allowNote")
+		}
+		if desc, ok := raw["description"].(string); ok && strings.TrimSpace(desc) == "" {
+			delete(raw, "description")
+		}
+		if !confirmed {
+			delete(raw, "confirmed")
+		}
+		if encoded, err := json.Marshal(raw); err == nil {
+			return "```ask\n" + string(encoded) + "\n```"
+		}
+		return match
+	})
+	return asks, normalized
+}
+
+// HasPendingDocumentAsks reports whether a document has at least one active
+// (unconfirmed) inline ask block.
+func HasPendingDocumentAsks(content string) bool {
+	asks, _ := parseDocumentAsks(content)
+	for _, ask := range asks {
+		if !ask.confirmed {
+			return true
+		}
+	}
+	return false
+}
+
+func describeDocumentAskChanges(previous, current string) ([]object, string, string) {
+	prevAsks, prevNorm := parseDocumentAsks(previous)
+	currAsks, currNorm := parseDocumentAsks(current)
+	byID := make(map[string]parsedDocumentAsk, len(prevAsks))
+	for _, ask := range prevAsks {
+		byID[ask.id] = ask
+	}
+	answers := []object{}
+	for _, ask := range currAsks {
+		prev, existed := byID[ask.id]
+		prevSel := slices.Clone(prev.selected)
+		currSel := slices.Clone(ask.selected)
+		slices.Sort(prevSel)
+		slices.Sort(currSel)
+		if existed && slices.Equal(prevSel, currSel) && prev.note == ask.note {
+			continue
+		}
+		if !existed && len(ask.selected) == 0 && ask.note == "" {
+			continue
+		}
+		values := make([]string, 0, len(ask.selected))
+		for _, sid := range ask.selected {
+			if label := ask.options[sid]; label != "" {
+				values = append(values, label)
+			} else {
+				values = append(values, sid)
+			}
+		}
+		entry := object{
+			"id":       ask.id,
+			"question": ask.question,
+			"values":   values,
+		}
+		if ask.note != "" {
+			entry["note"] = ask.note
+		}
+		answers = append(answers, entry)
+	}
+	return answers, prevNorm, currNorm
+}
+
 // Document edits start from the latest known version. Comments use content
 // fingerprints so edited comments and user-reopened threads trigger feedback
 // idempotently while user-resolved threads stay quiet.
@@ -201,7 +348,11 @@ func pendingArtifactFeedback(w *projectionWriter, artifact ArtifactView) ([]any,
 	items := []any{}
 	var board []object
 	if artifact.Kind == "document" {
-		if diff := LineDiff(base.Content, artifact.Content, 4000); diff != nil {
+		answers, baseNorm, currentNorm := describeDocumentAskChanges(base.Content, artifact.Content)
+		if len(answers) > 0 {
+			items = append(items, object{"kind": "answer", "answers": answers})
+		}
+		if diff := LineDiff(baseNorm, currentNorm, 4000); diff != nil {
 			items = append(items, object{"kind": "edit", "diff": *diff})
 		}
 	} else {
@@ -361,6 +512,36 @@ func describeBoardChanges(previous, current []object) []any {
 	slices.Sort(after)
 	if !slices.Equal(before, after) {
 		items = append(items, object{"kind": "choice", "chosen": now})
+	}
+	verdicts := func(nodes []object, index map[string]object) ([]string, []object) {
+		keys, values := []string{}, []object{}
+		for _, node := range nodes {
+			if node.str("type") != "option" {
+				continue
+			}
+			verdict := node.obj("data").str("verdict")
+			if verdict != "approved" && verdict != "changes_requested" {
+				continue
+			}
+			gid := optionGroupID(node, index)
+			keys = append(keys, gid+":"+node.str("id")+":"+verdict)
+			entry := object{"id": node["id"], "title": boardNodeName(node), "verdict": verdict}
+			if gid != "" {
+				entry["group"] = gid
+				if title := groupNodeTitle(index[gid]); title != "" {
+					entry["groupTitle"] = title
+				}
+			}
+			values = append(values, entry)
+		}
+		return keys, values
+	}
+	beforeVerdicts, _ := verdicts(previous, old)
+	afterVerdicts, nowVerdicts := verdicts(current, new)
+	slices.Sort(beforeVerdicts)
+	slices.Sort(afterVerdicts)
+	if !slices.Equal(beforeVerdicts, afterVerdicts) {
+		items = append(items, object{"kind": "verify", "verdicts": nowVerdicts})
 	}
 	changes := []string{}
 	for _, node := range current {

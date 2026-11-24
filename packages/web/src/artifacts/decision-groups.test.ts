@@ -126,9 +126,15 @@ describe('decision-groups helpers', () => {
     const doc = sampleBoard()
     expect(summarizeDecisionGroups(doc)).toEqual({
       totalGroups: 3,
+      chooseGroups: 3,
+      verifyGroups: 0,
       pickedGroups: 0,
       recommendedFallbackGroups: 2,
       remainingGroups: 1,
+      verifyItemsTotal: 0,
+      verifyApproved: 0,
+      verifyChangesRequested: 0,
+      verifyPending: 0,
       hasActiveDecisionGroups: true,
     })
 
@@ -137,11 +143,84 @@ describe('decision-groups helpers', () => {
     l2.data = { ...l2.data, chosen: true }
     expect(summarizeDecisionGroups(doc)).toEqual({
       totalGroups: 3,
+      chooseGroups: 3,
+      verifyGroups: 0,
       pickedGroups: 1,
       recommendedFallbackGroups: 1,
       remainingGroups: 1,
+      verifyItemsTotal: 0,
+      verifyApproved: 0,
+      verifyChangesRequested: 0,
+      verifyPending: 0,
       hasActiveDecisionGroups: true,
     })
+  })
+
+  test('summarizes verify groups separately and skips them for auto-recommended picks', () => {
+    const doc: FlowDocument = {
+      version: 1,
+      nodes: [
+        {
+          id: 'grp-v1',
+          type: 'group',
+          x: 0,
+          y: 0,
+          width: 800,
+          height: 360,
+          data: { label: 'Homepage Verify', round: 1, mode: 'verify' },
+        },
+        {
+          id: 'v-a',
+          type: 'option',
+          parent: 'grp-v1',
+          x: 20,
+          y: 50,
+          width: 300,
+          height: 220,
+          data: { title: 'Hero section', group: 'grp-v1', verdict: 'approved' },
+        },
+        {
+          id: 'v-b',
+          type: 'option',
+          parent: 'grp-v1',
+          x: 360,
+          y: 50,
+          width: 300,
+          height: 220,
+          data: {
+            title: 'Footer alignment',
+            group: 'grp-v1',
+            verdict: 'changes_requested',
+            recommended: true,
+          },
+        },
+        {
+          id: 'v-c',
+          type: 'option',
+          parent: 'grp-v1',
+          x: 700,
+          y: 50,
+          width: 300,
+          height: 220,
+          data: { title: 'Mobile nav', group: 'grp-v1' },
+        },
+      ],
+      edges: [],
+    }
+    expect(summarizeDecisionGroups(doc)).toEqual({
+      totalGroups: 1,
+      chooseGroups: 0,
+      verifyGroups: 1,
+      pickedGroups: 0,
+      recommendedFallbackGroups: 0,
+      remainingGroups: 0,
+      verifyItemsTotal: 3,
+      verifyApproved: 1,
+      verifyChangesRequested: 1,
+      verifyPending: 1,
+      hasActiveDecisionGroups: true,
+    })
+    expect(collectAutoRecommendedOptionIds(doc)).toEqual([])
   })
 
   test('collects auto-recommended options for unpicked active groups respecting pick mode', () => {

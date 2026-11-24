@@ -95,12 +95,15 @@ func (board whiteboard) summary(positions bool) (items, connectors []args) {
 				item["confirmed"] = true
 			}
 		case "option":
-			for _, key := range []string{"title", "note", "chosen", "group", "recommended", "pick"} {
+			for _, key := range []string{"title", "note", "chosen", "group", "recommended", "pick", "verdict"} {
 				if value := data[key]; value != nil && value != false && value != "" {
 					item[key] = value
 				}
 			}
 		case "image":
+			if src := text(data, "src"); src != "" {
+				item["src"] = src
+			}
 			if alt := text(data, "alt"); alt != "" {
 				item["alt"] = alt
 			}
@@ -387,7 +390,7 @@ func rewriteEmbeddedBoard(stored embeddedBoard, spec boardFenceSpec) (string, er
 			removeEdges = append(removeEdges, id)
 		}
 	}
-	if err := board.change(spec.Items, spec.Connectors, removeItems, removeEdges, spec.Direction, spec.Relayout); err != nil {
+	if err := board.change(spec.Items, spec.Connectors, removeItems, removeEdges, spec.Direction, spec.Relayout, nil); err != nil {
 		return "", err
 	}
 	if spec.Height != 0 {
