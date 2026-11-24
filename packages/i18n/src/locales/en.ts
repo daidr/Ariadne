@@ -483,6 +483,8 @@ export const en: Record<MessageKey, string> = {
     'Model request failed: {detail}. The request carried images; if this model cannot look at images, turn off "Sees images" in the model settings',
   'error.repeating':
     'The same call came back {count} times with the same result, so this turn was stopped',
+  'error.compactionLoop':
+    'Context was compacted {count} times in a row without file edits, artifact updates, or a reply, so this turn stopped automatically; add guidance and retry',
   'error.truncated':
     'The reply went over the per-response token limit {count} times in a row, so this turn stopped; raise the limit in model settings and retry',
   'error.interrupted': 'The server stopped mid-turn; work resumed from there',

@@ -465,6 +465,8 @@ export const zhCN = {
   'error.modelRequestImages':
     '模型请求失败：{detail}。这次请求带了图片，如果这个模型看不了图片，在模型设置里关掉“看图片”',
   'error.repeating': '同样的调用重复了 {count} 次，结果都没变，已停止',
+  'error.compactionLoop':
+    '上下文已连续压缩 {count} 次仍无实质进展（没有改动文件、更新产物或发出回复），这一回合已自动停止。可以补充指引后继续',
   'error.truncated':
     '回复连续 {count} 次超出单次 token 上限，这一回合停止了。可以在模型设置里调高上限后重试',
   'error.interrupted': '服务中途停止过，已从断点继续',

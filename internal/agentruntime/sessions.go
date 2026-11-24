@@ -719,7 +719,11 @@ func (m *Sessions) Stream(ctx context.Context, settings map[string]any, request 
 				if seeder, ok := s.driver.(HistorySeeder); ok {
 					input, err = seeder.Seed(ctx, rest)
 				} else if request.Conversation == "" && len(request.Tools) == 0 {
-					input = RenderHistoryWithBudget(rest, DefaultStatelessReplayBytes)
+					budget := DefaultStatelessReplayBytes
+					if budgeter, ok := s.driver.(StatelessHistoryBudgeter); ok {
+						budget = budgeter.StatelessHistoryBudget(system)
+					}
+					input = RenderHistoryWithBudget(rest, budget)
 				} else if budgeter, ok := s.driver.(HistoryBudgeter); ok {
 					input = RenderHistoryWithBudget(rest, budgeter.HistoryBudget(system))
 				} else {
