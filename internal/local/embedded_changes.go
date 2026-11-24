@@ -106,6 +106,10 @@ func resolveEmbeddedRepoPath(ctx context.Context, worktreeDir, repoPath string) 
 	}
 	parts := strings.Split(clean, "/")
 	current := root
+	ephemeralRoots := []string{root}
+	if outerGitDir := linkedWorktreeGitDir(root); outerGitDir != "" {
+		ephemeralRoots = append(ephemeralRoots, outerGitDir)
+	}
 	parentRepoDir := ""
 	if dirHasValidGitEntry(root) {
 		parentRepoDir = root
@@ -121,6 +125,11 @@ func resolveEmbeddedRepoPath(ctx context.Context, worktreeDir, repoPath string) 
 		}
 		if i < len(parts)-1 && dirHasValidGitEntry(current) {
 			parentRepoDir = current
+			if wtGitDir := linkedWorktreeGitDir(current); wtGitDir != "" {
+				ephemeralRoots = append(ephemeralRoots, wtGitDir)
+			} else if parentGitDir := resolveRegularGitFileDir(current); parentGitDir != "" && isPathWithinAny(parentGitDir, ephemeralRoots) {
+				ephemeralRoots = append(ephemeralRoots, parentGitDir)
+			}
 		}
 	}
 	if !isPathWithin(current, root) {
@@ -147,6 +156,9 @@ func resolveEmbeddedRepoPath(ctx context.Context, worktreeDir, repoPath string) 
 		}
 	} else if info.Mode().IsRegular() {
 		repo = inspectEmbeddedGitFile(ctx, root, current, clean, len(parts), gitPath)
+		if !repo.ObjectStoreInsideWorktree && repo.CommonDir != "" {
+			repo.ObjectStoreInsideWorktree = isPathWithinAny(repo.CommonDir, ephemeralRoots)
+		}
 	} else {
 		return EmbeddedRepo{}, errors.New("invalid embedded repository .git entry")
 	}

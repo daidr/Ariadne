@@ -104,6 +104,11 @@ func DiscoverEmbeddedRepos(ctx context.Context, worktreeDir string) ([]EmbeddedR
 		return nil, nil
 	}
 
+	ephemeralRoots := []string{root}
+	if outerGitDir := linkedWorktreeGitDir(root); outerGitDir != "" {
+		ephemeralRoots = append(ephemeralRoots, outerGitDir)
+	}
+
 	initialParentRepoDir := ""
 	if dirHasValidGitEntry(root) {
 		initialParentRepoDir = root
@@ -187,6 +192,29 @@ func DiscoverEmbeddedRepos(ctx context.Context, worktreeDir string) ([]EmbeddedR
 	if err := walk(root, 0, initialParentRepoDir); err != nil {
 		return nil, err
 	}
+	for _, repo := range repos {
+		if repo.Kind == EmbeddedWorktree && repo.RegisteredWorktreePath != "" && repo.GitDir != "" {
+			ephemeralRoots = append(ephemeralRoots, repo.GitDir)
+		}
+	}
+	for {
+		changed := false
+		for i := range repos {
+			if repos[i].ObjectStoreInsideWorktree || repos[i].CommonDir == "" {
+				continue
+			}
+			if isPathWithinAny(repos[i].CommonDir, ephemeralRoots) {
+				repos[i].ObjectStoreInsideWorktree = true
+				if repos[i].GitDir != "" {
+					ephemeralRoots = append(ephemeralRoots, repos[i].GitDir)
+				}
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
 	slices.SortFunc(repos, func(a, b EmbeddedRepo) int {
 		return cmp.Compare(a.RelPath, b.RelPath)
 	})
@@ -247,6 +275,53 @@ func resolveGitFileTarget(repoDir, gitFile string) (string, bool) {
 		return "", false
 	}
 	return gitDir, true
+}
+
+func resolveRegularGitFileDir(dir string) string {
+	gitPath := filepath.Join(dir, ".git")
+	info, err := os.Lstat(gitPath)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return ""
+	}
+	gitDir, ok := resolveGitFileTarget(dir, gitPath)
+	if !ok {
+		return ""
+	}
+	return gitDir
+}
+
+// linkedWorktreeGitDir returns dir's per-worktree gitdir (<common>/worktrees/<name>)
+// when dir is a linked Git worktree whose admin gitdir points back to dir/.git.
+func linkedWorktreeGitDir(dir string) string {
+	gitPath := filepath.Join(dir, ".git")
+	gitInfo, err := os.Lstat(gitPath)
+	if err != nil || gitInfo.Mode()&os.ModeSymlink != 0 || !gitInfo.Mode().IsRegular() {
+		return ""
+	}
+	gitDir, ok := resolveGitFileTarget(dir, gitPath)
+	if !ok {
+		return ""
+	}
+	if _, ok := linkedWorktreeCommonDir(gitDir); !ok {
+		return ""
+	}
+	rawBack, err := readSmallTextFile(filepath.Join(gitDir, "gitdir"))
+	if err != nil {
+		return ""
+	}
+	backLine, _, _ := strings.Cut(rawBack, "\n")
+	backPath := filepath.FromSlash(strings.TrimSpace(strings.TrimRight(backLine, "\r")))
+	if backPath == "" {
+		return ""
+	}
+	if !filepath.IsAbs(backPath) {
+		backPath = filepath.Join(gitDir, backPath)
+	}
+	backInfo, err := os.Lstat(backPath)
+	if err != nil || !os.SameFile(gitInfo, backInfo) {
+		return ""
+	}
+	return gitDir
 }
 
 func dirHasValidGitEntry(dir string) bool {
@@ -343,7 +418,7 @@ func readSubmoduleHeadGitlink(ctx context.Context, superprojectDir, subRelPath s
 		return ""
 	}
 	parentGit := NewGit(superprojectDir, "file")
-	res := parentGit(ctx, []string{"--no-optional-locks", "ls-tree", "-z", "HEAD", "--", subRelPath}, GitOptions{Directory: superprojectDir, Whole: true})
+	res := parentGit(ctx, []string{"--no-optional-locks", "--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", subRelPath}, GitOptions{Directory: superprojectDir, Whole: true})
 	if res.ExitCode != 0 {
 		return ""
 	}
@@ -355,7 +430,7 @@ func readSubmoduleIndexGitlink(ctx context.Context, superprojectDir, subRelPath 
 		return ""
 	}
 	parentGit := NewGit(superprojectDir, "file")
-	res := parentGit(ctx, []string{"--no-optional-locks", "ls-files", "--stage", "-z", "--", subRelPath}, GitOptions{Directory: superprojectDir, Whole: true})
+	res := parentGit(ctx, []string{"--no-optional-locks", "--literal-pathspecs", "ls-files", "--stage", "-z", "--", subRelPath}, GitOptions{Directory: superprojectDir, Whole: true})
 	if res.ExitCode != 0 {
 		return ""
 	}
@@ -530,6 +605,30 @@ func isPathWithin(target, root string) bool {
 		return false
 	}
 	return within(cleanPathKey(resolvedTarget), cleanPathKey(resolvedRoot))
+}
+
+func isPathWithinAny(target string, roots []string) bool {
+	if target == "" || len(roots) == 0 {
+		return false
+	}
+	resolvedTarget, err := canonicalOrClean(target)
+	if err != nil {
+		return false
+	}
+	targetKey := cleanPathKey(resolvedTarget)
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		resolvedRoot, err := canonicalOrClean(root)
+		if err != nil {
+			continue
+		}
+		if within(targetKey, cleanPathKey(resolvedRoot)) {
+			return true
+		}
+	}
+	return false
 }
 
 func verifyEmbeddedGitDir(ctx context.Context, repoGit GitRun, expectedGitDir string) (bool, error) {

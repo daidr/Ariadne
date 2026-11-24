@@ -982,8 +982,16 @@ func TestDiscoverAndInspectEmbeddedSubmodule(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing direct-sub in %+v", repos)
 	}
-	if !directSub.IsSubmodule() || directSub.Kind != EmbeddedGitFile || directSub.SubmodulePath != "direct-sub" || worktreePathKey(directSub.SuperprojectPath) != worktreePathKey(wt) {
+	if !directSub.IsSubmodule() || directSub.Kind != EmbeddedGitFile || !directSub.ObjectStoreInsideWorktree ||
+		directSub.SubmodulePath != "direct-sub" || worktreePathKey(directSub.SuperprojectPath) != worktreePathKey(wt) {
 		t.Fatalf("unexpected direct-sub metadata: %+v", directSub)
+	}
+	resolvedDirectSub, err := resolveEmbeddedRepoPath(ctx, wt, "direct-sub")
+	if err != nil {
+		t.Fatalf("resolveEmbeddedRepoPath(direct-sub): %v", err)
+	}
+	if !resolvedDirectSub.IsSubmodule() || !resolvedDirectSub.ObjectStoreInsideWorktree {
+		t.Fatalf("resolveEmbeddedRepoPath must mark direct submodule ObjectStoreInsideWorktree=true: %+v", resolvedDirectSub)
 	}
 
 	nestedSubRel := "nested-worktrees/feat-split/subrepos/pkg-ui/vendor-bundle"
@@ -1125,6 +1133,34 @@ func TestRemoveWorktreeWithCleanAndDirtySubmodule(t *testing.T) {
 		gitOK(t, subGit, "config", "user.name", "Ariadne Test")
 		gitOK(t, subGit, "config", "user.email", "test@example.invalid")
 
+		// Verify external-host nested worktree keeps ObjectStoreInsideWorktree==false while
+		// its per-worktree submodule (under host/.git/worktrees/<wt>/modules/vendor-bundle)
+		// is recognized with ObjectStoreInsideWorktree==true in both discovery and direct resolution.
+		const nestedRel = "nested-worktrees/feat-clean/pkg"
+		const nestedSubRel = "nested-worktrees/feat-clean/pkg/vendor-bundle"
+		discovered, err := DiscoverEmbeddedRepos(ctx, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byRel := map[string]EmbeddedRepo{}
+		for _, r := range discovered {
+			byRel[r.RelPath] = r
+		}
+		if r := byRel[nestedRel]; r.Kind != EmbeddedWorktree || r.ObjectStoreInsideWorktree {
+			t.Fatalf("external-host nested worktree must keep ObjectStoreInsideWorktree=false: %+v", r)
+		}
+		nestedSubRepo := byRel[nestedSubRel]
+		if !nestedSubRepo.IsSubmodule() || !nestedSubRepo.ObjectStoreInsideWorktree {
+			t.Fatalf("nested worktree submodule must have ObjectStoreInsideWorktree=true: %+v", nestedSubRepo)
+		}
+		resolvedNestedSub, err := resolveEmbeddedRepoPath(ctx, dir, nestedSubRel)
+		if err != nil {
+			t.Fatalf("resolveEmbeddedRepoPath(%q): %v", nestedSubRel, err)
+		}
+		if !resolvedNestedSub.IsSubmodule() || !resolvedNestedSub.ObjectStoreInsideWorktree {
+			t.Fatalf("resolveEmbeddedRepoPath must mark nested worktree submodule ObjectStoreInsideWorktree=true: %+v", resolvedNestedSub)
+		}
+
 		// 1. Dirty submodule blocks removal.
 		writeGit(t, subDir, "bundle.js", "dirty\n")
 		if removed, err := factory.Remove(ctx, "thr_nested_submod", RemoveOptions{Merged: true}); err != nil || removed {
@@ -1135,10 +1171,77 @@ func TestRemoveWorktreeWithCleanAndDirtySubmodule(t *testing.T) {
 		// 2. Diverged detached HEAD in submodule blocks removal.
 		writeGit(t, subDir, "bundle.js", "new commit\n")
 		gitCommit(t, subGit, "diverge from gitlink")
+		divergedSHA := commitSHA(ctx, subGit, "HEAD", "")
 		if removed, err := factory.Remove(ctx, "thr_nested_submod", RemoveOptions{Merged: true}); err != nil || removed {
 			t.Fatalf("diverged submodule must block Remove: removed=%t err=%v", removed, err)
 		}
 		gitOK(t, subGit, "checkout", "--detach", "-q", orphanSHA)
+
+		// 2b. Unpushed local branch in external-host nested worktree submodule blocks non-discard removals
+		// even when HEAD is back at clean aligned detached gitlink.
+		gitOK(t, subGit, "branch", "local-wip", divergedSHA)
+		st, err := InspectEmbeddedRepo(ctx, nestedSubRepo)
+		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
+			t.Fatalf("unpushed local branch in nested submodule must be Unpushed+Unmerged: %+v, err=%v", st, err)
+		}
+		for _, opts := range []RemoveOptions{{}, {Merged: true}} {
+			if removed, err := factory.Remove(ctx, "thr_nested_submod", opts); err != nil || removed {
+				t.Fatalf("unpushed local branch in nested submodule must block Remove(%+v): removed=%t err=%v", opts, removed, err)
+			}
+		}
+		gitOK(t, subGit, "branch", "-D", "local-wip")
+
+		// 2c. Stash in external-host nested worktree submodule blocks idle/user/merged removal.
+		writeGit(t, subDir, "bundle.js", "stashed edit\n")
+		gitOK(t, subGit, "stash", "push", "-q", "-m", "wip")
+		st, err = InspectEmbeddedRepo(ctx, nestedSubRepo)
+		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
+			t.Fatalf("stash in nested submodule must be Unpushed+Unmerged: %+v, err=%v", st, err)
+		}
+		if removed, err := factory.Remove(ctx, "thr_nested_submod", RemoveOptions{Spare: true}); err != nil || removed {
+			t.Fatalf("stash in nested submodule must block idle Remove: removed=%t err=%v", removed, err)
+		}
+		gitOK(t, subGit, "stash", "drop", "-q")
+
+		// 2d. Pushed feature branch merged only into a local-only configured branch (not pushed to remote)
+		// must remain Unmerged and block merged removal so the local branch is not destroyed.
+		gitOK(t, subGit, "checkout", "-qb", "feat/local-merge", divergedSHA)
+		gitOK(t, subGit, "push", "-q", "-u", "origin", "feat/local-merge")
+		gitOK(t, subGit, "branch", "vendor-orphan", divergedSHA)
+		st, err = InspectEmbeddedRepo(ctx, nestedSubRepo)
+		if err != nil || st.Dirty || st.Unpushed || !st.Unmerged {
+			t.Fatalf("local-only merge into submodule configured branch must remain Unmerged: %+v, err=%v", st, err)
+		}
+		if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_nested_submod", Branch: *info.Branch}, *info.Base); err != nil || merged {
+			t.Fatalf("local-only merge in nested submodule must block Merged: %t, %v", merged, err)
+		}
+		if removed, err := factory.Remove(ctx, "thr_nested_submod", RemoveOptions{Merged: true}); err != nil || removed {
+			t.Fatalf("local-only merge in nested submodule must block merged Remove: removed=%t err=%v", removed, err)
+		}
+		gitOK(t, subGit, "checkout", "--detach", "-q", orphanSHA)
+		gitOK(t, subGit, "branch", "-D", "feat/local-merge", "vendor-orphan")
+
+		// 2e. Named-branch unpushed commit in submodule with updated parent gitlink (alignedSubmodule==true)
+		// must still report Unpushed+Unmerged and block user/idle/merged removals.
+		gitOK(t, nestedGit, "config", "user.name", "Ariadne Test")
+		gitOK(t, nestedGit, "config", "user.email", "test@example.invalid")
+		gitOK(t, subGit, "checkout", "-qb", "feat/aligned-unpushed", orphanSHA)
+		writeGit(t, subDir, "bundle.js", "export const version = 9;\n")
+		gitCommit(t, subGit, "unpushed submodule commit")
+		gitOK(t, nestedGit, "add", "vendor-bundle")
+		gitOK(t, nestedGit, "commit", "-q", "-m", "bump submodule gitlink")
+		st, err = InspectEmbeddedRepo(ctx, nestedSubRepo)
+		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
+			t.Fatalf("unpushed named-branch commit with aligned gitlink must be Unpushed+Unmerged: %+v, err=%v", st, err)
+		}
+		for _, opts := range []RemoveOptions{{}, {Spare: true}, {Merged: true}} {
+			if removed, err := factory.Remove(ctx, "thr_nested_submod", opts); err != nil || removed {
+				t.Fatalf("unpushed aligned submodule commit must block Remove(%+v): removed=%t err=%v", opts, removed, err)
+			}
+		}
+		gitOK(t, nestedGit, "reset", "--hard", "-q", "HEAD~1")
+		gitOK(t, subGit, "checkout", "--detach", "-q", orphanSHA)
+		gitOK(t, subGit, "branch", "-D", "feat/aligned-unpushed")
 
 		// 3. Locked nested worktree with clean submodule still blocks removal.
 		gitOK(t, hostGit, "worktree", "lock", nestedWT)
@@ -1174,7 +1277,7 @@ func TestRemoveWorktreeWithCleanAndDirtySubmodule(t *testing.T) {
 
 	t.Run("outer worktree with direct initialized submodule guards dirty files and lock before single force", func(t *testing.T) {
 		t.Parallel()
-		remoteBare, _ := initOrphanSubmoduleRemote(t)
+		remoteBare, orphanSHA := initOrphanSubmoduleRemote(t)
 		remoteURL := fileURL(remoteBare)
 
 		outer, outerGit := initGit(t)
@@ -1190,7 +1293,32 @@ func TestRemoveWorktreeWithCleanAndDirtySubmodule(t *testing.T) {
 		dir := info.Label
 		ws.Close()
 
-		gitOK(t, NewGit(dir, "file"), "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q", "vendor-bundle")
+		outerWTGit := NewGit(dir, "file")
+		gitOK(t, outerWTGit, "config", "user.name", "Ariadne Test")
+		gitOK(t, outerWTGit, "config", "user.email", "test@example.invalid")
+		gitOK(t, outerWTGit, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q", "vendor-bundle")
+
+		subDir := filepath.Join(dir, "vendor-bundle")
+		subGit := NewGit(subDir, "file")
+		gitOK(t, subGit, "config", "user.name", "Ariadne Test")
+		gitOK(t, subGit, "config", "user.email", "test@example.invalid")
+
+		// Direct submodule's per-worktree object store (<outer>/.git/worktrees/<wt>/modules/vendor-bundle)
+		// must be marked ObjectStoreInsideWorktree==true by both DiscoverEmbeddedRepos and resolveEmbeddedRepoPath.
+		discovered, err := DiscoverEmbeddedRepos(ctx, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(discovered) != 1 || !discovered[0].IsSubmodule() || !discovered[0].ObjectStoreInsideWorktree {
+			t.Fatalf("outer direct submodule must have ObjectStoreInsideWorktree=true: %+v", discovered)
+		}
+		resolvedDirect, err := resolveEmbeddedRepoPath(ctx, dir, "vendor-bundle")
+		if err != nil {
+			t.Fatalf("resolveEmbeddedRepoPath(vendor-bundle): %v", err)
+		}
+		if !resolvedDirect.IsSubmodule() || !resolvedDirect.ObjectStoreInsideWorktree {
+			t.Fatalf("resolveEmbeddedRepoPath must mark outer direct submodule ObjectStoreInsideWorktree=true: %+v", resolvedDirect)
+		}
 
 		// 1. Dirty file in outer worktree must block removal even though submodule is clean.
 		dirtyFile := filepath.Join(dir, "keep-me.txt")
@@ -1204,6 +1332,71 @@ func TestRemoveWorktreeWithCleanAndDirtySubmodule(t *testing.T) {
 		if err := os.Remove(dirtyFile); err != nil {
 			t.Fatal(err)
 		}
+
+		// 1b. Unpushed local branch in direct submodule while on clean aligned detached HEAD blocks non-discard removals.
+		writeGit(t, subDir, "bundle.js", "export const version = 20;\n")
+		gitCommit(t, subGit, "local direct sub commit")
+		localSubSHA := commitSHA(ctx, subGit, "HEAD", "")
+		gitOK(t, subGit, "branch", "local-wip", localSubSHA)
+		gitOK(t, subGit, "checkout", "--detach", "-q", orphanSHA)
+		st, err := InspectEmbeddedRepo(ctx, discovered[0])
+		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
+			t.Fatalf("unpushed local branch in outer submodule must be Unpushed+Unmerged: %+v, err=%v", st, err)
+		}
+		for _, opts := range []RemoveOptions{{}, {Merged: true}} {
+			if removed, err := factory.Remove(ctx, "thr_outer_submod", opts); err != nil || removed {
+				t.Fatalf("unpushed local branch in outer submodule must block Remove(%+v): removed=%t err=%v", opts, removed, err)
+			}
+		}
+		gitOK(t, subGit, "branch", "-D", "local-wip")
+
+		// 1c. Stash in direct submodule while on clean aligned detached HEAD blocks removal.
+		writeGit(t, subDir, "bundle.js", "export const version = 21;\n")
+		gitOK(t, subGit, "stash", "push", "-q", "-m", "direct-wip")
+		st, err = InspectEmbeddedRepo(ctx, discovered[0])
+		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
+			t.Fatalf("stash in outer submodule must be Unpushed+Unmerged: %+v, err=%v", st, err)
+		}
+		if removed, err := factory.Remove(ctx, "thr_outer_submod", RemoveOptions{Spare: true}); err != nil || removed {
+			t.Fatalf("stash in outer submodule must block idle Remove: removed=%t err=%v", removed, err)
+		}
+		gitOK(t, subGit, "stash", "drop", "-q")
+
+		// 1d. Pushed feature branch merged only into local-only vendor-orphan branch must stay Unmerged.
+		gitOK(t, subGit, "checkout", "-qb", "feat/direct-local-merge", localSubSHA)
+		gitOK(t, subGit, "push", "-q", "-u", "origin", "feat/direct-local-merge")
+		gitOK(t, subGit, "branch", "vendor-orphan", localSubSHA)
+		st, err = InspectEmbeddedRepo(ctx, discovered[0])
+		if err != nil || st.Dirty || st.Unpushed || !st.Unmerged {
+			t.Fatalf("local-only merge in outer submodule must stay Unmerged: %+v, err=%v", st, err)
+		}
+		if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_outer_submod", Branch: *info.Branch}, *info.Base); err != nil || merged {
+			t.Fatalf("local-only merge in outer submodule must block Merged: %t, %v", merged, err)
+		}
+		if removed, err := factory.Remove(ctx, "thr_outer_submod", RemoveOptions{Merged: true}); err != nil || removed {
+			t.Fatalf("local-only merge in outer submodule must block merged Remove: removed=%t err=%v", removed, err)
+		}
+		gitOK(t, subGit, "checkout", "--detach", "-q", orphanSHA)
+		gitOK(t, subGit, "branch", "-D", "feat/direct-local-merge", "vendor-orphan")
+
+		// 1e. Unpushed commit on named branch with updated outer gitlink blocks idle/user/merged removals.
+		gitOK(t, subGit, "checkout", "-qb", "feat/direct-aligned-unpushed", orphanSHA)
+		writeGit(t, subDir, "bundle.js", "export const version = 22;\n")
+		gitCommit(t, subGit, "unpushed direct submodule commit")
+		gitOK(t, outerWTGit, "add", "vendor-bundle")
+		gitOK(t, outerWTGit, "commit", "-q", "-m", "bump outer gitlink")
+		st, err = InspectEmbeddedRepo(ctx, discovered[0])
+		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
+			t.Fatalf("unpushed named-branch commit with aligned outer gitlink must be Unpushed+Unmerged: %+v, err=%v", st, err)
+		}
+		for _, opts := range []RemoveOptions{{}, {Spare: true}, {Merged: true}} {
+			if removed, err := factory.Remove(ctx, "thr_outer_submod", opts); err != nil || removed {
+				t.Fatalf("unpushed aligned outer submodule commit must block Remove(%+v): removed=%t err=%v", opts, removed, err)
+			}
+		}
+		gitOK(t, outerWTGit, "reset", "--hard", "-q", "HEAD~1")
+		gitOK(t, subGit, "checkout", "--detach", "-q", orphanSHA)
+		gitOK(t, subGit, "branch", "-D", "feat/direct-aligned-unpushed")
 
 		// 2. Locked outer worktree must block removal.
 		gitOK(t, outerGit, "worktree", "lock", dir)
@@ -1295,5 +1488,58 @@ func TestSubmoduleGitlinkParsingAndGitmodulesBranch(t *testing.T) {
 	gitOK(t, repoGit, "checkout", "--detach", "-q", "HEAD")
 	if got := readSubmoduleConfiguredBranch(ctx, repoDir, "libs/follow"); got != "" {
 		t.Fatalf("dot branch on detached superproject must be empty, got %q", got)
+	}
+}
+
+func TestSubmoduleGitlinkLiteralPathspecs(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	// 1. Real on-disk submodule with bracket path (common in frontend monorepos).
+	subOrigin, subOriginGit := initGit(t)
+	subSHA := commitSHA(ctx, subOriginGit, "HEAD", "")
+
+	_, outerGit := initGit(t)
+	const bracketPath = "packages/[pkg]"
+	gitOK(t, outerGit, "-c", "protocol.file.allow=always", "submodule", "add", "-q", "-b", "main", fileURL(subOrigin), bracketPath)
+	gitCommit(t, outerGit, "add bracket submodule")
+
+	wt := filepath.Join(shortTempDir(t), "wt")
+	gitOK(t, outerGit, "worktree", "add", "-qb", "ariadne/bracket-sub", wt)
+	gitOK(t, NewGit(wt, "file"), "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q", bracketPath)
+
+	if got := readSubmoduleHeadGitlink(ctx, wt, bracketPath); got != subSHA {
+		t.Fatalf("readSubmoduleHeadGitlink(%q) = %q, want %q", bracketPath, got, subSHA)
+	}
+	if got := readSubmoduleIndexGitlink(ctx, wt, bracketPath); got != subSHA {
+		t.Fatalf("readSubmoduleIndexGitlink(%q) = %q, want %q", bracketPath, got, subSHA)
+	}
+	if got := readSubmoduleConfiguredBranch(ctx, wt, bracketPath); got != "main" {
+		t.Fatalf("readSubmoduleConfiguredBranch(%q) = %q, want main", bracketPath, got)
+	}
+	repos, err := DiscoverEmbeddedRepos(ctx, wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 1 || !repos[0].IsSubmodule() || repos[0].SubmodulePath != bracketPath || !repos[0].ObjectStoreInsideWorktree {
+		t.Fatalf("expected bracket submodule to be discovered as submodule with ObjectStoreInsideWorktree=true, got %+v", repos)
+	}
+
+	// 2. Pathspec-magic prefixes (":" / ":(bad)") in git tree & index must match literally
+	// instead of being parsed as Git pathspec magic.
+	magicRepo, magicGit := initGit(t)
+	baseSHA := commitSHA(ctx, magicGit, "HEAD", "")
+	for _, subPath := range []string{":colon-sub", ":(bad)sub"} {
+		gitOK(t, magicGit, "-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo", "160000,"+baseSHA+","+subPath)
+	}
+	gitOK(t, magicGit, "-c", "core.protectNTFS=false", "commit", "-q", "-m", "add pathspec-magic gitlinks")
+
+	for _, subPath := range []string{":colon-sub", ":(bad)sub"} {
+		if got := readSubmoduleIndexGitlink(ctx, magicRepo, subPath); got != baseSHA {
+			t.Fatalf("readSubmoduleIndexGitlink(%q) = %q, want %q", subPath, got, baseSHA)
+		}
+		if got := readSubmoduleHeadGitlink(ctx, magicRepo, subPath); got != baseSHA {
+			t.Fatalf("readSubmoduleHeadGitlink(%q) = %q, want %q", subPath, got, baseSHA)
+		}
 	}
 }
