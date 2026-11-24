@@ -1,15 +1,20 @@
 import { posix, resolve } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { buildSharedShikiBundle } from '../../shiki-bundle-plugin'
+import { codeWorkerUrl } from './code-worker-url'
 import { shikiWorkerUrl } from './shiki-worker-url'
 
 const webRoot = resolve(import.meta.dirname, '../..')
 
 describe('shared Shiki bundle deduplication', () => {
-  test('shikiWorkerUrl points to shiki.worker.ts in dev/test environments', () => {
-    const url = shikiWorkerUrl()
-    expect(url).toBeInstanceOf(URL)
-    expect(url.pathname.endsWith('/shiki.worker.ts')).toBe(true)
+  test('shikiWorkerUrl and codeWorkerUrl point to source worker modules in dev/test environments', () => {
+    const shikiUrl = shikiWorkerUrl()
+    expect(shikiUrl).toBeInstanceOf(URL)
+    expect(shikiUrl.pathname.endsWith('/shiki.worker.ts')).toBe(true)
+
+    const codeUrl = codeWorkerUrl()
+    expect(codeUrl).toBeInstanceOf(URL)
+    expect(codeUrl.pathname.endsWith('/code.worker.ts')).toBe(true)
   })
 
   test('builds one shared worker-safe Shiki runtime, standalone WASM, and deduplicated grammars', async () => {
@@ -17,14 +22,16 @@ describe('shared Shiki bundle deduplication', () => {
     const byName = new Map(bundle.emittedFiles.map((file) => [file.fileName, file.source]))
 
     const workerSource = byName.get(bundle.workerChunkFile)
+    const codeWorkerSource = byName.get(bundle.codeWorkerChunkFile)
     const shikiEntrySource = byName.get(bundle.shikiChunkFile)
     expect(typeof workerSource).toBe('string')
+    expect(typeof codeWorkerSource).toBe('string')
     expect(typeof shikiEntrySource).toBe('string')
 
-    // Worker entry stays a thin wrapper importing from the shared Shiki chunk instead of
-    // duplicating the Shiki engine or grammar files.
+    // Worker entries import from the shared Shiki chunk instead of duplicating the Shiki engine or grammar files.
     expect((workerSource as string).length).toBeLessThan(2048)
     expect(workerSource as string).toMatch(/import\{[^}]+\}from"\.\/shiki-[^"]+\.js"/)
+    expect(codeWorkerSource as string).toMatch(/import\{[^}]+\}from"\.\/shiki-[^"]+\.js"/)
 
     // Shared Shiki entry exports both main-thread and worker APIs.
     expect(shikiEntrySource as string).toContain('highlightCodeToHtml')

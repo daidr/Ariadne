@@ -25,10 +25,12 @@ const sfcSource = readFileSync(resolve(import.meta.dirname, 'ChangedFileDiff.vue
 const styleBlock = sfcSource.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? ''
 
 describe('ChangedFileDiff vertical scrolling', () => {
-  test('does not cap diff height and uses native scroll-y=false with sticky single-line toolbar', () => {
+  test('does not cap diff height and uses native scroll-y=false, worker pool, syncHighlightLines=0, and sticky single-line toolbar', () => {
     expect(styleBlock).not.toMatch(/\bmax-(?:block-size|height)\s*:/)
     expect(styleBlock).not.toContain('.dou-code-editor__scroller')
     expect(sfcSource).toContain(':scroll-y="false"')
+    expect(sfcSource).toContain(':worker="codeEditorWorker()"')
+    expect(sfcSource).toContain(':sync-highlight-lines="0"')
     expect(sfcSource).toContain('sticky-toolbar')
   })
 
@@ -155,7 +157,7 @@ describe('ChangedFileDiff syntax highlighting', () => {
     loadShikiMock.mockClear()
   })
 
-  test('highlights built-in languages immediately in split and inline modes', () => {
+  test('highlights built-in languages asynchronously without blocking render frames in split and inline modes', async () => {
     const file: ChangedFile = {
       path: 'packages/web/src/demo.ts',
       previousPath: null,
@@ -174,8 +176,10 @@ describe('ChangedFileDiff syntax highlighting', () => {
         attachTo: document.body,
       })
 
-      expect(wrapper.findAll('.dou-syntax-keyword').length).toBeGreaterThan(0)
-      expect(wrapper.findAll('.dou-syntax-number').length).toBeGreaterThan(0)
+      await vi.waitFor(() => {
+        expect(wrapper.findAll('.dou-syntax-keyword').length).toBeGreaterThan(0)
+        expect(wrapper.findAll('.dou-syntax-number').length).toBeGreaterThan(0)
+      })
       expect(loadShikiMock).not.toHaveBeenCalled()
       wrapper.unmount()
     }
@@ -227,7 +231,9 @@ describe('ChangedFileDiff syntax highlighting', () => {
       attachTo: document.body,
     })
 
-    expect(second.findAll('.dou-syntax-keyword').length).toBeGreaterThan(0)
+    await vi.waitFor(() => {
+      expect(second.findAll('.dou-syntax-keyword').length).toBeGreaterThan(0)
+    })
     expect(loadShikiMock).toHaveBeenCalledTimes(1)
     second.unmount()
 

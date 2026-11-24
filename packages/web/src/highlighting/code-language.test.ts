@@ -8,6 +8,7 @@ import {
   builtInCodeLanguage,
   loadCodeLanguage,
   peekCodeLanguage,
+  remoteShikiCodeLanguage,
   resetCodeLanguageCache,
   useCodeLanguage,
 } from './code-language'
@@ -150,6 +151,54 @@ describe('code language resolution and highlighting', () => {
     await nextTick()
     expect(binding.language.value).toBeNull()
     expect(peekCodeLanguage('notes.txt')).toBeNull()
+
+    scope.stop()
+  })
+
+  test('resolves non-built-in Shiki languages to remoteCodeLanguage synchronously when Worker is available and falls back on Worker unavailability', async () => {
+    expect(remoteShikiCodeLanguage('src/app.ts')).toBeNull()
+    expect(remoteShikiCodeLanguage('notes.txt')).toBeNull()
+
+    const goRemote = remoteShikiCodeLanguage('internal/core/server.go')
+    expect(goRemote).not.toBeNull()
+    expect(goRemote!.name).toBe('go')
+    expect(goRemote!.workerMode).toBe('tokens')
+    expect(remoteShikiCodeLanguage('cmd/main.go')).toBe(goRemote)
+
+    const fakeGo = { name: 'go' } as CodeLanguage
+    const loader = vi.fn(async () => fakeGo)
+    const workerHealthy = ref(true)
+    const path = ref('internal/core/server.go')
+    const scope = effectScope()
+    const binding = scope.run(() =>
+      useCodeLanguage(() => path.value, { loader, remote: () => workerHealthy.value }),
+    )!
+
+    // Synchronous remote descriptor — no main-thread Shiki load required.
+    expect(binding.isBuiltIn.value).toBe(false)
+    expect(binding.language.value).toBe(goRemote)
+    expect(loader).not.toHaveBeenCalled()
+
+    path.value = 'packages/web/src/main.ts'
+    await nextTick()
+    expect(binding.isBuiltIn.value).toBe(true)
+    expect(binding.language.value?.name).toBe('typescript')
+
+    path.value = 'deploy/Dockerfile.prod'
+    await nextTick()
+    expect(binding.isBuiltIn.value).toBe(false)
+    expect(binding.language.value?.name).toBe('dockerfile')
+    expect(binding.language.value?.workerMode).toBe('tokens')
+
+    // If the worker becomes unavailable at runtime, reactively falls back to main-thread Shiki.
+    path.value = 'internal/core/server.go'
+    await nextTick()
+    expect(binding.language.value).toBe(goRemote)
+    workerHealthy.value = false
+    await vi.waitFor(() => {
+      expect(binding.language.value).toBe(fakeGo)
+    })
+    expect(loader).toHaveBeenCalledTimes(1)
 
     scope.stop()
   })

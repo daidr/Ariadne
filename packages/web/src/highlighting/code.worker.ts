@@ -1,34 +1,5 @@
-import {
-  css,
-  html,
-  javascript,
-  json,
-  jsx,
-  markdown,
-  python,
-  scss,
-  serveCodeHighlighting,
-  shell,
-  sql,
-  tsx,
-  typescript,
-  vue,
-  yaml,
-} from '@dou-ui/code/worker'
+import type { WorkerMessageScope } from '@dou-ui/code/worker'
+import { attachCodeWorker } from './code-worker-runtime'
+import { loadShikiLanguage } from './shiki'
 
-serveCodeHighlighting([
-  typescript,
-  tsx,
-  javascript,
-  jsx,
-  json,
-  css,
-  scss,
-  html,
-  vue,
-  markdown,
-  python,
-  shell,
-  sql,
-  yaml,
-])
+attachCodeWorker(globalThis as unknown as WorkerMessageScope, loadShikiLanguage)

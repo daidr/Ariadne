@@ -1,6 +1,8 @@
-import type { CodeBlockHighlighter } from 'dou-ui'
+import type { CodeBlockHighlightContext, CodeBlockHighlighter } from 'dou-ui'
 import { resolveShikiLanguage } from './languages'
 import { shikiWorkerPool, type HighlightOptions } from './shiki-worker-pool'
+
+export type { CodeBlockHighlightContext }
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -25,10 +27,6 @@ export interface CodeHtmlHighlighterSource {
   highlight(code: string, lang: string, options?: HighlightOptions): Promise<string>
 }
 
-export interface CodeBlockHighlightContext {
-  signal?: AbortSignal
-}
-
 /**
  * Create a `DouCodeBlock` highlighter backed by lazy Shiki dual-theme highlighting.
  * Plain text and unsupported languages resolve synchronously as escaped plain lines without
@@ -49,7 +47,7 @@ export function createCodeBlockHighlighter(
     const options = context?.signal ? { signal: context.signal } : undefined
     return highlightHtml(code, lang, options).then(
       (html) => html || plainCodeLinesHtml(code),
-      () => plainCodeLinesHtml(code),
+      () => (context?.signal?.aborted ? '' : plainCodeLinesHtml(code)),
     )
   }
 }

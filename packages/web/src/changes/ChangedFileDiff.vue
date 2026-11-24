@@ -7,6 +7,7 @@ import { RotateCwIcon } from '@dou-ui/icons'
 import { DouAlert, DouButton, DouEmpty, DouSpinner, DouText } from 'dou-ui'
 import { computed, shallowRef, watch } from 'vue'
 import { ApiError } from '../api'
+import { codeEditorWorker } from '../highlighting/code-worker-pool'
 import { t, tm } from '../i18n'
 import { useReviewComments, type ReviewNote } from '../review/review-comments'
 import { useCodeLanguage } from './languages'
@@ -116,6 +117,8 @@ const { language } = useCodeLanguage(() => props.file.path)
       :original="versions.before ?? ''"
       :model-value="versions.after ?? ''"
       :language="language"
+      :worker="codeEditorWorker()"
+      :sync-highlight-lines="0"
       :gutters="gutters"
       :widgets="widgets"
       :mode="oneSided ? 'inline' : mode"

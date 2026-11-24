@@ -6,6 +6,7 @@ export interface SharedShikiBundle {
   emittedFiles: Array<{ fileName: string; source: string | Uint8Array }>
   shikiChunkFile: string
   workerChunkFile: string
+  codeWorkerChunkFile: string
 }
 
 export interface BuildSharedShikiOptions {
@@ -18,10 +19,10 @@ export interface BuildSharedShikiOptions {
 }
 
 /**
- * Build `shiki.ts` and `shiki.worker.ts` together in one pure-ESM Vite build (no DOM-only
- * `__vitePreload` helper, full minification, standalone `onig.wasm` asset) so the main thread
- * (worker fallback + code editor languages) and the Shiki Web Worker share the exact same
- * runtime, WASM, themes and grammar chunks.
+ * Build `shiki.ts`, `shiki.worker.ts` and `code.worker.ts` together in one pure-ESM Vite build
+ * (no DOM-only `__vitePreload` helper, full minification, standalone `onig.wasm` asset) so the
+ * main thread fallback, the Shiki HTML worker and the `@dou-ui/code` syntax/diff worker share
+ * the exact same runtime, WASM, themes and grammar chunks.
  */
 export async function buildSharedShikiBundle(
   options: BuildSharedShikiOptions,
@@ -29,6 +30,7 @@ export async function buildSharedShikiBundle(
   const dir = resolve(options.root, 'src/highlighting')
   const shikiEntryPath = normalizePath(resolve(dir, 'shiki.ts'))
   const workerEntryPath = normalizePath(resolve(dir, 'shiki.worker.ts'))
+  const codeWorkerEntryPath = normalizePath(resolve(dir, 'code.worker.ts'))
   const assetsDir = options.assetsDir ?? 'assets'
 
   const result = await viteBuild({
@@ -64,6 +66,7 @@ export async function buildSharedShikiBundle(
         entry: {
           shiki: shikiEntryPath,
           'shiki.worker': workerEntryPath,
+          'code.worker': codeWorkerEntryPath,
         },
         formats: ['es'],
       },
@@ -82,6 +85,7 @@ export async function buildSharedShikiBundle(
   const emittedFiles: Array<{ fileName: string; source: string | Uint8Array }> = []
   let shikiChunkFile = ''
   let workerChunkFile = ''
+  let codeWorkerChunkFile = ''
 
   for (const bundle of outputs) {
     if (!('output' in bundle)) continue
@@ -92,6 +96,8 @@ export async function buildSharedShikiBundle(
           shikiChunkFile = item.fileName
         } else if (item.isEntry && item.name === 'shiki.worker') {
           workerChunkFile = item.fileName
+        } else if (item.isEntry && item.name === 'code.worker') {
+          codeWorkerChunkFile = item.fileName
         }
       } else {
         emittedFiles.push({ fileName: item.fileName, source: item.source })
@@ -99,13 +105,13 @@ export async function buildSharedShikiBundle(
     }
   }
 
-  if (!shikiChunkFile || !workerChunkFile) {
+  if (!shikiChunkFile || !workerChunkFile || !codeWorkerChunkFile) {
     throw new Error(
-      `ariadne-shared-shiki failed to locate entry chunks (shiki=${shikiChunkFile}, worker=${workerChunkFile})`,
+      `ariadne-shared-shiki failed to locate entry chunks (shiki=${shikiChunkFile}, worker=${workerChunkFile}, codeWorker=${codeWorkerChunkFile})`,
     )
   }
 
-  return { emittedFiles, shikiChunkFile, workerChunkFile }
+  return { emittedFiles, shikiChunkFile, workerChunkFile, codeWorkerChunkFile }
 }
 
 /**
@@ -117,6 +123,7 @@ export function sharedShikiPlugin(): Plugin {
   let highlightingDir = ''
   let shikiEntryPath = ''
   let workerUrlModulePath = ''
+  let codeWorkerUrlModulePath = ''
   let built: SharedShikiBundle | null = null
 
   return {
@@ -128,6 +135,7 @@ export function sharedShikiPlugin(): Plugin {
       highlightingDir = normalizePath(resolve(config.root, 'src/highlighting'))
       shikiEntryPath = normalizePath(resolve(highlightingDir, 'shiki.ts'))
       workerUrlModulePath = normalizePath(resolve(highlightingDir, 'shiki-worker-url.ts'))
+      codeWorkerUrlModulePath = normalizePath(resolve(highlightingDir, 'code-worker-url.ts'))
     },
     watchChange(file) {
       if (normalizePath(file).startsWith(`${highlightingDir}/`)) {
@@ -156,9 +164,14 @@ export function sharedShikiPlugin(): Plugin {
     },
     load(id) {
       if (!built || resolvedConfig?.isWorker) return null
-      if (normalizePath(id) === workerUrlModulePath) {
+      const normalized = normalizePath(id)
+      if (normalized === workerUrlModulePath) {
         const workerRelative = `./${posix.basename(built.workerChunkFile)}`
         return `export function shikiWorkerUrl() { return new URL(/* @vite-ignore */ ${JSON.stringify(workerRelative)}, import.meta.url) }\n`
+      }
+      if (normalized === codeWorkerUrlModulePath) {
+        const workerRelative = `./${posix.basename(built.codeWorkerChunkFile)}`
+        return `export function codeWorkerUrl() { return new URL(/* @vite-ignore */ ${JSON.stringify(workerRelative)}, import.meta.url) }\n`
       }
       return null
     },

@@ -1,73 +1,69 @@
+import {
+  createCodeWorkerPool,
+  type CodeWorkerOption,
+  type CodeWorkerPool,
+  type CodeWorkerPoolOptions,
+} from '@dou-ui/code'
+import { ref } from 'vue'
+import { codeWorkerUrl } from './code-worker-url'
 import { resolveHighlightPoolSize } from './shiki-worker-pool'
 
-export interface CodeEditorWorkerPoolOptions {
-  createWorker?: () => Worker
-  maxWorkers?: number
+const workerUnavailable = ref(false)
+
+/** Whether browser Web Workers are available and healthy for `@dou-ui/code` highlighting. */
+export function canUseCodeWorker(mode: string = import.meta.env.MODE): boolean {
+  return typeof Worker !== 'undefined' && mode !== 'test' && !workerUnavailable.value
 }
 
-export interface CodeEditorWorkerPool {
-  /** Acquire a worker for `DouCodeEditor`'s `:worker` prop, lazily spawning up to `maxWorkers`. */
-  acquire(): Worker
-  /** Number of currently active (non-terminated) workers tracked by the pool. */
-  activeCount(): number
+/** Test helper to clear the cached worker-failure fallback flag between tests. */
+export function resetCodeWorkerAvailability(): void {
+  workerUnavailable.value = false
 }
 
-function createDefaultCodeWorker(): Worker {
-  return new Worker(new URL('./code.worker.ts', import.meta.url), {
-    type: 'module',
-    name: 'ariadne-code',
+export function createDefaultCodeWorker(): Worker {
+  let worker: Worker
+  try {
+    worker = new Worker(codeWorkerUrl(), {
+      type: 'module',
+      name: 'ariadne-code',
+    })
+  } catch (error) {
+    workerUnavailable.value = true
+    throw error
+  }
+  worker.addEventListener(
+    'error',
+    () => {
+      workerUnavailable.value = true
+    },
+    { once: true },
+  )
+  return worker
+}
+
+/**
+ * Create a lazily-spawned `@dou-ui/code` worker pool backed by `code.worker.ts`
+ * (built-in languages + on-demand Shiki off-main-thread highlighting + async large diffs).
+ */
+export function createAriadneCodeWorkerPool(
+  options: CodeWorkerPoolOptions = {},
+  factory: () => Worker = createDefaultCodeWorker,
+): CodeWorkerPool {
+  return createCodeWorkerPool(factory, {
+    maxWorkers: resolveHighlightPoolSize(),
+    ...options,
   })
 }
 
 /**
- * Pool of `@dou-ui/code/worker` instances for `DouCodeEditor`.
- *
- * `@dou-ui/code` ref-counts each returned `Worker` and calls `worker.terminate()` when the last
- * editor bound to it unmounts. Wrapping `terminate` lets the pool drop ended slots automatically
- * and lazily spawn up to `maxWorkers` workers across concurrent editors without leaking threads.
+ * Shared lazily-spawned worker pool for `<DouCodeEditor>` and `<DouCodeDiff>`.
  */
-export function createCodeEditorWorkerPool(
-  options: CodeEditorWorkerPoolOptions = {},
-): CodeEditorWorkerPool {
-  const createWorker = options.createWorker ?? createDefaultCodeWorker
-  const maxWorkers = Math.max(1, Math.floor(options.maxWorkers ?? resolveHighlightPoolSize()))
-  const slots: Array<Worker | null> = Array.from({ length: maxWorkers }, () => null)
-  let cursor = 0
+export const codeWorkerPool: CodeWorkerPool = createAriadneCodeWorkerPool()
 
-  function acquire(): Worker {
-    // Prefer filling an empty slot first so concurrent editors spread across distinct workers.
-    for (let i = 0; i < maxWorkers; i++) {
-      const index = (cursor + i) % maxWorkers
-      if (slots[index] === null) {
-        const worker = createWorker()
-        const rawTerminate = worker.terminate.bind(worker)
-        const releaseSlot = () => {
-          if (slots[index] === worker) slots[index] = null
-        }
-        worker.addEventListener('error', releaseSlot, { once: true })
-        worker.terminate = () => {
-          releaseSlot()
-          rawTerminate()
-        }
-        slots[index] = worker
-        cursor = (index + 1) % maxWorkers
-        return worker
-      }
-    }
-
-    const index = cursor
-    cursor = (cursor + 1) % maxWorkers
-    return slots[index]!
-  }
-
-  function activeCount(): number {
-    return slots.filter((slot) => slot !== null).length
-  }
-
-  return { acquire, activeCount }
+/**
+ * Reactive `:worker` prop value for `DouCodeEditor` and `DouCodeDiff`: returns the shared
+ * lazy `codeWorkerPool` in real browsers, and `false` in Vitest or when Workers are unavailable.
+ */
+export function codeEditorWorker(mode: string = import.meta.env.MODE): CodeWorkerOption {
+  return canUseCodeWorker(mode) ? codeWorkerPool : false
 }
-
-const sharedCodeEditorWorkerPool = createCodeEditorWorkerPool()
-
-/** Shared worker factory suitable for `<DouCodeEditor :worker="acquireCodeEditorWorker">`. */
-export const acquireCodeEditorWorker = (): Worker => sharedCodeEditorWorkerPool.acquire()
