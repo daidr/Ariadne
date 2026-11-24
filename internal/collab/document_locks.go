@@ -15,28 +15,93 @@ const maxDocumentLocks = 256
 
 var errDocumentBlockLocked = errors.New("document block is being edited by AI")
 
-// Record affected blocks, including whole blocks that disappear during a replacement.
-func changedDocumentBlocks(doc *crdt.Doc, change func() error) (map[string]bool, error) {
-	changed := map[string]bool{}
-	root := doc.GetMap("document")
-	listener := func(payload, _ any) {
-		events, _ := payload.([]crdt.IEventType)
-		for _, event := range events {
-			path := event.Path()
-			if len(path) > 0 {
-				if id, ok := path[0].(string); ok {
-					changed[id] = true
-				}
-			} else if event, ok := event.(*crdt.YMapEvent); ok {
-				for id := range event.GetKeys() {
-					changed[id] = true
-				}
+// collectChangedTypes records every SharedType touched by transactions during
+// change via afterTransaction, avoiding ObserveDeep dropping sibling child
+// events in the same transaction.
+func collectChangedTypes(doc *crdt.Doc, change func() error) (map[crdt.SharedType]crdt.ChangedSubs, error) {
+	changed := map[crdt.SharedType]crdt.ChangedSubs{}
+	handler := crdt.NewObserverHandler(func(args ...any) {
+		if len(args) == 0 {
+			return
+		}
+		trans, ok := args[0].(*crdt.Transaction)
+		if !ok {
+			return
+		}
+		for shared, subs := range trans.ChangedTypes() {
+			existing := changed[shared]
+			if existing == nil {
+				changed[shared] = subs
+				continue
+			}
+			maps.Copy(existing, subs)
+		}
+	})
+	doc.On("afterTransaction", handler)
+	defer doc.Off("afterTransaction", handler)
+	return changed, change()
+}
+
+func sharedTypeChanged(value any, changed map[crdt.SharedType]crdt.ChangedSubs) bool {
+	switch node := value.(type) {
+	case *crdt.YMap:
+		if _, ok := changed[node]; ok {
+			return true
+		}
+		hit := false
+		node.Range(func(_ string, child any) {
+			if !hit && sharedTypeChanged(child, changed) {
+				hit = true
+			}
+		})
+		return hit
+	case *crdt.YArray:
+		if _, ok := changed[node]; ok {
+			return true
+		}
+		for _, child := range node.ToArray() {
+			if sharedTypeChanged(child, changed) {
+				return true
 			}
 		}
+		return false
+	case crdt.SharedType:
+		_, ok := changed[node]
+		return ok
+	default:
+		return false
 	}
-	root.ObserveDeep(listener)
-	defer root.UnobserveDeep(listener)
-	return changed, change()
+}
+
+func blockEntryChanged(root *crdt.YMap, id string, changed map[crdt.SharedType]crdt.ChangedSubs) bool {
+	if subs := changed[root]; subs != nil {
+		if _, ok := subs[id]; ok {
+			return true
+		}
+	}
+	return sharedTypeChanged(root.Get(id), changed)
+}
+
+// Record affected blocks, including whole blocks that disappear during a replacement.
+func changedDocumentBlocks(doc *crdt.Doc, change func() error) (map[string]bool, error) {
+	changedTypes, err := collectChangedTypes(doc, change)
+	changed := map[string]bool{}
+	if len(changedTypes) == 0 {
+		return changed, err
+	}
+	root := doc.GetMap("document")
+	for id := range changedTypes[root] {
+		changed[id] = true
+	}
+	if len(changedTypes) == 1 && changedTypes[root] != nil {
+		return changed, err
+	}
+	root.Range(func(id string, value any) {
+		if !changed[id] && sharedTypeChanged(value, changedTypes) {
+			changed[id] = true
+		}
+	})
+	return changed, err
 }
 
 func (draft *Draft) lockDocumentBlocks(changed map[string]bool) error {
@@ -86,11 +151,14 @@ func (draft *Draft) publishDocumentWriter() {
 	}
 }
 
-func documentLocksChanged(before, after *crdt.Doc, ids, changed map[string]bool) bool {
+func documentLocksChanged(before, after *crdt.Doc, ids map[string]bool, changed map[crdt.SharedType]crdt.ChangedSubs) bool {
+	if len(changed) == 0 {
+		return false
+	}
 	old, next := before.GetMap("document"), after.GetMap("document")
 	ancestors := map[string]bool{}
 	for id := range ids {
-		if changed[id] {
+		if blockEntryChanged(next, id, changed) {
 			return true
 		}
 		left, _ := old.Get(id).(*crdt.YMap)
@@ -105,7 +173,7 @@ func documentLocksChanged(before, after *crdt.Doc, ids, changed map[string]bool)
 			if left == nil {
 				break
 			}
-			if changed[parent] && (right == nil || !equalJSON(left.Get("parent"), right.Get("parent")) ||
+			if blockEntryChanged(next, parent, changed) && (right == nil || !equalJSON(left.Get("parent"), right.Get("parent")) ||
 				!equalJSON(left.Get("order"), right.Get("order"))) {
 				return true
 			}
