@@ -4,7 +4,7 @@ import { ChevronRightIcon } from '@dou-ui/icons'
 import { DouLink, DouPopover } from 'dou-ui'
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
-import { openMessage, state } from '../store'
+import { openMessage, threadsById } from '../store'
 import StageIcon from './StageIcon.vue'
 
 /**
@@ -15,7 +15,7 @@ const props = defineProps<{ relays: MessageRelay[] }>()
 
 const targets = computed(() =>
   props.relays.flatMap((relay) => {
-    const thread = state.detail?.threads.find((item) => item.id === relay.threadId)
+    const thread = threadsById.value.get(relay.threadId)
     return thread ? [{ relay, thread }] : []
   }),
 )

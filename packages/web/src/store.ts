@@ -864,6 +864,13 @@ function dropProjectComposers(projectId: string) {
 /** The thread in front of the group on the right the user last used. */
 export const activeThreadId = computed(() => side.focusedThread(state.side))
 
+/** Threads of the open project indexed by ID for O(1) lookups across views. */
+export const threadsById = computed(() => {
+  const map = new Map<string, ThreadView>()
+  for (const thread of state.detail?.threads ?? []) map.set(thread.id, thread)
+  return map
+})
+
 /**
  * Open something on the right side, beside the coordinator, which stays where it is: where
  * it already is, else in the group last used, or in a new group beside it.

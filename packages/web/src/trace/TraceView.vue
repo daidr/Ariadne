@@ -12,11 +12,12 @@ import {
   type TableColumn,
 } from 'dou-ui'
 import { ChevronLeftIcon, DownloadIcon, RotateCwIcon } from '@dou-ui/icons'
-import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { coalescedRefresh } from '../coalesced-refresh'
 import { duration, locale, t, tm } from '../i18n'
-import { onLiveEvent, backMain, report, saveDownload, state } from '../store'
+import { reuse } from '../reuse'
+import { onLiveEvent, backMain, report, saveDownload, state, threadsById } from '../store'
 import TraceInspector from './TraceInspector.vue'
 import TraceTimeline from './TraceTimeline.vue'
 import { findRow, parentKeys, traceRows, type TraceRow } from './rows'
@@ -24,12 +25,14 @@ import { rowsInRange, timelineModel, type TimeRange, type TimelineMode } from '.
 
 const props = defineProps<{ conversationId: string }>()
 
+const LIVE_REFRESH_MS = 400
+
 const name = computed(() => {
   if (state.detail?.project.coordinatorId === props.conversationId) return t('coordinator.title')
-  return state.detail?.threads.find((thread) => thread.id === props.conversationId)?.title ?? ''
+  return threadsById.value.get(props.conversationId)?.title ?? ''
 })
 
-const turns = ref<TraceTurn[]>([])
+const turns = shallowRef<TraceTurn[]>([])
 const more = ref(false)
 const loading = ref(true)
 const exporting = ref(false)
@@ -81,9 +84,15 @@ const load = coalescedRefresh<never, void>(async () => {
     // Reopen pagination if a long disconnect exceeded the bounded live window.
     if (from === undefined || page.more) {
       more.value = page.more
-      turns.value = page.turns
+      const next = reuse(turns.value, page.turns)
+      if (next !== turns.value) turns.value = next
     } else if (page.turns.length) {
-      turns.value = [...turns.value.filter((turn) => turn.seq < from), ...page.turns]
+      const kept = turns.value.filter((turn) => turn.seq < from)
+      const previousTail = turns.value.slice(kept.length)
+      const mergedTail = reuse(previousTail, page.turns)
+      if (mergedTail !== previousTail) {
+        turns.value = [...kept, ...mergedTail]
+      }
     }
     problem.value = null
   } catch (error) {
@@ -142,11 +151,14 @@ onUnmounted(
     const data = event.data as { conversationId?: unknown }
     if (
       !document.hidden &&
-      liveTimer === undefined &&
       events.has(event.type) &&
       data.conversationId === props.conversationId
     ) {
-      liveTimer = setTimeout(refreshNow, 100)
+      if (event.type === 'turn.finished') {
+        refreshNow()
+      } else if (liveTimer === undefined) {
+        liveTimer = setTimeout(refreshNow, LIVE_REFRESH_MS)
+      }
     }
   }),
 )

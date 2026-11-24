@@ -4,7 +4,7 @@ import { AlertTriangleIcon, FlagIcon, SignpostIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
 import { questionOf, showsHeadline, statusLine, threadStageLabel } from '../stage'
-import { state } from '../store'
+import { state, threadsById } from '../store'
 import type { PlanNodeData } from './layout'
 import StageIcon from '../components/StageIcon.vue'
 import PullRequestTag from '../components/PullRequestTag.vue'
@@ -36,7 +36,7 @@ const hasHeadline = (thread: PlanNodeData['threads'][number]) =>
   !!thread.lastHeadline && showsHeadline(thread.stage)
 /** For a thread named as its node: what it is doing or asks, from the live thread. */
 function lineOf(id: string): string | null {
-  const thread = state.detail?.threads.find((item) => item.id === id)
+  const thread = threadsById.value.get(id)
   return thread ? (statusLine(thread, questionOf(id, state.detail?.needsMe))?.text ?? null) : null
 }
 </script>

@@ -3,7 +3,7 @@ import { reactive } from 'vue'
 import { api } from './api'
 import { askTitle } from './blocks/ask'
 import { t, tm } from './i18n'
-import { openProject, openThread, state } from './store'
+import { openProject, openThread, state, threadsById } from './store'
 
 const KEY = 'ariadne.notify'
 
@@ -75,7 +75,7 @@ function reasonOf(
       const { report, summary, threadId } = event.data
       // Changes still under review are not the user's yet, nor is a reviewer's verdict.
       if (event.data.reviewing) return null
-      if (state.detail?.threads.some((thread) => thread.id === threadId && thread.reviewOf)) {
+      if (threadsById.value.get(threadId)?.reviewOf) {
         return null
       }
       if (report === 'ready') return { threadId, title: t('notify.review'), body: summary }
@@ -96,15 +96,13 @@ function reasonOf(
     case 'review.abandoned': {
       // Left without a verdict: the changes go to the user as they are.
       const { threadId } = event.data
-      const author = state.detail?.threads.find((thread) => thread.id === threadId)
+      const author = threadsById.value.get(threadId)
       return { threadId, title: t('notify.review'), body: author?.lastHeadline ?? '' }
     }
     case 'turn.finished':
       if (event.data.outcome !== 'failed') return null
       // A reviewer's failure lets its round go, which notifies by itself.
-      if (
-        state.detail?.threads.some((one) => one.id === event.data.conversationId && one.reviewOf)
-      ) {
+      if (threadsById.value.get(event.data.conversationId)?.reviewOf) {
         return null
       }
       return {
@@ -118,8 +116,8 @@ function reasonOf(
 }
 
 async function threadOf(projectId: string, threadId: string): Promise<ThreadView | null> {
-  const known = state.detail?.project.id === projectId ? state.detail.threads : null
-  const threads = known ?? (await api.getProject(projectId).catch(() => null))?.threads ?? []
+  if (state.detail?.project.id === projectId) return threadsById.value.get(threadId) ?? null
+  const threads = (await api.getProject(projectId).catch(() => null))?.threads ?? []
   return threads.find((thread) => thread.id === threadId) ?? null
 }
 

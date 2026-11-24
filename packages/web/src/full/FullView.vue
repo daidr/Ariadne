@@ -6,7 +6,7 @@ import StageIcon from '../components/StageIcon.vue'
 import ThreadTools from '../components/ThreadTools.vue'
 import { t } from '../i18n'
 import { foldLayoutKey } from '../pwa'
-import { closeFull, state } from '../store'
+import { closeFull, state, threadsById } from '../store'
 import OpenedView from './OpenedView.vue'
 
 const props = defineProps<{ compact?: boolean }>()
@@ -32,16 +32,16 @@ const effectiveSplit = computed({
 
 const full = computed(() => state.full)
 const threadId = computed(() =>
-  full.value?.threadId && state.detail?.threads.some((th) => th.id === full.value!.threadId)
-    ? full.value.threadId
-    : null,
+  full.value?.threadId && threadsById.value.has(full.value.threadId) ? full.value.threadId : null,
 )
-const thread = computed(() => state.detail?.threads.find((th) => th.id === threadId.value) ?? null)
+const thread = computed(() =>
+  threadId.value ? (threadsById.value.get(threadId.value) ?? null) : null,
+)
 const label = computed(() => {
   const view = full.value?.view
   if (!view) return ''
   if (view.kind === 'artifact') return state.artifacts.find((a) => a.id === view.id)?.title ?? ''
-  const owner = state.detail?.threads.find((th) => th.id === view.threadId)
+  const owner = threadsById.value.get(view.threadId)
   return owner ? t('view.changesOf', { title: owner.title }) : ''
 })
 </script>

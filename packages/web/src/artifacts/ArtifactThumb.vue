@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { ArtifactSummary } from '@ariadne/core'
 import { DouMarkdown, DouSkeleton, DouText, useColorMode } from 'dou-ui'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { COLOR_MODE_KEY } from '../color-mode'
-import { boardThumbnail } from './board-thumbnail'
+import { boardThumbnail, observeThumbnailVisibility } from './board-thumbnail'
 
 /**
  * A small picture of what an artifact holds, drawn from its stored preview: a document's
@@ -15,18 +15,49 @@ const preview = computed(() => props.artifact.preview)
 /** Links and images stay out of a picture. */
 const noUrl = () => undefined
 
-// A whiteboard is drawn from its content, the way the board shows it.
+// A whiteboard is drawn from its content, deferred until its card approaches the viewport.
+const thumb = useTemplateRef<HTMLElement>('thumb')
 const picture = ref<string | null>(null)
 const { resolved } = useColorMode({ storageKey: COLOR_MODE_KEY })
+const boardTarget = computed(() =>
+  props.artifact.preview.kind === 'whiteboard' && props.artifact.preview.items
+    ? ([props.artifact.id, props.artifact.updatedAt, resolved.value] as const)
+    : null,
+)
+const visible = ref(typeof IntersectionObserver === 'undefined')
+
+watch(
+  () => props.artifact.id,
+  () => {
+    picture.value = null
+  },
+)
+
+watch(
+  [thumb, () => boardTarget.value !== null, () => props.artifact.id],
+  ([el, needsBoard], _prev, cleanup) => {
+    if (!needsBoard) return
+    if (typeof IntersectionObserver === 'undefined') {
+      visible.value = true
+      return
+    }
+    visible.value = false
+    if (!el) return
+    const stop = observeThumbnailVisibility(el, () => {
+      visible.value = true
+    })
+    cleanup(stop)
+  },
+  { flush: 'post', immediate: true },
+)
+
 let asked = 0
 watch(
-  () =>
-    props.artifact.preview.kind === 'whiteboard' && props.artifact.preview.items
-      ? ([props.artifact.id, props.artifact.updatedAt, resolved.value] as const)
-      : null,
-  async (target) => {
+  [boardTarget, visible],
+  async ([target, isVisible]) => {
     const ask = ++asked
     if (!target) return void (picture.value = null)
+    if (!isVisible) return
     try {
       const url = await boardThumbnail(...target)
       // A newer change may have asked for another picture meanwhile.
@@ -46,7 +77,7 @@ const rows = computed(() =>
 </script>
 
 <template>
-  <div class="thumb" :class="`thumb-${preview.kind}`" inert aria-hidden="true">
+  <div ref="thumb" class="thumb" :class="`thumb-${preview.kind}`" inert aria-hidden="true">
     <div class="thumb-sheet thumb-sheet-back" />
     <div class="thumb-sheet">
       <template v-if="preview.kind === 'document'">

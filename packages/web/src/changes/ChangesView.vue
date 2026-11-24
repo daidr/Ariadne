@@ -42,6 +42,7 @@ import {
   completeThread,
   onLiveEvent,
   state,
+  threadsById,
   type TurnChangesRef,
 } from '../store'
 import PullRequestTag from '../components/PullRequestTag.vue'
@@ -126,9 +127,7 @@ const view = computed(() => ({
   path: props.path,
 }))
 
-const thread = computed(
-  () => state.detail?.threads.find((item) => item.id === props.threadId) ?? null,
-)
+const thread = computed(() => threadsById.value.get(props.threadId) ?? null)
 
 const root = useTemplateRef<HTMLElement>('root')
 const { width: containerWidth } = useElementSize(root)

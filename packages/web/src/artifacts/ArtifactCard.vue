@@ -1,26 +1,31 @@
 <script setup lang="ts">
 import type { ArtifactSummary } from '@ariadne/core'
 import { DouAvatar, DouCard, DouText } from 'dou-ui'
+import { computed } from 'vue'
 import { locale, t } from '../i18n'
+import { useServerNow } from '../server-clock'
 import { dragArtifact } from '../side/dock'
 import ArtifactThumb from './ArtifactThumb.vue'
 import { kindIcon } from './kinds'
 
 /** An artifact as a card: a picture of what it holds, its name and when it last changed. */
-defineProps<{ artifact: ArtifactSummary; current?: boolean }>()
+const props = defineProps<{ artifact: ArtifactSummary; current?: boolean }>()
+const now = useServerNow()
 
 /** When it was last changed: the time today, the day this year, the date before. */
-function editedAt(at: number): string {
-  const date = new Date(at)
-  const now = new Date()
-  const options: Intl.DateTimeFormatOptions =
-    date.toDateString() === now.toDateString()
-      ? { hour: '2-digit', minute: '2-digit' }
-      : date.getFullYear() === now.getFullYear()
-        ? { month: 'long', day: 'numeric' }
-        : { dateStyle: 'medium' }
+const editedLabel = computed(() => {
+  const date = new Date(props.artifact.updatedAt)
+  const current = new Date(now.value)
+  const sameYear = date.getFullYear() === current.getFullYear()
+  const sameDay =
+    sameYear && date.getMonth() === current.getMonth() && date.getDate() === current.getDate()
+  const options: Intl.DateTimeFormatOptions = sameDay
+    ? { hour: '2-digit', minute: '2-digit' }
+    : sameYear
+      ? { month: 'long', day: 'numeric' }
+      : { dateStyle: 'medium' }
   return t('artifacts.editedAt', { time: date.toLocaleString(locale.value, options) })
-}
+})
 </script>
 
 <template>
@@ -41,7 +46,7 @@ function editedAt(at: number): string {
       <span class="card-text">
         <DouText weight="medium" truncate>{{ artifact.title }}</DouText>
         <DouText variant="tertiary" size="sm" truncate>
-          {{ editedAt(artifact.updatedAt) }}
+          {{ editedLabel }}
         </DouText>
       </span>
     </span>

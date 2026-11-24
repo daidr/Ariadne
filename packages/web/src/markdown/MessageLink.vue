@@ -6,7 +6,7 @@ import { kindIcon } from '../artifacts/kinds'
 import StageIcon from '../components/StageIcon.vue'
 import { dragArtifact, dragThread } from '../side/dock'
 import { artifactKey, threadKey } from '../side/layout'
-import { openThreadFrom, state } from '../store'
+import { openThreadFrom, state, threadsById } from '../store'
 import { linkSummary } from './link-summaries'
 import type { LinkSummary } from '@ariadne/plugin-sdk'
 import { innerLink, sameHostedRepository } from './links'
@@ -33,9 +33,7 @@ const props = defineProps<{
 
 const inner = computed(() => innerLink(props.href))
 const thread = computed(() =>
-  inner.value?.kind === 'thread'
-    ? (state.detail?.threads.find((item) => item.id === inner.value!.id) ?? null)
-    : null,
+  inner.value?.kind === 'thread' ? (threadsById.value.get(inner.value.id) ?? null) : null,
 )
 const artifact = computed(() =>
   inner.value?.kind === 'artifact'

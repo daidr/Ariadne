@@ -346,4 +346,24 @@ describe('ProjectList activity popover behavior', () => {
     await nextTick()
     expect(onSelect).toHaveBeenCalledTimes(1)
   })
+
+  test('virtualizes long project lists above 40 items and keeps keyboard reordering working', async () => {
+    state.projects = Array.from({ length: 60 }, (_, index) =>
+      makeProjectSummary(`prj_${index + 1}`, `Project ${index + 1}`),
+    )
+
+    const { wrapper } = mountProjectList({ compact: false, active: true })
+    expect(wrapper.find('.dou-virtual-list').exists()).toBe(true)
+
+    const renderedButtons = wrapper.findAll('button[data-project-id]')
+    expect(renderedButtons.length).toBeGreaterThan(0)
+    expect(renderedButtons.length).toBeLessThan(60)
+
+    const first = wrapper.find<HTMLButtonElement>('button[data-project-id="prj_1"]')
+    await first.trigger('keydown', { key: 'ArrowDown', altKey: true })
+    await nextTick()
+
+    expect(state.projects[0]?.id).toBe('prj_2')
+    expect(state.projects[1]?.id).toBe('prj_1')
+  })
 })

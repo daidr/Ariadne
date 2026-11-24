@@ -11,7 +11,7 @@ import {
   threadGroups,
   type ThreadGroup,
 } from '../stage'
-import { activeThreadId, openThread, state } from '../store'
+import { activeThreadId, openThread, state, threadsById } from '../store'
 import { dragThread } from '../side/dock'
 import PullRequestTag from './PullRequestTag.vue'
 import ThreadRow from './ThreadRow.vue'
@@ -21,7 +21,7 @@ import { openGroups } from './thread-list'
 const LIMIT = 6
 
 const threads = computed(() => state.detail?.threads ?? [])
-const byId = computed(() => new Map(threads.value.map((thread) => [thread.id, thread])))
+const byId = threadsById
 const actions = computed(() => threadActionIds(state.detail?.needsMe))
 const showingAll = ref(new Set<ThreadGroup>())
 

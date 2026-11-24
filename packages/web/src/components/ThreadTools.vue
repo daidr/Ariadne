@@ -11,7 +11,7 @@ import {
 } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { completeThread, openMain, openThread, state } from '../store'
+import { completeThread, openMain, openThread, threadsById } from '../store'
 
 /**
  * The "…" menu of a thread. In a side tab group it is the group's own menu, whose items
@@ -36,7 +36,7 @@ const workspace = computed(() => {
 
 const reviewed = computed(() => {
   const id = props.thread?.reviewOf
-  return id ? (state.detail?.threads.find((item) => item.id === id) ?? null) : null
+  return id ? (threadsById.value.get(id) ?? null) : null
 })
 
 const firstThreadItem = computed<'workspace' | 'reviewed' | 'archive' | 'trace' | null>(() => {
