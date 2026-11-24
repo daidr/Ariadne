@@ -1,7 +1,6 @@
 package realtime
 
 import (
-	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -59,16 +58,20 @@ func NewLive(state *State, options LiveOptions) *LiveCommands {
 	return &LiveCommands{state: state, entries: map[string]*liveEntry{}, options: options}
 }
 func (live *LiveCommands) emit(entry *liveEntry, ended bool) error {
-	update := LiveUpdate{ProjectID: entry.value.ProjectID, ConversationID: entry.value.ConversationID}
+	payload := &LiveUpdate{ProjectID: entry.value.ProjectID, ConversationID: entry.value.ConversationID}
+	size := len(payload.ProjectID) + len(payload.ConversationID) + 32
 	if !ended {
-		copy := entry.value
-		update.Command = &copy
+		copied := entry.value
+		payload.Command = &copied
+		size += len(copied.ProjectID) + len(copied.ConversationID) + len(copied.Command) + len(copied.CWD) + len(copied.Tail) + 64
 	}
-	data, err := json.Marshal(update)
-	if err != nil {
-		return err
-	}
-	return live.state.Set(Update{Kind: "live", ProjectID: update.ProjectID, ConversationID: update.ConversationID, Data: data}, !ended)
+	return live.state.Set(Update{
+		Kind:           "live",
+		ProjectID:      payload.ProjectID,
+		ConversationID: payload.ConversationID,
+		Value:          payload,
+		Size:           size,
+	}, !ended)
 }
 func (live *LiveCommands) Start(input LiveCommand) (LiveHandle, error) {
 	live.mu.Lock()

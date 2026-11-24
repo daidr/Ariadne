@@ -28,6 +28,12 @@ func (log *watchedLog) Watch() (<-chan struct{}, func()) {
 	return wake, func() { stop(); log.watchers.Add(-1) }
 }
 
+func (log *watchedLog) WatchProject(projectID string) (<-chan struct{}, func()) {
+	log.watchers.Add(1)
+	wake, stop := log.Store.WatchProject(projectID)
+	return wake, func() { stop(); log.watchers.Add(-1) }
+}
+
 func TestStreamReplayNewEventsAndDisconnectReleaseSubscriptions(t *testing.T) {
 	store, err := eventstore.Open(t.Context(), eventstore.Options{Path: ":memory:"})
 	if err != nil {
@@ -112,10 +118,7 @@ func TestStreamReplayNewEventsAndDisconnectReleaseSubscriptions(t *testing.T) {
 	if log.watchers.Load() != 0 {
 		t.Fatal("disconnect retained durable watcher")
 	}
-	hub.mu.Lock()
-	count := len(hub.clients)
-	hub.mu.Unlock()
-	if count != 0 {
+	if hub.clientCount() != 0 {
 		t.Fatal("disconnect retained transient watcher")
 	}
 }
@@ -168,4 +171,84 @@ func TestStreamReplayReadsEventsInBatches(t *testing.T) {
 	if reads := log.reads.Load(); reads != 3 {
 		t.Fatalf("expected 3 batched reads for %d events (batch=%d), got %d", total, replayBatchSize, reads)
 	}
+}
+
+func TestStreamProjectWakeupIsolation(t *testing.T) {
+	store, err := eventstore.Open(t.Context(), eventstore.Options{Path: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewHub()
+	defer hub.Close()
+
+	logP1 := &watchedLog{Store: store}
+	logP2 := &watchedLog{Store: store}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	p1Ready := make(chan struct{}, 1)
+	p2Ready := make(chan struct{}, 1)
+	p1Events := make(chan eventstore.Event, 32)
+	p2Events := make(chan eventstore.Event, 8)
+	done := make(chan error, 2)
+
+	go func() {
+		done <- Stream(ctx, logP1, hub, StreamOptions{AfterSeq: 0, ProjectID: "p1", Heartbeat: time.Hour}, StreamSink{
+			OnReady: func(int64) error { p1Ready <- struct{}{}; return nil },
+			OnEvent: func(ev eventstore.Event) error { p1Events <- ev; return nil },
+		})
+	}()
+	go func() {
+		done <- Stream(ctx, logP2, hub, StreamOptions{AfterSeq: 0, ProjectID: "p2", Heartbeat: time.Hour}, StreamSink{
+			OnReady: func(int64) error { p2Ready <- struct{}{}; return nil },
+			OnEvent: func(ev eventstore.Event) error { p2Events <- ev; return nil },
+		})
+	}()
+
+	<-p1Ready
+	<-p2Ready
+	// Wait briefly for initial empty replay on p2 to settle.
+	deadline := time.Now().Add(time.Second)
+	for logP2.reads.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	p2ReadsBefore := logP2.reads.Load()
+
+	// Append 20 events for p1; p2 must not wake up or issue any extra Read calls.
+	for range 20 {
+		if _, err := store.Append(t.Context(), []eventstore.NewEvent{{Type: "test", ProjectID: "p1", Data: json.RawMessage(`{}`)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 20 {
+		select {
+		case ev := <-p1Events:
+			if ev.ProjectID != "p1" {
+				t.Fatalf("unexpected event on p1 stream: %+v", ev)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for p1 event %d", i)
+		}
+	}
+	if p2ReadsAfter := logP2.reads.Load(); p2ReadsAfter != p2ReadsBefore {
+		t.Fatalf("p2 stream woke up and read %d extra times during p1 traffic", p2ReadsAfter-p2ReadsBefore)
+	}
+
+	// Now append one event for p2 and verify p2 receives it.
+	if _, err := store.Append(t.Context(), []eventstore.NewEvent{{Type: "test", ProjectID: "p2", Data: json.RawMessage(`{}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev := <-p2Events:
+		if ev.ProjectID != "p2" {
+			t.Fatalf("unexpected event on p2 stream: %+v", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for p2 event")
+	}
+
+	cancel()
+	<-done
+	<-done
 }

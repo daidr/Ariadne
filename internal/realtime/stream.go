@@ -13,6 +13,10 @@ type Log interface {
 	Watch() (<-chan struct{}, func())
 }
 
+type projectWatcher interface {
+	WatchProject(projectID string) (<-chan struct{}, func())
+}
+
 type StreamOptions struct {
 	AfterSeq  int64
 	ProjectID string
@@ -34,7 +38,13 @@ const replayBatchSize = 64
 // coalesced transient updates to sink. Context cancellation, a sink error, or
 // queue overflow releases both subscriptions.
 func Stream(ctx context.Context, log Log, hub *Hub, options StreamOptions, sink StreamSink) error {
-	changed, stopLog := log.Watch()
+	var changed <-chan struct{}
+	var stopLog func()
+	if watcher, ok := log.(projectWatcher); ok {
+		changed, stopLog = watcher.WatchProject(options.ProjectID)
+	} else {
+		changed, stopLog = log.Watch()
+	}
 	defer stopLog()
 	sub, stopUpdates := hub.Subscribe(options.ProjectID)
 	defer stopUpdates()

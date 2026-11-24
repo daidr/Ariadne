@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"connectrpc.com/connect"
 
@@ -54,6 +56,7 @@ func (h *eventServiceHandler) StreamEvents(
 			return stream.Send(msg)
 		})
 	}
+	var drafts draftStreamTracker
 
 	err := realtime.Stream(ctx, h.api.options.Repository.Store, h.api.hub, realtime.StreamOptions{
 		AfterSeq:  after,
@@ -91,11 +94,17 @@ func (h *eventServiceHandler) StreamEvents(
 			})
 		},
 		OnUpdate: func(item realtime.Update) error {
-			msg, ok := toProtoRealtimeUpdate(item)
+			msg, ok, commit := toProtoRealtimeUpdateWithDrafts(item, &drafts)
 			if !ok {
 				return nil
 			}
-			return send(msg)
+			if err := send(msg); err != nil {
+				return err
+			}
+			if commit != nil {
+				commit()
+			}
+			return nil
 		},
 	})
 	if err == nil {
@@ -108,6 +117,109 @@ func (h *eventServiceHandler) StreamEvents(
 	return err
 }
 
+type sentDraftSnapshot struct {
+	messageID string
+	text      string
+	blocks    json.RawMessage
+	startedAt int64
+}
+
+type draftStreamTracker struct {
+	sent map[string]sentDraftSnapshot
+}
+
+func (t *draftStreamTracker) encode(payload realtime.DraftUpdate) (*ariadnev1.StreamEventsResponse, bool, func()) {
+	convID := payload.ConversationID
+	if payload.Draft == nil {
+		return &ariadnev1.StreamEventsResponse{
+				Payload: &ariadnev1.StreamEventsResponse_Draft{
+					Draft: &ariadnev1.ReplyDraftUpdate{
+						ProjectId:      payload.ProjectID,
+						ConversationId: convID,
+					},
+				},
+			}, true, func() {
+				delete(t.sent, convID)
+			}
+	}
+	draft := payload.Draft
+	prev, hasPrev := t.sent[convID]
+	canAppend := hasPrev && prev.messageID == draft.MessageID && prev.startedAt == draft.StartedAt && strings.HasPrefix(draft.Text, prev.text)
+	if canAppend {
+		delta := draft.Text[len(prev.text):]
+		sameBlocks := bytes.Equal(draft.Blocks, prev.blocks)
+		if delta == "" && sameBlocks && !draft.Posted {
+			return nil, false, nil
+		}
+		outDraft := &ariadnev1.ReplyDraft{
+			MessageId:  draft.MessageID,
+			Text:       delta,
+			StartedAt:  draft.StartedAt,
+			Posted:     draft.Posted,
+			Append:     true,
+			KeepBlocks: sameBlocks,
+		}
+		if !sameBlocks {
+			outDraft.BlocksJson = []byte(draft.Blocks)
+		}
+		commit := func() {
+			if draft.Posted {
+				delete(t.sent, convID)
+				return
+			}
+			if t.sent == nil {
+				t.sent = make(map[string]sentDraftSnapshot)
+			}
+			t.sent[convID] = sentDraftSnapshot{
+				messageID: draft.MessageID,
+				text:      draft.Text,
+				blocks:    draft.Blocks,
+				startedAt: draft.StartedAt,
+			}
+		}
+		return &ariadnev1.StreamEventsResponse{
+			Payload: &ariadnev1.StreamEventsResponse_Draft{
+				Draft: &ariadnev1.ReplyDraftUpdate{
+					ProjectId:      payload.ProjectID,
+					ConversationId: convID,
+					Draft:          outDraft,
+				},
+			},
+		}, true, commit
+	}
+	outDraft := &ariadnev1.ReplyDraft{
+		MessageId:  draft.MessageID,
+		Text:       draft.Text,
+		BlocksJson: []byte(draft.Blocks),
+		StartedAt:  draft.StartedAt,
+		Posted:     draft.Posted,
+	}
+	commit := func() {
+		if draft.Posted {
+			delete(t.sent, convID)
+			return
+		}
+		if t.sent == nil {
+			t.sent = make(map[string]sentDraftSnapshot)
+		}
+		t.sent[convID] = sentDraftSnapshot{
+			messageID: draft.MessageID,
+			text:      draft.Text,
+			blocks:    draft.Blocks,
+			startedAt: draft.StartedAt,
+		}
+	}
+	return &ariadnev1.StreamEventsResponse{
+		Payload: &ariadnev1.StreamEventsResponse_Draft{
+			Draft: &ariadnev1.ReplyDraftUpdate{
+				ProjectId:      payload.ProjectID,
+				ConversationId: convID,
+				Draft:          outDraft,
+			},
+		},
+	}, true, commit
+}
+
 type backgroundSnapshotPayload struct {
 	ProjectID      string               `json:"projectId"`
 	ConversationID string               `json:"conversationId"`
@@ -115,11 +227,26 @@ type backgroundSnapshotPayload struct {
 }
 
 func toProtoRealtimeUpdate(item realtime.Update) (*ariadnev1.StreamEventsResponse, bool) {
+	msg, ok, _ := toProtoRealtimeUpdateWithDrafts(item, nil)
+	return msg, ok
+}
+
+func toProtoRealtimeUpdateWithDrafts(item realtime.Update, drafts *draftStreamTracker) (*ariadnev1.StreamEventsResponse, bool, func()) {
 	switch item.Kind {
 	case "live":
 		var payload realtime.LiveUpdate
-		if err := json.Unmarshal(item.Data, &payload); err != nil {
-			return nil, false
+		switch v := item.Value.(type) {
+		case *realtime.LiveUpdate:
+			if v == nil {
+				return nil, false, nil
+			}
+			payload = *v
+		case realtime.LiveUpdate:
+			payload = v
+		default:
+			if err := json.Unmarshal(item.Data, &payload); err != nil {
+				return nil, false, nil
+			}
 		}
 		if payload.ProjectID == "" {
 			payload.ProjectID = item.ProjectID
@@ -143,12 +270,30 @@ func toProtoRealtimeUpdate(item realtime.Update) (*ariadnev1.StreamEventsRespons
 		}
 		return &ariadnev1.StreamEventsResponse{
 			Payload: &ariadnev1.StreamEventsResponse_Live{Live: out},
-		}, true
+		}, true, nil
 
 	case "background":
 		var payload backgroundSnapshotPayload
-		if err := json.Unmarshal(item.Data, &payload); err != nil {
-			return nil, false
+		switch v := item.Value.(type) {
+		case *background.Snapshot:
+			if v == nil {
+				return nil, false, nil
+			}
+			payload = backgroundSnapshotPayload{
+				ProjectID:      v.ProjectID,
+				ConversationID: v.ConversationID,
+				Commands:       v.Commands,
+			}
+		case background.Snapshot:
+			payload = backgroundSnapshotPayload{
+				ProjectID:      v.ProjectID,
+				ConversationID: v.ConversationID,
+				Commands:       v.Commands,
+			}
+		default:
+			if err := json.Unmarshal(item.Data, &payload); err != nil {
+				return nil, false, nil
+			}
 		}
 		if payload.ProjectID == "" {
 			payload.ProjectID = item.ProjectID
@@ -168,18 +313,31 @@ func toProtoRealtimeUpdate(item realtime.Update) (*ariadnev1.StreamEventsRespons
 					Commands:       cmds,
 				},
 			},
-		}, true
+		}, true, nil
 
 	case "draft":
 		var payload realtime.DraftUpdate
-		if err := json.Unmarshal(item.Data, &payload); err != nil {
-			return nil, false
+		switch v := item.Value.(type) {
+		case *realtime.DraftUpdate:
+			if v == nil {
+				return nil, false, nil
+			}
+			payload = *v
+		case realtime.DraftUpdate:
+			payload = v
+		default:
+			if err := json.Unmarshal(item.Data, &payload); err != nil {
+				return nil, false, nil
+			}
 		}
 		if payload.ProjectID == "" {
 			payload.ProjectID = item.ProjectID
 		}
 		if payload.ConversationID == "" {
 			payload.ConversationID = item.ConversationID
+		}
+		if drafts != nil {
+			return drafts.encode(payload)
 		}
 		out := &ariadnev1.ReplyDraftUpdate{
 			ProjectId:      payload.ProjectID,
@@ -196,18 +354,28 @@ func toProtoRealtimeUpdate(item realtime.Update) (*ariadnev1.StreamEventsRespons
 		}
 		return &ariadnev1.StreamEventsResponse{
 			Payload: &ariadnev1.StreamEventsResponse_Draft{Draft: out},
-		}, true
+		}, true, nil
 
 	case "update":
 		var view update.View
-		if err := json.Unmarshal(item.Data, &view); err != nil {
-			return nil, false
+		switch v := item.Value.(type) {
+		case update.View:
+			view = v
+		case *update.View:
+			if v == nil {
+				return nil, false, nil
+			}
+			view = *v
+		default:
+			if err := json.Unmarshal(item.Data, &view); err != nil {
+				return nil, false, nil
+			}
 		}
 		return &ariadnev1.StreamEventsResponse{
 			Payload: &ariadnev1.StreamEventsResponse_UpdateStatus{
 				UpdateStatus: toProtoUpdateStatus(view),
 			},
-		}, true
+		}, true, nil
 	}
-	return nil, false
+	return nil, false, nil
 }
