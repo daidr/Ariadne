@@ -208,7 +208,49 @@ func (tc *turnChanges) record(ctx context.Context, turnID string) {
 		touchedBaselines []core.RepoBaseline
 		afterBySource    = make(map[string]map[string]sdk.RepoSnapshot, len(sources))
 		primaryOnly      = len(sources) == 1 && sources[0].Primary
+		existingLoaded   bool
+		existingBySource map[string]map[string]sdk.RepoBaseline
+		embeddedBySource = make(map[string]map[string]sdk.RepoChanges)
 	)
+	loadEmbeddedChanges := func(src workspaces.ThreadSource) map[string]sdk.RepoChanges {
+		if cached, ok := embeddedBySource[src.ID]; ok {
+			return cached
+		}
+		if src.Branches == nil || src.Branches.EmbeddedChanges == nil || (src.Workspace != nil && src.Workspace.Removed) {
+			embeddedBySource[src.ID] = nil
+			return nil
+		}
+		if !existingLoaded {
+			existingLoaded = true
+			stored, err := tc.repository.RepoBaselines(recordCtx, tc.threadID)
+			if err == nil && len(stored) > 0 {
+				existingBySource = make(map[string]map[string]sdk.RepoBaseline)
+				for _, item := range stored {
+					m := existingBySource[item.SourceID]
+					if m == nil {
+						m = make(map[string]sdk.RepoBaseline)
+						existingBySource[item.SourceID] = m
+					}
+					m[item.RepoPath] = sdk.RepoBaseline{
+						RepoPath:   item.RepoPath,
+						BaseHead:   item.BaseHead,
+						BaseBranch: item.BaseBranch,
+					}
+				}
+			}
+		}
+		items, err := src.Branches.EmbeddedChanges(recordCtx, tc.threadID, existingBySource[src.ID])
+		if err != nil {
+			embeddedBySource[src.ID] = nil
+			return nil
+		}
+		byPath := make(map[string]sdk.RepoChanges, len(items))
+		for _, item := range items {
+			byPath[item.RepoPath] = item
+		}
+		embeddedBySource[src.ID] = byPath
+		return byPath
+	}
 
 	for _, src := range sources {
 		before, hasBefore := tc.beforeBySource[src.ID]
@@ -237,10 +279,54 @@ func (tc *turnChanges) record(ctx context.Context, turnID string) {
 			}
 			beforeSnap, existed := before.repos[afterSnap.RepoPath]
 			if !existed {
-				// Embedded repo appeared mid-turn (for example via git clone or git init).
+				// Embedded repo appeared mid-turn (for example via git worktree add,
+				// git clone, git submodule update, or git init).
 				if afterSnap.RepoPath == "" {
 					continue
 				}
+				if emb, ok := loadEmbeddedChanges(src)[afterSnap.RepoPath]; ok && emb.Changes != nil && emb.Changes.From != "" {
+					fromTree := emb.Changes.From
+					baseBranch := emb.Changes.Base
+					if baseBranch == "" {
+						baseBranch = afterSnap.Branch
+					}
+					if afterSnap.Head != "" && afterSnap.Head != fromTree {
+						touchedBaselines = append(touchedBaselines, core.RepoBaseline{
+							SourceID:   src.ID,
+							RepoPath:   afterSnap.RepoPath,
+							BaseHead:   fromTree,
+							BaseBranch: baseBranch,
+						})
+					}
+					if afterSnap.Tree == fromTree {
+						continue
+					}
+					diffFiles, err := diffSourceRepo(recordCtx, src.Branches, tc.threadID, afterSnap.RepoPath, fromTree, afterSnap.Tree)
+					if err != nil || len(diffFiles) == 0 {
+						continue
+					}
+					if afterSnap.Head != "" && afterSnap.Head == fromTree {
+						touchedBaselines = append(touchedBaselines, core.RepoBaseline{
+							SourceID:   src.ID,
+							RepoPath:   afterSnap.RepoPath,
+							BaseHead:   fromTree,
+							BaseBranch: baseBranch,
+						})
+					}
+					files := toTurnFiles(diffFiles)
+					turnRepos = append(turnRepos, core.TurnRepoChanges{
+						SourceID:   src.ID,
+						SourceName: src.Name,
+						RepoPath:   afterSnap.RepoPath,
+						Branch:     afterSnap.Branch,
+						From:       fromTree,
+						To:         afterSnap.Tree,
+						Files:      files,
+						Total:      sumTurnFileTotals(files),
+					})
+					continue
+				}
+
 				fromTree := afterSnap.Head
 				if fromTree == "" {
 					fromTree = emptyTreeSHA

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,6 +25,7 @@ const (
 const (
 	maxEmbeddedGitDepth = 8
 	maxGitFileBytes     = 8 << 10
+	maxGitmodulesBytes  = 1 << 20
 )
 
 // Directories that never hold user source repositories and can be huge in real workspaces.
@@ -64,6 +66,12 @@ type EmbeddedRepo struct {
 	CommonDir                 string
 	RegisteredWorktreePath    string
 	ObjectStoreInsideWorktree bool
+	SuperprojectPath          string
+	SubmodulePath             string
+}
+
+func (r EmbeddedRepo) IsSubmodule() bool {
+	return r.SuperprojectPath != "" && r.SubmodulePath != ""
 }
 
 type EmbeddedRepoStatus struct {
@@ -96,9 +104,14 @@ func DiscoverEmbeddedRepos(ctx context.Context, worktreeDir string) ([]EmbeddedR
 		return nil, nil
 	}
 
+	initialParentRepoDir := ""
+	if dirHasValidGitEntry(root) {
+		initialParentRepoDir = root
+	}
+
 	var repos []EmbeddedRepo
-	var walk func(dir string, depth int) error
-	walk = func(dir string, depth int) error {
+	var walk func(dir string, depth int, parentRepoDir string) error
+	walk = func(dir string, depth int, parentRepoDir string) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -109,6 +122,7 @@ func DiscoverEmbeddedRepos(ctx context.Context, worktreeDir string) ([]EmbeddedR
 			}
 			return err
 		}
+		nextParentRepoDir := parentRepoDir
 		if depth > 0 {
 			for _, entry := range entries {
 				if entry.Name() != ".git" {
@@ -123,8 +137,10 @@ func DiscoverEmbeddedRepos(ctx context.Context, worktreeDir string) ([]EmbeddedR
 					rel = dir
 				}
 				gitPath := filepath.Join(dir, ".git")
+				var repo EmbeddedRepo
+				recognized := false
 				if entry.IsDir() {
-					repos = append(repos, EmbeddedRepo{
+					repo = EmbeddedRepo{
 						Path:                      dir,
 						RelPath:                   filepath.ToSlash(rel),
 						Depth:                     depth,
@@ -132,9 +148,20 @@ func DiscoverEmbeddedRepos(ctx context.Context, worktreeDir string) ([]EmbeddedR
 						GitDir:                    gitPath,
 						CommonDir:                 gitPath,
 						ObjectStoreInsideWorktree: true,
-					})
+					}
+					recognized = true
 				} else if entryType.IsRegular() {
-					repos = append(repos, inspectEmbeddedGitFile(ctx, root, dir, filepath.ToSlash(rel), depth, gitPath))
+					repo = inspectEmbeddedGitFile(ctx, root, dir, filepath.ToSlash(rel), depth, gitPath)
+					recognized = true
+				}
+				if recognized {
+					if repo.GitDir != "" {
+						if err := populateSubmoduleMetadata(ctx, root, parentRepoDir, &repo); err != nil {
+							return err
+						}
+						nextParentRepoDir = dir
+					}
+					repos = append(repos, repo)
 				}
 				break
 			}
@@ -150,14 +177,14 @@ func DiscoverEmbeddedRepos(ctx context.Context, worktreeDir string) ([]EmbeddedR
 			if !entry.IsDir() {
 				continue
 			}
-			if err := walk(filepath.Join(dir, name), depth+1); err != nil {
+			if err := walk(filepath.Join(dir, name), depth+1, nextParentRepoDir); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 
-	if err := walk(root, 0); err != nil {
+	if err := walk(root, 0, initialParentRepoDir); err != nil {
 		return nil, err
 	}
 	slices.SortFunc(repos, func(a, b EmbeddedRepo) int {
@@ -193,6 +220,222 @@ func readSmallTextFile(path string) (string, error) {
 	return string(data), nil
 }
 
+func resolveGitFileTarget(repoDir, gitFile string) (string, bool) {
+	raw, err := readSmallTextFile(gitFile)
+	if err != nil {
+		return "", false
+	}
+	line, _, _ := strings.Cut(raw, "\n")
+	line = strings.TrimRight(line, "\r")
+	target, ok := strings.CutPrefix(line, "gitdir:")
+	if !ok {
+		return "", false
+	}
+	target = filepath.FromSlash(strings.TrimSpace(target))
+	if target == "" {
+		return "", false
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(repoDir, target)
+	}
+	gitDir, err := canonicalOrClean(target)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Stat(gitDir)
+	if err != nil || !info.IsDir() {
+		return "", false
+	}
+	return gitDir, true
+}
+
+func dirHasValidGitEntry(dir string) bool {
+	gitPath := filepath.Join(dir, ".git")
+	info, err := os.Lstat(gitPath)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	if info.IsDir() {
+		return true
+	}
+	if !info.Mode().IsRegular() {
+		return false
+	}
+	gitDir, ok := resolveGitFileTarget(dir, gitPath)
+	return ok && gitDir != ""
+}
+
+func hasRegularGitmodules(dir string) bool {
+	info, err := os.Lstat(filepath.Join(dir, ".gitmodules"))
+	return err == nil && info.Mode()&os.ModeSymlink == 0 && info.Mode().IsRegular()
+}
+
+func populateSubmoduleMetadata(ctx context.Context, worktreeRoot, parentRepoDir string, repo *EmbeddedRepo) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if repo == nil || repo.GitDir == "" || repo.Kind == EmbeddedWorktree || parentRepoDir == "" {
+		return nil
+	}
+	if !isPathWithin(parentRepoDir, worktreeRoot) {
+		return nil
+	}
+	if repo.Kind != EmbeddedGitFile && !hasRegularGitmodules(parentRepoDir) {
+		return nil
+	}
+	rel, err := filepath.Rel(parentRepoDir, repo.Path)
+	if err != nil {
+		return nil
+	}
+	subRel := filepath.ToSlash(rel)
+	if subRel == "" || subRel == "." || subRel == ".." || strings.HasPrefix(subRel, "../") {
+		return nil
+	}
+	if readSubmoduleGitlink(ctx, parentRepoDir, subRel) != "" {
+		repo.SuperprojectPath = parentRepoDir
+		repo.SubmodulePath = subRel
+	}
+	return ctx.Err()
+}
+
+func parseLsTreeGitlink(output, expectedPath string) string {
+	for _, entry := range strings.Split(output, "\x00") {
+		if entry == "" {
+			continue
+		}
+		meta, entryPath, ok := strings.Cut(entry, "\t")
+		if !ok || entryPath != expectedPath {
+			continue
+		}
+		fields := strings.Fields(meta)
+		if len(fields) == 3 && fields[0] == "160000" && fields[1] == "commit" && isObjectID(fields[2]) {
+			return fields[2]
+		}
+	}
+	return ""
+}
+
+func parseLsFilesGitlink(output, expectedPath string) string {
+	fallback := ""
+	for _, entry := range strings.Split(output, "\x00") {
+		if entry == "" {
+			continue
+		}
+		meta, entryPath, ok := strings.Cut(entry, "\t")
+		if !ok || entryPath != expectedPath {
+			continue
+		}
+		fields := strings.Fields(meta)
+		if len(fields) == 3 && fields[0] == "160000" && isObjectID(fields[1]) {
+			if fields[2] == "0" {
+				return fields[1]
+			}
+			if fallback == "" || fields[2] == "2" {
+				fallback = fields[1]
+			}
+		}
+	}
+	return fallback
+}
+
+func readSubmoduleHeadGitlink(ctx context.Context, superprojectDir, subRelPath string) string {
+	if superprojectDir == "" || subRelPath == "" || subRelPath == "." || subRelPath == ".." || strings.HasPrefix(subRelPath, "../") {
+		return ""
+	}
+	parentGit := NewGit(superprojectDir, "file")
+	res := parentGit(ctx, []string{"--no-optional-locks", "ls-tree", "-z", "HEAD", "--", subRelPath}, GitOptions{Directory: superprojectDir, Whole: true})
+	if res.ExitCode != 0 {
+		return ""
+	}
+	return parseLsTreeGitlink(res.Stdout, subRelPath)
+}
+
+func readSubmoduleIndexGitlink(ctx context.Context, superprojectDir, subRelPath string) string {
+	if superprojectDir == "" || subRelPath == "" || subRelPath == "." || subRelPath == ".." || strings.HasPrefix(subRelPath, "../") {
+		return ""
+	}
+	parentGit := NewGit(superprojectDir, "file")
+	res := parentGit(ctx, []string{"--no-optional-locks", "ls-files", "--stage", "-z", "--", subRelPath}, GitOptions{Directory: superprojectDir, Whole: true})
+	if res.ExitCode != 0 {
+		return ""
+	}
+	return parseLsFilesGitlink(res.Stdout, subRelPath)
+}
+
+func readSubmoduleGitlink(ctx context.Context, superprojectDir, subRelPath string) string {
+	if sha := readSubmoduleHeadGitlink(ctx, superprojectDir, subRelPath); sha != "" {
+		return sha
+	}
+	if ctx.Err() != nil {
+		return ""
+	}
+	return readSubmoduleIndexGitlink(ctx, superprojectDir, subRelPath)
+}
+
+func readSubmoduleConfiguredBranch(ctx context.Context, superprojectDir, subRelPath string) string {
+	if superprojectDir == "" || subRelPath == "" {
+		return ""
+	}
+	gitmodulesPath := filepath.Join(superprojectDir, ".gitmodules")
+	info, err := os.Lstat(gitmodulesPath)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > maxGitmodulesBytes {
+		return ""
+	}
+	parentGit := NewGit(superprojectDir, "file")
+	res := parentGit(ctx, []string{"config", "--no-includes", "--file", gitmodulesPath, "--null", "--get-regexp", `^submodule\..*\.(path|branch)$`}, GitOptions{Directory: superprojectDir, Whole: true})
+	if res.ExitCode != 0 {
+		return ""
+	}
+	branches := make(map[string]string)
+	var matchedNames []string
+	for _, entry := range strings.Split(res.Stdout, "\x00") {
+		if entry == "" {
+			continue
+		}
+		key, val, ok := strings.Cut(entry, "\n")
+		if !ok {
+			continue
+		}
+		rest, ok := strings.CutPrefix(key, "submodule.")
+		if !ok {
+			continue
+		}
+		if name, ok := strings.CutSuffix(rest, ".path"); ok && name != "" {
+			cleaned := path.Clean(filepath.ToSlash(strings.TrimSpace(val)))
+			if cleaned == subRelPath {
+				matchedNames = append(matchedNames, name)
+			}
+		} else if name, ok := strings.CutSuffix(rest, ".branch"); ok && name != "" {
+			branches[name] = strings.TrimSpace(val)
+		}
+	}
+	branch := ""
+	for i := len(matchedNames) - 1; i >= 0; i-- {
+		if b := branches[matchedNames[i]]; b != "" {
+			branch = b
+			break
+		}
+	}
+	if branch == "" {
+		return ""
+	}
+	if branch == "." {
+		sym := parentGit(ctx, []string{"symbolic-ref", "-q", "--short", "HEAD"}, GitOptions{Directory: superprojectDir})
+		if sym.ExitCode != 0 {
+			return ""
+		}
+		branch = strings.TrimSpace(sym.Stdout)
+	}
+	branch = strings.TrimPrefix(branch, "refs/heads/")
+	if branch == "" || strings.HasPrefix(branch, "-") || strings.ContainsAny(branch, " \t\r\n") {
+		return ""
+	}
+	if validRef(ctx, parentGit, "refs/heads/"+branch) != nil {
+		return ""
+	}
+	return branch
+}
+
 func inspectEmbeddedGitFile(ctx context.Context, worktreeRoot, repoDir, relPath string, depth int, gitFile string) EmbeddedRepo {
 	repo := EmbeddedRepo{
 		Path:    repoDir,
@@ -200,29 +443,8 @@ func inspectEmbeddedGitFile(ctx context.Context, worktreeRoot, repoDir, relPath 
 		Depth:   depth,
 		Kind:    EmbeddedGitFile,
 	}
-	raw, err := readSmallTextFile(gitFile)
-	if err != nil {
-		return repo
-	}
-	line, _, _ := strings.Cut(raw, "\n")
-	line = strings.TrimRight(line, "\r")
-	target, ok := strings.CutPrefix(line, "gitdir:")
+	gitDir, ok := resolveGitFileTarget(repoDir, gitFile)
 	if !ok {
-		return repo
-	}
-	target = filepath.FromSlash(strings.TrimSpace(target))
-	if target == "" {
-		return repo
-	}
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(repoDir, target)
-	}
-	gitDir, err := canonicalOrClean(target)
-	if err != nil {
-		return repo
-	}
-	info, err := os.Stat(gitDir)
-	if err != nil || !info.IsDir() {
 		return repo
 	}
 	repo.GitDir = gitDir
@@ -375,9 +597,7 @@ func InspectEmbeddedRepo(ctx context.Context, repo EmbeddedRepo) (EmbeddedRepoSt
 		return EmbeddedRepoStatus{}, err
 	}
 	branchRef := ""
-	if sym.ExitCode != 0 {
-		status.Dirty = true
-	} else {
+	if sym.ExitCode == 0 {
 		branchRef = strings.TrimSpace(sym.Stdout)
 	}
 
@@ -395,9 +615,23 @@ func InspectEmbeddedRepo(ctx context.Context, repo EmbeddedRepo) (EmbeddedRepoSt
 		return EmbeddedRepoStatus{}, err
 	}
 
+	headGitlinkSHA := ""
+	if repo.IsSubmodule() {
+		headGitlinkSHA = readSubmoduleHeadGitlink(ctx, repo.SuperprojectPath, repo.SubmodulePath)
+		if err := ctx.Err(); err != nil {
+			return EmbeddedRepoStatus{}, err
+		}
+	}
+	alignedSubmodule := repo.IsSubmodule() && headSHA != "" && headGitlinkSHA != "" && headSHA == headGitlinkSHA
+	alignedDetachedSubmodule := alignedSubmodule && branchRef == ""
+
+	if branchRef == "" && !alignedDetachedSubmodule {
+		status.Dirty = true
+	}
+
 	if repo.ObjectStoreInsideWorktree {
 		revArgs := []string{"rev-list"}
-		if headSHA != "" {
+		if headSHA != "" && !alignedDetachedSubmodule {
 			revArgs = append(revArgs, "HEAD")
 		}
 		revArgs = append(revArgs, "--branches", "--not", "--remotes", "--max-count=1")
@@ -420,6 +654,8 @@ func InspectEmbeddedRepo(ctx context.Context, repo EmbeddedRepo) (EmbeddedRepoSt
 		status.Unmerged = false
 	case repo.ObjectStoreInsideWorktree && status.Unpushed:
 		status.Unmerged = true
+	case alignedSubmodule:
+		status.Unmerged = false
 	case branchRef == "":
 		status.Unmerged = true
 	default:
@@ -460,11 +696,11 @@ func embeddedBranchMerged(ctx context.Context, git GitRun, repo EmbeddedRepo, br
 		}
 	}
 
-	// 2. For external object stores (linked worktrees / submodules sharing host
-	//    git dir), check the host repo's HEAD branch and its remote counterpart.
+	// 2. For external object stores (linked worktrees sharing a host git dir),
+	//    check the host repo's HEAD branch and its remote counterpart.
 	hostRef := ""
 	hostHasCommit := false
-	if !repo.ObjectStoreInsideWorktree {
+	if !repo.ObjectStoreInsideWorktree && !repo.IsSubmodule() {
 		hostRef = readCommonHeadRef(repo.CommonDir)
 		if hostRef != "" {
 			if commitSHA(ctx, git, hostRef, "") != "" {
@@ -502,6 +738,25 @@ func embeddedBranchMerged(ctx context.Context, git GitRun, repo EmbeddedRepo, br
 		}
 		hasExplicitDefaultCandidate = true
 		return isAncestor(candidate)
+	}
+
+	if repo.IsSubmodule() {
+		if configuredBranch := readSubmoduleConfiguredBranch(ctx, repo.SuperprojectPath, repo.SubmodulePath); configuredBranch != "" {
+			if hasRemoteUpstream && checkCandidate("refs/remotes/"+upstreamRemote+"/"+configuredBranch) {
+				return true
+			}
+			if checkCandidate("refs/remotes/origin/" + configuredBranch) {
+				return true
+			}
+			if onlyRemote := soleRemoteName(ctx, git); onlyRemote != "" {
+				if checkCandidate("refs/remotes/" + onlyRemote + "/" + configuredBranch) {
+					return true
+				}
+			}
+			if !repo.ObjectStoreInsideWorktree && checkCandidate("refs/heads/"+configuredBranch) {
+				return true
+			}
+		}
 	}
 
 	if hasRemoteUpstream {
@@ -762,6 +1017,19 @@ func nestedWorktreesDeepestFirst(repos []EmbeddedRepo) []EmbeddedRepo {
 	return nested
 }
 
+func hasDirectSubmodule(repos []EmbeddedRepo, worktreeDir string) bool {
+	targetKey := worktreePathKey(worktreeDir)
+	if targetKey == "" {
+		return false
+	}
+	for _, repo := range repos {
+		if repo.IsSubmodule() && worktreePathKey(repo.SuperprojectPath) == targetKey {
+			return true
+		}
+	}
+	return false
+}
+
 func removeNestedWorktrees(ctx context.Context, repos []EmbeddedRepo, discard bool) (bool, error) {
 	nested := nestedWorktreesDeepestFirst(repos)
 	for _, repo := range nested {
@@ -789,6 +1057,8 @@ func removeNestedWorktrees(ctx context.Context, repos []EmbeddedRepo, discard bo
 		args := []string{"--git-dir", repo.CommonDir, "worktree", "remove"}
 		if discard {
 			args = append(args, "--force", "--force")
+		} else if hasDirectSubmodule(repos, repo.Path) {
+			args = append(args, "--force")
 		}
 		args = append(args, "--", repo.RegisteredWorktreePath)
 		result := hostGit(ctx, args, GitOptions{Directory: repo.CommonDir})
@@ -800,7 +1070,7 @@ func removeNestedWorktrees(ctx context.Context, repos []EmbeddedRepo, discard bo
 			continue
 		}
 		lower := strings.ToLower(result.Stderr)
-		if strings.Contains(lower, "modified or untracked") || strings.Contains(lower, "use --force") || strings.Contains(lower, "locked") {
+		if strings.Contains(lower, "modified or untracked") || strings.Contains(lower, "use --force") || strings.Contains(lower, "locked") || strings.Contains(lower, "submodules") {
 			return false, nil
 		}
 		return false, gitFailure(result, "git worktree remove")

@@ -46,6 +46,13 @@ func hasRepoActivity(changes *sdk.BranchChanges) bool {
 	return len(changes.Files) > 0 || len(changes.Commits) > 0 || len(changes.Uncommitted) > 0
 }
 
+func hasStoredNonZeroChanges(stored any) bool {
+	if stored == nil {
+		return false
+	}
+	return !core.SameChangeTotals(stored, core.ChangeTotals{})
+}
+
 func baselinesBySource(items []core.RepoBaseline) map[string]map[string]sdk.RepoBaseline {
 	if len(items) == 0 {
 		return nil
@@ -106,25 +113,29 @@ func (manager *Manager) ThreadChangesSince(ctx context.Context, threadID string,
 					return ThreadChanges{}, workError(err)
 				}
 				if revisions == *known {
+					staleEmptyOuter := revisions.Head != "" && revisions.Head == revisions.BaseHead && hasStoredNonZeroChanges(thread.Changes)
 					if primary.Branches.EmbeddedChanges == nil || primary.Workspace.Removed {
-						return ThreadChanges{Mergeable: primary.Mergeable, Unchanged: true}, nil
-					}
-					embedded, err := primary.Branches.EmbeddedChanges(ctx, threadID, bySource[primary.ID])
-					if err != nil {
-						return ThreadChanges{}, workError(err)
-					}
-					hasEmbeddedActivity := false
-					for _, item := range embedded {
-						if hasRepoActivity(item.Changes) {
-							hasEmbeddedActivity = true
-							break
+						if !staleEmptyOuter {
+							return ThreadChanges{Mergeable: primary.Mergeable, Unchanged: true}, nil
 						}
+					} else {
+						embedded, err := primary.Branches.EmbeddedChanges(ctx, threadID, bySource[primary.ID])
+						if err != nil {
+							return ThreadChanges{}, workError(err)
+						}
+						hasEmbeddedActivity := false
+						for _, item := range embedded {
+							if hasRepoActivity(item.Changes) {
+								hasEmbeddedActivity = true
+								break
+							}
+						}
+						if !hasEmbeddedActivity && !staleEmptyOuter {
+							return ThreadChanges{Mergeable: primary.Mergeable, Unchanged: true}, nil
+						}
+						prefetchedPrimaryEmbedded = embedded
+						hasPrefetchedPrimaryEmbedded = true
 					}
-					if !hasEmbeddedActivity {
-						return ThreadChanges{Mergeable: primary.Mergeable, Unchanged: true}, nil
-					}
-					prefetchedPrimaryEmbedded = embedded
-					hasPrefetchedPrimaryEmbedded = true
 				}
 			}
 		}

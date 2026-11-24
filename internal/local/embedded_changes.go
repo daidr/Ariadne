@@ -106,7 +106,11 @@ func resolveEmbeddedRepoPath(ctx context.Context, worktreeDir, repoPath string) 
 	}
 	parts := strings.Split(clean, "/")
 	current := root
-	for _, part := range parts {
+	parentRepoDir := ""
+	if dirHasValidGitEntry(root) {
+		parentRepoDir = root
+	}
+	for i, part := range parts {
 		current = filepath.Join(current, part)
 		info, err := os.Lstat(current)
 		if err != nil {
@@ -114,6 +118,9 @@ func resolveEmbeddedRepoPath(ctx context.Context, worktreeDir, repoPath string) 
 		}
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return EmbeddedRepo{}, errors.New("embedded repository path is not a directory")
+		}
+		if i < len(parts)-1 && dirHasValidGitEntry(current) {
+			parentRepoDir = current
 		}
 	}
 	if !isPathWithin(current, root) {
@@ -153,6 +160,9 @@ func resolveEmbeddedRepoPath(ctx context.Context, worktreeDir, repoPath string) 
 	}
 	if !ok {
 		return EmbeddedRepo{}, errors.New("embedded repository gitdir verification failed")
+	}
+	if err := populateSubmoduleMetadata(ctx, root, parentRepoDir, &repo); err != nil {
+		return EmbeddedRepo{}, err
 	}
 	return repo, nil
 }
@@ -194,23 +204,31 @@ func isAncestorSHA(ctx context.Context, git GitRun, ancestor, descendant string)
 
 // resolveEmbeddedFallbackBase finds the default remote/upstream base ref for an
 // embedded repository when no recorded first-touch baseline is available (or to
-// upgrade a baseline that tracks an advancing default branch).
-func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedRepo, branchRef string) (ref, name, sha string) {
+// upgrade a baseline that tracks an advancing default branch). Only candidates
+// that share history (a valid merge-base) with headSHA are returned.
+func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedRepo, branchRef, headSHA string) (ref, name, sha, mergeBase string) {
 	upstreamRef := resolveUpstreamRef(ctx, git, "")
 	upstreamRemote, upstreamShort, hasRemoteUpstream := remoteNameAndBranch(upstreamRef)
 	branchShort := strings.TrimPrefix(branchRef, "refs/heads/")
 
 	checked := make(map[string]bool)
-	tryCandidate := func(candidate string) (string, string, string, bool) {
+	tryCandidate := func(candidate string) (string, string, string, string, bool) {
 		if candidate == "" || candidate == branchRef || checked[candidate] {
-			return "", "", "", false
+			return "", "", "", "", false
 		}
 		checked[candidate] = true
 		resolved := commitSHA(ctx, git, candidate, "")
 		if resolved == "" {
-			return "", "", "", false
+			return "", "", "", "", false
 		}
-		return candidate, displayRefName(candidate), resolved, true
+		mb := resolved
+		if headSHA != "" && resolved != headSHA {
+			mb = mergeBaseSHA(ctx, git, resolved, headSHA)
+			if mb == "" {
+				return "", "", "", "", false
+			}
+		}
+		return candidate, displayRefName(candidate), resolved, mb, true
 	}
 
 	// 1. Upstream tracking a differently named branch (e.g. feat/work -> origin/develop).
@@ -220,82 +238,104 @@ func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedR
 			uShort = shortBranchName(upstreamRef)
 		}
 		if uShort != "" && uShort != branchShort {
-			if r, n, s, ok := tryCandidate(upstreamRef); ok {
-				return r, n, s
+			if r, n, s, mb, ok := tryCandidate(upstreamRef); ok {
+				return r, n, s, mb
 			}
 		}
 	}
 
-	// 2. Explicit remote default branch (refs/remotes/<remote>/HEAD).
+	// 2. For Git submodules, prefer the branch declared in the parent's .gitmodules.
+	if repo.IsSubmodule() {
+		if configuredBranch := readSubmoduleConfiguredBranch(ctx, repo.SuperprojectPath, repo.SubmodulePath); configuredBranch != "" {
+			if hasRemoteUpstream {
+				if r, n, s, mb, ok := tryCandidate("refs/remotes/" + upstreamRemote + "/" + configuredBranch); ok {
+					return r, n, s, mb
+				}
+			}
+			if r, n, s, mb, ok := tryCandidate("refs/remotes/origin/" + configuredBranch); ok {
+				return r, n, s, mb
+			}
+			if onlyRemote := soleRemoteName(ctx, git); onlyRemote != "" {
+				if r, n, s, mb, ok := tryCandidate("refs/remotes/" + onlyRemote + "/" + configuredBranch); ok {
+					return r, n, s, mb
+				}
+			}
+			if r, n, s, mb, ok := tryCandidate("refs/heads/" + configuredBranch); ok {
+				return r, n, s, mb
+			}
+		}
+	}
+
+	// 3. Explicit remote default branch (refs/remotes/<remote>/HEAD).
 	if remoteDefault := resolveRemoteDefaultRef(ctx, git, upstreamRemote); remoteDefault != "" {
-		if r, n, s, ok := tryCandidate(remoteDefault); ok {
-			return r, n, s
+		if r, n, s, mb, ok := tryCandidate(remoteDefault); ok {
+			return r, n, s, mb
 		}
-		if !repo.ObjectStoreInsideWorktree {
-			if r, n, s, ok := tryCandidate(localBranchForRemoteRef(remoteDefault)); ok {
-				return r, n, s
+		if !repo.ObjectStoreInsideWorktree && !repo.IsSubmodule() {
+			if r, n, s, mb, ok := tryCandidate(localBranchForRemoteRef(remoteDefault)); ok {
+				return r, n, s, mb
 			}
 		}
 	}
 
-	// 3. Host repository HEAD for external object stores (nested worktrees / submodules).
-	if !repo.ObjectStoreInsideWorktree {
+	// 4. Host repository HEAD for external object stores (nested linked worktrees).
+	if !repo.ObjectStoreInsideWorktree && !repo.IsSubmodule() {
 		if hostRef := readCommonHeadRef(repo.CommonDir); hostRef != "" {
 			if hostUpstream := resolveUpstreamRef(ctx, git, hostRef); hostUpstream != "" {
-				if r, n, s, ok := tryCandidate(hostUpstream); ok {
-					return r, n, s
+				if r, n, s, mb, ok := tryCandidate(hostUpstream); ok {
+					return r, n, s, mb
 				}
 			}
 			if hostShort, ok := strings.CutPrefix(hostRef, "refs/heads/"); ok && hostShort != "" {
 				if hasRemoteUpstream {
-					if r, n, s, ok := tryCandidate("refs/remotes/" + upstreamRemote + "/" + hostShort); ok {
-						return r, n, s
+					if r, n, s, mb, ok := tryCandidate("refs/remotes/" + upstreamRemote + "/" + hostShort); ok {
+						return r, n, s, mb
 					}
 				}
-				if r, n, s, ok := tryCandidate("refs/remotes/origin/" + hostShort); ok {
-					return r, n, s
+				if r, n, s, mb, ok := tryCandidate("refs/remotes/origin/" + hostShort); ok {
+					return r, n, s, mb
 				}
 			}
-			if r, n, s, ok := tryCandidate(hostRef); ok {
-				return r, n, s
+			if r, n, s, mb, ok := tryCandidate(hostRef); ok {
+				return r, n, s, mb
 			}
 		}
 	}
 
-	// 4. Conventional default branch names (main / master).
+	// 5. Conventional default branch names (main / master).
 	if hasRemoteUpstream {
 		for _, candidate := range []string{"refs/remotes/" + upstreamRemote + "/main", "refs/remotes/" + upstreamRemote + "/master"} {
-			if r, n, s, ok := tryCandidate(candidate); ok {
-				return r, n, s
+			if r, n, s, mb, ok := tryCandidate(candidate); ok {
+				return r, n, s, mb
 			}
 		}
 	}
 	for _, candidate := range []string{"refs/remotes/origin/main", "refs/remotes/origin/master"} {
-		if r, n, s, ok := tryCandidate(candidate); ok {
-			return r, n, s
+		if r, n, s, mb, ok := tryCandidate(candidate); ok {
+			return r, n, s, mb
 		}
 	}
 	if onlyRemote := soleRemoteName(ctx, git); onlyRemote != "" {
 		for _, candidate := range []string{"refs/remotes/" + onlyRemote + "/main", "refs/remotes/" + onlyRemote + "/master"} {
-			if r, n, s, ok := tryCandidate(candidate); ok {
-				return r, n, s
+			if r, n, s, mb, ok := tryCandidate(candidate); ok {
+				return r, n, s, mb
 			}
 		}
 	}
 	for _, candidate := range []string{"refs/heads/main", "refs/heads/master"} {
-		if r, n, s, ok := tryCandidate(candidate); ok {
-			return r, n, s
+		if r, n, s, mb, ok := tryCandidate(candidate); ok {
+			return r, n, s, mb
 		}
 	}
 
-	// 5. Same-named upstream tracking ref (shows local unpushed commits).
+	// 6. Same-named upstream tracking ref (shows local unpushed commits).
 	if upstreamRef != "" {
-		if r, n, s, ok := tryCandidate(upstreamRef); ok {
-			return r, n, s
+		if r, n, s, mb, ok := tryCandidate(upstreamRef); ok {
+			return r, n, s, mb
 		}
 	}
 
-	return "", "", ""
+	return "", "", "", ""
 }
 
 // EmbeddedRepoChanges computes the branch diff and uncommitted status for one
@@ -340,43 +380,82 @@ func EmbeddedRepoChanges(ctx context.Context, repo EmbeddedRepo, baseline *sdk.R
 	if branchName != "HEAD" {
 		branchRef = "refs/heads/" + branchName
 	}
-	_, defaultName, defaultSHA := resolveEmbeddedFallbackBase(ctx, repoGit, repo, branchRef)
-
 	var from, baseSHA, baseName string
 	recordedSHA := ""
 	if baseline != nil && baseline.BaseHead != "" {
 		recordedSHA = commitSHA(ctx, repoGit, baseline.BaseHead, "")
 	}
 	if recordedSHA != "" {
-		if defaultSHA != "" && defaultSHA != recordedSHA && isAncestorSHA(ctx, repoGit, recordedSHA, defaultSHA) {
-			if mb := mergeBaseSHA(ctx, repoGit, defaultSHA, status.headSHA); mb != "" && isAncestorSHA(ctx, repoGit, recordedSHA, mb) {
-				baseSHA = defaultSHA
-				from = mb
-				baseName = defaultName
-			}
+		_, defaultName, defaultSHA, defaultMB := resolveEmbeddedFallbackBase(ctx, repoGit, repo, branchRef, status.headSHA)
+		if defaultSHA != "" && defaultMB != "" && defaultSHA != recordedSHA &&
+			isAncestorSHA(ctx, repoGit, recordedSHA, defaultSHA) &&
+			isAncestorSHA(ctx, repoGit, recordedSHA, defaultMB) {
+			baseSHA = defaultSHA
+			from = defaultMB
+			baseName = defaultName
 		}
 		if from == "" {
 			baseSHA = recordedSHA
-			from = mergeBaseSHA(ctx, repoGit, baseSHA, status.headSHA)
-			if from == "" {
-				from = baseSHA
-			}
-			switch {
-			case defaultSHA == baseSHA && defaultName != "":
+			mb := mergeBaseSHA(ctx, repoGit, baseSHA, status.headSHA)
+			if mb != "" {
+				from = mb
+				switch {
+				case defaultSHA == baseSHA && defaultName != "":
+					baseName = defaultName
+				case baseline.BaseBranch != "" && baseline.BaseBranch != branchName:
+					baseName = baseline.BaseBranch
+				default:
+					baseName = shortCommitSHA(baseSHA)
+				}
+			} else if defaultSHA != "" && defaultMB != "" {
+				// recordedSHA has no common ancestor with HEAD (for example after switching
+				// to an unrelated orphan branch): fall back to a connected default base
+				// rather than diffing two unrelated trees.
+				baseSHA = defaultSHA
+				from = defaultMB
 				baseName = defaultName
-			case baseline.BaseBranch != "" && baseline.BaseBranch != branchName:
-				baseName = baseline.BaseBranch
-			default:
-				baseName = shortCommitSHA(baseSHA)
+			} else {
+				baseSHA = status.headSHA
+				from = status.headSHA
+				baseName = branchName
 			}
 		}
-	} else if defaultSHA != "" {
+	} else if repo.IsSubmodule() {
+		gitlinkSHA := readSubmoduleGitlink(ctx, repo.SuperprojectPath, repo.SubmodulePath)
+		switch {
+		case gitlinkSHA != "" && gitlinkSHA == status.headSHA:
+			baseSHA = gitlinkSHA
+			from = status.headSHA
+			baseName = shortCommitSHA(gitlinkSHA)
+		case gitlinkSHA != "":
+			if mb := mergeBaseSHA(ctx, repoGit, gitlinkSHA, status.headSHA); mb != "" {
+				baseSHA = gitlinkSHA
+				from = mb
+				baseName = shortCommitSHA(gitlinkSHA)
+			} else if _, defaultName, defaultSHA, defaultMB := resolveEmbeddedFallbackBase(ctx, repoGit, repo, branchRef, status.headSHA); defaultSHA != "" && defaultMB != "" {
+				baseSHA = defaultSHA
+				from = defaultMB
+				baseName = defaultName
+			} else {
+				baseSHA = status.headSHA
+				from = status.headSHA
+				baseName = branchName
+			}
+		default:
+			if _, defaultName, defaultSHA, defaultMB := resolveEmbeddedFallbackBase(ctx, repoGit, repo, branchRef, status.headSHA); defaultSHA != "" && defaultMB != "" {
+				baseSHA = defaultSHA
+				from = defaultMB
+				baseName = defaultName
+			} else {
+				baseSHA = status.headSHA
+				from = status.headSHA
+				baseName = branchName
+			}
+		}
+	} else if _, defaultName, defaultSHA, defaultMB := resolveEmbeddedFallbackBase(ctx, repoGit, repo, branchRef, status.headSHA); defaultSHA != "" && defaultMB != "" {
 		baseSHA = defaultSHA
 		baseName = defaultName
-		from = mergeBaseSHA(ctx, repoGit, baseSHA, status.headSHA)
-		if from == "" {
-			from = baseSHA
-		}
+		from = defaultMB
 	} else {
 		baseSHA = status.headSHA
 		from = status.headSHA
