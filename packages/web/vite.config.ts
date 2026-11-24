@@ -1,14 +1,86 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import zlib from 'node:zlib'
 import vue from '@vitejs/plugin-vue'
 import { colorModeScript } from 'dou-ui'
+import type { Plugin } from 'vite'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { sharedShikiPlugin } from './shiki-bundle-plugin'
 import { COLOR_MODE_KEY, THEME_COLORS, themeColorScript } from './src/color-mode'
+
+const PRECOMPRESS_MIN_BYTES = 256
+const PRECOMPRESS_TEXT_EXTS = new Set([
+  '.html',
+  '.htm',
+  '.js',
+  '.mjs',
+  '.css',
+  '.svg',
+  '.json',
+  '.webmanifest',
+  '.txt',
+  '.xml',
+])
+const PRECOMPRESS_GENERIC_EXTS = new Set(['.wasm'])
+
+function collectFiles(dir: string, out: string[] = []): string[] {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      collectFiles(fullPath, out)
+    } else if (entry.isFile()) {
+      out.push(fullPath)
+    }
+  }
+  return out
+}
+
+function precompressStaticAssets(): Plugin {
+  let outDir = ''
+  let isBuild = false
+  return {
+    name: 'ariadne-precompress',
+    apply: 'build',
+    configResolved(config) {
+      isBuild = config.command === 'build'
+      outDir = path.resolve(config.root, config.build.outDir)
+    },
+    closeBundle: {
+      order: 'post',
+      handler() {
+        if (!isBuild || !outDir || !fs.existsSync(outDir)) return
+        for (const filePath of collectFiles(outDir)) {
+          const ext = path.extname(filePath).toLowerCase()
+          const isText = PRECOMPRESS_TEXT_EXTS.has(ext)
+          const isGeneric = PRECOMPRESS_GENERIC_EXTS.has(ext)
+          if (!isText && !isGeneric) continue
+          const raw = fs.readFileSync(filePath)
+          if (raw.length < PRECOMPRESS_MIN_BYTES) continue
+          const compressed = zlib.brotliCompressSync(raw, {
+            params: {
+              [zlib.constants.BROTLI_PARAM_QUALITY]: 9,
+              [zlib.constants.BROTLI_PARAM_MODE]: isText
+                ? zlib.constants.BROTLI_MODE_TEXT
+                : zlib.constants.BROTLI_MODE_GENERIC,
+              [zlib.constants.BROTLI_PARAM_SIZE_HINT]: raw.length,
+            },
+          })
+          if (compressed.length < raw.length) {
+            fs.writeFileSync(`${filePath}.br`, compressed)
+          }
+        }
+      },
+    },
+  }
+}
 
 export default defineConfig({
   worker: {
     format: 'es',
   },
   plugins: [
+    sharedShikiPlugin(),
     vue(),
     {
       // Write data-dou-theme before the first paint, so dark mode does not flash light.
@@ -104,6 +176,7 @@ export default defineConfig({
         ],
       },
     }),
+    precompressStaticAssets(),
   ],
   server: {
     port: 5173,

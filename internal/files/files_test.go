@@ -3,7 +3,11 @@ package files
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -191,8 +195,11 @@ func TestFileHTTPRequiresAuthenticationAndPreservesHeaders(t *testing.T) {
 		request.Header.Set("Authorization", "Bearer secret")
 		result := httptest.NewRecorder()
 		handler.ServeHTTP(result, request)
-		if result.Code != 200 || result.Header().Get("Cache-Control") != "private, no-store" || result.Header().Get("X-Content-Type-Options") != "nosniff" {
+		if result.Code != 200 || result.Header().Get("Cache-Control") != "private, no-cache" || result.Header().Get("X-Content-Type-Options") != "nosniff" {
 			t.Fatalf("file headers: %d %v", result.Code, result.Header())
+		}
+		if result.Header().Get("ETag") == "" || result.Header().Get("Accept-Ranges") != "bytes" {
+			t.Fatalf("missing ETag or Accept-Ranges: %v", result.Header())
 		}
 		if method == "HEAD" && result.Body.Len() != 0 {
 			t.Fatal("HEAD returned file bytes")
@@ -201,4 +208,219 @@ func TestFileHTTPRequiresAuthenticationAndPreservesHeaders(t *testing.T) {
 			t.Fatal("GET changed file bytes")
 		}
 	}
+}
+
+func TestFileServeETagAndNotModified(t *testing.T) {
+	store := newStore(t)
+	payload := []byte("cached attachment body\n")
+	saved, err := store.Save(t.Context(), "p1", "text/plain", payload, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(payload)
+	wantETag := fmt.Sprintf("%q", hex.EncodeToString(sum[:]))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/files/{fileId}", store.Serve)
+
+	first := httptest.NewRecorder()
+	mux.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "http://localhost"+saved.URL, nil))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first GET status = %d, want 200", first.Code)
+	}
+	if got := first.Header().Get("ETag"); got != wantETag {
+		t.Fatalf("ETag = %q, want %q", got, wantETag)
+	}
+	if got := first.Header().Get("Cache-Control"); got != "private, no-cache" {
+		t.Fatalf("Cache-Control = %q, want private, no-cache", got)
+	}
+
+	for _, inm := range []string{wantETag, "W/" + wantETag, `"other", ` + wantETag, "*"} {
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			req := httptest.NewRequest(method, "http://localhost"+saved.URL, nil)
+			req.Header.Set("If-None-Match", inm)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusNotModified {
+				t.Fatalf("%s If-None-Match=%q: status = %d, want 304", method, inm, rec.Code)
+			}
+			if rec.Body.Len() != 0 {
+				t.Fatalf("%s 304 returned %d bytes", method, rec.Body.Len())
+			}
+			if rec.Header().Get("ETag") != wantETag || rec.Header().Get("Cache-Control") != "private, no-cache" {
+				t.Fatalf("304 cache headers mismatch: %v", rec.Header())
+			}
+			if rec.Header().Get("X-Content-Type-Options") != "nosniff" || rec.Header().Get("Cross-Origin-Resource-Policy") != "same-origin" || rec.Header().Get("Content-Security-Policy") != "default-src 'none'" {
+				t.Fatalf("304 missing security headers: %v", rec.Header())
+			}
+		}
+	}
+
+	missReq := httptest.NewRequest(http.MethodGet, "http://localhost"+saved.URL, nil)
+	missReq.Header.Set("If-None-Match", `"different-hash"`)
+	missRec := httptest.NewRecorder()
+	mux.ServeHTTP(missRec, missReq)
+	if missRec.Code != http.StatusOK || !bytes.Equal(missRec.Body.Bytes(), payload) {
+		t.Fatalf("mismatched ETag returned status=%d body=%q", missRec.Code, missRec.Body.String())
+	}
+}
+
+func TestFileServeRangeAndChunkedStreaming(t *testing.T) {
+	store := newStore(t)
+	// Build a 2.5 MiB binary payload containing NUL bytes to span multiple 1 MiB SQLite chunks.
+	total := 2*fileBlobChunkBytes + 512*1024
+	payload := make([]byte, total)
+	for i := range payload {
+		payload[i] = byte(i % 251)
+	}
+	saved, err := store.Save(t.Context(), "p1", "application/octet-stream", payload, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(payload)
+	etag := fmt.Sprintf("%q", hex.EncodeToString(sum[:]))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/files/{fileId}", store.Serve)
+
+	t.Run("full streamed download matches exact binary payload", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://localhost"+saved.URL, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		if rec.Header().Get("Content-Disposition") != "attachment" {
+			t.Fatalf("Content-Disposition = %q, want attachment", rec.Header().Get("Content-Disposition"))
+		}
+		if rec.Header().Get("Content-Length") != fmt.Sprint(total) {
+			t.Fatalf("Content-Length = %q, want %d", rec.Header().Get("Content-Length"), total)
+		}
+		if !bytes.Equal(rec.Body.Bytes(), payload) {
+			t.Fatalf("streamed binary body mismatch (got %d bytes, want %d)", rec.Body.Len(), total)
+		}
+	})
+
+	t.Run("single ranges across chunk boundaries and suffix", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			rangeHdr string
+			start    int
+			end      int
+		}{
+			{"prefix", "bytes=0-1023", 0, 1023},
+			{"across chunk boundary", fmt.Sprintf("bytes=%d-%d", fileBlobChunkBytes-64, fileBlobChunkBytes+127), fileBlobChunkBytes - 64, fileBlobChunkBytes + 127},
+			{"open end", fmt.Sprintf("bytes=%d-", total-500), total - 500, total - 1},
+			{"suffix", "bytes=-256", total - 256, total - 1},
+		}
+		for _, tc := range cases {
+			req := httptest.NewRequest(http.MethodGet, "http://localhost"+saved.URL, nil)
+			req.Header.Set("Range", tc.rangeHdr)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			wantLen := tc.end - tc.start + 1
+			wantContentRange := fmt.Sprintf("bytes %d-%d/%d", tc.start, tc.end, total)
+			if rec.Code != http.StatusPartialContent {
+				t.Fatalf("%s: status = %d, want 206", tc.name, rec.Code)
+			}
+			if rec.Header().Get("Content-Range") != wantContentRange {
+				t.Fatalf("%s: Content-Range = %q, want %q", tc.name, rec.Header().Get("Content-Range"), wantContentRange)
+			}
+			if rec.Header().Get("Content-Length") != fmt.Sprint(wantLen) {
+				t.Fatalf("%s: Content-Length = %q, want %d", tc.name, rec.Header().Get("Content-Length"), wantLen)
+			}
+			if !bytes.Equal(rec.Body.Bytes(), payload[tc.start:tc.end+1]) {
+				t.Fatalf("%s: range bytes mismatch", tc.name)
+			}
+		}
+	})
+
+	t.Run("HEAD with range returns partial headers and no body", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodHead, "http://localhost"+saved.URL, nil)
+		req.Header.Set("Range", "bytes=10-109")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusPartialContent || rec.Body.Len() != 0 {
+			t.Fatalf("HEAD range: status=%d bodyLen=%d", rec.Code, rec.Body.Len())
+		}
+		if rec.Header().Get("Content-Length") != "100" || rec.Header().Get("Content-Range") != fmt.Sprintf("bytes 10-109/%d", total) {
+			t.Fatalf("HEAD range headers: %v", rec.Header())
+		}
+	})
+
+	t.Run("unsatisfiable range returns 416", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://localhost"+saved.URL, nil)
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", total))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusRequestedRangeNotSatisfiable {
+			t.Fatalf("status = %d, want 416", rec.Code)
+		}
+		if rec.Header().Get("Content-Range") != fmt.Sprintf("bytes */%d", total) {
+			t.Fatalf("Content-Range = %q", rec.Header().Get("Content-Range"))
+		}
+	})
+
+	t.Run("If-Range respects ETag", func(t *testing.T) {
+		matchReq := httptest.NewRequest(http.MethodGet, "http://localhost"+saved.URL, nil)
+		matchReq.Header.Set("Range", "bytes=0-15")
+		matchReq.Header.Set("If-Range", etag)
+		matchRec := httptest.NewRecorder()
+		mux.ServeHTTP(matchRec, matchReq)
+		if matchRec.Code != http.StatusPartialContent || !bytes.Equal(matchRec.Body.Bytes(), payload[:16]) {
+			t.Fatalf("matching If-Range failed: status=%d len=%d", matchRec.Code, matchRec.Body.Len())
+		}
+
+		missReq := httptest.NewRequest(http.MethodGet, "http://localhost"+saved.URL, nil)
+		missReq.Header.Set("Range", "bytes=0-15")
+		missReq.Header.Set("If-Range", `"stale-etag"`)
+		missRec := httptest.NewRecorder()
+		mux.ServeHTTP(missRec, missReq)
+		if missRec.Code != http.StatusOK || missRec.Body.Len() != total {
+			t.Fatalf("mismatched If-Range should return full 200: status=%d len=%d", missRec.Code, missRec.Body.Len())
+		}
+	})
+
+	t.Run("empty file handles GET and unsatisfiable range", func(t *testing.T) {
+		empty, err := store.Save(t.Context(), "p1", "text/plain", []byte{}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		okRec := httptest.NewRecorder()
+		mux.ServeHTTP(okRec, httptest.NewRequest(http.MethodGet, "http://localhost"+empty.URL, nil))
+		if okRec.Code != http.StatusOK || okRec.Body.Len() != 0 || okRec.Header().Get("Content-Length") != "0" {
+			t.Fatalf("empty GET: status=%d len=%d cl=%q", okRec.Code, okRec.Body.Len(), okRec.Header().Get("Content-Length"))
+		}
+
+		rangeReq := httptest.NewRequest(http.MethodGet, "http://localhost"+empty.URL, nil)
+		rangeReq.Header.Set("Range", "bytes=0-0")
+		rangeRec := httptest.NewRecorder()
+		mux.ServeHTTP(rangeRec, rangeReq)
+		if rangeRec.Code != http.StatusOK || rangeRec.Body.Len() != 0 || rangeRec.Header().Get("Content-Length") != "0" {
+			t.Fatalf("empty range: status=%d len=%d cl=%q", rangeRec.Code, rangeRec.Body.Len(), rangeRec.Header().Get("Content-Length"))
+		}
+	})
+
+	t.Run("sqliteBlobReader performs single bounded query for small range", func(t *testing.T) {
+		reader := &sqliteBlobReader{
+			ctx:  t.Context(),
+			db:   store.Events.DB(),
+			id:   saved.ID,
+			size: int64(total),
+		}
+		if _, err := reader.Seek(int64(fileBlobChunkBytes+100), io.SeekStart); err != nil {
+			t.Fatal(err)
+		}
+		buf := make([]byte, 256)
+		n, err := io.ReadFull(reader, buf)
+		if err != nil || n != 256 {
+			t.Fatalf("ReadFull: n=%d err=%v", n, err)
+		}
+		if reader.reads != 1 {
+			t.Fatalf("expected 1 SQLite read for 256-byte range, got %d", reader.reads)
+		}
+		if !bytes.Equal(buf, payload[fileBlobChunkBytes+100:fileBlobChunkBytes+356]) {
+			t.Fatalf("read slice mismatch")
+		}
+	})
 }

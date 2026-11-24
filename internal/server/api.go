@@ -7,9 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
-	"mime"
 	"net/http"
-	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -80,6 +78,7 @@ type API struct {
 	options       Options
 	auth          httpauth.Auth
 	files         files.Store
+	staticAssets  *staticAssetCache
 	syncer        *ThreadSync
 	hub           *realtime.Hub
 	ownedHub      bool
@@ -136,7 +135,7 @@ func New(options Options) (*API, error) {
 		}
 		options.Hub = options.State.Hub()
 	}
-	api := &API{options: options, auth: httpauth.Auth{Token: options.Token, Now: options.Now}, files: files.Store{Events: options.Repository.Store, Now: options.Now}, syncer: NewThreadSync(), hub: options.Hub, mux: http.NewServeMux(), rpcMux: http.NewServeMux()}
+	api := &API{options: options, auth: httpauth.Auth{Token: options.Token, Now: options.Now}, files: files.Store{Events: options.Repository.Store, Now: options.Now}, staticAssets: newStaticAssetCache(), syncer: NewThreadSync(), hub: options.Hub, mux: http.NewServeMux(), rpcMux: http.NewServeMux()}
 	api.rooms = options.Rooms
 	if api.rooms == nil {
 		api.rooms = collab.NewRooms(options.Repository, api.report)
@@ -304,70 +303,6 @@ func text(body object, key string) string { value, _ := body[key].(string); retu
 func prefix(text string, length int) string {
 	units := utf16.Encode([]rune(text))
 	return string(utf16.Decode(units[:min(length, len(units))]))
-}
-func staticContentType(name string) string {
-	ext := strings.ToLower(path.Ext(name))
-	switch ext {
-	case ".webmanifest":
-		return "application/manifest+json"
-	case ".js", ".mjs":
-		return "text/javascript; charset=utf-8"
-	case ".svg":
-		return "image/svg+xml"
-	case ".png":
-		return "image/png"
-	case ".ico":
-		return "image/x-icon"
-	}
-	return mime.TypeByExtension(ext)
-}
-
-func isStaticAssetPath(name string) bool {
-	if strings.HasPrefix(name, "assets/") || strings.HasPrefix(name, "icons/") {
-		return true
-	}
-	switch strings.ToLower(path.Ext(name)) {
-	case ".js", ".mjs", ".css", ".map", ".webmanifest", ".json", ".svg", ".png", ".ico", ".webp", ".jpg", ".jpeg", ".gif", ".woff", ".woff2", ".ttf", ".otf", ".txt", ".xml":
-		return true
-	default:
-		return false
-	}
-}
-
-func (api *API) static(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/api/") || api.options.Web == nil {
-		domainerr.Write(w, domainerr.NotFound(r.URL.Path))
-		return
-	}
-	name := strings.TrimPrefix(r.URL.Path, "/")
-	if name == "" {
-		name = "index.html"
-	}
-	data, err := fs.ReadFile(api.options.Web, name)
-	if err != nil {
-		if isStaticAssetPath(name) {
-			domainerr.Write(w, domainerr.NotFound(r.URL.Path))
-			return
-		}
-		name = "index.html"
-		data, err = fs.ReadFile(api.options.Web, name)
-	}
-	if err != nil {
-		api.report(err)
-		domainerr.Write(w, domainerr.NotFound(r.URL.Path))
-		return
-	}
-	w.Header().Set("Cache-Control", "no-cache")
-	if strings.HasPrefix(name, "assets/") {
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	}
-	if contentType := staticContentType(name); contentType != "" {
-		w.Header().Set("Content-Type", contentType)
-	}
-	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-	if r.Method != "HEAD" {
-		_, _ = w.Write(data)
-	}
 }
 
 var fileID = regexp.MustCompile(`^fil_[\w-]+$`)

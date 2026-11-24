@@ -119,7 +119,14 @@ func Open(ctx context.Context, options Options) (*Store, error) {
 		query.Set("mode", "memory")
 		query.Set("cache", "shared")
 	}
-	for _, pragma := range []string{"busy_timeout(5000)", "journal_mode(WAL)", "synchronous(NORMAL)", "foreign_keys(1)"} {
+	for _, pragma := range []string{
+		"busy_timeout(5000)",
+		"journal_mode(WAL)",
+		"synchronous(NORMAL)",
+		"foreign_keys(1)",
+		"cache_size(-32000)",
+		"temp_store(MEMORY)",
+	} {
 		query.Add("_pragma", pragma)
 	}
 	uri.RawQuery = query.Encode()
