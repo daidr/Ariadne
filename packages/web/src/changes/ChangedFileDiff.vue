@@ -68,9 +68,9 @@ const review = useReviewComments(
   () => versions.value?.after ?? null,
 )
 const gutters = computed(() =>
-  review.gutter.value.markers?.length
-    ? [line.gutter.value, review.gutter.value]
-    : [line.gutter.value],
+  [line.gutter.value, review.gutter.value].filter(
+    (gutter) => gutter.hoverMarker || (gutter.markers?.length ?? 0) > 0,
+  ),
 )
 const widgets = computed(() => [...line.widgets.value, ...review.widgets.value])
 const oneSided = computed(() => !versions.value?.before || !versions.value?.after)
