@@ -10,6 +10,7 @@ import type {
   LineComment,
   LiveUpdate,
   DraftUpdate,
+  ReplyDraft,
   BackgroundUpdate,
   BackgroundView,
   MessageView,
@@ -1644,6 +1645,7 @@ export function followEvents(
     const current = new AbortController()
     controller = current
     const options = lastSeq === null ? {} : { afterSeq: lastSeq }
+    const activeDrafts = new Map<string, ReplyDraft>()
 
     void (async () => {
       try {
@@ -1651,6 +1653,7 @@ export function followEvents(
           if (stopped || controller !== current) return
           switch (frame.payload.case) {
             case 'ready':
+              activeDrafts.clear()
               delay = 500
               if (lastSeq === null) {
                 lastSeq = Number(frame.payload.value.lastSeq)
@@ -1705,20 +1708,37 @@ export function followEvents(
             }
             case 'draft': {
               const u = frame.payload.value
+              if (!u.draft) {
+                activeDrafts.delete(u.conversationId)
+                onDraft?.({
+                  projectId: u.projectId,
+                  conversationId: u.conversationId,
+                  draft: null,
+                })
+                break
+              }
+              const prev = activeDrafts.get(u.conversationId)
+              const canAppend = u.draft.append && prev?.messageId === u.draft.messageId
+              const text = canAppend ? prev.text + u.draft.text : u.draft.text
+              const blocks =
+                canAppend && u.draft.keepBlocks
+                  ? prev.blocks
+                  : u.draft.blocksJson.length
+                    ? JSON.parse(utf8Decoder.decode(u.draft.blocksJson))
+                    : undefined
+              const assembled: ReplyDraft = {
+                messageId: u.draft.messageId,
+                text,
+                ...(blocks ? { blocks } : {}),
+                startedAt: Number(u.draft.startedAt),
+                ...(u.draft.posted ? { posted: true } : {}),
+              }
+              if (assembled.posted) activeDrafts.delete(u.conversationId)
+              else activeDrafts.set(u.conversationId, assembled)
               onDraft?.({
                 projectId: u.projectId,
                 conversationId: u.conversationId,
-                draft: u.draft
-                  ? {
-                      messageId: u.draft.messageId,
-                      text: u.draft.text,
-                      ...(u.draft.blocksJson.length
-                        ? { blocks: JSON.parse(utf8Decoder.decode(u.draft.blocksJson)) }
-                        : {}),
-                      startedAt: Number(u.draft.startedAt),
-                      ...(u.draft.posted ? { posted: true } : {}),
-                    }
-                  : null,
+                draft: assembled,
               })
               break
             }

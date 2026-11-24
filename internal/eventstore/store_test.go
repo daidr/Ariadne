@@ -358,3 +358,158 @@ func TestBackupFailureReleasesItsReservedFile(t *testing.T) {
 		t.Fatal("failed backup retained its reserved destination", err)
 	}
 }
+
+func TestWatchProjectIsolatesWakeupsAndCleansUp(t *testing.T) {
+	store := openTestStore(t, Options{})
+	allWake, stopAll := store.Watch()
+	defer stopAll()
+	p1Wake, stopP1 := store.WatchProject("p1")
+	defer stopP1()
+	p2Wake, stopP2 := store.WatchProject("p2")
+	defer stopP2()
+
+	if _, err := store.Append(t.Context(), []NewEvent{input("ok", "p1")}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-allWake:
+	default:
+		t.Fatal("global watch missed p1 append")
+	}
+	select {
+	case <-p1Wake:
+	default:
+		t.Fatal("p1 watch missed p1 append")
+	}
+	select {
+	case <-p2Wake:
+		t.Fatal("p2 watch woke for p1 append")
+	default:
+	}
+
+	// Rolled-back savepoint for p2 must not wake p2 when outer tx commits p1.
+	if err := store.Within(t.Context(), func(tx *Transaction) error {
+		if _, err := tx.Append([]NewEvent{input("outer", "p1")}); err != nil {
+			return err
+		}
+		_ = tx.Within(func(inner *Transaction) error {
+			if _, err := inner.Append([]NewEvent{input("rolled", "p2")}); err != nil {
+				return err
+			}
+			return errors.New("rollback p2")
+		})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-allWake:
+	default:
+		t.Fatal("global watch missed outer commit")
+	}
+	select {
+	case <-p1Wake:
+	default:
+		t.Fatal("p1 watch missed outer commit")
+	}
+	select {
+	case <-p2Wake:
+		t.Fatal("p2 watch woke for rolled-back savepoint")
+	default:
+	}
+
+	// Purge wakes the purged project and global watchers, not unrelated projects.
+	if _, err := store.Purge(t.Context(), "p1", NewEvent{
+		Type:      "project.deleted",
+		ProjectID: "p1",
+		Data:      json.RawMessage(`{"id":"p1"}`),
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-allWake:
+	default:
+		t.Fatal("global watch missed purge")
+	}
+	select {
+	case <-p1Wake:
+	default:
+		t.Fatal("p1 watch missed purge")
+	}
+	select {
+	case <-p2Wake:
+		t.Fatal("p2 watch woke for p1 purge")
+	default:
+	}
+
+	stopP1()
+	stopP2()
+	store.watchMu.Lock()
+	projectGroups := len(store.projectWatches)
+	store.watchMu.Unlock()
+	if projectGroups != 0 {
+		t.Fatalf("cancelled project watchers retained %d map groups", projectGroups)
+	}
+}
+
+func TestRecentRingBufferServesLiveReadsAndHandlesPurgeEviction(t *testing.T) {
+	store := openTestStore(t, Options{})
+	if _, err := store.Append(t.Context(), []NewEvent{
+		input("a", "p1"),
+		input("b", "p2"),
+		input("c", "p1"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Live read hits ring buffer and clones Data so caller mutation cannot poison cache.
+	got, ok := store.readRecent(ReadOptions{AfterSeq: 0, ProjectID: "p1", Limit: 10}, 10)
+	if !ok || len(got) != 2 || got[0].Seq != 1 || got[1].Seq != 3 {
+		t.Fatalf("unexpected ring read: ok=%v events=%+v", ok, got)
+	}
+	got[0].Data[0] = 'X'
+	again, err := store.Read(t.Context(), ReadOptions{AfterSeq: 0, ProjectID: "p1", Limit: 10})
+	if err != nil || len(again) != 2 || string(again[0].Data) != `{"name":"保留原文"}` {
+		t.Fatalf("caller mutation leaked into ring buffer: %+v err=%v", again, err)
+	}
+
+	// OmitData returns empty payload matching SQLite behavior.
+	omitted, err := store.Read(t.Context(), ReadOptions{AfterSeq: 0, OmitData: true})
+	if err != nil || len(omitted) != 3 || len(omitted[0].Data) != 0 {
+		t.Fatalf("OmitData mismatch: %+v err=%v", omitted, err)
+	}
+
+	// Purge removes p1's prior events from the ring and keeps only the tombstone.
+	tombstone, err := store.Purge(t.Context(), "p1", NewEvent{
+		Type:      "project.deleted",
+		ProjectID: "p1",
+		Data:      json.RawMessage(`{"id":"p1"}`),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterPurge, ok := store.readRecent(ReadOptions{AfterSeq: 0, ProjectID: "p1", Limit: 10}, 10)
+	if !ok || len(afterPurge) != 1 || afterPurge[0].Seq != tombstone.Seq || afterPurge[0].Type != "project.deleted" {
+		t.Fatalf("ring buffer after purge: ok=%v events=%+v", ok, afterPurge)
+	}
+
+	// Exceeding recentEventLimit evicts old entries and falls back to SQLite seamlessly.
+	batch := make([]NewEvent, recentEventLimit+20)
+	for i := range batch {
+		batch[i] = input(fmt.Sprintf("ev-%d", i), "p2")
+	}
+	if _, err := store.Append(t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.readRecent(ReadOptions{AfterSeq: 0, Limit: 10}, 10); ok {
+		t.Fatal("expected historical AfterSeq=0 to miss evicted ring buffer")
+	}
+	all, err := store.Read(t.Context(), ReadOptions{AfterSeq: 0, Limit: 1000})
+	if err != nil || len(all) != len(batch)+2 {
+		t.Fatalf("historical fallback read: len=%d err=%v", len(all), err)
+	}
+	recentTail, ok := store.readRecent(ReadOptions{AfterSeq: all[len(all)-5].Seq, Limit: 10}, 10)
+	if !ok || len(recentTail) != 4 || recentTail[3].Seq != all[len(all)-1].Seq {
+		t.Fatalf("recent tail miss: ok=%v tail=%+v", ok, recentTail)
+	}
+}

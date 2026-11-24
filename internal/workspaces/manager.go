@@ -114,12 +114,18 @@ func New(options Options) (*Manager, error) {
 			return
 		}
 		commands := manager.Background.List(thread)
-		views := []map[string]any{}
-		for _, command := range commands {
-			views = append(views, map[string]any{"id": command.ID, "command": command.Command, "startedAt": command.StartedAt, "url": command.URL, "result": command.Result})
+		snapshot := &background.Snapshot{
+			ProjectID:      conversation.ProjectID,
+			ConversationID: thread,
+			Commands:       commands,
 		}
-		data, _ := json.Marshal(map[string]any{"projectId": conversation.ProjectID, "conversationId": thread, "commands": views})
-		options.State.Set(realtime.Update{Kind: "background", ProjectID: conversation.ProjectID, ConversationID: thread, Data: data}, len(views) > 0)
+		options.State.Set(realtime.Update{
+			Kind:           "background",
+			ProjectID:      conversation.ProjectID,
+			ConversationID: thread,
+			Value:          snapshot,
+			Size:           snapshot.ByteSize(),
+		}, len(commands) > 0)
 	}})
 	return manager, nil
 }

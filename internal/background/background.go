@@ -37,6 +37,28 @@ type Command struct {
 	Result         *Result `json:"result"`
 	Keep           bool    `json:"keep"`
 }
+
+// Snapshot is an immutable view of a conversation's background commands for
+// transient realtime updates.
+type Snapshot struct {
+	ProjectID      string    `json:"projectId"`
+	ConversationID string    `json:"conversationId"`
+	Commands       []Command `json:"commands"`
+}
+
+func (s *Snapshot) ByteSize() int {
+	if s == nil {
+		return 32
+	}
+	size := len(s.ProjectID) + len(s.ConversationID) + 32
+	for _, cmd := range s.Commands {
+		size += len(cmd.ID) + len(cmd.ThreadID) + len(cmd.Command) + len(cmd.CWD) + 64
+		if cmd.URL != nil {
+			size += len(*cmd.URL)
+		}
+	}
+	return size
+}
 type Output struct {
 	Command Command `json:"command"`
 	Text    string  `json:"text"`

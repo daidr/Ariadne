@@ -131,9 +131,7 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 		version = supplied.Version
 		supplied.OnError = onError
 		supplied.OnChange = func(view update.View) {
-			if data, err := json.Marshal(view); err == nil {
-				_ = state.Set(realtime.Update{Kind: "update", Data: data}, true)
-			}
+			_ = state.Set(realtime.Update{Kind: "update", Value: view}, true)
 		}
 		updates = update.New(life, user, supplied)
 		add(updates.Close)

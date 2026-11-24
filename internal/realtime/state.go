@@ -1,11 +1,9 @@
 package realtime
 
 import (
-	"encoding/json"
 	"errors"
 	"iter"
 	"slices"
-	"strings"
 	"sync"
 )
 
@@ -26,55 +24,48 @@ func NewState(hub *Hub) *State {
 	}
 	return &State{hub: hub, entries: map[string]Update{}}
 }
+
 func (state *State) Hub() *Hub { return state.hub }
+
+func stateEntryWeight(entry Update) int {
+	if entry.Kind == "" {
+		return 0
+	}
+	payloadSize := entry.Size
+	if payloadSize <= 0 {
+		payloadSize = len(entry.Data)
+	}
+	return payloadSize + len(entry.Kind) + len(entry.ProjectID) + len(entry.ConversationID) + 64
+}
+
 func (state *State) Set(update Update, retain bool) error {
-	if !isValidKind(update.Kind) || !json.Valid(update.Data) {
-		return errors.New("invalid transient state")
-	}
-	if update.Kind == "update" {
-		if update.ProjectID != "" || update.ConversationID != "" {
-			return errors.New("invalid transient state")
-		}
-	} else if update.ProjectID == "" || update.ConversationID == "" {
-		return errors.New("invalid transient state")
-	}
-	if len(update.Data) > MaxPendingBytes-1024 {
-		return errors.New("transient state exceeds frame limit")
-	}
-	encoded, err := json.Marshal(update.Data)
-	if err != nil {
-		return err
-	}
-	if len(encoded) > MaxPendingBytes-1024 {
-		return errors.New("transient state exceeds encoded frame limit")
-	}
-	update.Data = encoded
 	if len(update.ProjectID) > 512 || len(update.ConversationID) > 512 {
 		return errors.New("transient identity exceeds size limit")
 	}
-	key := updateKey(update)
+	if update.Value == nil && len(update.Data) > MaxPendingBytes-1024 {
+		return errors.New("transient state exceeds frame limit")
+	}
+	normalized, queueSize, err := normalizeUpdate(update)
+	if err != nil {
+		return errors.New("invalid transient state")
+	}
+	if normalized.Size > MaxPendingBytes-1024 {
+		return errors.New("transient state exceeds encoded frame limit")
+	}
+	key := updateKey(normalized)
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if state.closed {
 		return errors.New("transient state is closed")
 	}
 	old, exists := state.entries[key]
-	entryWeight := func(entry Update) int {
-		if entry.Kind == "" {
-			return 0
-		}
-		return len(entry.Data) + len(entry.Kind) + len(entry.ProjectID) + len(entry.ConversationID) + 64
-	}
-	weight := state.bytes - entryWeight(old)
+	weight := state.bytes - stateEntryWeight(old)
 	if retain {
-		weight += entryWeight(update)
+		weight += stateEntryWeight(normalized)
 		if !exists && len(state.entries) >= 4096 || weight > 32*1024*1024 {
 			return errors.New("transient state capacity exceeded")
 		}
-		update.Data = slices.Clone(update.Data)
-		update.ProjectID = strings.Clone(update.ProjectID)
-		update.ConversationID = strings.Clone(update.ConversationID)
-		state.entries[key] = update
+		state.entries[key] = normalized
 		if !exists {
 			state.order = append(state.order, key)
 		}
@@ -92,8 +83,10 @@ func (state *State) Set(update Update, retain bool) error {
 		}
 	}
 	state.bytes = weight
-	return state.hub.Publish(update)
+	state.hub.publishNormalized(normalized, queueSize)
+	return nil
 }
+
 func (state *State) Snapshots(project string) iter.Seq[Update] {
 	return func(yield func(Update) bool) {
 		state.mu.Lock()
@@ -104,7 +97,9 @@ func (state *State) Snapshots(project string) iter.Seq[Update] {
 				state.mu.Lock()
 				update, exists := state.entries[key]
 				if exists && update.Kind == kind && (project == "" || (update.ProjectID != "" && update.ProjectID == project)) {
-					update.Data = slices.Clone(update.Data)
+					if len(update.Data) > 0 {
+						update.Data = slices.Clone(update.Data)
+					}
 				} else {
 					exists = false
 				}
@@ -116,6 +111,7 @@ func (state *State) Snapshots(project string) iter.Seq[Update] {
 		}
 	}
 }
+
 func (state *State) DropProject(project string) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
@@ -123,7 +119,7 @@ func (state *State) DropProject(project string) {
 	for _, key := range state.order {
 		update := state.entries[key]
 		if update.ProjectID == project {
-			state.bytes -= len(update.Data) + len(update.Kind) + len(update.ProjectID) + len(update.ConversationID) + 64
+			state.bytes -= stateEntryWeight(update)
 			delete(state.entries, key)
 		} else {
 			order = append(order, key)
@@ -132,6 +128,7 @@ func (state *State) DropProject(project string) {
 	clear(state.order[len(order):])
 	state.order = order
 }
+
 func (state *State) Close() {
 	state.mu.Lock()
 	defer state.mu.Unlock()

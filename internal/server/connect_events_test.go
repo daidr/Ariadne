@@ -335,3 +335,136 @@ func TestStreamWriteGuardPreservesDeadlineOnErrorAndSlowClose(t *testing.T) {
 		t.Fatalf("failed Send must keep single finite deadline without clearing or extending, got %+v", rw2.deadlines)
 	}
 }
+
+func TestEventServiceStreamEventsIncrementalDrafts(t *testing.T) {
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "drafts.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	hub := realtime.NewHub()
+	defer hub.Close()
+	state := realtime.NewState(hub)
+	defer state.Close()
+	drafts := realtime.NewDrafts(state, realtime.LiveOptions{
+		Now:      func() time.Time { return time.UnixMilli(1_800_000_000_000) },
+		Interval: 10 * time.Millisecond,
+	})
+	defer drafts.Close()
+
+	api, err := New(Options{Repository: repo, Token: "draft-secret", State: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	client := ariadnev1connect.NewEventServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("draft-secret")),
+	)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	stream, err := client.StreamEvents(ctx, connect.NewRequest(&ariadnev1.StreamEventsRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stream.Receive() || stream.Msg().GetReady() == nil {
+		t.Fatalf("expected ready frame, err=%v", stream.Err())
+	}
+
+	handle, err := drafts.Start("prj_1", "thr_1", "msg_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks1 := json.RawMessage(`[{"type":"steps","items":[]}]`)
+	blocks2 := json.RawMessage(`[{"type":"confirm","title":"Go?"}]`)
+
+	// 1. Initial frame is full (append=false).
+	if err := handle.WriteUI("你好", blocks1); err != nil {
+		t.Fatal(err)
+	}
+	if !stream.Receive() {
+		t.Fatalf("expected initial draft frame, err=%v", stream.Err())
+	}
+	d1 := stream.Msg().GetDraft().GetDraft()
+	if d1 == nil || d1.GetAppend() || d1.GetKeepBlocks() || d1.GetText() != "你好" || string(d1.GetBlocksJson()) != string(blocks1) {
+		t.Fatalf("unexpected initial draft: %+v", d1)
+	}
+
+	// 2. Prefix append with unchanged blocks sends only the delta and keep_blocks=true.
+	if err := handle.WriteUI("你好，世界", blocks1); err != nil {
+		t.Fatal(err)
+	}
+	if !stream.Receive() {
+		t.Fatalf("expected incremental draft frame, err=%v", stream.Err())
+	}
+	d2 := stream.Msg().GetDraft().GetDraft()
+	if d2 == nil || !d2.GetAppend() || !d2.GetKeepBlocks() || d2.GetText() != "，世界" || len(d2.GetBlocksJson()) != 0 {
+		t.Fatalf("unexpected incremental draft: %+v", d2)
+	}
+
+	// 3. Prefix append with changed blocks sends delta + new blocks_json with keep_blocks=false.
+	if err := handle.WriteUI("你好，世界！", blocks2); err != nil {
+		t.Fatal(err)
+	}
+	if !stream.Receive() {
+		t.Fatalf("expected blocks-changed draft frame, err=%v", stream.Err())
+	}
+	d3 := stream.Msg().GetDraft().GetDraft()
+	if d3 == nil || !d3.GetAppend() || d3.GetKeepBlocks() || d3.GetText() != "！" || string(d3.GetBlocksJson()) != string(blocks2) {
+		t.Fatalf("unexpected blocks-changed draft: %+v", d3)
+	}
+
+	// 4. Mid-stream reconnecting client receives the full snapshot (append=false).
+	ctx2, cancel2 := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel2()
+	stream2, err := client.StreamEvents(ctx2, connect.NewRequest(&ariadnev1.StreamEventsRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stream2.Receive() || stream2.Msg().GetReady() == nil {
+		t.Fatalf("expected ready on reconnect stream, err=%v", stream2.Err())
+	}
+	if !stream2.Receive() {
+		t.Fatalf("expected full reconnect draft snapshot, err=%v", stream2.Err())
+	}
+	snap := stream2.Msg().GetDraft().GetDraft()
+	if snap == nil || snap.GetAppend() || snap.GetText() != "你好，世界！" || string(snap.GetBlocksJson()) != string(blocks2) {
+		t.Fatalf("unexpected reconnect draft snapshot: %+v", snap)
+	}
+	cancel2()
+	_ = stream2.Close()
+
+	// 5. Non-prefix rewrite falls back to a full frame (append=false).
+	if err := handle.WriteUI("重写后的文本", blocks2); err != nil {
+		t.Fatal(err)
+	}
+	if !stream.Receive() {
+		t.Fatalf("expected full rewrite frame, err=%v", stream.Err())
+	}
+	d4 := stream.Msg().GetDraft().GetDraft()
+	if d4 == nil || d4.GetAppend() || d4.GetText() != "重写后的文本" || string(d4.GetBlocksJson()) != string(blocks2) {
+		t.Fatalf("unexpected rewrite draft frame: %+v", d4)
+	}
+
+	// 6. Posted emits the final incremental delta with posted=true.
+	if err := handle.WriteUI("重写后的文本。", blocks2); err != nil {
+		t.Fatal(err)
+	}
+	handle.Posted()
+	if !stream.Receive() {
+		t.Fatalf("expected posted draft frame, err=%v", stream.Err())
+	}
+	d5 := stream.Msg().GetDraft().GetDraft()
+	if d5 == nil || !d5.GetAppend() || !d5.GetKeepBlocks() || !d5.GetPosted() || d5.GetText() != "。" {
+		t.Fatalf("unexpected posted draft frame: %+v", d5)
+	}
+
+	cancel()
+	_ = stream.Close()
+}
