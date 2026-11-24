@@ -1,5 +1,6 @@
 import { defaultLanguages, type CodeLanguage } from '@dou-ui/editor'
 import { resolveShikiLanguage } from '../highlighting/languages'
+import { shikiWorkerPool } from '../highlighting/shiki-worker-pool'
 
 const extraLanguages: CodeLanguage[] = [
   { value: 'dockerfile', label: 'Dockerfile' },
@@ -19,11 +20,11 @@ export const documentCodeLanguages: CodeLanguage[] = [
 ].toSorted((a, b) => a.label.localeCompare(b.label))
 
 /**
- * Lazily highlight a document code block with Shiki dual themes (`--shiki-light` / `--shiki-dark`).
- * Plain text or unsupported languages return early without loading Shiki or its WASM engine.
+ * Lazily highlight a document code block with Shiki dual themes (`--shiki-light` / `--shiki-dark`)
+ * via the shared Web Worker pool. Plain text or unsupported languages return early without
+ * starting workers or loading Shiki.
  */
 export async function highlightDocumentCode(code: string, lang: string): Promise<string> {
   if (!code || !resolveShikiLanguage(lang)) return ''
-  const { highlightCodeToHtml } = await import('../highlighting/shiki')
-  return highlightCodeToHtml(code, lang)
+  return shikiWorkerPool.highlight(code, lang)
 }

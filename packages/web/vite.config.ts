@@ -5,6 +5,9 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { COLOR_MODE_KEY, THEME_COLORS, themeColorScript } from './src/color-mode'
 
 export default defineConfig({
+  worker: {
+    format: 'es',
+  },
   plugins: [
     vue(),
     {
