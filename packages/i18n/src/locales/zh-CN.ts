@@ -95,7 +95,7 @@ export const zhCN = {
   'plan.noThread': '还没有讨论串在做',
   'plan.showCompleted': '显示已完成 ({count})',
   'plan.hideCompleted': '隐藏已完成 ({count})',
-  'plan.allCompleted': '当前没有进行中的任务，已完成 {count} 项',
+  'plan.allCompleted': '当前没有进行中的规划',
   'plan.group.collapse': '收起分组',
   'plan.group.expand': '展开分组',
   'plan.op.add': '新增「{title}」',

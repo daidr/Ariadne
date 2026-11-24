@@ -3,6 +3,7 @@ import type { PlanNodeView, PlanProposalView, PlanView } from '@ariadne/core'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
+import { t } from '../i18n'
 import { state } from '../store'
 import PlanMain from './PlanMain.vue'
 import PlanPanel from './PlanPanel.vue'
@@ -116,6 +117,42 @@ describe.each([
   ['PlanMain', PlanMain],
   ['PlanPanel', PlanPanel],
 ] as const)('%s all-completed edge cases', (_name, Component) => {
+  test('shows updated empty-state copy with only the top-right completed toggle', async () => {
+    state.plan = makePlan('prj_done', [makeNode('a'), makeNode('b')])
+
+    const wrapper = mount(Component, { global: { stubs: { PlanGraph: MockPlanGraph } } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.find('.mock-plan-graph').exists()).toBe(false)
+    expect(wrapper.text()).toContain(t('plan.allCompleted'))
+
+    const showLabel = t('plan.showCompleted', { count: 2 })
+    const hideLabel = t('plan.hideCompleted', { count: 2 })
+    const toggleButtons = wrapper
+      .findAll('button[aria-pressed]')
+      .filter((btn) => btn.text().includes(showLabel))
+    expect(toggleButtons).toHaveLength(1)
+
+    const allShowButtons = wrapper.findAll('button').filter((btn) => btn.text().includes(showLabel))
+    expect(allShowButtons).toHaveLength(1)
+    expect(wrapper.find('.dou-empty button').exists()).toBe(false)
+
+    await toggleButtons[0]!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.mock-plan-graph').exists()).toBe(true)
+    const activeToggle = wrapper.find('button[aria-pressed="true"]')
+    expect(activeToggle.exists()).toBe(true)
+    expect(activeToggle.text()).toContain(hideLabel)
+
+    await activeToggle.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.mock-plan-graph').exists()).toBe(false)
+    expect(wrapper.find('button[aria-pressed="false"]').text()).toContain(showLabel)
+  })
+
   test('clears selected detail when hiding all completed nodes', async () => {
     state.plan = makePlan('prj_done', [makeNode('a'), makeNode('b')])
     setShowCompleted('prj_done', true)
