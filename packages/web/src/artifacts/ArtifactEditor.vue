@@ -13,14 +13,15 @@ import {
   ChevronUpIcon,
   HistoryIcon,
   MoreHorizontalIcon,
+  PauseIcon,
   PencilIcon,
+  PlayIcon,
   RotateCcwIcon,
   SendIcon,
   UndoIcon,
 } from '@dou-ui/icons'
 import {
   computed,
-  defineAsyncComponent,
   effectScope,
   nextTick,
   onBeforeUnmount,
@@ -29,6 +30,7 @@ import {
   watch,
   type EffectScope,
 } from 'vue'
+import { defineAsyncView } from '../components/async-view'
 import { api, ApiError } from '../api'
 import { t } from '../i18n'
 import { report, state } from '../store'
@@ -37,6 +39,11 @@ import ArtifactHistory from './ArtifactHistory.vue'
 import CommentList from './CommentList.vue'
 import type { DecisionGroupSummary } from './decision-groups'
 import type { DocumentAskSummary } from './document-asks'
+import {
+  clearPendingArtifactFeedback,
+  getPendingArtifactFeedback,
+  setPendingArtifactFeedback,
+} from './feedback-pending'
 import { kindIcon } from './kinds'
 import { useSharedArtifact, type SharedArtifact } from './shared'
 
@@ -45,9 +52,9 @@ const props = defineProps<{ id: string; place: 'side' | 'full' }>()
 
 // Each kind has its own dou-ui package; load only the one in use.
 const bodies = {
-  document: defineAsyncComponent(() => import('./DocumentBody.vue')),
-  whiteboard: defineAsyncComponent(() => import('./WhiteboardBody.vue')),
-  dashboard: defineAsyncComponent(() => import('./DashboardBody.vue')),
+  document: defineAsyncView(() => import('./DocumentBody.vue')),
+  whiteboard: defineAsyncView(() => import('./WhiteboardBody.vue')),
+  dashboard: defineAsyncView(() => import('./DashboardBody.vue')),
 }
 
 const artifact = ref<ArtifactView | null>(null)
@@ -128,7 +135,12 @@ async function switchVersion(version?: number) {
   }
 }
 
-watch(historyOpen, async (open, _, onCleanup) => {
+const historyRetryTick = ref(0)
+function retryHistory() {
+  historyRetryTick.value++
+}
+
+watch([historyOpen, historyRetryTick], async ([open], _, onCleanup) => {
   if (!open) return
   const controller = new AbortController()
   onCleanup(() => controller.abort())
@@ -145,13 +157,19 @@ watch(historyOpen, async (open, _, onCleanup) => {
 
 /**
  * What the user does here reaches the agent either when they click send/submit or after a
- * 15-second idle pause (paused while active decision groups await explicit submission).
+ * 15-second idle countdown (paused while active decision groups await explicit submission or
+ * when the user pauses / switches away).
  */
 const QUIET_MS = 15_000
 const WITHDRAW_WINDOW_MS = 60_000
-let quiet: ReturnType<typeof setTimeout> | null = null
-let sentRoundTimer: ReturnType<typeof setTimeout> | null = null
+let quietTimer: ReturnType<typeof setInterval> | null = null
+let quietDeadline = 0
+let sentRoundTimer: ReturnType<typeof setInterval> | null = null
+let sentRoundDeadline = 0
 const waiting = ref(false)
+const quietPaused = ref(false)
+const quietSeconds = ref(0)
+const withdrawSeconds = ref(0)
 const pendingChanges = ref(0)
 const pendingNotes = ref(0)
 /** A round is being sent with pictures, which takes a moment. */
@@ -186,10 +204,33 @@ const hasStructuredRound = computed(
   () => hasActiveDecisionGroups.value || hasActiveDocumentAsks.value,
 )
 
+function stopQuietTimer() {
+  if (quietTimer) clearInterval(quietTimer)
+  quietTimer = null
+  quietDeadline = 0
+  quietSeconds.value = 0
+}
+
 function clearSentRound() {
-  if (sentRoundTimer) clearTimeout(sentRoundTimer)
+  if (sentRoundTimer) clearInterval(sentRoundTimer)
   sentRoundTimer = null
+  sentRoundDeadline = 0
+  withdrawSeconds.value = 0
   sentRound.value = null
+}
+
+function startSentRoundCountdown() {
+  if (sentRoundTimer) clearInterval(sentRoundTimer)
+  sentRoundDeadline = Date.now() + WITHDRAW_WINDOW_MS
+  withdrawSeconds.value = Math.ceil(WITHDRAW_WINDOW_MS / 1000)
+  sentRoundTimer = setInterval(() => {
+    const leftMs = sentRoundDeadline - Date.now()
+    if (leftMs <= 0) {
+      clearSentRound()
+      return
+    }
+    withdrawSeconds.value = Math.ceil(leftMs / 1000)
+  }, 250)
 }
 
 watch(
@@ -238,9 +279,34 @@ const shared = shallowRef<SharedArtifact | null>(null)
 let room: { id: string; scope: EffectScope } | null = null
 const roomGeneration = shallowRef(0)
 
+function syncPendingStore(id = room?.id) {
+  if (!id) return
+  if (waiting.value && pendingChanges.value > 0) {
+    setPendingArtifactFeedback(id, {
+      pendingChanges: pendingChanges.value,
+      pendingNotes: pendingNotes.value,
+      paused: quietPaused.value,
+    })
+  } else {
+    clearPendingArtifactFeedback(id)
+  }
+}
+
 function join(id: string) {
   const scope = effectScope()
   room = { id, scope }
+  const saved = getPendingArtifactFeedback(id)
+  if (saved && saved.pendingChanges > 0) {
+    waiting.value = true
+    pendingChanges.value = saved.pendingChanges
+    pendingNotes.value = saved.pendingNotes
+    quietPaused.value = saved.paused
+  } else {
+    waiting.value = false
+    pendingChanges.value = 0
+    pendingNotes.value = 0
+    quietPaused.value = false
+  }
   const onLockedEdit =
     artifact.value?.kind === 'document'
       ? () => {
@@ -268,10 +334,36 @@ watch(
 )
 
 function scheduleQuietSend() {
-  if (quiet) clearTimeout(quiet)
-  quiet = null
-  if (hasStructuredRound.value) return
-  quiet = setTimeout(() => void sendFeedback(), QUIET_MS)
+  stopQuietTimer()
+  if (hasStructuredRound.value || quietPaused.value || !waiting.value) return
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+  quietDeadline = Date.now() + QUIET_MS
+  quietSeconds.value = Math.ceil(QUIET_MS / 1000)
+  quietTimer = setInterval(() => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      stopQuietTimer()
+      return
+    }
+    const leftMs = quietDeadline - Date.now()
+    if (leftMs <= 0) {
+      stopQuietTimer()
+      void sendFeedback()
+      return
+    }
+    quietSeconds.value = Math.ceil(leftMs / 1000)
+  }, 250)
+}
+
+function toggleQuietPause() {
+  if (quietPaused.value) {
+    quietPaused.value = false
+    syncPendingStore()
+    scheduleQuietSend()
+  } else {
+    quietPaused.value = true
+    stopQuietTimer()
+    syncPendingStore()
+  }
 }
 
 function touched(kind: 'edit' | 'comment' = 'edit') {
@@ -280,36 +372,23 @@ function touched(kind: 'edit' | 'comment' = 'edit') {
   waiting.value = true
   pendingChanges.value++
   if (kind === 'comment') pendingNotes.value++
+  syncPendingStore()
   scheduleQuietSend()
 }
 
 function onDecisionSummary(summary: DecisionGroupSummary) {
   decisionSummary.value = summary
-  if (summary.hasActiveDecisionGroups && quiet) {
-    clearTimeout(quiet)
-    quiet = null
-  }
+  if (summary.hasActiveDecisionGroups) stopQuietTimer()
 }
 
 function onAskSummary(summary: DocumentAskSummary) {
   askSummary.value = summary
-  if (summary.hasActiveAsks && quiet) {
-    clearTimeout(quiet)
-    quiet = null
-  }
+  if (summary.hasActiveAsks) stopQuietTimer()
 }
 
-async function sendFeedback(leaving = false, explicit = false) {
-  if (quiet) clearTimeout(quiet)
-  quiet = null
+async function sendFeedback(explicit = false) {
+  stopQuietTimer()
   if (!room) return
-  if (leaving) {
-    if (!waiting.value || hasStructuredRound.value) return
-    waiting.value = false
-    pendingChanges.value = 0
-    pendingNotes.value = 0
-    return api.sendFeedback(room.id, [], true)
-  }
   if (sending.value) return
   if (!explicit && (!waiting.value || hasStructuredRound.value)) return
 
@@ -336,8 +415,10 @@ async function sendFeedback(leaving = false, explicit = false) {
     const boardAtSend = body.value?.currentSnapshot?.()
     const sentMutationSeq = localMutationSeq
     waiting.value = false
+    quietPaused.value = false
     pendingChanges.value = 0
     pendingNotes.value = 0
+    clearPendingArtifactFeedback(id)
     const pictures = (await body.value?.markedPictures?.()) ?? []
     const projectId = artifact.value?.projectId ?? ''
     const images = await Promise.all(
@@ -363,25 +444,24 @@ async function sendFeedback(leaving = false, explicit = false) {
           hadNotes,
           previousHeard,
         }
-        sentRoundTimer = setTimeout(clearSentRound, WITHDRAW_WINDOW_MS)
+        startSentRoundCountdown()
       }
     } else if (explicit && !editedDuringSend && (initialPending > 0 || applied > 0)) {
       waiting.value = true
+      quietPaused.value = true
       pendingChanges.value = Math.max(initialPending, applied)
       pendingNotes.value = hadNotes
+      syncPendingStore(id)
     }
   } catch (error) {
-    if (explicit) {
-      if (initialPending > 0 || applied > 0) {
-        waiting.value = true
-        pendingChanges.value += Math.max(initialPending, applied)
-        pendingNotes.value += hadNotes
-      }
-      report(error)
-    } else {
-      // The server sends what waits on its own a little later, without the pictures.
-      console.warn('feedback not sent', error)
+    if (initialPending > 0 || applied > 0) {
+      waiting.value = true
+      quietPaused.value = true
+      pendingChanges.value += Math.max(initialPending, applied)
+      pendingNotes.value += hadNotes
+      syncPendingStore(id)
     }
+    report(error)
   } finally {
     sending.value = false
   }
@@ -399,6 +479,7 @@ async function withdrawSentFeedback() {
       waiting.value = true
       pendingChanges.value += target.hadPending
       pendingNotes.value += target.hadNotes
+      syncPendingStore(target.artifactId)
       scheduleQuietSend()
     } else {
       report(t('artifact.feedback.withdrawTooLate'))
@@ -489,10 +570,20 @@ const canSubmitAsk = computed(() => {
 })
 
 function leave() {
+  stopQuietTimer()
   clearSentRound()
   if (!room) return
-  void sendFeedback(true)
+  if (waiting.value && pendingChanges.value > 0) {
+    setPendingArtifactFeedback(room.id, {
+      pendingChanges: pendingChanges.value,
+      pendingNotes: pendingNotes.value,
+      paused: true,
+    })
+  } else {
+    clearPendingArtifactFeedback(room.id)
+  }
   waiting.value = false
+  quietPaused.value = false
   pendingChanges.value = 0
   pendingNotes.value = 0
   room.scope.stop()
@@ -501,24 +592,17 @@ function leave() {
 }
 onBeforeUnmount(leave)
 
-// Going to another tab or window is leaving for a while: what waits goes now.
-function hidden() {
-  if (document.visibilityState === 'hidden') void sendFeedback()
+// Switching away pauses the countdown instead of silently submitting unfinished feedback.
+function onVisibilityChange() {
+  if (document.visibilityState === 'hidden') {
+    stopQuietTimer()
+  } else if (waiting.value && !quietPaused.value && !hasStructuredRound.value) {
+    scheduleQuietSend()
+  }
 }
-document.addEventListener('visibilitychange', hidden)
-// Closing the page cancels what is still being sent: what waits goes at once, without
-// pictures, in a request that outlives the page.
-function closing() {
-  if (!room || hasStructuredRound.value || (!waiting.value && !sending.value)) return
-  waiting.value = false
-  pendingChanges.value = 0
-  pendingNotes.value = 0
-  void api.sendFeedback(room.id, [], true)
-}
-window.addEventListener('pagehide', closing)
+document.addEventListener('visibilitychange', onVisibilityChange)
 onBeforeUnmount(() => {
-  document.removeEventListener('visibilitychange', hidden)
-  window.removeEventListener('pagehide', closing)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 
 /** Comments go to the newest version of a document or whiteboard; a dashboard has none. */
@@ -536,6 +620,15 @@ const commentProps = computed(() =>
 function openComment(id: string) {
   body.value?.revealComment?.(id)
   activeComment.value = id
+}
+
+async function refreshComments(id: string) {
+  try {
+    const detail = await api.getArtifact(id, { versions: false })
+    if (props.id === id) comments.value = detail.comments
+  } catch {
+    // Keep existing local comment list if sync fails.
+  }
 }
 
 /** The longest quote the server keeps (MAX_COMMENT_QUOTE). */
@@ -652,7 +745,7 @@ async function comment(
     comments.value = result.comments
   } catch (error) {
     report(error)
-    void load()
+    void refreshComments(props.id)
   }
 }
 
@@ -752,6 +845,7 @@ async function rename() {
       <CommentList
         v-if="artifact?.kind === 'document' && !viewingOld"
         :comments="comments"
+        :kind="artifact.kind"
         :anchored="() => body?.anchored?.() ?? new Set()"
         @open="openComment"
         @action="comment"
@@ -781,6 +875,7 @@ async function rename() {
             :versions="versions"
             :selected="artifact.version"
             :status="historyStatus"
+            @retry="retryHistory"
             @select="
               (version) => {
                 close()
@@ -874,7 +969,11 @@ async function rename() {
         </DouText>
         <DouButton size="sm" variant="ghost" :loading="withdrawing" @click="withdrawSentFeedback">
           <template #leading><UndoIcon /></template>
-          {{ t('artifact.feedback.withdraw') }}
+          {{
+            withdrawSeconds > 0
+              ? t('artifact.feedback.withdrawCountdown', { seconds: withdrawSeconds })
+              : t('artifact.feedback.withdraw')
+          }}
         </DouButton>
       </template>
       <template v-else-if="feedbackBarState === 'decision'">
@@ -887,7 +986,7 @@ async function rename() {
           tone="primary"
           :loading="sending"
           :disabled="!canSubmitDecision"
-          @click="sendFeedback(false, true)"
+          @click="sendFeedback(true)"
         >
           <template #leading><SendIcon /></template>
           {{ t('artifact.feedback.submitRound') }}
@@ -903,7 +1002,7 @@ async function rename() {
           tone="primary"
           :loading="sending"
           :disabled="!canSubmitAsk"
-          @click="sendFeedback(false, true)"
+          @click="sendFeedback(true)"
         >
           <template #leading><SendIcon /></template>
           {{ t('artifact.feedback.submitAnswers') }}
@@ -912,21 +1011,37 @@ async function rename() {
       <template v-else-if="feedbackBarState === 'pending'">
         <DouText size="sm" variant="secondary" truncate class="artifact-feedback-text">
           {{
-            pendingChanges === 1
-              ? t('artifact.feedback.pendingChanges')
-              : t('artifact.feedback.pendingCount', { count: pendingChanges })
+            quietPaused
+              ? t('artifact.feedback.pendingPaused', { count: pendingChanges })
+              : quietSeconds > 0
+                ? t('artifact.feedback.pendingCountdown', {
+                    count: pendingChanges,
+                    seconds: quietSeconds,
+                  })
+                : pendingChanges === 1
+                  ? t('artifact.feedback.pendingChanges')
+                  : t('artifact.feedback.pendingCount', { count: pendingChanges })
           }}
         </DouText>
-        <DouButton
-          size="sm"
-          variant="soft"
-          tone="primary"
-          :loading="sending"
-          @click="sendFeedback(false, true)"
-        >
-          <template #leading><SendIcon /></template>
-          {{ t('artifact.feedback.sendNow') }}
-        </DouButton>
+        <div class="artifact-feedback-actions">
+          <DouButton size="sm" variant="ghost" :disabled="sending" @click="toggleQuietPause">
+            <template #leading>
+              <PlayIcon v-if="quietPaused" />
+              <PauseIcon v-else />
+            </template>
+            {{ t(quietPaused ? 'artifact.feedback.resume' : 'artifact.feedback.pause') }}
+          </DouButton>
+          <DouButton
+            size="sm"
+            variant="soft"
+            tone="primary"
+            :loading="sending"
+            @click="sendFeedback(true)"
+          >
+            <template #leading><SendIcon /></template>
+            {{ t('artifact.feedback.sendNow') }}
+          </DouButton>
+        </div>
       </template>
     </div>
   </div>
@@ -934,6 +1049,7 @@ async function rename() {
 
 <style scoped>
 .artifact {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -998,14 +1114,28 @@ async function rename() {
 }
 
 .artifact-feedback-bar {
+  position: absolute;
+  left: 50%;
+  bottom: max(12px, var(--ariadne-safe-bottom));
+  transform: translateX(-50%);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  max-width: calc(100% - 24px);
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--dou-color-border);
+  border-radius: var(--dou-radius-container);
+  background: var(--dou-color-bg-surface);
+  box-shadow: var(--dou-shadow-md, 0 4px 12px rgb(0 0 0 / 0.08));
+}
+
+.artifact-feedback-actions {
   display: flex;
   flex: none;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 12px 6px 16px;
-  border-top: 1px solid var(--dou-color-border);
-  background: var(--dou-color-surface-subtle, var(--dou-color-surface, var(--dou-color-bg)));
+  gap: 4px;
 }
 
 .artifact-feedback-text {

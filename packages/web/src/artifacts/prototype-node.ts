@@ -28,7 +28,7 @@ export const prototypeNode = defineNodeType<PrototypeNodeData>({
     const bodyH = Math.max(0, draw.height - headH)
     const borderColor = draw.color('var(--dou-color-border)')
     const mutedColor = draw.color('var(--dou-color-text-tertiary)')
-    const bgSubtle = draw.color('var(--dou-color-bg-subtle)')
+    const bgSubtle = draw.color('var(--dou-color-bg-muted)')
 
     return (
       drawCard(draw, []) +

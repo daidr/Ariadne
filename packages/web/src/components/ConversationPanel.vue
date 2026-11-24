@@ -1693,7 +1693,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 
 .model-option-effort {
   flex: none;
-  font-size: var(--dou-font-size-xs);
+  font-size: 11px;
   color: var(--dou-color-primary);
   font-weight: var(--dou-font-weight-medium);
 }

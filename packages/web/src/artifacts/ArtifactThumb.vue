@@ -27,9 +27,13 @@ watch(
   async (target) => {
     const ask = ++asked
     if (!target) return void (picture.value = null)
-    const url = await boardThumbnail(...target)
-    // A newer change may have asked for another picture meanwhile.
-    if (ask === asked) picture.value = url
+    try {
+      const url = await boardThumbnail(...target)
+      // A newer change may have asked for another picture meanwhile.
+      if (ask === asked) picture.value = url
+    } catch {
+      if (ask === asked) picture.value = null
+    }
   },
   { immediate: true },
 )

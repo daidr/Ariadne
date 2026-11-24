@@ -26,6 +26,10 @@ import {
   GitBranchIcon,
   GitMergeIcon,
   PanelLeftIcon,
+  PauseIcon,
+  PlayIcon,
+  RotateCwIcon,
+  SendIcon,
 } from '@dou-ui/icons'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
@@ -54,7 +58,16 @@ import {
   scopedFileKey,
   type FileNode,
 } from './files'
-import { draftsChanged, flushComments } from './comment-sender'
+import {
+  deferComments,
+  draftsChanged,
+  flushComments,
+  isPaused,
+  isSending,
+  pauseComments,
+  remainingSeconds,
+  resumeComments,
+} from './comment-sender'
 import { draftsOf } from './line-comments'
 import type { ReviewRoundView, SentLineComment } from '@ariadne/core'
 import ReviewMark from '../review/ReviewMark.vue'
@@ -740,10 +753,12 @@ const commentCountByPath = computed(() => {
   return counts
 })
 const commentCount = (path: string) => commentCountByPath.value.get(path) ?? 0
-// Comments go to the thread on their own once the user stops writing them; leaving sends
-// what waits at once.
+const commentsPaused = computed(() => isPaused(props.threadId))
+const commentsSending = computed(() => isSending(props.threadId))
+const commentsRemaining = computed(() => remainingSeconds(props.threadId))
+// Comments send after a visible countdown; leaving keeps drafts paused instead of silently submitting.
 watch(drafts, () => draftsChanged(props.threadId), { deep: true })
-onBeforeUnmount(() => void flushComments(props.threadId))
+onBeforeUnmount(() => deferComments(props.threadId))
 
 const methodOptions = computed(() => [
   { value: 'squash', label: t('changes.method.squash') },
@@ -884,7 +899,15 @@ const methodOptions = computed(() => [
       <ViewActions :view="view" :place="place" />
     </div>
 
-    <DouAlert v-if="problem" tone="danger" class="changes-alert">{{ problem }}</DouAlert>
+    <DouAlert v-if="problem" tone="danger" class="changes-alert">
+      {{ problem }}
+      <template #action>
+        <DouButton size="sm" variant="outline" @click="showLatest">
+          <template #leading><RotateCwIcon /></template>
+          {{ t('conversation.retry') }}
+        </DouButton>
+      </template>
+    </DouAlert>
     <DouAlert
       v-if="
         (!isMultiRepo && singleRepo?.uncommitted.length) ||
@@ -1034,15 +1057,78 @@ const methodOptions = computed(() => [
         </div>
       </template>
     </DouSplitter>
+    <div v-if="drafts.length > 0" class="changes-comments-bar" role="status" aria-live="polite">
+      <DouText size="sm" variant="secondary" truncate class="changes-comments-text">
+        {{
+          commentsPaused || commentsRemaining === null
+            ? t('changes.commentsPaused', { count: drafts.length })
+            : t('changes.commentsPending', { count: drafts.length, seconds: commentsRemaining })
+        }}
+      </DouText>
+      <div class="changes-comments-actions">
+        <DouButton
+          size="sm"
+          variant="ghost"
+          :disabled="commentsSending"
+          @click="commentsPaused ? resumeComments(threadId) : pauseComments(threadId)"
+        >
+          <template #leading>
+            <PlayIcon v-if="commentsPaused" />
+            <PauseIcon v-else />
+          </template>
+          {{ t(commentsPaused ? 'changes.commentsResume' : 'changes.commentsPause') }}
+        </DouButton>
+        <DouButton
+          size="sm"
+          variant="soft"
+          tone="primary"
+          :loading="commentsSending"
+          @click="void flushComments(threadId)"
+        >
+          <template #leading><SendIcon /></template>
+          {{ t('changes.commentsSendNow') }}
+        </DouButton>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .changes {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+}
+
+.changes-comments-bar {
+  position: absolute;
+  left: 50%;
+  bottom: max(12px, var(--ariadne-safe-bottom));
+  transform: translateX(-50%);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--dou-color-border);
+  border-radius: var(--dou-radius-container);
+  background: var(--dou-color-bg-surface);
+  box-shadow: var(--dou-shadow-md, 0 4px 12px rgb(0 0 0 / 0.08));
+}
+
+.changes-comments-text {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.changes-comments-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
 }
 
 .changes-header {
@@ -1178,7 +1264,7 @@ const methodOptions = computed(() => [
   justify-content: space-between;
   gap: 6px 12px;
   padding: 10px 12px;
-  background-color: var(--dou-color-bg-subtle);
+  background-color: var(--dou-color-bg-muted);
   border-bottom: 1px solid var(--dou-color-border);
 }
 

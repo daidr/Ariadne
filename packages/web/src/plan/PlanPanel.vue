@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { EyeIcon, EyeOffIcon } from '@dou-ui/icons'
 import { DouButton, DouEmpty } from 'dou-ui'
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { defineAsyncView } from '../components/async-view'
 import { t } from '../i18n'
 import { state } from '../store'
 import { partitionPlanNodes } from './layout'
@@ -9,7 +10,7 @@ import PlanChangeBar from './PlanChangeBar.vue'
 import PlanNodeDetail from './PlanNodeDetail.vue'
 import { activePreview, showingCompleted, toggleShowCompleted } from './ui'
 
-const PlanGraph = defineAsyncComponent(() => import('./PlanGraph.vue'))
+const PlanGraph = defineAsyncView(() => import('./PlanGraph.vue'))
 
 const selected = ref<string | null>(null)
 const preview = computed(() => activePreview(state.plan))
@@ -105,8 +106,11 @@ const node = computed(() =>
 }
 
 .plan-panel > .plan-panel-detail {
+  flex: none;
+  max-height: 45%;
+  overflow-y: auto;
   margin: 0;
-  padding: 8px 8px 8px 16px;
+  padding: 8px 8px max(8px, var(--ariadne-safe-bottom)) 16px;
   border-top: 1px solid var(--dou-color-border-subtle);
 }
 

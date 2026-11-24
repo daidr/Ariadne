@@ -24,19 +24,11 @@ const open = ref(false)
 
 <template>
   <DouPopover v-model:open="open" trigger="click" placement="top-start" :width="560">
-    <DouText
-      variant="secondary"
-      size="sm"
-      class="live-trigger"
-      role="button"
-      tabindex="0"
-      :aria-expanded="open"
-      @keydown.enter.prevent="open = !open"
-    >
+    <button type="button" class="live-trigger" :aria-expanded="open">
       <DouStatusDot tone="primary" ripple />
       <DouShimmer class="live-text">{{ t('command.running', { command: shown }) }}</DouShimmer>
       <span class="live-time">{{ elapsed }}</span>
-    </DouText>
+    </button>
     <template #content>
       <DouText size="sm" class="live-command" :title="command.command">
         {{ command.cwd === '.' ? '' : `${command.cwd} ` }}$ {{ command.command }}
@@ -52,8 +44,22 @@ const open = ref(false)
   display: flex;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
   min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dou-radius-control);
+  background: transparent;
+  color: var(--dou-color-text-secondary);
+  font: inherit;
+  font-size: var(--dou-font-size-sm);
+  text-align: start;
   cursor: pointer;
+}
+
+.live-trigger:focus-visible {
+  outline: 2px solid var(--dou-color-focus);
+  outline-offset: 2px;
 }
 
 .live-text {

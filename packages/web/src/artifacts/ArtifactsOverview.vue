@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import type { ArtifactKind, ArtifactSummary } from '@ariadne/core'
-import { DouButton, DouDropdown, DouEmpty, DouInput, DouSegmentedControl, DouText } from 'dou-ui'
+import {
+  DouButton,
+  DouDropdown,
+  DouEmpty,
+  DouInput,
+  DouSegmentedControl,
+  DouSpinner,
+  DouText,
+} from 'dou-ui'
 import { ChevronLeftIcon, PlusIcon, SearchIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
@@ -82,7 +90,10 @@ const shown = computed(() => {
         <template #prefix><SearchIcon /></template>
       </DouInput>
     </div>
-    <div v-if="shown.length" class="overview-grid">
+    <div v-if="state.currentId && !state.artifactsLoaded" class="overview-loading" role="status">
+      <DouSpinner />
+    </div>
+    <div v-else-if="shown.length" class="overview-grid">
       <ArtifactCard
         v-for="artifact in shown"
         :key="artifact.id"
@@ -143,5 +154,12 @@ const shown = computed(() => {
 
 .overview-empty {
   padding: 48px 16px;
+}
+
+.overview-loading {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  min-height: 160px;
 }
 </style>

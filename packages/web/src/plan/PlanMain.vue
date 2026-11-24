@@ -177,6 +177,20 @@ const time = (at: number) =>
   border-left: 1px solid var(--dou-color-border-subtle);
 }
 
+@media (max-width: 760px) {
+  .plan-main-body {
+    flex-direction: column;
+  }
+
+  .plan-main-side {
+    box-sizing: border-box;
+    width: 100%;
+    max-height: 45%;
+    border-left: 0;
+    border-top: 1px solid var(--dou-color-border-subtle);
+  }
+}
+
 .plan-main-revision {
   display: flex;
   align-items: center;

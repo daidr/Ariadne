@@ -3,7 +3,8 @@ import type { SentLineComment } from '@ariadne/core'
 import type { ChangedFile, FileVersions } from '@ariadne/plugin-sdk'
 import { DouCodeDiff } from '@dou-ui/code'
 import '@dou-ui/code/style.css'
-import { DouAlert, DouEmpty, DouSpinner, DouText } from 'dou-ui'
+import { RotateCwIcon } from '@dou-ui/icons'
+import { DouAlert, DouButton, DouEmpty, DouSpinner, DouText } from 'dou-ui'
 import { computed, shallowRef, watch } from 'vue'
 import { ApiError } from '../api'
 import { t, tm } from '../i18n'
@@ -28,10 +29,18 @@ const props = defineProps<{
 const mode = defineModel<'split' | 'inline' | 'auto'>('mode', { required: true })
 const versions = shallowRef<FileVersions | null>(null)
 const problem = shallowRef<string | null>(null)
+const retryTick = shallowRef(0)
+let bypassCache = false
+function retry() {
+  bypassCache = true
+  retryTick.value++
+}
 watch(
-  [() => props.loadVersions, () => props.file.path, () => props.file.previousPath],
+  [() => props.loadVersions, () => props.file.path, () => props.file.previousPath, retryTick],
   async ([load, path, previousPath], _before, cleanup) => {
-    const cached = load.peek?.(path, previousPath ?? null) ?? null
+    const skipCache = bypassCache
+    bypassCache = false
+    const cached = skipCache ? null : (load.peek?.(path, previousPath ?? null) ?? null)
     if (cached) {
       versions.value = cached
       problem.value = null
@@ -87,7 +96,15 @@ const { language } = useCodeLanguage(() => props.file.path)
         {{ t('changes.renamed', { path: file.previousPath }) }}
       </DouText>
     </header>
-    <DouAlert v-if="problem" tone="danger" class="file-diff-problem">{{ problem }}</DouAlert>
+    <DouAlert v-if="problem" tone="danger" class="file-diff-problem">
+      {{ problem }}
+      <template #action>
+        <DouButton size="sm" variant="outline" @click="retry">
+          <template #leading><RotateCwIcon /></template>
+          {{ t('conversation.retry') }}
+        </DouButton>
+      </template>
+    </DouAlert>
     <div v-else-if="!versions" class="file-diff-loading"><DouSpinner size="sm" /></div>
     <DouEmpty
       v-else-if="versions.skipped"

@@ -331,7 +331,7 @@ const nameOf = (plugin: PluginRecord) =>
   flex-direction: column;
   margin-top: 4px;
   border: 1px solid var(--dou-color-border-subtle);
-  border-radius: var(--dou-radius-md);
+  border-radius: var(--dou-radius-container);
   overflow: hidden;
 }
 

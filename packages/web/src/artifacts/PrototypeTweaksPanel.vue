@@ -210,8 +210,9 @@ function formatRangeValue(spec: PrototypeTweakSpec, val: PrototypeTweakValue | u
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-width: 248px;
-  max-width: 288px;
+  width: min(288px, calc(100vw - 32px));
+  min-width: 0;
+  max-width: 100%;
 }
 
 .tweaks-header {

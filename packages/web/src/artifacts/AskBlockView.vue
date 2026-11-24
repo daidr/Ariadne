@@ -217,8 +217,8 @@ const hasAnswer = computed(
   padding: 12px 14px;
   margin: 4px 0;
   border: 1px solid var(--dou-color-border);
-  border-radius: var(--dou-radius-md, 10px);
-  background: var(--dou-color-surface-subtle, var(--dou-color-surface));
+  border-radius: var(--dou-radius-container);
+  background: var(--dou-color-bg-muted);
   transition:
     border-color 0.15s ease,
     background-color 0.15s ease;
@@ -316,8 +316,8 @@ const hasAnswer = computed(
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--dou-color-border);
-  border-radius: var(--dou-radius-sm, 8px);
-  background: var(--dou-color-surface, var(--dou-color-bg));
+  border-radius: var(--dou-radius-control);
+  background: var(--dou-color-bg-surface);
   color: inherit;
   font: inherit;
   text-align: left;
@@ -333,11 +333,7 @@ const hasAnswer = computed(
 
 .doc-ask-option.is-picked {
   border-color: var(--dou-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--dou-color-primary) 7%,
-    var(--dou-color-surface, var(--dou-color-bg))
-  );
+  background: color-mix(in srgb, var(--dou-color-primary) 7%, var(--dou-color-bg-surface));
 }
 
 .doc-ask-option:disabled {
