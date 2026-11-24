@@ -43,6 +43,15 @@ message BranchChanges {
   repeated string uncommitted = 8;
 }
 
+message RepoChanges {
+  optional string source_id = 1;
+  optional string source_name = 2;
+  optional string repo_path = 3;
+  bool embedded = 4;
+  bool mergeable = 5;
+  BranchChanges changes = 6;
+}
+
 message FileVersions {
   optional string before = 1;
   optional string after = 2;
@@ -88,6 +97,7 @@ message GetThreadChangesResponse {
   optional BranchChanges changes = 1;
   bool mergeable = 2;
   bool unchanged = 3;
+  repeated RepoChanges repos = 4;
 }
 
 message GetChangedFileRequest {
@@ -96,6 +106,8 @@ message GetChangedFileRequest {
   string head = 3;
   string path = 4;
   optional string previous_path = 5;
+  optional string source_id = 6;
+  optional string repo_path = 7;
 }
 
 message GetChangedFileResponse {
@@ -112,6 +124,8 @@ message GetChangedFilesRequest {
   string from = 2;
   string head = 3;
   repeated ChangedFileRef files = 4;
+  optional string source_id = 5;
+  optional string repo_path = 6;
 }
 
 message GetChangedFilesResponse {

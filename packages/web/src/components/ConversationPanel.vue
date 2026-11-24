@@ -244,9 +244,17 @@ watch(
     void api
       .getChanges(threadId, undefined, controller.signal)
       .then((result) => {
-        if (controller.signal.aborted || !result.changes) return
-        if (result.changes.uncommitted.length > 0 && result.changes.files.length === 0) return
-        const totals = result.changes.files.reduce(
+        if (controller.signal.aborted) return
+        const repoList =
+          result.repos && result.repos.length > 0
+            ? result.repos.map((repo) => repo.changes)
+            : result.changes
+              ? [result.changes]
+              : []
+        if (!repoList.length) return
+        const allFiles = repoList.flatMap((entry) => entry.files)
+        if (allFiles.length === 0 && repoList.some((entry) => entry.uncommitted.length > 0)) return
+        const totals = allFiles.reduce(
           (acc, file) => ({
             files: acc.files + 1,
             added: acc.added + (file.added ?? 0),

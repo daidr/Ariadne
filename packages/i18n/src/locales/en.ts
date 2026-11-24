@@ -577,6 +577,11 @@ export const en: Record<MessageKey, string> = {
   'changes.skipMerge': 'Archive without merging',
   'changes.open': 'Changes',
   'changes.files': '{count} files',
+  'changes.repos': '{count} repositories',
+  'changes.primaryRepo': 'Main repository',
+  'changes.embeddedRepo': 'Embedded',
+  'changes.mergePrimaryOnly':
+    'Merges only the main repository into {base}; other repositories stay separate',
   'changes.collapseFiles': 'Collapse file list',
   'changes.expandFiles': 'Expand file list',
   'changes.resizeFiles': 'Resize file list',

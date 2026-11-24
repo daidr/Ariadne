@@ -16,10 +16,12 @@ export function mergeOffered(thread: ThreadView | null | undefined): boolean {
   return !!workspace?.branch && !!workspace.base && !gone(workspace) && !thread?.pullRequest
 }
 
-/** Whether the thread still has an openable branch (live worktree or parked while idle). */
+/** Whether the thread still has openable branch or multi-repo workspace changes. */
 export function hasOpenBranch(thread: ThreadView | null | undefined): boolean {
   const workspace = thread?.workspace
-  return !!workspace?.branch && !!workspace.base && !gone(workspace)
+  if (workspace && gone(workspace)) return false
+  if (!!workspace?.branch && !!workspace.base) return true
+  return !!thread?.changes && thread.changes.files > 0
 }
 
 /**

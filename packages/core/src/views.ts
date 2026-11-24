@@ -11,6 +11,7 @@ import type {
   LineComment,
   MessageMention,
   TurnFile,
+  TurnRepoChanges,
   ChangeTotals,
   ArtifactKind,
   ArtifactCommentAnchor,
@@ -429,6 +430,8 @@ export type NoticeView = {
       total: { files: number; added: number; removed: number }
       /** When the turn started; missing on older notices. */
       startedAt?: number
+      /** Per-repository breakdown when a turn touches embedded or multiple repositories. */
+      repos?: TurnRepoChanges[]
     }
 )
 

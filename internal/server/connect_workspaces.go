@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path"
 	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +23,17 @@ import (
 
 var commitID = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
 var threadDirectoryID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+func validRepoPath(value string) bool {
+	if value == "" {
+		return true
+	}
+	if strings.ContainsRune(value, 0) || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") {
+		return false
+	}
+	cleaned := path.Clean(value)
+	return cleaned != "." && cleaned != ".." && !strings.HasPrefix(cleaned, "../")
+}
 
 type workspaceServiceHandler struct {
 	api *API
@@ -58,6 +71,7 @@ func (h *workspaceServiceHandler) GetThreadChanges(
 	}
 	return connect.NewResponse(&ariadnev1.GetThreadChangesResponse{
 		Changes:   toProtoBranchChanges(value.Changes),
+		Repos:     toProtoRepoChangesList(value.Repos),
 		Mergeable: value.Mergeable,
 		Unchanged: value.Unchanged,
 	}), nil
@@ -80,6 +94,10 @@ func (h *workspaceServiceHandler) GetChangedFile(
 	if !commitID.MatchString(req.Msg.GetHead()) {
 		return nil, badInput("head")
 	}
+	repoPath := req.Msg.GetRepoPath()
+	if !validRepoPath(repoPath) {
+		return nil, badInput("repoPath")
+	}
 	var previous *string
 	if req.Msg.PreviousPath != nil && *req.Msg.PreviousPath != "" {
 		v := *req.Msg.PreviousPath
@@ -90,6 +108,8 @@ func (h *workspaceServiceHandler) GetChangedFile(
 		Head:         req.Msg.GetHead(),
 		Path:         req.Msg.GetPath(),
 		PreviousPath: previous,
+		SourceID:     req.Msg.GetSourceId(),
+		RepoPath:     repoPath,
 	})
 	if err != nil {
 		return nil, err
@@ -118,6 +138,11 @@ func (h *workspaceServiceHandler) GetChangedFiles(
 	if !commitID.MatchString(head) {
 		return nil, badInput("head")
 	}
+	sourceID := req.Msg.GetSourceId()
+	repoPath := req.Msg.GetRepoPath()
+	if !validRepoPath(repoPath) {
+		return nil, badInput("repoPath")
+	}
 	rawFiles := req.Msg.GetFiles()
 	if len(rawFiles) == 0 || len(rawFiles) > 64 {
 		return nil, badInput("files")
@@ -137,6 +162,8 @@ func (h *workspaceServiceHandler) GetChangedFiles(
 			Head:         head,
 			Path:         item.GetPath(),
 			PreviousPath: previous,
+			SourceID:     sourceID,
+			RepoPath:     repoPath,
 		}
 	}
 	files, err := manager.ThreadFiles(ctx, req.Msg.GetThreadId(), requests)

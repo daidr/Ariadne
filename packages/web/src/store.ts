@@ -19,6 +19,7 @@ import type {
   TodoView,
   ThreadView,
   TurnFile,
+  TurnRepoChanges,
 } from '@ariadne/core'
 import { toast } from 'dou-ui'
 import { computed, reactive, ref, toRaw, type Ref } from 'vue'
@@ -89,6 +90,7 @@ export interface TurnChangesRef {
   from: string
   to: string
   files: TurnFile[]
+  repos?: TurnRepoChanges[]
   total: { files: number; added: number; removed: number }
 }
 

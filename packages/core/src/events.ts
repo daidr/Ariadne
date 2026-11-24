@@ -168,6 +168,18 @@ export interface TurnFile {
   removed: number | null
 }
 
+/** One repository's changes within a turn snapshot. */
+export interface TurnRepoChanges {
+  sourceId?: string
+  sourceName?: string
+  repoPath?: string
+  branch?: string
+  from: string
+  to: string
+  files: TurnFile[]
+  total: ChangeTotals
+}
+
 /**
  * A block of a model's reasoning as its provider returned it; `signature` (or the opaque
  * `text` of a `redacted` block) is what the provider checks when it is sent back.

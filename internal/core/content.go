@@ -288,6 +288,9 @@ func noticeEvent(w *projectionWriter, e eventstore.Event, d object) {
 		add(d["reviewerId"], "review", payload)
 	case "turn.changed":
 		payload := pick(d, "turnId", "from", "to", "files", "total")
+		if repos, ok := d["repos"]; ok && repos != nil {
+			payload["repos"] = repos
+		}
 		if started, ok := d["startedAt"]; ok && started != nil && started != float64(0) {
 			payload["startedAt"] = started
 		}

@@ -46,7 +46,12 @@ function awaitWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T
 }
 
 /** A cache belongs to one immutable comparison in one view. */
-export function fileVersionsFor(threadId: string, from: string, head: string): FileVersionLoader {
+export function fileVersionsFor(
+  threadId: string,
+  from: string,
+  head: string,
+  scope?: { sourceId?: string; repoPath?: string },
+): FileVersionLoader {
   const cache = new Map<string, { file: FileVersions; bytes: number; expires: number }>()
   const inFlight = new Map<string, Promise<FileVersions>>()
   let pending: QueuedRequest[] = []
@@ -111,6 +116,8 @@ export function fileVersionsFor(threadId: string, from: string, head: string): F
             head,
             path: item.path,
             previousPath: item.previousPath,
+            ...(scope?.sourceId ? { sourceId: scope.sourceId } : {}),
+            ...(scope?.repoPath ? { repoPath: scope.repoPath } : {}),
           })
           .then(({ file }) => {
             remember(item.key, file)
@@ -130,6 +137,8 @@ export function fileVersionsFor(threadId: string, from: string, head: string): F
           from,
           head,
           files: chunk.map((item) => ({ path: item.path, previousPath: item.previousPath })),
+          ...(scope?.sourceId ? { sourceId: scope.sourceId } : {}),
+          ...(scope?.repoPath ? { repoPath: scope.repoPath } : {}),
         })
         .then(({ files }) => {
           chunk.forEach((item, index) => {

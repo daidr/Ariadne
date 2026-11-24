@@ -33,6 +33,114 @@ func (reader Reader) SecondaryWorkspace(ctx context.Context, thread, source stri
 	return secondaryWorkspace(ctx, reader.DB, thread, source)
 }
 
+// ThreadSecondaryWorkspaces returns the latest state of every secondary source
+// workspace recorded for one thread, sorted by source ID.
+func (reader Reader) ThreadSecondaryWorkspaces(ctx context.Context, projectID, threadID string) ([]WorkspaceView, error) {
+	rows, err := records(ctx, reader.DB, `SELECT type, data FROM events WHERE project_id = ?
+	 AND type IN ('workspace.source.opened', 'workspace.source.removed')
+	 AND json_extract(data, '$.threadId') = ? ORDER BY seq DESC`, projectID, threadID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	result := []WorkspaceView{}
+	for _, row := range rows {
+		value, err := row.json("data", nil)
+		if err != nil {
+			return nil, err
+		}
+		data := asObject(value)
+		sourceID := data.str("sourceId")
+		if sourceID == "" || seen[sourceID] {
+			continue
+		}
+		seen[sourceID] = true
+		result = append(result, WorkspaceView{
+			SourceID: sourceID,
+			Label:    data.str("label"),
+			Branch:   data["branch"],
+			Base:     data["base"],
+			Removed:  row.text("type") == "workspace.source.removed",
+		})
+	}
+	slices.SortFunc(result, func(a, b WorkspaceView) int {
+		if a.SourceID < b.SourceID {
+			return -1
+		}
+		if a.SourceID > b.SourceID {
+			return 1
+		}
+		return 0
+	})
+	return result, nil
+}
+
+type RepoBaseline struct {
+	SourceID   string `json:"sourceId"`
+	RepoPath   string `json:"repoPath"`
+	BaseHead   string `json:"baseHead"`
+	BaseBranch string `json:"baseBranch,omitempty"`
+}
+
+func (reader Reader) RepoBaselines(ctx context.Context, threadID string) ([]RepoBaseline, error) {
+	rows, err := records(ctx, reader.DB, `SELECT source_id, repo_path, base_head, base_branch
+	 FROM thread_repo_baselines WHERE thread_id = ? ORDER BY source_id, repo_path`, threadID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]RepoBaseline, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, RepoBaseline{
+			SourceID:   row.text("source_id"),
+			RepoPath:   row.text("repo_path"),
+			BaseHead:   row.text("base_head"),
+			BaseBranch: row.text("base_branch"),
+		})
+	}
+	return result, nil
+}
+
+// RecordRepoBaselines persists the first observed HEAD for each embedded
+// repository touched by a thread. Existing baselines are never overwritten.
+func (repo *Repository) RecordRepoBaselines(ctx context.Context, threadID string, baselines []RepoBaseline) error {
+	if len(baselines) == 0 {
+		return nil
+	}
+	_, err := repo.mutateThread(ctx, threadID, func(tx *eventstore.Transaction, _ ThreadView) ([]change, error) {
+		rows, err := records(ctx, tx.SQL(), `SELECT source_id, repo_path FROM thread_repo_baselines WHERE thread_id = ?`, threadID)
+		if err != nil {
+			return nil, err
+		}
+		existing := make(map[string]bool, len(rows))
+		for _, row := range rows {
+			existing[row.text("source_id")+"\x00"+row.text("repo_path")] = true
+		}
+		changes := []change{}
+		for _, baseline := range baselines {
+			if baseline.RepoPath == "" || baseline.BaseHead == "" {
+				continue
+			}
+			key := baseline.SourceID + "\x00" + baseline.RepoPath
+			if existing[key] {
+				continue
+			}
+			existing[key] = true
+			data := object{
+				"threadId": threadID,
+				"sourceId": baseline.SourceID,
+				"repoPath": baseline.RepoPath,
+				"baseHead": baseline.BaseHead,
+			}
+			if baseline.BaseBranch != "" {
+				data["baseBranch"] = baseline.BaseBranch
+			}
+			changes = append(changes, change{"workspace.repo.baseline", data})
+		}
+		return changes, nil
+	})
+	return err
+}
+
 // SecondaryWorkspaces batch-loads the latest secondary workspace state for the
 // given thread IDs under a project and source in a single query.
 func (reader Reader) SecondaryWorkspaces(ctx context.Context, projectID, source string, threadIDs []string) (map[string]*WorkspaceView, error) {
@@ -304,6 +412,16 @@ type ChangeTotals struct {
 	Added   int64 `json:"added"`
 	Removed int64 `json:"removed"`
 }
+type TurnRepoChanges struct {
+	SourceID   string       `json:"sourceId,omitempty"`
+	SourceName string       `json:"sourceName,omitempty"`
+	RepoPath   string       `json:"repoPath,omitempty"`
+	Branch     string       `json:"branch,omitempty"`
+	From       string       `json:"from"`
+	To         string       `json:"to"`
+	Files      []TurnFile   `json:"files"`
+	Total      ChangeTotals `json:"total"`
+}
 
 func changeCount(value any) (int64, bool) {
 	switch v := value.(type) {
@@ -358,8 +476,25 @@ func (repo *Repository) SyncBranchChanges(ctx context.Context, id string, totals
 	return err
 }
 
+func sumTurnFiles(files []TurnFile) ChangeTotals {
+	total := ChangeTotals{Files: int64(len(files))}
+	for _, file := range files {
+		if file.Added != nil {
+			total.Added += *file.Added
+		}
+		if file.Removed != nil {
+			total.Removed += *file.Removed
+		}
+	}
+	return total
+}
+
 func (repo *Repository) RecordTurnChanges(ctx context.Context, id, turnID, from, to string, files []TurnFile, branch *ChangeTotals) error {
-	if len(files) == 0 {
+	return repo.RecordTurnRepoChanges(ctx, id, turnID, from, to, files, nil, branch)
+}
+
+func (repo *Repository) RecordTurnRepoChanges(ctx context.Context, id, turnID, from, to string, files []TurnFile, repos []TurnRepoChanges, branch *ChangeTotals) error {
+	if len(files) == 0 && len(repos) == 0 {
 		return nil
 	}
 	return repo.withTurn(ctx, id, turnID, func(tx *eventstore.Transaction, projectID string) error {
@@ -367,16 +502,49 @@ func (repo *Repository) RecordTurnChanges(ctx context.Context, id, turnID, from,
 		if err != nil {
 			return err
 		}
-		total := ChangeTotals{Files: int64(len(files))}
-		for _, file := range files {
-			if file.Added != nil {
-				total.Added += *file.Added
+		const maxRecordedFiles = 200
+		var total ChangeTotals
+		var storedFiles []TurnFile
+		var storedRepos []TurnRepoChanges
+		if len(repos) > 0 {
+			remaining := maxRecordedFiles
+			storedRepos = make([]TurnRepoChanges, 0, len(repos))
+			for _, item := range repos {
+				if len(item.Files) == 0 {
+					continue
+				}
+				repoTotal := item.Total
+				if repoTotal.Files == 0 {
+					repoTotal = sumTurnFiles(item.Files)
+				}
+				total.Files += repoTotal.Files
+				total.Added += repoTotal.Added
+				total.Removed += repoTotal.Removed
+				keep := min(len(item.Files), remaining)
+				remaining -= keep
+				entry := item
+				entry.Files = item.Files[:keep]
+				entry.Total = repoTotal
+				storedRepos = append(storedRepos, entry)
 			}
-			if file.Removed != nil {
-				total.Removed += *file.Removed
+			if len(storedRepos) == 0 {
+				return nil
 			}
+			if len(storedRepos) == 1 {
+				from = storedRepos[0].From
+				to = storedRepos[0].To
+				storedFiles = storedRepos[0].Files
+			} else {
+				storedFiles = []TurnFile{}
+			}
+		} else {
+			total = sumTurnFiles(files)
+			storedFiles = files[:min(len(files), maxRecordedFiles)]
 		}
-		data := object{"conversationId": id, "turnId": turnID, "from": from, "to": to, "files": files[:min(len(files), 200)], "total": total}
+		data := object{"conversationId": id, "turnId": turnID, "from": from, "to": to, "files": storedFiles, "total": total}
+		if len(storedRepos) > 0 {
+			data["repos"] = storedRepos
+		}
 		if current.Turn != nil && current.Turn.StartedAt != 0 {
 			data["startedAt"] = current.Turn.StartedAt
 		}

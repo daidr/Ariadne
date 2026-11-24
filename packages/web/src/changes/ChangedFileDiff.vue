@@ -14,6 +14,7 @@ import { useLineComments } from './line-comments'
 const props = defineProps<{
   threadId: string
   file: ChangedFile
+  commentPath?: string
   loadVersions: ((
     path: string,
     previousPath: string | null,
@@ -52,9 +53,10 @@ watch(
   { immediate: true },
 )
 
+const effectiveCommentPath = computed(() => props.commentPath ?? props.file.path)
 const line = useLineComments(
   () => props.threadId,
-  () => props.file.path,
+  () => effectiveCommentPath.value,
   () =>
     versions.value && !versions.value.skipped
       ? { original: versions.value.before ?? '', modified: versions.value.after ?? '' }
@@ -64,7 +66,7 @@ const line = useLineComments(
 const review = useReviewComments(
   () => props.threadId,
   () => props.notes,
-  () => props.file.path,
+  () => effectiveCommentPath.value,
   () => versions.value?.after ?? null,
 )
 const gutters = computed(() =>

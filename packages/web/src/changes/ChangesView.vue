@@ -22,6 +22,8 @@ import {
   AlertTriangleIcon,
   ArchiveIcon,
   ChevronDownIcon,
+  FolderGitIcon,
+  GitBranchIcon,
   GitMergeIcon,
   PanelLeftIcon,
 } from '@dou-ui/icons'
@@ -43,14 +45,54 @@ import ThreadTools from '../components/ThreadTools.vue'
 import ViewActions from '../full/ViewActions.vue'
 import ChangedFileDiff from './ChangedFileDiff.vue'
 import ChangedFiles from './ChangedFiles.vue'
-import { fileTree, folderKeys, lineTotals, orderedFiles, type FileNode } from './files'
+import {
+  fileTree,
+  folderKeys,
+  lineTotals,
+  orderedFiles,
+  repoFileTree,
+  scopedFileKey,
+  type FileNode,
+} from './files'
 import { draftsChanged, flushComments } from './comment-sender'
 import { draftsOf } from './line-comments'
 import type { ReviewRoundView, SentLineComment } from '@ariadne/core'
 import ReviewMark from '../review/ReviewMark.vue'
 import { reviewNotes } from '../review/review-comments'
-import { sameComparison, useBranchUpdates } from './branch-updates'
-import { fileVersionsFor } from './file-versions'
+import { useBranchUpdates } from './branch-updates'
+import { fileVersionsFor, type FileVersionLoader } from './file-versions'
+
+interface ChangeRepoGroup {
+  key: string
+  sourceId: string
+  sourceName: string
+  repoPath: string
+  embedded: boolean
+  mergeable: boolean
+  branch: string
+  base: string
+  from: string
+  head: string
+  commits: BranchChanges['commits']
+  files: ChangedFile[]
+  uncommitted: string[]
+  totals: { added: number; removed: number }
+}
+
+type DiffListItem =
+  | {
+      kind: 'repo-header'
+      key: string
+      group: ChangeRepoGroup
+      label: string
+    }
+  | {
+      kind: 'file'
+      key: string
+      group: ChangeRepoGroup
+      file: ChangedFile
+      commentPath: string
+    }
 
 /**
  * What a thread's branch changed against its base, with merging it; or, with `turn`, what
@@ -131,6 +173,7 @@ const visible = () =>
   !!root.value?.getClientRects().length && (props.place === 'full' || state.full === null)
 const branch = useBranchUpdates(() => (props.turn ? null : props.threadId), visible)
 const { hasUpdate, loading, mergeable, problem, showLatest } = branch
+
 const changes = computed<BranchChanges | null>(() => {
   const { turn } = props
   return turn
@@ -145,9 +188,176 @@ const changes = computed<BranchChanges | null>(() => {
       }
     : branch.changes.value
 })
-const from = computed(() => changes.value?.from ?? '')
-const head = computed(() => changes.value?.head ?? '')
-const loadVersions = computed(() => fileVersionsFor(props.threadId, from.value, head.value))
+
+const repoGroups = computed<ChangeRepoGroup[]>(() => {
+  const { turn } = props
+  if (turn) {
+    if (turn.repos && turn.repos.length > 0) {
+      return turn.repos.map((repo) => {
+        const sourceId = repo.sourceId ?? ''
+        const sourceName = repo.sourceName ?? ''
+        const repoPath = repo.repoPath ?? ''
+        const embedded = repoPath.length > 0
+        return {
+          key: `${sourceId}\0${repoPath}`,
+          sourceId,
+          sourceName,
+          repoPath,
+          embedded,
+          mergeable: false,
+          branch: repo.branch ?? (embedded ? '' : (thread.value?.workspace?.branch ?? '')),
+          base: embedded ? '' : (thread.value?.workspace?.base ?? ''),
+          from: repo.from,
+          head: repo.to,
+          commits: [],
+          files: repo.files,
+          uncommitted: [],
+          totals: { added: repo.total.added, removed: repo.total.removed },
+        }
+      })
+    }
+    return [
+      {
+        key: '',
+        sourceId: '',
+        sourceName: '',
+        repoPath: '',
+        embedded: false,
+        mergeable: false,
+        branch: thread.value?.workspace?.branch ?? '',
+        base: thread.value?.workspace?.base ?? '',
+        from: turn.from,
+        head: turn.to,
+        commits: [],
+        files: turn.files,
+        uncommitted: [],
+        totals: { added: turn.total.added, removed: turn.total.removed },
+      },
+    ]
+  }
+  if (branch.repos.value.length > 0) {
+    return branch.repos.value.map((repo) => {
+      const sourceId = repo.sourceId ?? ''
+      const sourceName = repo.sourceName ?? ''
+      const repoPath = repo.repoPath ?? ''
+      return {
+        key: `${sourceId}\0${repoPath}`,
+        sourceId,
+        sourceName,
+        repoPath,
+        embedded: !!repo.embedded,
+        mergeable: !!repo.mergeable,
+        branch: repo.changes.branch,
+        base: repo.changes.base,
+        from: repo.changes.from,
+        head: repo.changes.head,
+        commits: repo.changes.commits,
+        files: repo.changes.files,
+        uncommitted: repo.changes.uncommitted,
+        totals: lineTotals(repo.changes.files),
+      }
+    })
+  }
+  if (branch.changes.value) {
+    const current = branch.changes.value
+    return [
+      {
+        key: '',
+        sourceId: '',
+        sourceName: '',
+        repoPath: '',
+        embedded: false,
+        mergeable: mergeable.value,
+        branch: current.branch,
+        base: current.base,
+        from: current.from,
+        head: current.head,
+        commits: current.commits,
+        files: current.files,
+        uncommitted: current.uncommitted,
+        totals: lineTotals(current.files),
+      },
+    ]
+  }
+  return []
+})
+
+const isMultiRepo = computed(() => repoGroups.value.length > 1)
+const singleRepo = computed(() => (repoGroups.value.length === 1 ? repoGroups.value[0]! : null))
+
+function repoDisplayLabel(group: ChangeRepoGroup): string {
+  if (group.sourceName && group.repoPath) return `${group.sourceName}/${group.repoPath}`
+  if (group.repoPath) return group.repoPath
+  if (group.sourceName) return group.sourceName
+  return t('changes.primaryRepo')
+}
+
+function repoContextPrefix(group: ChangeRepoGroup): string {
+  if (group.sourceName && group.repoPath) return `${group.sourceName}/${group.repoPath}`
+  if (group.repoPath) return group.repoPath
+  if (group.sourceName) return group.sourceName
+  return ''
+}
+
+function commentPathFor(group: ChangeRepoGroup, path: string): string {
+  const prefix = group.repoPath
+    ? group.sourceName
+      ? `${group.sourceName}/${group.repoPath}`
+      : group.repoPath
+    : group.sourceName && isMultiRepo.value
+      ? group.sourceName
+      : ''
+  return prefix ? `${prefix}/${path}` : path
+}
+
+const singleRepoContext = computed(() =>
+  singleRepo.value ? repoContextPrefix(singleRepo.value) : '',
+)
+
+const totalFilesCount = computed(() =>
+  repoGroups.value.reduce((sum, group) => sum + group.files.length, 0),
+)
+const totalCommitsCount = computed(() =>
+  repoGroups.value.reduce((sum, group) => sum + group.commits.length, 0),
+)
+const totalUncommittedCount = computed(() =>
+  repoGroups.value.reduce((sum, group) => sum + group.uncommitted.length, 0),
+)
+const totals = computed(() =>
+  repoGroups.value.reduce(
+    (acc, group) => ({
+      added: acc.added + group.totals.added,
+      removed: acc.removed + group.totals.removed,
+    }),
+    { added: 0, removed: 0 },
+  ),
+)
+
+const comparisonKey = computed(() =>
+  JSON.stringify([
+    props.threadId,
+    repoGroups.value.map((group) => [group.sourceId, group.repoPath, group.from, group.head]),
+  ]),
+)
+
+let loaderCacheKey = ''
+const loaderCache = new Map<string, FileVersionLoader>()
+function loaderFor(group: ChangeRepoGroup): FileVersionLoader {
+  if (loaderCacheKey !== comparisonKey.value) {
+    loaderCache.clear()
+    loaderCacheKey = comparisonKey.value
+  }
+  const cacheKey = JSON.stringify([group.sourceId, group.repoPath, group.from, group.head])
+  let loader = loaderCache.get(cacheKey)
+  if (!loader) {
+    loader = fileVersionsFor(props.threadId, group.from, group.head, {
+      sourceId: group.sourceId || undefined,
+      repoPath: group.repoPath || undefined,
+    })
+    loaderCache.set(cacheKey, loader)
+  }
+  return loader
+}
 
 onBeforeUnmount(
   onLiveEvent((event) => {
@@ -209,41 +419,121 @@ async function skipMerge() {
   closeView(view.value)
 }
 
-const tree = computed(() => fileTree(changes.value?.files ?? []))
-const files = computed(() => orderedFiles(tree.value))
+const tree = computed<FileNode[]>(() => {
+  if (!isMultiRepo.value) {
+    return fileTree(singleRepo.value?.files ?? [])
+  }
+  return repoFileTree(
+    repoGroups.value
+      .filter((group) => group.files.length > 0)
+      .map((group) => ({
+        key: group.key,
+        label: repoDisplayLabel(group),
+        branch: group.branch,
+        embedded: group.embedded,
+        files: group.files,
+        commentPrefix: group.repoPath
+          ? group.sourceName
+            ? `${group.sourceName}/${group.repoPath}`
+            : group.repoPath
+          : group.sourceName || '',
+      })),
+  )
+})
+
+const diffItems = computed<DiffListItem[]>(() => {
+  if (!isMultiRepo.value) {
+    const group = singleRepo.value
+    if (!group) return []
+    return orderedFiles(tree.value).map((file) => ({
+      kind: 'file' as const,
+      key: file.path,
+      group,
+      file,
+      commentPath: commentPathFor(group, file.path),
+    }))
+  }
+  const items: DiffListItem[] = []
+  for (const group of repoGroups.value) {
+    if (group.files.length === 0 && group.uncommitted.length === 0) continue
+    items.push({
+      kind: 'repo-header',
+      key: `repo:${group.key}`,
+      group,
+      label: repoDisplayLabel(group),
+    })
+    for (const file of orderedFiles(fileTree(group.files))) {
+      items.push({
+        kind: 'file',
+        key: scopedFileKey(group.key, file.path),
+        group,
+        file,
+        commentPath: commentPathFor(group, file.path),
+      })
+    }
+  }
+  return items
+})
+
+const fileItems = computed(() =>
+  diffItems.value.filter(
+    (item): item is Extract<DiffListItem, { kind: 'file' }> => item.kind === 'file',
+  ),
+)
+
 const expanded = ref<string[]>([])
 const selected = ref<string | null>(null)
 const diffList = useTemplateRef<VirtualListExpose>('diffList')
-const comparisonKey = computed(() =>
-  JSON.stringify([props.threadId, changes.value?.from, changes.value?.head]),
-)
-const totals = computed(() => lineTotals(changes.value?.files ?? []))
 
 const PREFETCH_AHEAD = 12
 const PREFETCH_BEHIND = 2
 
-function prefetchAround(index: number) {
-  if (!from.value || !head.value || !files.value.length) return
-  const start = Math.max(0, index - PREFETCH_BEHIND)
-  const end = Math.min(files.value.length, index + PREFETCH_AHEAD)
-  loadVersions.value.prefetch(files.value.slice(start, end))
+function prefetchAround(listIndex: number) {
+  if (!diffItems.value.length) return
+  const start = Math.max(0, listIndex - PREFETCH_BEHIND)
+  const end = Math.min(diffItems.value.length, listIndex + PREFETCH_AHEAD)
+  const byRepo = new Map<ChangeRepoGroup, ChangedFile[]>()
+  for (const item of diffItems.value.slice(start, end)) {
+    if (item.kind !== 'file' || !item.group.from || !item.group.head) continue
+    const list = byRepo.get(item.group) ?? []
+    list.push(item.file)
+    byRepo.set(item.group, list)
+  }
+  for (const [group, files] of byRepo) {
+    loaderFor(group).prefetch(files)
+  }
 }
 
-function goToFile(path: string | null) {
-  const index = files.value.findIndex((file) => file.path === path)
+function goToKey(key: string | null) {
+  if (!key) return
+  const index = diffItems.value.findIndex((item) => item.key === key)
   if (index < 0) return
-  selected.value = path
+  const item = diffItems.value[index]!
+  if (item.kind === 'file') {
+    selected.value = item.key
+  }
   prefetchAround(index)
   diffList.value?.scrollToIndex(index, 'start')
+}
+
+function findInitialFileKey(preferred?: string | null): string | null {
+  if (preferred) {
+    const exact = fileItems.value.find(
+      (item) =>
+        item.key === preferred || item.commentPath === preferred || item.file.path === preferred,
+    )
+    if (exact) return exact.key
+  }
+  return fileItems.value[0]?.key ?? null
 }
 
 /** Below this width, a tab on the side, the file list folds into the file's name. */
 const NARROW_PX = 720
 
 watch(
-  changes,
+  comparisonKey,
   (next, previous) => {
-    if (next && (!previous || !sameComparison(previous, next))) {
+    if (next && next !== previous) {
       expanded.value = folderKeys(tree.value)
     }
   },
@@ -254,24 +544,28 @@ watch(
   ([_list, id, turnId, path], [, beforeId, beforeTurn, beforePath]) => {
     const start = id !== beforeId || turnId !== beforeTurn || path !== beforePath
     const preferred = start ? path : (selected.value ?? path)
-    const target = files.value.find((file) => file.path === preferred) ?? files.value[0]
-    goToFile(target?.path ?? null)
+    goToKey(findInitialFileKey(preferred))
   },
   { flush: 'post' },
 )
 
 function select(node: TreeNodeData) {
-  const { file: changed } = node as FileNode
-  if (!changed) return
+  const fileNode = node as FileNode
+  if (fileNode.repo) {
+    filesOpen.value = false
+    goToKey(fileNode.key)
+    return
+  }
+  if (!fileNode.file) return
   filesOpen.value = false
-  goToFile(changed.path)
+  goToKey(fileNode.key)
 }
 
 watch(
-  [files, loadVersions],
+  [diffItems, comparisonKey],
   ([list]) => {
     if (!list.length) return
-    const index = selected.value ? list.findIndex((file) => file.path === selected.value) : 0
+    const index = selected.value ? list.findIndex((item) => item.key === selected.value) : 0
     prefetchAround(index >= 0 ? index : 0)
   },
   { immediate: true },
@@ -290,26 +584,50 @@ function updateSelection() {
     const viewport = diffList.value?.el()
     if (!viewport) return
     const top = viewport.getBoundingClientRect().top + 1
-    const active = Array.from(viewport.querySelectorAll<HTMLElement>('[data-file-path]')).find(
+    const active = Array.from(viewport.querySelectorAll<HTMLElement>('[data-file-key]')).find(
       (item) => item.getBoundingClientRect().bottom > top,
     )
-    if (active?.dataset.filePath) {
-      selected.value = active.dataset.filePath
-      const index = files.value.findIndex((file) => file.path === active.dataset.filePath)
+    if (active?.dataset.fileKey) {
+      selected.value = active.dataset.fileKey
+      const index = diffItems.value.findIndex((item) => item.key === active.dataset.fileKey)
       if (index >= 0) prefetchAround(index)
     }
   })
 }
 
-function estimateFileHeight(file: ChangedFile) {
-  return Math.min(640, 96 + 20 * ((file.added ?? 0) + (file.removed ?? 0)))
+function estimateItemHeight(item: DiffListItem) {
+  if (item.kind === 'repo-header') {
+    return item.group.uncommitted.length > 0 ? 76 : 44
+  }
+  return Math.min(640, 96 + 20 * ((item.file.added ?? 0) + (item.file.removed ?? 0)))
 }
 
+const primaryMergeableRepo = computed(
+  () => repoGroups.value.find((group) => group.mergeable && !group.embedded) ?? null,
+)
+const mergeExpectedHead = computed(
+  () => primaryMergeableRepo.value?.head ?? changes.value?.head ?? '',
+)
 // Merged as it stands: nothing came after the last merge.
 const upToDate = computed(
-  () => !!thread.value?.merged && thread.value.merged.head === changes.value?.head,
+  () => !!thread.value?.merged && thread.value.merged.head === mergeExpectedHead.value,
 )
-const base = computed(() => changes.value?.base ?? thread.value?.workspace?.base ?? '')
+const base = computed(
+  () =>
+    primaryMergeableRepo.value?.base ?? changes.value?.base ?? thread.value?.workspace?.base ?? '',
+)
+const canMerge = computed(
+  () =>
+    !props.turn &&
+    mergeable.value &&
+    !upToDate.value &&
+    (primaryMergeableRepo.value
+      ? primaryMergeableRepo.value.files.length > 0
+      : (changes.value?.files.length ?? 0) > 0),
+)
+const hasOtherChangedRepos = computed(
+  () => isMultiRepo.value && repoGroups.value.some((group) => !group.mergeable),
+)
 
 const mergeOpen = ref(false)
 // The way this project was last merged; the autopilot uses the same.
@@ -333,7 +651,7 @@ watch(hasUpdate, (value) => {
 })
 
 async function merge() {
-  const expectedHead = changes.value?.head
+  const expectedHead = mergeExpectedHead.value
   if (!expectedHead || hasUpdate.value) return
   merging.value = true
   try {
@@ -436,7 +754,7 @@ const methodOptions = computed(() => [
   <div ref="root" class="changes" :class="[`is-${place}`, { 'is-narrow': narrow }]">
     <div class="changes-header">
       <DouButton
-        v-if="!narrow && files.length"
+        v-if="!narrow && fileItems.length"
         variant="ghost"
         size="sm"
         :aria-label="filesSidebarLabel"
@@ -447,16 +765,44 @@ const methodOptions = computed(() => [
         <PanelLeftIcon aria-hidden="true" />
       </DouButton>
       <div class="changes-title">
-        <DouText weight="medium" truncate>{{ thread?.title }}</DouText>
+        <div class="changes-title-row">
+          <DouText weight="medium" truncate>{{ thread?.title }}</DouText>
+          <DouTag
+            v-if="!isMultiRepo && singleRepo?.embedded"
+            size="sm"
+            variant="soft"
+            class="changes-repo-tag"
+          >
+            {{ t('changes.embeddedRepo') }}
+          </DouTag>
+        </div>
         <DouText v-if="turn" variant="tertiary" size="sm" class="changes-meta">
+          <template v-if="isMultiRepo">
+            {{ t('changes.repos', { count: repoGroups.length }) }} ·
+          </template>
+          <template v-else-if="singleRepoContext">
+            {{ singleRepoContext
+            }}<template v-if="singleRepo?.branch"> ({{ singleRepo.branch }})</template> ·
+          </template>
           {{ t('changes.files', { count: turn.total.files }) }}
           <span class="changes-added">+{{ turn.total.added }}</span>
           <span class="changes-removed">−{{ turn.total.removed }}</span>
         </DouText>
-        <DouText v-else-if="changes" variant="tertiary" size="sm" class="changes-meta">
-          {{ changes.branch }} → {{ changes.base }} ·
-          {{ t('changes.commits', { count: changes.commits.length }) }} ·
-          {{ t('changes.files', { count: changes.files.length }) }}
+        <DouText v-else-if="isMultiRepo" variant="tertiary" size="sm" class="changes-meta">
+          {{ t('changes.repos', { count: repoGroups.length }) }} ·
+          {{ t('changes.commits', { count: totalCommitsCount }) }} ·
+          {{ t('changes.files', { count: totalFilesCount }) }}
+          <span class="changes-added">+{{ totals.added }}</span>
+          <span class="changes-removed">−{{ totals.removed }}</span>
+        </DouText>
+        <DouText v-else-if="singleRepo" variant="tertiary" size="sm" class="changes-meta">
+          <template v-if="singleRepoContext">{{ singleRepoContext }} · </template>
+          <template v-if="singleRepo.base && singleRepo.base !== singleRepo.branch">
+            {{ singleRepo.branch }} → {{ singleRepo.base }}
+          </template>
+          <template v-else>{{ singleRepo.branch }}</template>
+          · {{ t('changes.commits', { count: singleRepo.commits.length }) }} ·
+          {{ t('changes.files', { count: singleRepo.files.length }) }}
           <span class="changes-added">+{{ totals.added }}</span>
           <span class="changes-removed">−{{ totals.removed }}</span>
         </DouText>
@@ -492,12 +838,12 @@ const methodOptions = computed(() => [
         </DouPopover>
       </div>
       <PullRequestTag v-if="thread && !mergeable && !turn" :thread="thread" />
-      <DouTag v-if="mergeable && upToDate" tone="success" size="sm">
+      <DouTag v-if="mergeable && upToDate && !turn" tone="success" size="sm">
         <template #leading><GitMergeIcon /></template>
         {{ t('changes.merged', { base }) }}
       </DouTag>
       <DouPopover
-        v-if="mergeable && !upToDate && changes?.files.length"
+        v-if="canMerge"
         v-model:open="mergeOpen"
         trigger="click"
         placement="bottom-end"
@@ -511,6 +857,9 @@ const methodOptions = computed(() => [
         <template #content>
           <form class="merge-form" @submit.prevent="merge">
             <DouAlert v-if="busy" tone="warning" size="sm">{{ t('changes.mergeBusy') }}</DouAlert>
+            <DouAlert v-if="hasOtherChangedRepos" tone="neutral" size="sm">
+              {{ t('changes.mergePrimaryOnly', { base }) }}
+            </DouAlert>
             <DouSegmentedControl v-model="method" :options="methodOptions" size="sm" block />
             <DouTextarea
               v-model="message"
@@ -535,14 +884,27 @@ const methodOptions = computed(() => [
     </div>
 
     <DouAlert v-if="problem" tone="danger" class="changes-alert">{{ problem }}</DouAlert>
-    <DouAlert v-if="changes?.uncommitted.length" tone="neutral" class="changes-alert">
-      {{ t('changes.uncommitted', { count: changes.uncommitted.length }) }}
+    <DouAlert
+      v-if="
+        (!isMultiRepo && singleRepo?.uncommitted.length) ||
+        (isMultiRepo && totalFilesCount === 0 && totalUncommittedCount > 0)
+      "
+      tone="neutral"
+      class="changes-alert"
+    >
+      {{
+        t('changes.uncommitted', {
+          count: isMultiRepo ? totalUncommittedCount : singleRepo!.uncommitted.length,
+        })
+      }}
     </DouAlert>
 
     <div v-if="loading" class="changes-empty"><DouSpinner /></div>
-    <div v-else-if="!changes || !changes.files.length" class="changes-empty">
+    <div v-else-if="repoGroups.length === 0 || totalFilesCount === 0" class="changes-empty">
       <DouEmpty
-        :description="changes ? t('changes.empty', { base: changes.base }) : t('changes.noBranch')"
+        :description="
+          singleRepo?.base ? t('changes.empty', { base: singleRepo.base }) : t('changes.noBranch')
+        "
       />
     </div>
     <DouSplitter
@@ -564,7 +926,7 @@ const methodOptions = computed(() => [
           v-model:expanded="expanded"
           :tree="tree"
           :selected="selected"
-          :count="changes.files.length"
+          :count="totalFilesCount"
           :review-count="reviewCount"
           :comment-count="commentCount"
           class="changes-files"
@@ -581,7 +943,7 @@ const methodOptions = computed(() => [
               :width="320"
             >
               <DouButton variant="ghost" size="sm" class="diff-file">
-                {{ t('changes.files', { count: files.length }) }}
+                {{ t('changes.files', { count: totalFilesCount }) }}
                 <template #trailing><ChevronDownIcon /></template>
               </DouButton>
               <template #content>
@@ -589,7 +951,7 @@ const methodOptions = computed(() => [
                   v-model:expanded="expanded"
                   :tree="tree"
                   :selected="selected"
-                  :count="changes.files.length"
+                  :count="totalFilesCount"
                   :review-count="reviewCount"
                   :comment-count="commentCount"
                   class="diff-file-tree"
@@ -602,22 +964,67 @@ const methodOptions = computed(() => [
             :key="comparisonKey"
             ref="diffList"
             class="diff-list"
-            :items="files"
-            item-key="path"
-            :estimate-size="estimateFileHeight"
+            :items="diffItems"
+            item-key="key"
+            :estimate-size="estimateItemHeight"
             :overscan="1"
-            :aria-label="t('changes.files', { count: files.length })"
+            :aria-label="t('changes.files', { count: totalFilesCount })"
             @scroll="updateSelection"
           >
             <template #default="{ item, index }">
+              <section
+                v-if="item.kind === 'repo-header'"
+                class="repo-section-header"
+                :class="{ 'is-first': index === 0 }"
+                :data-repo-key="item.group.key"
+              >
+                <div class="repo-section-main">
+                  <FolderGitIcon class="repo-section-icon" aria-hidden="true" />
+                  <DouText size="sm" weight="medium" truncate :title="item.label">
+                    {{ item.label }}
+                  </DouText>
+                  <DouTag v-if="item.group.embedded" size="sm" variant="soft">
+                    {{ t('changes.embeddedRepo') }}
+                  </DouTag>
+                  <span v-if="item.group.branch" class="repo-section-branch">
+                    <GitBranchIcon aria-hidden="true" />
+                    <template v-if="item.group.base && item.group.base !== item.group.branch">
+                      {{ item.group.branch }} → {{ item.group.base }}
+                    </template>
+                    <template v-else>{{ item.group.branch }}</template>
+                  </span>
+                </div>
+                <DouText variant="tertiary" size="sm" class="repo-section-meta">
+                  <template v-if="!turn && item.group.commits.length > 0">
+                    {{ t('changes.commits', { count: item.group.commits.length }) }} ·
+                  </template>
+                  {{ t('changes.files', { count: item.group.files.length }) }}
+                  <span class="changes-added">+{{ item.group.totals.added }}</span>
+                  <span class="changes-removed">−{{ item.group.totals.removed }}</span>
+                </DouText>
+                <DouAlert
+                  v-if="item.group.uncommitted.length > 0"
+                  tone="neutral"
+                  size="sm"
+                  class="repo-section-uncommitted"
+                >
+                  {{ t('changes.uncommitted', { count: item.group.uncommitted.length }) }}
+                </DouAlert>
+              </section>
               <ChangedFileDiff
+                v-else
                 v-model:mode="diffMode"
                 class="diff-item"
-                :class="{ 'diff-first': index === 0, 'diff-last': index === files.length - 1 }"
-                :data-file-path="item.path"
+                :class="{
+                  'diff-first': index === 0 || diffItems[index - 1]?.kind === 'repo-header',
+                  'diff-last': index === diffItems.length - 1,
+                }"
+                :data-file-path="item.file.path"
+                :data-file-key="item.key"
                 :thread-id="threadId"
-                :file="item"
-                :load-versions="loadVersions"
+                :file="item.file"
+                :comment-path="item.commentPath"
+                :load-versions="loaderFor(item.group)"
                 :sent="sentComments"
                 :notes="notes"
               />
@@ -656,6 +1063,17 @@ const methodOptions = computed(() => [
   flex: 1;
   flex-direction: column;
   min-width: 0;
+}
+
+.changes-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.changes-repo-tag {
+  flex: none;
 }
 
 .changes-meta {
@@ -750,6 +1168,59 @@ const methodOptions = computed(() => [
   .diff-list {
     scroll-padding-top: 44px;
   }
+}
+
+.repo-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding: 10px 12px;
+  background-color: var(--dou-color-bg-subtle);
+  border-bottom: 1px solid var(--dou-color-border);
+}
+
+.repo-section-header:not(.is-first) {
+  border-top: 1px solid var(--dou-color-border);
+  margin-top: 8px;
+}
+
+.repo-section-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.repo-section-icon {
+  flex: none;
+  color: var(--dou-color-text-secondary);
+}
+
+.repo-section-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--dou-color-text-tertiary);
+  font-family: var(--dou-font-family-mono, monospace);
+}
+
+.repo-section-branch svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+.repo-section-meta {
+  flex: none;
+  white-space: nowrap;
+}
+
+.repo-section-uncommitted {
+  flex-basis: 100%;
 }
 
 .diff-item:not(.diff-first) {

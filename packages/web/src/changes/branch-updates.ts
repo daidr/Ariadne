@@ -1,4 +1,4 @@
-import type { BranchChanges } from '@ariadne/plugin-sdk'
+import type { BranchChanges, RepoChanges } from '@ariadne/plugin-sdk'
 import { computed, onMounted, onScopeDispose, shallowRef, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { tm } from '../i18n'
@@ -15,6 +15,28 @@ export function sameComparison(before: BranchChanges | null, after: BranchChange
       before.from === after.from &&
       before.head === after.head)
   )
+}
+
+export function sameRepoComparisons(
+  before: readonly RepoChanges[] | undefined,
+  after: readonly RepoChanges[] | undefined,
+): boolean {
+  const left = before ?? []
+  const right = after ?? []
+  if (left.length !== right.length) return false
+  for (let i = 0; i < left.length; i++) {
+    const a = left[i]!
+    const b = right[i]!
+    if (
+      (a.sourceId ?? '') !== (b.sourceId ?? '') ||
+      (a.repoPath ?? '') !== (b.repoPath ?? '') ||
+      a.embedded !== b.embedded ||
+      !sameComparison(a.changes, b.changes)
+    ) {
+      return false
+    }
+  }
+  return true
 }
 
 /**
@@ -42,8 +64,16 @@ export function useBranchUpdates(threadId: () => string | null, visible: () => b
     }
     const request = new AbortController()
     controller = request
-    const last = (newer.value ?? shown.value)?.changes
-    const known = !full && last?.baseHead ? { head: last.head, baseHead: last.baseHead } : undefined
+    const latest = newer.value ?? shown.value
+    const last = latest?.changes
+    const multiOrEmbedded =
+      (latest?.repos?.length ?? 0) > 1 ||
+      (latest?.repos?.length === 1 &&
+        (latest.repos[0]!.embedded || !!(latest.repos[0]!.repoPath ?? '')))
+    const known =
+      !full && !multiOrEmbedded && last?.baseHead
+        ? { head: last.head, baseHead: last.baseHead }
+        : undefined
     try {
       const next = await api.getChanges(id, known, request.signal)
       if (request.signal.aborted) return
@@ -51,7 +81,11 @@ export function useBranchUpdates(threadId: () => string | null, visible: () => b
       mergeable.value = next.mergeable
       problem.value = null
       if (next.unchanged) return
-      if (!shown.value || sameComparison(shown.value.changes, next.changes)) {
+      const unchangedRepos =
+        shown.value &&
+        sameComparison(shown.value.changes, next.changes) &&
+        sameRepoComparisons(shown.value.repos, next.repos)
+      if (!shown.value || unchangedRepos) {
         shown.value = next
         newer.value = null
       } else {
@@ -116,6 +150,7 @@ export function useBranchUpdates(threadId: () => string | null, visible: () => b
 
   return {
     changes: computed(() => shown.value?.changes ?? null),
+    repos: computed(() => shown.value?.repos ?? []),
     hasUpdate: computed(() => newer.value !== null),
     loading,
     mergeable,

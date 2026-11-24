@@ -13,7 +13,7 @@ import (
 	"github.com/daidr/Ariadne/internal/schema"
 )
 
-var projectionTables = []string{"projects", "threads", "attentions", "attention_waiters", "messages", "todos", "memories", "notices", "conversations", "transcript", "plan_nodes", "plan_edges", "plan_revisions", "plan_proposals", "plan_node_issues", "issue_writes", "used_approvals", "artifacts", "artifact_versions", "artifact_comments", "artifact_feedback", "reviews", "prompts", "search_docs", "search_text"}
+var projectionTables = []string{"projects", "threads", "thread_repo_baselines", "attentions", "attention_waiters", "messages", "todos", "memories", "notices", "conversations", "transcript", "plan_nodes", "plan_edges", "plan_revisions", "plan_proposals", "plan_node_issues", "issue_writes", "used_approvals", "artifacts", "artifact_versions", "artifact_comments", "artifact_feedback", "reviews", "prompts", "search_docs", "search_text"}
 
 // DomainProjection preserves the dependency order of the original projections.
 type DomainProjection struct{}
@@ -75,7 +75,7 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 			return err
 		}
 	}
-	if version == schema.Version || version == 67 || version == 68 || version == 69 || version == 70 {
+	if version == schema.Version || version == 67 || version == 68 || version == 69 || version == 70 || version == 71 {
 		return schema.Create(ctx, tx)
 	}
 	if err := dropProjectionTables(ctx, tx); err != nil {

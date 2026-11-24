@@ -331,3 +331,93 @@ func TestWorkspaceBatchFilesRPC(t *testing.T) {
 		t.Fatalf("expected invalid argument for empty files, got %v", err)
 	}
 }
+
+func TestWorkspaceMultiRepoRPC(t *testing.T) {
+	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite"), Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	if _, err := repo.Store.Append(t.Context(), workspaceHTTPSeed()); err != nil {
+		t.Fatal(err)
+	}
+	from, head := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	added := int64(2)
+	var gotRepoPath string
+	registry := sources.New()
+	registry.Register(sdk.ContextProvider{Info: sdk.ContextProviderInfo{Kind: "fixture", Provides: []string{"workspace"}}, Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
+		return sdk.Capabilities{Workspace: &sdk.WorkspaceCapability{Isolated: true, Branches: &sdk.BranchCapability{
+			Changes: func(context.Context, sdk.ThreadBranch, string) (*sdk.BranchChanges, error) {
+				return &sdk.BranchChanges{
+					Branch: "work/thread", Base: "integration", From: from, Head: head,
+					Files: []sdk.ChangedFile{{Path: "root.go", Status: "modified", Added: &added}},
+				}, nil
+			},
+			EmbeddedChanges: func(context.Context, string, map[string]sdk.RepoBaseline) ([]sdk.RepoChanges, error) {
+				return []sdk.RepoChanges{{
+					RepoPath: "packages/sub",
+					Embedded: true,
+					Changes: &sdk.BranchChanges{
+						Branch: "feat/sub", Base: "main", From: from, Head: head,
+						Files: []sdk.ChangedFile{{Path: "sub.go", Status: "added", Added: &added}},
+					},
+				}}, nil
+			},
+			File: func(_ context.Context, req sdk.FileVersionRequest) (sdk.FileVersions, error) {
+				gotRepoPath = req.RepoPath
+				after := "repo:" + req.RepoPath + ":" + req.Path
+				return sdk.FileVersions{After: &after}, nil
+			},
+		}}}, nil
+	}})
+	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background())
+	api, err := New(Options{Repository: repo, Token: "test-token", Now: now, Workspaces: manager, Sources: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	auth := connect.WithInterceptors(bearerClientInterceptor("test-token"))
+	client := ariadnev1connect.NewWorkspaceServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+
+	changesResp, err := client.GetThreadChanges(t.Context(), connect.NewRequest(&ariadnev1.GetThreadChangesRequest{ThreadId: "thr_a"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changesResp.Msg.Repos) != 2 {
+		t.Fatalf("expected 2 repos in GetThreadChangesResponse, got %+v", changesResp.Msg.Repos)
+	}
+	if changesResp.Msg.Repos[1].GetRepoPath() != "packages/sub" || !changesResp.Msg.Repos[1].GetEmbedded() || changesResp.Msg.Repos[1].GetMergeable() {
+		t.Fatalf("unexpected embedded repo entry: %+v", changesResp.Msg.Repos[1])
+	}
+
+	subPath := "packages/sub"
+	fileResp, err := client.GetChangedFile(t.Context(), connect.NewRequest(&ariadnev1.GetChangedFileRequest{
+		ThreadId: "thr_a",
+		From:     from,
+		Head:     head,
+		Path:     "sub.go",
+		RepoPath: &subPath,
+	}))
+	if err != nil || gotRepoPath != "packages/sub" || fileResp.Msg.File.GetAfter() != "repo:packages/sub:sub.go" {
+		t.Fatalf("unexpected embedded GetChangedFile response: repoPath=%q resp=%+v err=%v", gotRepoPath, fileResp, err)
+	}
+
+	badPath := "../escape"
+	if _, err := client.GetChangedFile(t.Context(), connect.NewRequest(&ariadnev1.GetChangedFileRequest{
+		ThreadId: "thr_a",
+		From:     from,
+		Head:     head,
+		Path:     "sub.go",
+		RepoPath: &badPath,
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for traversal repoPath, got %v", err)
+	}
+}

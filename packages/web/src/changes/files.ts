@@ -1,14 +1,39 @@
 import type { ChangedFile } from '@ariadne/plugin-sdk'
 
-/** A row of the changed-file tree: a folder (its path compacted) or a file. */
+/** Metadata attached to a repository root row in multi-repository file trees. */
+export interface FileRepoNode {
+  key: string
+  label: string
+  branch: string
+  embedded: boolean
+  fileCount: number
+}
+
+/** Input group for building a multi-repository file tree. */
+export interface RepoTreeGroup {
+  key: string
+  label: string
+  branch?: string
+  embedded?: boolean
+  files: ChangedFile[]
+  commentPrefix?: string
+}
+
+/** A row of the changed-file tree: a repository group, a folder (compacted), or a file. */
 export type FileNode = {
   key: string
   label: string
   children?: FileNode[]
   file?: ChangedFile
+  repo?: FileRepoNode
+  commentPath?: string
 }
 
 const DIR = 'dir:'
+
+export function scopedFileKey(repoKey: string, path: string): string {
+  return repoKey ? `${repoKey}\0${path}` : path
+}
 
 /**
  * The changed files as a tree of folders, folders first and by name. A folder with only
@@ -33,6 +58,40 @@ export function fileTree(files: ChangedFile[]): FileNode[] {
   return compact(root).children ?? []
 }
 
+/** Build a tree grouped by repository when multiple repositories have changes. */
+export function repoFileTree(groups: RepoTreeGroup[]): FileNode[] {
+  return groups.map((group) => {
+    const prefix = group.commentPrefix ?? ''
+    const scopeNodes = (nodes: FileNode[]): FileNode[] =>
+      nodes.map((node) => {
+        if (node.file) {
+          return {
+            ...node,
+            key: scopedFileKey(group.key, node.file.path),
+            commentPath: prefix ? `${prefix}/${node.file.path}` : node.file.path,
+          }
+        }
+        return {
+          ...node,
+          key: `repo:${group.key}:${node.key}`,
+          children: node.children ? scopeNodes(node.children) : undefined,
+        }
+      })
+    return {
+      key: `repo:${group.key}`,
+      label: group.label,
+      repo: {
+        key: group.key,
+        label: group.label,
+        branch: group.branch ?? '',
+        embedded: !!group.embedded,
+        fileCount: group.files.length,
+      },
+      children: scopeNodes(fileTree(group.files)),
+    }
+  })
+}
+
 function compact(node: FileNode): FileNode {
   if (!node.children) return node
   let children = node.children.map(compact)
@@ -50,7 +109,7 @@ function compact(node: FileNode): FileNode {
   return { ...node, children }
 }
 
-/** Keys of every folder, to open them all. */
+/** Keys of every folder (and repository group), to open them all. */
 export function folderKeys(nodes: FileNode[]): string[] {
   return nodes.flatMap((node) => (node.children ? [node.key, ...folderKeys(node.children)] : []))
 }
@@ -58,6 +117,11 @@ export function folderKeys(nodes: FileNode[]): string[] {
 /** The files in the order the tree shows them. */
 export function orderedFiles(nodes: FileNode[]): ChangedFile[] {
   return nodes.flatMap((node) => (node.file ? [node.file] : orderedFiles(node.children ?? [])))
+}
+
+/** Leaf file nodes (preserving scoped keys and comment paths) in tree order. */
+export function orderedFileNodes(nodes: FileNode[]): FileNode[] {
+  return nodes.flatMap((node) => (node.file ? [node] : orderedFileNodes(node.children ?? [])))
 }
 
 /** Lines added and removed over all files; binary files count for nothing. */

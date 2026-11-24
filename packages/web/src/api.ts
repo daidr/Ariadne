@@ -37,6 +37,7 @@ import type {
   LocalizedText,
   MergeMethod,
   MergeOutcome,
+  RepoChanges,
   SettingsSchema,
   WorktreeInfo,
 } from '@ariadne/plugin-sdk'
@@ -65,6 +66,7 @@ import {
   fromProtoMessageView,
   fromProtoNoticeView,
   fromProtoProjectWorktrees,
+  fromProtoRepoChanges,
   fromProtoReviewRound,
   fromProtoSentLineComment,
   fromProtoSkillView,
@@ -1352,7 +1354,12 @@ export const api = {
     threadId: string,
     known?: { head: string; baseHead: string },
     signal?: AbortSignal,
-  ): Promise<{ changes: BranchChanges | null; mergeable: boolean; unchanged?: boolean }> => {
+  ): Promise<{
+    changes: BranchChanges | null
+    repos?: RepoChanges[]
+    mergeable: boolean
+    unchanged?: boolean
+  }> => {
     const response = await workspaceClient.getThreadChanges(
       {
         threadId,
@@ -1360,15 +1367,26 @@ export const api = {
       },
       signal ? { signal } : undefined,
     )
+    const repos = response.repos
+      .map(fromProtoRepoChanges)
+      .filter((item): item is RepoChanges => item !== null)
     return {
       changes: fromProtoBranchChanges(response.changes),
+      ...(repos.length > 0 ? { repos } : {}),
       mergeable: response.mergeable,
       ...(response.unchanged ? { unchanged: true } : {}),
     }
   },
   getChangedFile: async (
     threadId: string,
-    input: { from: string; head: string; path: string; previousPath: string | null },
+    input: {
+      from: string
+      head: string
+      path: string
+      previousPath: string | null
+      sourceId?: string
+      repoPath?: string
+    },
     signal?: AbortSignal,
   ): Promise<{ file: FileVersions }> => {
     const response = await workspaceClient.getChangedFile(
@@ -1378,6 +1396,8 @@ export const api = {
         head: input.head,
         path: input.path,
         ...(input.previousPath ? { previousPath: input.previousPath } : {}),
+        ...(input.sourceId ? { sourceId: input.sourceId } : {}),
+        ...(input.repoPath ? { repoPath: input.repoPath } : {}),
       },
       signal ? { signal } : undefined,
     )
@@ -1389,6 +1409,8 @@ export const api = {
       from: string
       head: string
       files: { path: string; previousPath: string | null }[]
+      sourceId?: string
+      repoPath?: string
     },
     signal?: AbortSignal,
   ): Promise<{ files: FileVersions[] }> => {
@@ -1401,6 +1423,8 @@ export const api = {
           path: file.path,
           ...(file.previousPath ? { previousPath: file.previousPath } : {}),
         })),
+        ...(input.sourceId ? { sourceId: input.sourceId } : {}),
+        ...(input.repoPath ? { repoPath: input.repoPath } : {}),
       },
       signal ? { signal } : undefined,
     )

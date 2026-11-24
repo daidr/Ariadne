@@ -230,4 +230,66 @@ describe('ConversationPanel capsule changes backfill', () => {
     expect(diffButton.text()).toContain('+18')
     expect(diffButton.text()).toContain('−4')
   })
+
+  test('aggregates totals across multiple repos when backfilling changes', async () => {
+    vi.spyOn(api, 'getChanges').mockResolvedValue({
+      changes: {
+        branch: 'ariadne/legacy',
+        base: 'main',
+        from: '0000000000000000000000000000000000000001',
+        head: '0000000000000000000000000000000000000002',
+        baseHead: '0000000000000000000000000000000000000001',
+        commits: [],
+        files: [{ path: 'root.ts', previousPath: null, status: 'modified', added: 5, removed: 1 }],
+        uncommitted: [],
+      },
+      repos: [
+        {
+          sourceId: 'src_main',
+          embedded: false,
+          mergeable: true,
+          changes: {
+            branch: 'ariadne/legacy',
+            base: 'main',
+            from: '0000000000000000000000000000000000000001',
+            head: '0000000000000000000000000000000000000002',
+            commits: [],
+            files: [
+              { path: 'root.ts', previousPath: null, status: 'modified', added: 5, removed: 1 },
+            ],
+            uncommitted: [],
+          },
+        },
+        {
+          sourceId: 'src_main',
+          repoPath: 'packages/sub',
+          embedded: true,
+          mergeable: false,
+          changes: {
+            branch: 'feat/sub',
+            base: 'main',
+            from: '0000000000000000000000000000000000000003',
+            head: '0000000000000000000000000000000000000004',
+            commits: [],
+            files: [{ path: 'sub.ts', previousPath: null, status: 'added', added: 12, removed: 2 }],
+            uncommitted: [],
+          },
+        },
+      ],
+      mergeable: true,
+    })
+
+    const wrapper = mount(ConversationPanel, {
+      props: { threadId: 'thr_legacy' },
+      attachTo: document.body,
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+    await nextTick()
+
+    const bar = wrapper.findComponent(ConversationBar)
+    const diffButton = bar.get('button[aria-label="改动"]')
+    expect(diffButton.text()).toContain('+17')
+    expect(diffButton.text()).toContain('−3')
+  })
 })
