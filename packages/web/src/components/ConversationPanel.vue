@@ -1655,6 +1655,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .conversation-alert,
