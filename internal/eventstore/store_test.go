@@ -358,3 +358,71 @@ func TestBackupFailureReleasesItsReservedFile(t *testing.T) {
 		t.Fatal("failed backup retained its reserved destination", err)
 	}
 }
+
+func TestSQLiteConnectionPragmas(t *testing.T) {
+	check := func(t *testing.T, store *Store, wantWAL bool) {
+		t.Helper()
+		ctx := t.Context()
+		// Hold multiple concurrent pooled connections to verify PRAGMAs apply to every physical connection.
+		conns := make([]*sql.Conn, 4)
+		for i := range conns {
+			conn, err := store.DB().Conn(ctx)
+			if err != nil {
+				t.Fatalf("conn %d: %v", i, err)
+			}
+			conns[i] = conn
+			defer conn.Close()
+		}
+		for i, conn := range conns {
+			var cacheSize, tempStore, foreignKeys, busyTimeout, synchronous int
+			var journalMode string
+			if err := conn.QueryRowContext(ctx, "PRAGMA cache_size").Scan(&cacheSize); err != nil {
+				t.Fatalf("conn %d cache_size: %v", i, err)
+			}
+			if cacheSize != -32000 {
+				t.Fatalf("conn %d cache_size = %d, want -32000", i, cacheSize)
+			}
+			if err := conn.QueryRowContext(ctx, "PRAGMA temp_store").Scan(&tempStore); err != nil {
+				t.Fatalf("conn %d temp_store: %v", i, err)
+			}
+			if tempStore != 2 {
+				t.Fatalf("conn %d temp_store = %d, want 2 (MEMORY)", i, tempStore)
+			}
+			if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
+				t.Fatalf("conn %d foreign_keys: %v", i, err)
+			}
+			if foreignKeys != 1 {
+				t.Fatalf("conn %d foreign_keys = %d, want 1", i, foreignKeys)
+			}
+			if err := conn.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+				t.Fatalf("conn %d busy_timeout: %v", i, err)
+			}
+			if busyTimeout != 5000 {
+				t.Fatalf("conn %d busy_timeout = %d, want 5000", i, busyTimeout)
+			}
+			if err := conn.QueryRowContext(ctx, "PRAGMA synchronous").Scan(&synchronous); err != nil {
+				t.Fatalf("conn %d synchronous: %v", i, err)
+			}
+			if synchronous != 1 {
+				t.Fatalf("conn %d synchronous = %d, want 1 (NORMAL)", i, synchronous)
+			}
+			if wantWAL {
+				if err := conn.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journalMode); err != nil {
+					t.Fatalf("conn %d journal_mode: %v", i, err)
+				}
+				if journalMode != "wal" {
+					t.Fatalf("conn %d journal_mode = %q, want wal", i, journalMode)
+				}
+			}
+		}
+	}
+
+	t.Run("memory", func(t *testing.T) {
+		store := openTestStore(t, Options{Path: ":memory:"})
+		check(t, store, false)
+	})
+	t.Run("file", func(t *testing.T) {
+		store := openTestStore(t, Options{Path: filepath.Join(t.TempDir(), "pragmas.sqlite")})
+		check(t, store, true)
+	})
+}

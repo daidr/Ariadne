@@ -2,12 +2,15 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/internal/eventstore"
 )
 
 func intPointer(value int) *int { return &value }
@@ -421,4 +424,142 @@ func TestSchedulerDrainBlocksNewTurnsAndWaitIdle(t *testing.T) {
 		t.Fatal("expected OnActiveChange callback to fire")
 	}
 	mu.Unlock()
+}
+
+func TestHandleEventFiltersTypeBeforeUnmarshal(t *testing.T) {
+	repo := testRepository(t)
+
+	type finishCall struct {
+		threadID  string
+		keepAsked bool
+	}
+	var stopped []string
+	var finished []finishCall
+	sched, err := New(Options{
+		Repository:       repo,
+		Run:              func(context.Context, core.ConversationView) error { return nil },
+		OnThreadStopped:  func(id string) { stopped = append(stopped, id) },
+		OnThreadFinished: func(id string, keepAsked bool) { finished = append(finished, finishCall{id, keepAsked}) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Unrelated events must skip JSON deserialization entirely (malformed JSON must not fail).
+	for _, eventType := range []string{"turn.step", "message.posted", "artifact.revised", "todo.updated"} {
+		if err := sched.handleEvent(eventstore.Event{Type: eventType, Data: json.RawMessage(`not-json`)}); err != nil {
+			t.Fatalf("unrelated event %q should not be unmarshaled: %v", eventType, err)
+		}
+	}
+
+	// Large unrelated payload should allocate nothing during handleEvent.
+	largePayload := json.RawMessage(`{"payload":"` + strings.Repeat("x", 64*1024) + `"}`)
+	allocs := testing.AllocsPerRun(20, func() {
+		if err := sched.handleEvent(eventstore.Event{Type: "turn.step", Data: largePayload}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("unrelated event allocated %.0f times, want 0", allocs)
+	}
+
+	// thread.stopped must unmarshal and fire OnThreadStopped (and fail on invalid JSON).
+	if err := sched.handleEvent(eventstore.Event{Type: "thread.stopped", Data: json.RawMessage(`{"threadId":"thr_1"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sched.handleEvent(eventstore.Event{Type: "thread.stopped", Data: json.RawMessage(`not-json`)}); err == nil {
+		t.Fatal("thread.stopped with invalid JSON should return error")
+	}
+
+	// Finish-triggering events must unmarshal and fire OnThreadFinished with accurate keepAsked.
+	cases := []struct {
+		eventType string
+		data      string
+	}{
+		{"branch.merged", `{"threadId":"thr_2"}`},
+		{"pull_request.closed", `{"threadId":"thr_3"}`},
+		{"thread.reviewed", `{"threadId":"thr_4"}`},
+		{"thread.completed", `{"threadId":"thr_5"}`},
+		{"thread.reported", `{"threadId":"thr_6","report":"ready"}`},
+		{"thread.reported", `{"threadId":"thr_7","report":"done"}`},
+		{"thread.reported", `{"threadId":"thr_8","report":"failed"}`},
+		{"thread.reported", `{"threadId":"thr_9","report":"blocked"}`},
+		{"thread.reported", `{"threadId":"thr_10","report":"progress"}`},
+		{"thread.reported", `{"threadId":"thr_11","report":"waiting"}`},
+	}
+	for _, tc := range cases {
+		if err := sched.handleEvent(eventstore.Event{Type: tc.eventType, Data: json.RawMessage(tc.data)}); err != nil {
+			t.Fatalf("%s failed: %v", tc.eventType, err)
+		}
+	}
+	if err := sched.handleEvent(eventstore.Event{Type: "thread.reported", Data: json.RawMessage(`not-json`)}); err == nil {
+		t.Fatal("thread.reported with invalid JSON should return error when OnThreadFinished is set")
+	}
+
+	if len(stopped) != 1 || stopped[0] != "thr_1" {
+		t.Fatalf("stopped = %v, want [thr_1]", stopped)
+	}
+	wantFinished := []finishCall{
+		{"thr_2", false},
+		{"thr_3", false},
+		{"thr_4", false},
+		{"thr_5", false},
+		{"thr_6", true},
+		{"thr_7", false},
+		{"thr_8", false},
+		{"thr_9", false},
+	}
+	if len(finished) != len(wantFinished) {
+		t.Fatalf("finished = %+v, want %+v", finished, wantFinished)
+	}
+	for i := range wantFinished {
+		if finished[i] != wantFinished[i] {
+			t.Fatalf("finished[%d] = %+v, want %+v", i, finished[i], wantFinished[i])
+		}
+	}
+
+	// Without OnThreadFinished callback, finish-only events skip JSON unmarshaling as well.
+	noFinishCb, err := New(Options{
+		Repository: repo,
+		Run:        func(context.Context, core.ConversationView) error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, eventType := range []string{"branch.merged", "pull_request.closed", "thread.reviewed", "thread.completed", "thread.reported"} {
+		if err := noFinishCb.handleEvent(eventstore.Event{Type: eventType, Data: json.RawMessage(`not-json`)}); err != nil {
+			t.Fatalf("event %q without OnThreadFinished should skip unmarshal: %v", eventType, err)
+		}
+	}
+
+	// End-to-end consume batch: irrelevant events advance cursor while relevant events fire callbacks.
+	if _, err := repo.Store.Append(t.Context(), []eventstore.NewEvent{
+		{Type: "project.created", ProjectID: "prj_c", Data: json.RawMessage(`{"name":"C","coordinatorId":"crd_c"}`)},
+		{Type: "thread.created", ProjectID: "prj_c", Data: json.RawMessage(`{"threadId":"thr_c","title":"C"}`)},
+		{Type: "message.posted", ProjectID: "prj_c", Data: json.RawMessage(`{"messageId":"m1","conversationId":"thr_c","author":"user","kind":"message","content":"hi"}`)},
+		{Type: "thread.reported", ProjectID: "prj_c", Data: json.RawMessage(`{"threadId":"thr_c","report":"ready","headline":"done","summary":"ok","artifacts":[]}`)},
+		{Type: "thread.stopped", ProjectID: "prj_c", Data: json.RawMessage(`{"threadId":"thr_c","reason":"user"}`)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sched.ctx = t.Context()
+	stopped = nil
+	finished = nil
+	lastSeq, err := repo.Store.LastSeq(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextSeq, err := sched.consume(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nextSeq != lastSeq {
+		t.Fatalf("consume advanced seq to %d, want %d", nextSeq, lastSeq)
+	}
+	if len(stopped) != 1 || stopped[0] != "thr_c" {
+		t.Fatalf("consume stopped = %v, want [thr_c]", stopped)
+	}
+	if len(finished) != 1 || finished[0] != (finishCall{"thr_c", true}) {
+		t.Fatalf("consume finished = %+v, want [{thr_c true}]", finished)
+	}
 }

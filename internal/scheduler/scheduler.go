@@ -198,25 +198,8 @@ func (scheduler *Scheduler) consume(seq int64) (int64, error) {
 			return seq, err
 		}
 		for _, event := range events {
-			var data struct {
-				ThreadID string `json:"threadId"`
-				Report   string `json:"report"`
-			}
-			if err := json.Unmarshal(event.Data, &data); err != nil {
+			if err := scheduler.handleEvent(event); err != nil {
 				return seq, err
-			}
-			if event.Type == "thread.stopped" {
-				scheduler.Cancel(data.ThreadID)
-				if scheduler.options.OnThreadStopped != nil {
-					scheduler.options.OnThreadStopped(data.ThreadID)
-				}
-			}
-			finish := event.Type == "branch.merged" || event.Type == "pull_request.closed" || event.Type == "thread.reviewed" || event.Type == "thread.completed"
-			if event.Type == "thread.reported" {
-				finish = data.Report == "ready" || data.Report == "done" || data.Report == "failed" || data.Report == "blocked"
-			}
-			if finish && scheduler.options.OnThreadFinished != nil {
-				scheduler.options.OnThreadFinished(data.ThreadID, event.Type == "thread.reported" && data.Report == "ready")
 			}
 			seq = event.Seq
 		}
@@ -228,6 +211,48 @@ func (scheduler *Scheduler) consume(seq int64) (int64, error) {
 		scheduler.signal()
 		return seq, nil
 	}
+}
+func (scheduler *Scheduler) handleEvent(event eventstore.Event) error {
+	switch event.Type {
+	case "thread.stopped":
+		var data struct {
+			ThreadID string `json:"threadId"`
+		}
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			return err
+		}
+		scheduler.Cancel(data.ThreadID)
+		if scheduler.options.OnThreadStopped != nil {
+			scheduler.options.OnThreadStopped(data.ThreadID)
+		}
+	case "branch.merged", "pull_request.closed", "thread.reviewed", "thread.completed":
+		if scheduler.options.OnThreadFinished == nil {
+			return nil
+		}
+		var data struct {
+			ThreadID string `json:"threadId"`
+		}
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			return err
+		}
+		scheduler.options.OnThreadFinished(data.ThreadID, false)
+	case "thread.reported":
+		if scheduler.options.OnThreadFinished == nil {
+			return nil
+		}
+		var data struct {
+			ThreadID string `json:"threadId"`
+			Report   string `json:"report"`
+		}
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			return err
+		}
+		switch data.Report {
+		case "ready", "done", "failed", "blocked":
+			scheduler.options.OnThreadFinished(data.ThreadID, data.Report == "ready")
+		}
+	}
+	return nil
 }
 func (scheduler *Scheduler) fill() error {
 	repo := scheduler.options.Repository

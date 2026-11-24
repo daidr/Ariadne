@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
@@ -66,6 +67,16 @@ func TestQueryPlansAvoidEventsScanAndUseProjectIndexes(t *testing.T) {
 		) WHERE workspace_source_id IS NULL AND workspace_label IS NOT NULL`), "\n")
 	if !strings.Contains(backfillPlan, "events_project") || strings.Contains(backfillPlan, "SCAN events") {
 		t.Fatalf("v68 backfill query did not use events_project index:\n%s", backfillPlan)
+	}
+
+	searchThreadLookupPlan := strings.Join(explain("SELECT id, title FROM threads WHERE project_id = ? AND id IN (?, ?)", "prj_a", "thr_1", "thr_2"), "\n")
+	if strings.Contains(searchThreadLookupPlan, "SCAN threads") || !strings.Contains(searchThreadLookupPlan, "id=?") {
+		t.Fatalf("search thread lookup did not seek by id:\n%s", searchThreadLookupPlan)
+	}
+
+	searchArtifactLookupPlan := strings.Join(explain("SELECT id, kind FROM artifacts WHERE project_id = ? AND id IN (?, ?)", "prj_a", "art_1", "art_2"), "\n")
+	if strings.Contains(searchArtifactLookupPlan, "SCAN artifacts") || !strings.Contains(searchArtifactLookupPlan, "id=?") {
+		t.Fatalf("search artifact lookup did not seek by id:\n%s", searchArtifactLookupPlan)
 	}
 }
 
@@ -286,4 +297,151 @@ func TestGetProjectDetailSinceTracksChangedSeqAndSameHourArchive(t *testing.T) {
 	if !afterArchive.Partial || len(afterArchive.Threads) != 1 || afterArchive.Threads[0].ID != "thr_b" || !afterArchive.Threads[0].Archived {
 		t.Fatalf("same-hour 24h archive delta mismatch: %+v", afterArchive.Threads)
 	}
+}
+
+func TestSearchOnDemandMetadataLookupAndSQLitePragmas(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "search-perf.sqlite")
+	repo, err := Open(t.Context(), Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	var cacheSize, tempStore int
+	if err := repo.Store.DB().QueryRowContext(t.Context(), "PRAGMA cache_size").Scan(&cacheSize); err != nil {
+		t.Fatal(err)
+	}
+	if cacheSize != -32000 {
+		t.Fatalf("PRAGMA cache_size = %d, want -32000", cacheSize)
+	}
+	if err := repo.Store.DB().QueryRowContext(t.Context(), "PRAGMA temp_store").Scan(&tempStore); err != nil {
+		t.Fatal(err)
+	}
+	if tempStore != 2 {
+		t.Fatalf("PRAGMA temp_store = %d, want 2 (MEMORY)", tempStore)
+	}
+
+	events := []eventstore.NewEvent{
+		{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"搜索项目","coordinatorId":"crd_a"}`)},
+		{Type: "project.created", ProjectID: "prj_b", Data: json.RawMessage(`{"name":"其他项目","coordinatorId":"crd_b"}`)},
+		{Type: "thread.created", ProjectID: "prj_a", Data: json.RawMessage(`{"threadId":"thr_hit","title":"性能优化排查"}`)},
+		{Type: "thread.created", ProjectID: "prj_a", Data: json.RawMessage(`{"threadId":"thr_empty_title","title":""}`)},
+		{Type: "thread.created", ProjectID: "prj_b", Data: json.RawMessage(`{"threadId":"thr_other","title":"跨项目性能优化"}`)},
+		{Type: "artifact.created", ProjectID: "prj_a", Data: json.RawMessage(`{"artifactId":"art_board","kind":"whiteboard","title":"架构白板","content":"{\"nodes\":[{\"data\":{\"text\":\"needle_token 白板节点\"}}]}","author":"thr_hit"}`)},
+		{Type: "artifact.created", ProjectID: "prj_a", Data: json.RawMessage(`{"artifactId":"art_doc","kind":"document","title":"needle_token 文档","content":"普通文档正文","author":"thr_hit"}`)},
+		{Type: "message.posted", ProjectID: "prj_a", Data: json.RawMessage(`{"messageId":"msg_coord","conversationId":"crd_a","author":"user","kind":"message","content":"协调器里的 needle_token 消息"}`)},
+		{Type: "message.posted", ProjectID: "prj_a", Data: json.RawMessage(`{"messageId":"msg_thr_1","conversationId":"thr_hit","author":"user","kind":"message","content":"线程第一条 needle_token 消息"}`)},
+		{Type: "message.posted", ProjectID: "prj_a", Data: json.RawMessage(`{"messageId":"msg_thr_2","conversationId":"thr_hit","author":"agent","kind":"message","content":"线程第二条 needle_token 消息"}`)},
+		{Type: "message.posted", ProjectID: "prj_a", Data: json.RawMessage(`{"messageId":"msg_empty_title","conversationId":"thr_empty_title","author":"user","kind":"message","content":"空标题线程 needle_token 消息"}`)},
+		{Type: "message.posted", ProjectID: "prj_b", Data: json.RawMessage(`{"messageId":"msg_other","conversationId":"thr_other","author":"user","kind":"message","content":"其他项目 needle_token 消息"}`)},
+	}
+	for i := 0; i < 60; i++ {
+		id := strings.ReplaceAll(time.Unix(0, int64(i+1)).UTC().Format("150405.000000000"), ".", "")
+		events = append(events,
+			eventstore.NewEvent{Type: "thread.created", ProjectID: "prj_a", Data: json.RawMessage(`{"threadId":"thr_noise_` + id + `","title":"无关讨论串"}`)},
+			eventstore.NewEvent{Type: "artifact.created", ProjectID: "prj_a", Data: json.RawMessage(`{"artifactId":"art_noise_` + id + `","kind":"document","title":"无关产物","content":"无关正文","author":"user"}`)},
+		)
+	}
+	if _, err := repo.Store.Append(t.Context(), events); err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty query should return empty lists without failing.
+	emptyRes, err := repo.Reader.Search(t.Context(), "prj_a", "   ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(emptyRes["threads"].([]object)) != 0 || len(emptyRes["artifacts"].([]object)) != 0 || len(emptyRes["messages"].([]object)) != 0 {
+		t.Fatalf("empty query returned hits: %+v", emptyRes)
+	}
+
+	res, err := repo.Reader.Search(t.Context(), "prj_a", "needle_token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts := res["artifacts"].([]object)
+	if len(artifacts) != 2 {
+		t.Fatalf("artifacts len = %d, want 2: %+v", len(artifacts), artifacts)
+	}
+	artifactKinds := map[string]any{}
+	for _, hit := range artifacts {
+		artifactKinds[hit["id"].(string)] = hit["artifactKind"]
+	}
+	if artifactKinds["art_board"] != "whiteboard" || artifactKinds["art_doc"] != "document" {
+		t.Fatalf("artifact kinds mismatch: %+v", artifactKinds)
+	}
+
+	messages := res["messages"].([]object)
+	if len(messages) != 4 {
+		t.Fatalf("messages len = %d, want 4: %+v", len(messages), messages)
+	}
+	whereByMsg := map[string]any{}
+	for _, hit := range messages {
+		whereByMsg[hit["id"].(string)] = hit["where"]
+	}
+	if whereByMsg["msg_coord"] != nil {
+		t.Fatalf("coordinator message where = %#v, want nil", whereByMsg["msg_coord"])
+	}
+	if whereByMsg["msg_thr_1"] != "性能优化排查" || whereByMsg["msg_thr_2"] != "性能优化排查" {
+		t.Fatalf("thread message where mismatch: %+v", whereByMsg)
+	}
+	if title, ok := whereByMsg["msg_empty_title"].(string); !ok || title != "" {
+		t.Fatalf("empty-title thread message where = %#v, want empty string", whereByMsg["msg_empty_title"])
+	}
+
+	// Thread-only query should not fail when artifact/message hits are empty.
+	threadOnly, err := repo.Reader.Search(t.Context(), "prj_a", "性能优化排查")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(threadOnly["threads"].([]object)) != 1 || len(threadOnly["artifacts"].([]object)) != 0 || len(threadOnly["messages"].([]object)) != 0 {
+		t.Fatalf("thread-only query mismatch: %+v", threadOnly)
+	}
+
+	// Missing artifact metadata row should still fall back to "document".
+	if _, err := repo.Store.DB().ExecContext(t.Context(), "DELETE FROM artifacts WHERE id = 'art_board'"); err != nil {
+		t.Fatal(err)
+	}
+	fallbackRes, err := repo.Reader.Search(t.Context(), "prj_a", "needle_token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hit := range fallbackRes["artifacts"].([]object) {
+		if hit["id"] == "art_board" && hit["artifactKind"] != "document" {
+			t.Fatalf("missing artifact row fallback kind = %v, want document", hit["artifactKind"])
+		}
+	}
+
+	// Verify on-demand lookup helpers skip SQL when empty and only fetch requested IDs via id IN (...).
+	spy := &recordingQueryer{inner: repo.Store.DB()}
+	if titles, err := lookupThreadTitles(t.Context(), spy, "prj_a", nil); err != nil || len(titles) != 0 {
+		t.Fatalf("empty lookupThreadTitles = %v, %v", titles, err)
+	}
+	if kinds, err := lookupArtifactKinds(t.Context(), spy, "prj_a", nil); err != nil || len(kinds) != 0 {
+		t.Fatalf("empty lookupArtifactKinds = %v, %v", kinds, err)
+	}
+	if len(spy.queries) != 0 {
+		t.Fatalf("empty lookups unexpectedly executed queries: %v", spy.queries)
+	}
+	titles, err := lookupThreadTitles(t.Context(), spy, "prj_a", []string{"thr_hit", "thr_empty_title"})
+	if err != nil || len(titles) != 2 {
+		t.Fatalf("lookupThreadTitles = %v, %v", titles, err)
+	}
+	kinds, err := lookupArtifactKinds(t.Context(), spy, "prj_a", []string{"art_doc"})
+	if err != nil || len(kinds) != 1 || kinds["art_doc"] != "document" {
+		t.Fatalf("lookupArtifactKinds = %v, %v", kinds, err)
+	}
+	if len(spy.queries) != 2 || !strings.Contains(spy.queries[0], "id IN (?,?)") || !strings.Contains(spy.queries[1], "id IN (?)") {
+		t.Fatalf("unexpected lookup queries: %v", spy.queries)
+	}
+}
+
+type recordingQueryer struct {
+	inner   queryer
+	queries []string
+}
+
+func (r *recordingQueryer) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	r.queries = append(r.queries, query)
+	return r.inner.QueryContext(ctx, query, args...)
 }
