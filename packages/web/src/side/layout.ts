@@ -142,7 +142,7 @@ export function openThreads(layout: SideLayout): string[] {
 }
 
 /** A layout with a new root, still pointing at a group that is there. */
-function withRoot(layout: SideLayout, root: DockNode, focused = layout.focused): SideLayout {
+function withRoot(layout: SideLayout, root: DockNode, focused?: string | null): SideLayout {
   const previous = groupsOf(layout.root)[0]!
   let first = groupsOf(root)[0]!
   if (previous.id !== first.id) {
@@ -169,7 +169,7 @@ function withRoot(layout: SideLayout, root: DockNode, focused = layout.focused):
         : previous.active != null && tabs.includes(previous.active)
           ? previous.active
           : tabs[0]
-  if (returnedList && !focused) focused = first.id
+  const targetFocused = focused ?? (returnedList ? first.id : layout.focused)
   if (
     first.active !== active ||
     tabs.some((key, i) => first.tabs[i] !== key) ||
@@ -183,7 +183,7 @@ function withRoot(layout: SideLayout, root: DockNode, focused = layout.focused):
   )
   const recent = [...new Set(layout.recent ?? [])].filter((key) => groupByTab.has(key))
   const current =
-    groups.find((group) => group.id === focused) ?? groupByTab.get(recent[0]!) ?? groups[0]!
+    groups.find((group) => group.id === targetFocused) ?? groupByTab.get(recent[0]!) ?? groups[0]!
   return {
     root,
     focused: current.id,

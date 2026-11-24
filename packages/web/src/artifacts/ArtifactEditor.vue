@@ -39,6 +39,11 @@ import ArtifactHistory from './ArtifactHistory.vue'
 import CommentList from './CommentList.vue'
 import type { DecisionGroupSummary } from './decision-groups'
 import type { DocumentAskSummary } from './document-asks'
+import {
+  clearPendingArtifactFeedback,
+  getPendingArtifactFeedback,
+  setPendingArtifactFeedback,
+} from './feedback-pending'
 import { kindIcon } from './kinds'
 import { useSharedArtifact, type SharedArtifact } from './shared'
 
@@ -274,9 +279,34 @@ const shared = shallowRef<SharedArtifact | null>(null)
 let room: { id: string; scope: EffectScope } | null = null
 const roomGeneration = shallowRef(0)
 
+function syncPendingStore(id = room?.id) {
+  if (!id) return
+  if (waiting.value && pendingChanges.value > 0) {
+    setPendingArtifactFeedback(id, {
+      pendingChanges: pendingChanges.value,
+      pendingNotes: pendingNotes.value,
+      paused: quietPaused.value,
+    })
+  } else {
+    clearPendingArtifactFeedback(id)
+  }
+}
+
 function join(id: string) {
   const scope = effectScope()
   room = { id, scope }
+  const saved = getPendingArtifactFeedback(id)
+  if (saved && saved.pendingChanges > 0) {
+    waiting.value = true
+    pendingChanges.value = saved.pendingChanges
+    pendingNotes.value = saved.pendingNotes
+    quietPaused.value = saved.paused
+  } else {
+    waiting.value = false
+    pendingChanges.value = 0
+    pendingNotes.value = 0
+    quietPaused.value = false
+  }
   const onLockedEdit =
     artifact.value?.kind === 'document'
       ? () => {
@@ -327,10 +357,12 @@ function scheduleQuietSend() {
 function toggleQuietPause() {
   if (quietPaused.value) {
     quietPaused.value = false
+    syncPendingStore()
     scheduleQuietSend()
   } else {
     quietPaused.value = true
     stopQuietTimer()
+    syncPendingStore()
   }
 }
 
@@ -340,6 +372,7 @@ function touched(kind: 'edit' | 'comment' = 'edit') {
   waiting.value = true
   pendingChanges.value++
   if (kind === 'comment') pendingNotes.value++
+  syncPendingStore()
   scheduleQuietSend()
 }
 
@@ -385,6 +418,7 @@ async function sendFeedback(explicit = false) {
     quietPaused.value = false
     pendingChanges.value = 0
     pendingNotes.value = 0
+    clearPendingArtifactFeedback(id)
     const pictures = (await body.value?.markedPictures?.()) ?? []
     const projectId = artifact.value?.projectId ?? ''
     const images = await Promise.all(
@@ -414,8 +448,10 @@ async function sendFeedback(explicit = false) {
       }
     } else if (explicit && !editedDuringSend && (initialPending > 0 || applied > 0)) {
       waiting.value = true
+      quietPaused.value = true
       pendingChanges.value = Math.max(initialPending, applied)
       pendingNotes.value = hadNotes
+      syncPendingStore(id)
     }
   } catch (error) {
     if (initialPending > 0 || applied > 0) {
@@ -423,6 +459,7 @@ async function sendFeedback(explicit = false) {
       quietPaused.value = true
       pendingChanges.value += Math.max(initialPending, applied)
       pendingNotes.value += hadNotes
+      syncPendingStore(id)
     }
     report(error)
   } finally {
@@ -442,6 +479,7 @@ async function withdrawSentFeedback() {
       waiting.value = true
       pendingChanges.value += target.hadPending
       pendingNotes.value += target.hadNotes
+      syncPendingStore(target.artifactId)
       scheduleQuietSend()
     } else {
       report(t('artifact.feedback.withdrawTooLate'))
@@ -535,6 +573,15 @@ function leave() {
   stopQuietTimer()
   clearSentRound()
   if (!room) return
+  if (waiting.value && pendingChanges.value > 0) {
+    setPendingArtifactFeedback(room.id, {
+      pendingChanges: pendingChanges.value,
+      pendingNotes: pendingNotes.value,
+      paused: true,
+    })
+  } else {
+    clearPendingArtifactFeedback(room.id)
+  }
   waiting.value = false
   quietPaused.value = false
   pendingChanges.value = 0

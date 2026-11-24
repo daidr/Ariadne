@@ -170,7 +170,9 @@ function currentSnapshot() {
 }
 
 const hasUnsavedChanges = computed(
-  () => !!settings.value && savedSnapshot.value !== '' && currentSnapshot() !== savedSnapshot.value,
+  () =>
+    (!!settings.value && savedSnapshot.value !== '' && currentSnapshot() !== savedSnapshot.value) ||
+    !!source.value?.dirty,
 )
 const showSaveFooter = computed(() => tab.value !== 'usage' || hasUnsavedChanges.value)
 
@@ -185,8 +187,17 @@ function discardAndClose() {
 watch(
   () => state.projectSettingsOpen,
   async (open) => {
+    if (!open) {
+      if (!hasUnsavedChanges.value) {
+        loadedProjectId.value = null
+        savedSnapshot.value = ''
+        settings.value = null
+        error.value = null
+      }
+      return
+    }
     const project = state.detail?.project
-    if (!open || !project) return
+    if (!project) return
     if (loadedProjectId.value === project.id && settings.value && hasUnsavedChanges.value) {
       now.value = Date.now()
       return

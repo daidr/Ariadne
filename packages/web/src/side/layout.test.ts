@@ -8,9 +8,11 @@ import {
   compactGroup,
   viewOf,
   defaultLayout,
+  focus,
   focusedGroup,
   focusedThread,
   groupsOf,
+  listOf,
   move,
   open,
   openThreads,
@@ -272,5 +274,20 @@ describe('side layout', () => {
     layout = open(layout, threadKey('a'))
     layout = closeOthers(layout, 'plan')
     expect(shape(layout.root)).toEqual(['plan', 'threads', 'artifacts'])
+  })
+
+  test('focuses the first group when returning a list copy from a focused secondary group', () => {
+    let layout = open(defaultLayout(), threadKey('a'), { beside: 'horizontal' })
+    const [first, second] = groupsOf(layout.root)
+    layout = updateDock(layout, moveDockTab(layout.root, 'plan', second!.id))
+    const copy = groupsOf(layout.root)[1]!.tabs.find((key) => listOf(key) === 'plan')!
+    // Focus stays on the secondary group which still holds another tab.
+    layout = focus(layout, second!.id)
+    expect(focusedGroup(layout).id).toBe(second!.id)
+
+    layout = updateDock(layout, moveDockTab(layout.root, copy, first!.id))
+    expect(focusedGroup(layout).id).toBe(first!.id)
+    expect(focusedGroup(layout).active).toBe('plan')
+    expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts'], ['thread:a']])
   })
 })

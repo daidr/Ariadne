@@ -89,20 +89,25 @@ export async function flushComments(threadId: string): Promise<boolean> {
   const projectId = projects.get(threadId) ?? state.currentId
   if (!drafts.length || !projectId || sending[threadId]) return false
   sending[threadId] = true
+  let sent = false
   try {
-    const sent = await sendLineComments(
+    sent = await sendLineComments(
       projectId,
       threadId,
       sendable(drafts),
       drafts.map((draft) => draft.id),
     )
-    if (!draftsOf(threadId).length) {
-      projects.delete(threadId)
-      delete paused[threadId]
-    }
     return sent
   } finally {
     delete sending[threadId]
+    if (!draftsOf(threadId).length) {
+      projects.delete(threadId)
+      delete paused[threadId]
+    } else if (!sent) {
+      paused[threadId] = true
+    } else if (!paused[threadId]) {
+      startCountdown(threadId)
+    }
   }
 }
 

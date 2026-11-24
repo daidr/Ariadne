@@ -14,7 +14,7 @@ import {
   DouText,
 } from 'dou-ui'
 import { CloseIcon, PlusIcon, TrashIcon } from '@dou-ui/icons'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   api,
   ApiError,
@@ -139,6 +139,15 @@ const message = (cause: unknown) =>
 
 /** A server an agent suggested, added as a draft; turned on for its project once saved. */
 let suggested: { id: string; projectId: string } | null = null
+let loaded = false
+
+function consumeSuggested() {
+  if (!loaded) return
+  const pending = suggestedServer.value
+  if (!pending) return
+  suggestedServer.value = null
+  suggest(pending.block, pending.projectId)
+}
 
 onMounted(async () => {
   try {
@@ -146,10 +155,11 @@ onMounted(async () => {
   } catch (cause) {
     error.value = message(cause)
   }
-  const pending = suggestedServer.value
-  suggestedServer.value = null
-  if (pending) suggest(pending.block, pending.projectId)
+  loaded = true
+  consumeSuggested()
 })
+
+watch(suggestedServer, consumeSuggested)
 
 function suggest(block: ConnectorBlock, projectId: string) {
   const existing = servers.value.find((server) => sameServer(block, inputOf(server)))

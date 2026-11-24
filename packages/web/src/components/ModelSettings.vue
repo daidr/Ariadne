@@ -429,7 +429,6 @@ const showSaveFooter = computed(() => !isReadOnlyTab.value || hasUnsavedChanges.
 
 function discardAndClose() {
   mounted.value = false
-  hiddenRoles.value = null
   savedModelDraft.value = ''
   error.value = null
   problems.value = []
@@ -462,7 +461,15 @@ async function reloadKinds() {
 }
 
 watch(open, async (isOpen) => {
-  if (!isOpen) return
+  if (!isOpen) {
+    if (!hasUnsavedChanges.value) {
+      mounted.value = false
+      savedModelDraft.value = ''
+      error.value = null
+      problems.value = []
+    }
+    return
+  }
   if (mounted.value && hasUnsavedChanges.value) return
   mounted.value = true
   error.value = null

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, ref } from 'vue'
 import { api, type ModelSettings, type ModelSettingsInput } from '../api'
 import { locale } from '../i18n'
 import { applyModelSettings, state } from '../store'
@@ -387,5 +387,68 @@ describe('ModelSettings', () => {
     expect(dialog().props('fullscreen')).toBe(true)
     expect(tabBar().props('placement')).toBe('top')
     expect(tabBar().props('height')).toBe('100%')
+  })
+
+  test('unmounts child tabs on clean close so reopening loads fresh data, but preserves dirty tabs', async () => {
+    const getModelSettings = vi
+      .spyOn(api, 'getModelSettings')
+      .mockResolvedValue(makeModelSettings(false))
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+
+    const mcpMounted = vi.fn()
+    const McpStub = defineComponent({
+      name: 'McpSettings',
+      setup() {
+        const dirty = ref(false)
+        mcpMounted()
+        return { dirty, save: async () => true }
+      },
+      render() {
+        return h('div', { class: 'mcp-stub' })
+      },
+    })
+
+    const wrapper = mount(ModelSettingsDialog, {
+      props: { open: false, tab: 'mcp' },
+      global: {
+        stubs: {
+          PluginSettings: true,
+          SearchSettings: true,
+          WorkSettings: true,
+          InputSettings: true,
+          McpSettings: McpStub,
+          DataTab: true,
+          UpdatesSettings: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(mcpMounted).toHaveBeenCalledTimes(1)
+    expect(getModelSettings).toHaveBeenCalledTimes(1)
+
+    // Clean close resets mounted so reopening remounts McpSettings and reloads settings.
+    await wrapper.setProps({ open: false })
+    await flushPromises()
+    expect(wrapper.findComponent(McpStub).exists()).toBe(false)
+
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(mcpMounted).toHaveBeenCalledTimes(2)
+    expect(getModelSettings).toHaveBeenCalledTimes(2)
+
+    // Dirty child stays mounted across accidental close/reopen.
+    ;(wrapper.findComponent(McpStub).vm as unknown as { dirty: boolean }).dirty = true
+    await flushPromises()
+    await wrapper.setProps({ open: false })
+    await flushPromises()
+    expect(wrapper.findComponent(McpStub).exists()).toBe(true)
+
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(mcpMounted).toHaveBeenCalledTimes(2)
+    expect(getModelSettings).toHaveBeenCalledTimes(2)
   })
 })
