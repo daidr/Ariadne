@@ -69,7 +69,7 @@ func checkDocumentDraft(t *testing.T, paragraph bool) {
 	}
 	browserEdit := func(old, replacement string) error {
 		t.Helper()
-		clientDoc, err := Load("document", active.state)
+		clientDoc, err := active.cloneDoc()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -124,7 +124,11 @@ func checkDocumentDraft(t *testing.T, paragraph bool) {
 			t.Fatal("server writer was assigned to a browser")
 		}
 	}
-	preview := protocol.EncodeUpdate(active.state)
+	previewState, err := crdt.EncodeStateAsUpdate(active.doc, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := protocol.EncodeUpdate(previewState)
 	draft.Close()
 	content, err := ReadDocument(active.doc)
 	if err != nil || strings.TrimSpace(content) != strings.TrimSpace(afterUser) {

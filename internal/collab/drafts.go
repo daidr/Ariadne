@@ -1,7 +1,6 @@
 package collab
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -23,6 +22,7 @@ type Draft struct {
 	last      string
 	writer    string
 	undo      *crdt.UndoManager
+	shadow    *crdt.Doc
 	pieces    int
 	wroteAt   time.Time
 	changed   bool
@@ -31,6 +31,25 @@ type Draft struct {
 	cursor    map[string]any
 	lockPulse *time.Timer
 	paragraph *paragraphDraft
+}
+
+func (draft *Draft) ensureShadow() (*crdt.Doc, error) {
+	if draft.shadow != nil {
+		return draft.shadow, nil
+	}
+	doc, err := draft.room.cloneDoc()
+	if err != nil {
+		return nil, err
+	}
+	draft.shadow = doc
+	return doc, nil
+}
+
+func (draft *Draft) dropShadow() {
+	if draft.shadow != nil {
+		draft.shadow.Destroy()
+		draft.shadow = nil
+	}
 }
 
 func (rooms *Rooms) Draft(ctx context.Context, id string, kind, writer string) (*Draft, error) {
@@ -43,7 +62,7 @@ func (rooms *Rooms) Draft(ctx context.Context, id string, kind, writer string) (
 	active.mu.Lock()
 	rooms.mu.Unlock()
 	defer active.mu.Unlock()
-	if active.doc == nil || active.artifact.Kind != kind || active.draft != nil || len(active.peers) == 0 || len(active.state) > maxRoomState/2 {
+	if active.doc == nil || active.artifact.Kind != kind || active.draft != nil || len(active.peers) == 0 || active.exceedsHalfStateLimit() {
 		return nil, nil
 	}
 	if !active.dirty.IsZero() {
@@ -79,61 +98,77 @@ func (rooms *Rooms) Draft(ctx context.Context, id string, kind, writer string) (
 	return draft, nil
 }
 
+func (draft *Draft) syncParagraphLast() {
+	if draft.paragraph != nil {
+		draft.last = draft.paragraph.before + draft.paragraph.rendered + draft.paragraph.after
+	}
+}
+
 func (draft *Draft) Write(next string) error {
 	active := draft.room
 	active.mu.Lock()
 	defer active.mu.Unlock()
-	if active.draft != draft || next == draft.last || len(next) > 256<<10 || draft.pieces >= 128 || time.Since(draft.wroteAt) < draftInterval {
+	if active.draft != draft {
+		return nil
+	}
+	draft.syncParagraphLast()
+	if next == draft.last || len(next) > 256<<10 || draft.pieces >= 128 || time.Since(draft.wroteAt) < draftInterval {
 		return nil
 	}
 	draft.paragraph = nil
 	kind := active.artifact.Kind
-	trial, err := Load(kind, active.state)
-	if err != nil {
-		return err
-	}
-	defer trial.Destroy()
-	base := draft.last
-	var changed map[string]bool
-	switch kind {
-	case "document":
+	if kind == "document" {
 		content, err := normalizeDocument(next)
 		if err != nil {
 			return err
 		}
-		changed, err = draft.updateDocumentPreview(trial, content)
-		if err != nil {
-			return err
-		}
 		next = content
-	case "whiteboard":
-		if err := UpdateWhiteboard(trial, next, &base, draft); err != nil {
-			return err
-		}
-	case "dashboard":
-		if err := UpdateDashboard(trial, next, &base, draft); err != nil {
-			return err
-		}
 	}
-	state, err := roomState(trial)
+	trial, err := draft.ensureShadow()
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(state, active.state) {
-		change, err := crdt.EncodeStateAsUpdate(trial, crdt.EncodeStateVector(active.doc))
+	base := draft.last
+	var changed map[string]bool
+	change, err := captureUpdates(trial, func() error {
+		switch kind {
+		case "document":
+			var err error
+			changed, err = draft.updateDocumentPreview(trial, next)
+			return err
+		case "whiteboard":
+			return UpdateWhiteboard(trial, next, &base, draft)
+		case "dashboard":
+			return UpdateDashboard(trial, next, &base, draft)
+		default:
+			return nil
+		}
+	})
+	if err != nil {
+		if len(change) > 0 {
+			draft.dropShadow()
+		}
+		return err
+	}
+	if len(change) > 0 {
+		compacted, err := active.checkStateLimit(trial, len(change), 0)
 		if err != nil {
+			draft.dropShadow()
 			return err
 		}
 		if kind == "document" {
 			if err := draft.lockDocumentBlocks(changed); err != nil {
+				draft.dropShadow()
 				return err
 			}
 		}
-		writerState := observeWriter(active, func() { err = crdt.ApplyUpdate(active.doc, change, draft) }, draft.writer)
-		if err != nil {
-			return err
+		var applyErr error
+		writerState := observeWriter(active, func() { applyErr = crdt.ApplyUpdate(active.doc, change, draft) }, draft.writer)
+		if applyErr != nil {
+			draft.dropShadow()
+			return applyErr
 		}
-		active.state = state
+		active.recordApplied(change, compacted, 0)
 		active.broadcast(protocol.EncodeUpdate(change), nil)
 		if kind == "document" {
 			draft.cursor = writerState
@@ -169,11 +204,12 @@ func (draft *Draft) ReserveDocument(next string) error {
 	if active.draft != draft || active.artifact.Kind != "document" || next == draft.reserved || len(next) > 256<<10 {
 		return nil
 	}
+	draft.syncParagraphLast()
 	content, err := normalizeDocument(next)
 	if err != nil {
 		return err
 	}
-	trial, err := Load("document", active.state)
+	trial, err := active.cloneDoc()
 	if err != nil {
 		return err
 	}
@@ -215,29 +251,34 @@ func (active *room) rollbackDraft() bool {
 		return false
 	}
 	active.draft = nil
+	draft.dropShadow()
 	if draft.lockPulse != nil {
 		draft.lockPulse.Stop()
 	}
-	vector := crdt.EncodeStateVector(active.doc)
-	for draft.undo.CanUndo() {
-		if draft.undo.Undo() == nil {
-			break
+	change, err := captureUpdates(active.doc, func() error {
+		for draft.undo.CanUndo() {
+			if draft.undo.Undo() == nil {
+				break
+			}
 		}
-	}
+		return nil
+	})
 	draft.undo.Destroy()
 	draft.undo = nil
 	if draft.changed {
-		state, err := roomState(active.doc)
 		if err != nil {
 			active.owner.report(err)
-		} else {
-			active.state = state
-			active.checkpoint = true
-		}
-		if change, err := crdt.EncodeStateAsUpdate(active.doc, vector); err == nil {
+		} else if len(change) > 0 {
 			active.broadcast(protocol.EncodeUpdate(change), nil)
+			compacted, limitErr := active.checkStateLimit(active.doc, len(change), 0)
+			if limitErr != nil {
+				active.owner.report(limitErr)
+			} else {
+				active.recordApplied(change, compacted, 0)
+				active.checkpoint = true
+			}
 		} else {
-			active.owner.report(err)
+			active.checkpoint = true
 		}
 	}
 	if !active.dirty.IsZero() {
