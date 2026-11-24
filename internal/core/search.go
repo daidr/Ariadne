@@ -212,6 +212,67 @@ func snippet(text string, terms []string) string {
 }
 func jsLower(value string) string { return textutil.Lower(value) }
 
+func uniqueColumnValues(rows []record, column string) []string {
+	ids := make([]string, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		id := row.text(column)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func inPlaceholders(count int) string {
+	return strings.Repeat("?,", count-1) + "?"
+}
+
+func lookupThreadTitles(ctx context.Context, db queryer, projectID string, ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, projectID)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := records(ctx, db, "SELECT id, title FROM threads WHERE project_id = ? AND id IN ("+inPlaceholders(len(ids))+")", args...)
+	if err != nil {
+		return nil, err
+	}
+	titles := make(map[string]string, len(rows))
+	for _, row := range rows {
+		titles[row.text("id")] = row.text("title")
+	}
+	return titles, nil
+}
+
+func lookupArtifactKinds(ctx context.Context, db queryer, projectID string, ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, projectID)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := records(ctx, db, "SELECT id, kind FROM artifacts WHERE project_id = ? AND id IN ("+inPlaceholders(len(ids))+")", args...)
+	if err != nil {
+		return nil, err
+	}
+	kinds := make(map[string]string, len(rows))
+	for _, row := range rows {
+		kinds[row.text("id")] = row.text("kind")
+	}
+	return kinds, nil
+}
+
 func (reader Reader) Search(ctx context.Context, projectID, query string) (result object, err error) {
 	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
 		projects, err := records(ctx, tx, "SELECT id FROM projects WHERE id = ?", projectID)
@@ -222,22 +283,6 @@ func (reader Reader) Search(ctx context.Context, projectID, query string) (resul
 			return domainerr.NotFound(projectID)
 		}
 		terms := searchTerms(query)
-		titleRows, err := records(ctx, tx, "SELECT id, title FROM threads WHERE project_id = ?", projectID)
-		if err != nil {
-			return err
-		}
-		titles := map[string]string{}
-		for _, row := range titleRows {
-			titles[row.text("id")] = row.text("title")
-		}
-		kindRows, err := records(ctx, tx, "SELECT id, kind FROM artifacts WHERE project_id = ?", projectID)
-		if err != nil {
-			return err
-		}
-		kinds := map[string]string{}
-		for _, row := range kindRows {
-			kinds[row.text("id")] = row.text("kind")
-		}
 		result = object{"terms": terms}
 		for _, kind := range []string{"thread", "artifact", "message"} {
 			limit := 5
@@ -248,7 +293,20 @@ func (reader Reader) Search(ctx context.Context, projectID, query string) (resul
 			if err != nil {
 				return err
 			}
-			hits := []object{}
+			var titles, kinds map[string]string
+			switch kind {
+			case "message":
+				titles, err = lookupThreadTitles(ctx, tx, projectID, uniqueColumnValues(rows, "conversation_id"))
+				if err != nil {
+					return err
+				}
+			case "artifact":
+				kinds, err = lookupArtifactKinds(ctx, tx, projectID, uniqueColumnValues(rows, "ref_id"))
+				if err != nil {
+					return err
+				}
+			}
+			hits := make([]object, 0, len(rows))
 			for _, row := range rows {
 				hit := object{"kind": kind, "id": row["ref_id"], "snippet": snippet(row.text("body"), terms), "at": row["at"]}
 				if kind == "message" {
@@ -270,11 +328,7 @@ func (reader Reader) Search(ctx context.Context, projectID, query string) (resul
 				}
 				hits = append(hits, hit)
 			}
-			key := kind + "s"
-			if kind == "artifact" {
-				key = "artifacts"
-			}
-			result[key] = hits
+			result[kind+"s"] = hits
 		}
 		return nil
 	})
