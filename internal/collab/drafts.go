@@ -151,7 +151,7 @@ func (draft *Draft) Write(next string) error {
 		return err
 	}
 	if len(change) > 0 {
-		compacted, err := active.checkStateLimit(trial, len(change), 0)
+		compacted, err := active.checkStateLimit(trial, len(change))
 		if err != nil {
 			draft.dropShadow()
 			return err
@@ -168,7 +168,7 @@ func (draft *Draft) Write(next string) error {
 			draft.dropShadow()
 			return applyErr
 		}
-		active.recordApplied(change, compacted, 0)
+		active.recordApplied(change, compacted)
 		active.broadcast(protocol.EncodeUpdate(change), nil)
 		if kind == "document" {
 			draft.cursor = writerState
@@ -270,11 +270,11 @@ func (active *room) rollbackDraft() bool {
 			active.owner.report(err)
 		} else if len(change) > 0 {
 			active.broadcast(protocol.EncodeUpdate(change), nil)
-			compacted, limitErr := active.checkStateLimit(active.doc, len(change), 0)
+			compacted, limitErr := active.checkStateLimit(active.doc, len(change))
 			if limitErr != nil {
 				active.owner.report(limitErr)
 			} else {
-				active.recordApplied(change, compacted, 0)
+				active.recordApplied(change, compacted)
 				active.checkpoint = true
 			}
 		} else {

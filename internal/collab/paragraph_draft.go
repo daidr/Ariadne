@@ -108,10 +108,10 @@ func (draft *Draft) WriteParagraph(anchor string, replacement *string) (bool, er
 	draft.changed = true
 	if err == nil {
 		var compacted []byte
-		compacted, err = active.checkStateLimit(active.doc, len(change), 0)
+		compacted, err = active.checkStateLimit(active.doc, len(change))
 		if err == nil {
 			if len(change) > 0 {
-				active.recordApplied(change, compacted, 0)
+				active.recordApplied(change, compacted)
 				if draft.shadow != nil {
 					if syncErr := crdt.ApplyUpdate(draft.shadow, change, "sync"); syncErr != nil {
 						draft.dropShadow()
@@ -126,6 +126,9 @@ func (draft *Draft) WriteParagraph(anchor string, replacement *string) (bool, er
 			draft.wroteAt = time.Now()
 			return true, nil
 		}
+	}
+	if len(change) > 0 {
+		active.recordApplied(change, nil)
 	}
 	// Roll back the draft if we cannot encode the resulting shared state.
 	active.cancelDraft()
