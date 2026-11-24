@@ -257,3 +257,83 @@ describe('ChangedFileDiff syntax highlighting', () => {
     proto.unmount()
   })
 })
+
+describe('ChangedFileDiff gutter layout', () => {
+  test('overlays line comments and omits empty review-comments gutter until review notes exist', () => {
+    const file: ChangedFile = {
+      path: 'sample.ts',
+      previousPath: null,
+      status: 'modified',
+      added: 1,
+      removed: 1,
+    }
+    const loadVersions = cachedLoader('const a = 1\n', 'const a = 2\n')
+
+    const withoutNotes = mount(ChangedFileDiff, {
+      props: {
+        threadId: 'thr-diff-gutter-empty',
+        file,
+        loadVersions,
+        sent: [],
+        notes: [],
+        mode: 'inline',
+      },
+      attachTo: document.body,
+    })
+    const emptyRow = withoutNotes.find('.dou-code-editor__number')
+    expect(emptyRow.findAll('.dou-code-editor__cells > .dou-code-editor__cell')).toHaveLength(3)
+    expect(
+      emptyRow.findAll('.dou-code-editor__overlays > .dou-code-editor__cell.is-overlay'),
+    ).toHaveLength(1)
+    withoutNotes.unmount()
+
+    const withNotes = mount(ChangedFileDiff, {
+      props: {
+        threadId: 'thr-diff-gutter-notes',
+        file,
+        loadVersions,
+        sent: [],
+        notes: [
+          {
+            id: 'r0c0',
+            round: {
+              threadId: 'thr-diff-gutter-notes',
+              round: 1,
+              reviewerId: 'rev_1',
+              head: null,
+              requestedAt: 1,
+              verdict: null,
+              abandoned: false,
+              summary: null,
+              replies: null,
+              submittedAt: 1,
+              comments: [
+                {
+                  path: 'sample.ts',
+                  line: 1,
+                  quote: 'const a = 2',
+                  body: 'ok',
+                  kind: 'bug',
+                },
+              ],
+            },
+            comment: {
+              path: 'sample.ts',
+              line: 1,
+              quote: 'const a = 2',
+              body: 'ok',
+              kind: 'bug',
+            },
+            reply: null,
+          },
+        ],
+        mode: 'inline',
+      },
+      attachTo: document.body,
+    })
+    const notedRow = withNotes.find('.dou-code-editor__number')
+    expect(notedRow.findAll('.dou-code-editor__cells > .dou-code-editor__cell')).toHaveLength(4)
+    expect(withNotes.find('.review-comment-mark').exists()).toBe(true)
+    withNotes.unmount()
+  })
+})

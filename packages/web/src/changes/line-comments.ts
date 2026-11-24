@@ -180,6 +180,7 @@ export function useLineComments(
     return {
       name: 'line-comments',
       width: 18,
+      overlay: true,
       markers,
       hoverMarker: { icon: PlusIcon, title: t('changes.comment') },
       onPress: (line, _event, side) => {

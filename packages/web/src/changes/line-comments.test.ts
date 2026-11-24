@@ -20,6 +20,8 @@ describe('line comments in the diff', () => {
     await nextTick()
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(wrapper.findAll('.dou-code-diff__bar').length).toBeGreaterThan(0)
+    expect(gutter.value.overlay).toBe(true)
+    expect(wrapper.findAll('.dou-code-editor__cell.is-overlay').length).toBeGreaterThan(0)
     wrapper.unmount()
   })
 })
