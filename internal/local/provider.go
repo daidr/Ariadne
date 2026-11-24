@@ -81,13 +81,7 @@ func (factory *Workspaces) Capability() *sdk.WorkspaceCapability {
 			return factory.FileVersions(ctx, inputs)
 		},
 		Merged: func(ctx context.Context, thread sdk.ThreadBranch, base string) (bool, error) {
-			ctx, done, err := factory.begin(ctx)
-			if err != nil {
-				return false, err
-			}
-			defer done()
-			merged := BranchMerged(ctx, factory.git, thread.Branch, "refs/heads/"+base)
-			return merged, ctx.Err()
+			return factory.Merged(ctx, thread, "refs/heads/"+base)
 		},
 		Merge: func(ctx context.Context, input sdk.MergeRequest) (sdk.MergeOutcome, error) {
 			ctx, done, err := factory.begin(ctx)
@@ -106,7 +100,7 @@ func (factory *Workspaces) Capability() *sdk.WorkspaceCapability {
 			return UndoMerge(ctx, factory.git, UndoMergeInput{Branch: input.Branch, Base: input.Base, SHA: input.SHA})
 		},
 		Remove: func(ctx context.Context, threadID string, options sdk.WorktreeRemoveOptions) (bool, error) {
-			return factory.Remove(ctx, threadID, RemoveOptions{Discard: options.Discard, Spare: options.Spare})
+			return factory.Remove(ctx, threadID, RemoveOptions{Discard: options.Discard, Spare: options.Spare, Merged: options.Merged})
 		},
 		RemoveOrphaned: factory.RemoveOrphaned,
 		Worktrees:      factory.Worktrees, SharesStorage: factory.SharesStorage, Snapshot: factory.Snapshot,

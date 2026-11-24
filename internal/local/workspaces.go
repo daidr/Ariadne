@@ -565,6 +565,35 @@ func (factory *Workspaces) revisions(ctx context.Context, branch, baseRef, remot
 	return branchRevisions(ctx, factory.git, branch, baseRef, remoteBaseRef)
 }
 
+func (factory *Workspaces) Merged(ctx context.Context, thread sdk.ThreadBranch, baseRef string) (bool, error) {
+	ctx, done, err := factory.begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer done()
+	if !BranchMerged(ctx, factory.git, thread.Branch, baseRef) {
+		return false, ctx.Err()
+	}
+	if thread.ThreadID == "" {
+		return true, nil
+	}
+	dir, err := factory.checkedDirectory(thread.ThreadID)
+	if err != nil {
+		return false, err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	if !info.IsDir() {
+		return true, nil
+	}
+	return embeddedReposLanded(ctx, dir)
+}
+
 func (factory *Workspaces) Changes(ctx context.Context, threadID, branch, base string) (*sdk.BranchChanges, error) {
 	ctx, done, err := factory.begin(ctx)
 	if err != nil {

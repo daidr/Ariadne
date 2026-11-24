@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -152,5 +153,39 @@ func TestStorageKeepsPreviousMeasurementUntilRefresh(t *testing.T) {
 	refreshed, err := store.MeasureStorage(t.Context(), []string{"a"})
 	if err != nil || refreshed == nil || *refreshed.Total != 2 || refreshed.MeasuredAt <= first.MeasuredAt {
 		t.Fatal(refreshed, err)
+	}
+}
+
+func TestStoreMeasureStorageIncludesSiblingWorktreesWithoutDoubleCountingPlugins(t *testing.T) {
+	store, _ := testStore(t, nil)
+	managedWT := filepath.Join(store.options.Home, "plugins", "local", "worktrees", "repo1", "thr_1")
+	siblingWT := filepath.Join(t.TempDir(), ".ariadne-worktrees", "repo2", "thr_2")
+	for _, dir := range []string{managedWT, siblingWT} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "data.bin"), make([]byte, 16<<10), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	managedOnly, err := store.MeasureStorage(t.Context(), []string{managedWT})
+	if err != nil || managedOnly == nil || managedOnly.Managed == nil {
+		t.Fatalf("managedOnly: %+v, %v", managedOnly, err)
+	}
+	snapshot, err := store.MeasureStorage(t.Context(), []string{managedWT, siblingWT})
+	if err != nil || snapshot == nil || snapshot.Managed == nil || snapshot.Total == nil {
+		t.Fatalf("snapshot: %+v, %v", snapshot, err)
+	}
+	siblingSize := snapshot.Worktrees[siblingWT].Bytes
+	managedSize := snapshot.Worktrees[managedWT].Bytes
+	if siblingSize == nil || managedSize == nil {
+		t.Fatalf("missing worktree sizes: %+v", snapshot.Worktrees)
+	}
+	if *snapshot.Total != *managedSize+*siblingSize {
+		t.Fatalf("total=%d, want=%d", *snapshot.Total, *managedSize+*siblingSize)
+	}
+	if *snapshot.Managed != *managedOnly.Managed+*siblingSize {
+		t.Fatalf("managed=%d, want=%d (managedOnly=%d, sibling=%d)",
+			*snapshot.Managed, *managedOnly.Managed+*siblingSize, *managedOnly.Managed, *siblingSize)
 	}
 }

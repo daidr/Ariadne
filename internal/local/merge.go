@@ -241,7 +241,31 @@ func holdsMore(ctx context.Context, git GitRun, directory string) bool {
 	return false
 }
 
-type RemoveOptions struct{ Discard, Spare bool }
+type RemoveOptions struct{ Discard, Spare, Merged bool }
+
+func outerWorktreeBlocked(ctx context.Context, git GitRun, directory string) (bool, error) {
+	gitDirRes := git(ctx, []string{"rev-parse", "--path-format=absolute", "--git-dir"}, GitOptions{Directory: directory})
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if gitDirRes.ExitCode != 0 {
+		return true, nil
+	}
+	if outerGitDir := strings.TrimSpace(gitDirRes.Stdout); outerGitDir != "" {
+		if _, err := os.Lstat(filepath.Join(outerGitDir, "locked")); err == nil || !os.IsNotExist(err) {
+			return true, nil
+		}
+	}
+	statusArgs := append(worktreeConfigArgs(ctx, directory), "status", "--porcelain=v1", "-z", "--untracked-files=normal")
+	status := git(ctx, statusArgs, GitOptions{Directory: directory, Whole: true})
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if status.ExitCode != 0 || status.Stdout != "" {
+		return true, nil
+	}
+	return false, nil
+}
 
 func RemoveWorktree(ctx context.Context, git GitRun, directory string, options RemoveOptions) (bool, error) {
 	if _, err := os.Lstat(directory); os.IsNotExist(err) {
@@ -256,6 +280,42 @@ func RemoveWorktree(ctx context.Context, git GitRun, directory string, options R
 	if options.Spare && !options.Discard && holdsMore(ctx, git, directory) {
 		return false, nil
 	}
+	embedded, err := DiscoverEmbeddedRepos(ctx, directory)
+	if err != nil {
+		if !options.Discard || ctx.Err() != nil {
+			return false, err
+		}
+		embedded = nil
+	}
+	if !options.Discard && len(embedded) > 0 {
+		for _, repo := range embedded {
+			status, err := InspectEmbeddedRepo(ctx, repo)
+			if err != nil {
+				return false, err
+			}
+			if status.Dirty || (repo.ObjectStoreInsideWorktree && status.Unpushed) || (options.Merged && status.Unmerged) {
+				return false, nil
+			}
+		}
+		if len(nestedWorktreesDeepestFirst(embedded)) > 0 {
+			blocked, err := outerWorktreeBlocked(ctx, git, directory)
+			if err != nil {
+				return false, err
+			}
+			if blocked {
+				return false, nil
+			}
+		}
+	}
+	if len(embedded) > 0 {
+		removedNested, err := removeNestedWorktrees(ctx, embedded, options.Discard)
+		if err != nil {
+			return false, err
+		}
+		if !removedNested {
+			return false, nil
+		}
+	}
 	args := []string{"worktree", "remove"}
 	if options.Discard {
 		args = append(args, "--force", "--force")
@@ -266,7 +326,7 @@ func RemoveWorktree(ctx context.Context, git GitRun, directory string, options R
 		return true, nil
 	}
 	lower := strings.ToLower(result.Stderr)
-	if strings.Contains(lower, "modified or untracked") || strings.Contains(lower, "use --force") {
+	if strings.Contains(lower, "modified or untracked") || strings.Contains(lower, "use --force") || strings.Contains(lower, "locked") {
 		return false, nil
 	}
 	return false, gitFailure(result, "git worktree remove")

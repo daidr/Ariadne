@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 )
 
 // DirectorySize reports per-file allocation, with a logical-length fallback on Windows.
@@ -92,8 +93,10 @@ type directoryScan struct {
 }
 
 // MeasureStorage visits the union of the managed directory and worktrees once.
-// Each visited entry contributes to the applicable totals, even when a worktree
-// lives inside the managed directory. Hard links are deduplicated per total.
+// Managed measures the managed directory together with any worktrees stored
+// outside it (such as sibling .ariadne-worktrees directories) without double
+// counting worktrees inside the managed directory. Hard links are deduplicated
+// per total.
 func MeasureStorage(ctx context.Context, managed string, worktrees []string) StorageSizes {
 	result := StorageSizes{Worktrees: make(map[string]DirectorySize)}
 	select {
@@ -133,7 +136,7 @@ func MeasureStorage(ctx context.Context, managed string, worktrees []string) Sto
 			continue
 		}
 		if err != nil {
-			if !errors.Is(err, fs.ErrNotExist) && path == managed {
+			if !errors.Is(err, fs.ErrNotExist) {
 				scan.managed.failed = true
 			}
 			continue
@@ -198,13 +201,16 @@ func (scan *directoryScan) visit(ctx context.Context, path string, info fs.FileI
 func (scan *directoryScan) directoryCounters(path string, counts []*sizeCounter, inWorktree bool) ([]*sizeCounter, bool) {
 	// Children can share their parent's scope list without modifying it.
 	counts = counts[:len(counts):len(counts)]
-	if path == scan.root {
+	if path == scan.root && !slices.Contains(counts, scan.managed) {
 		counts = append(counts, scan.managed)
 	}
 	if counter := scan.worktrees[path]; counter != nil {
 		counts = append(counts, counter)
 		if !inWorktree {
 			counts = append(counts, scan.total)
+		}
+		if !slices.Contains(counts, scan.managed) {
+			counts = append(counts, scan.managed)
 		}
 		inWorktree = true
 	}

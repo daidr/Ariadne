@@ -469,13 +469,7 @@ func (host *Hosted) Capability() *sdk.WorkspaceCapability {
 		return BranchChanges(ctx, host.owner.git, BranchInput{Branch: thread.Branch, Base: base, BaseRef: "refs/remotes/origin/" + base, Worktree: dir})
 	}
 	branches.Merged = func(ctx context.Context, thread sdk.ThreadBranch, base string) (bool, error) {
-		ctx, done, err := host.owner.begin(ctx)
-		if err != nil {
-			return false, err
-		}
-		defer done()
-		merged := BranchMerged(ctx, host.owner.git, thread.Branch, "refs/remotes/origin/"+base)
-		return merged, ctx.Err()
+		return host.owner.Merged(ctx, thread, "refs/remotes/origin/"+base)
 	}
 	remove := branches.Remove
 	branches.Remove = func(ctx context.Context, threadID string, options sdk.WorktreeRemoveOptions) (bool, error) {
