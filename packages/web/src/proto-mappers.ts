@@ -752,6 +752,23 @@ function fromProtoFeedbackItem(item: ProtoArtifactFeedbackItem): ArtifactFeedbac
           ...(a.note ? { note: a.note } : {}),
         })),
       }
+    case 'tweak':
+      return {
+        kind: 'tweak',
+        tweaks: item.item.value.tweaks.map((entry) => ({
+          nodeId: entry.nodeId,
+          title: entry.title,
+          ...(entry.optionId ? { optionId: entry.optionId } : {}),
+          ...(entry.optionTitle ? { optionTitle: entry.optionTitle } : {}),
+          changes: entry.changes.map((c) => ({
+            key: c.key,
+            label: c.label,
+            value: c.value,
+            ...(c.previous !== undefined ? { previous: c.previous } : {}),
+            ...(c.unit ? { unit: c.unit } : {}),
+          })),
+        })),
+      }
     default:
       return null
   }

@@ -80,40 +80,52 @@ func (turn *turn) whiteboardChange(ctx context.Context, input args) (func(string
 	if err != nil {
 		return nil, err
 	}
-	resolvedImages := map[string]boardPicture{}
-	for _, item := range items {
-		id := text(item, "id")
-		kind := text(item, "kind")
-		hasFile := text(item, "file") != "" || text(item, "path") != ""
-		if kind == "image" || hasFile {
-			if hasFile {
-				pic, err := turn.boardPicture(ctx, item)
-				if err != nil {
-					return nil, fmt.Errorf("item %q: %w", id, err)
+		resolvedImages := map[string]boardPicture{}
+		resolvedPrototypes := map[string]boardPrototype{}
+		for _, item := range items {
+			id := text(item, "id")
+			kind := text(item, "kind")
+			hasHTML := text(item, "html") != ""
+			hasFile := text(item, "file") != "" || text(item, "path") != ""
+			if kind == "prototype" || hasHTML {
+				if hasHTML || hasFile {
+					proto, err := turn.resolvePrototype(ctx, item)
+					if err != nil {
+						return nil, fmt.Errorf("item %q: %w", id, err)
+					}
+					resolvedPrototypes[id] = proto
 				}
-				resolvedImages[id] = pic
+				continue
+			}
+			if kind == "image" || hasFile {
+				if hasFile {
+					pic, err := turn.boardPicture(ctx, item)
+					if err != nil {
+						return nil, fmt.Errorf("item %q: %w", id, err)
+					}
+					resolvedImages[id] = pic
+				}
 			}
 		}
+		return func(base string) (string, error) {
+			var board whiteboard
+			if err := json.Unmarshal([]byte(base), &board); err != nil {
+				return "", err
+			}
+			if err := board.change(items, connectors, removeItems, removeEdges, direction, input["relayout"] == true, resolvedImages, resolvedPrototypes); err != nil {
+				return "", err
+			}
+			if err := board.placeGroupsAndOptions(groups, options, pick); err != nil {
+				return "", err
+			}
+			encoded, err := jsonutil.Encode(board)
+			return string(encoded), err
+		}, nil
 	}
-	return func(base string) (string, error) {
-		var board whiteboard
-		if err := json.Unmarshal([]byte(base), &board); err != nil {
-			return "", err
-		}
-		if err := board.change(items, connectors, removeItems, removeEdges, direction, input["relayout"] == true, resolvedImages); err != nil {
-			return "", err
-		}
-		if err := board.placeGroupsAndOptions(groups, options, pick); err != nil {
-			return "", err
-		}
-		encoded, err := jsonutil.Encode(board)
-		return string(encoded), err
-	}, nil
-}
 
-var boardSizes = map[string][2]float64{
-	"rect": {160, 90}, "ellipse": {160, 90}, "diamond": {160, 110}, "sticky": {160, 160}, "text": {200, 40}, "pending": {160, 90}, "image": {320, 240},
-}
+	var boardSizes = map[string][2]float64{
+		"rect": {160, 90}, "ellipse": {160, 90}, "diamond": {160, 110}, "sticky": {160, 160}, "text": {200, 40}, "pending": {160, 90}, "image": {320, 240}, "prototype": {480, 336},
+	}
 
 func boardItems(values []args) map[string]args {
 	result := make(map[string]args, len(values))
@@ -142,18 +154,20 @@ func boardKind(node args) string {
 	return kind
 }
 
-func applyBoardItem(node, input args, resolvedImages map[string]boardPicture) error {
-	before, kind := boardKind(node), text(input, "kind")
-	if kind == "" {
-		kind = before
+	func applyBoardItem(node, input args, resolvedImages map[string]boardPicture, resolvedPrototypes map[string]boardPrototype) error {
+		before, kind := boardKind(node), text(input, "kind")
 		if kind == "" {
-			if text(input, "file") != "" || text(input, "path") != "" {
-				kind = "image"
-			} else {
-				kind = "rect"
+			kind = before
+			if kind == "" {
+				if text(input, "html") != "" {
+					kind = "prototype"
+				} else if text(input, "file") != "" || text(input, "path") != "" {
+					kind = "image"
+				} else {
+					kind = "rect"
+				}
 			}
 		}
-	}
 	size, supported := boardSizes[kind]
 	if _, editable := boardSizes[before]; before != "" && !editable {
 		if input["kind"] != nil || input["text"] != nil || input["tone"] != nil {
@@ -172,7 +186,55 @@ func applyBoardItem(node, input args, resolvedImages map[string]boardPicture) er
 	}
 	data := objectField(node, "data")
 	node["data"], node["type"] = data, kind
-	if kind == "image" {
+		if kind == "prototype" {
+			id := text(node, "id")
+			if proto, hasProto := resolvedPrototypes[id]; hasProto {
+				data = prototypeNodeData(proto, node)
+				node["data"] = data
+				_, hasW := input["width"].(float64)
+				_, hasH := input["height"].(float64)
+				if !hasW && !hasH {
+					w, h := prototypeCardSize(proto.viewportWidth, proto.viewportHeight, 0)
+					node["width"], node["height"] = w, h
+				} else if hasW && !hasH {
+					_, h := prototypeCardSize(proto.viewportWidth, proto.viewportHeight, asNumber(node["width"]))
+					node["height"] = h
+				}
+			} else if text(data, "html") == "" && text(data, "src") == "" {
+				return errors.New("prototype item requires html, file, or path")
+			} else {
+				if title, ok := input["title"].(string); ok {
+					data["title"] = title
+				}
+				if note, ok := input["note"].(string); ok {
+					if note == "" {
+						delete(data, "note")
+					} else {
+						data["note"] = note
+					}
+				}
+				if input["tweaks"] != nil {
+					tweaks, err := normalizePrototypeTweaks(input["tweaks"])
+					if err != nil {
+						return fmt.Errorf("tweaks: %w", err)
+					}
+					data["tweaks"] = tweaks
+				}
+			}
+			if text(data, "title") == "" {
+				if label, ok := input["text"].(string); ok && label != "" {
+					data["title"] = label
+				}
+			}
+			if asNumber(node["width"]) <= 0 {
+				node["width"] = size[0]
+			}
+			if asNumber(node["height"]) <= 0 {
+				node["height"] = size[1]
+			}
+			return nil
+		}
+		if kind == "image" {
 		delete(data, "shape")
 		delete(data, "tone")
 		id := text(node, "id")
@@ -248,7 +310,7 @@ func boardEndpoint(edge args, end string) string {
 	return text(objectField(edge, end), "node")
 }
 
-func (board *whiteboard) change(items, connectors []args, removeItems, removeEdges []string, direction string, relayout bool, resolvedImages map[string]boardPicture) error {
+	func (board *whiteboard) change(items, connectors []args, removeItems, removeEdges []string, direction string, relayout bool, resolvedImages map[string]boardPicture, resolvedPrototypes map[string]boardPrototype) error {
 	removed := map[string]bool{}
 	for _, id := range removeItems {
 		removed[id] = true
@@ -278,7 +340,7 @@ func (board *whiteboard) change(items, connectors []args, removeItems, removeEdg
 			nodes[id] = node
 			board.Nodes = append(board.Nodes, node)
 		}
-		if err := applyBoardItem(node, item, resolvedImages); err != nil {
+			if err := applyBoardItem(node, item, resolvedImages, resolvedPrototypes); err != nil {
 			return fmt.Errorf("item %q: %w", id, err)
 		}
 		moved[id] = true

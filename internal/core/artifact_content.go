@@ -16,7 +16,7 @@ import (
 
 const maxArtifactJSON = 8 * 1024 * 1024
 
-var whiteboardNodeTypes = []string{"shape", "sticky", "text", "ink", "image", "default", "group", "option", "pending"}
+var whiteboardNodeTypes = []string{"shape", "sticky", "text", "ink", "image", "default", "group", "option", "pending", "prototype"}
 var dashboardWidgetTypes = []string{"stat", "text", "table", "chart", "pivot", "pending"}
 
 // ECMAScript whitespace also includes NBSP and FEFF, but excludes U+0085.
@@ -174,11 +174,32 @@ func checkWhiteboard(raw any) error {
 		if data, has := node["data"]; has && asObject(data) == nil {
 			return artifactInvalid(fmt.Sprintf("node %q data is not an object", id))
 		}
-		if node.str("type") == "option" {
-			if _, ok := node.obj("data")["title"].(string); !ok {
-				return artifactInvalid(fmt.Sprintf("option %q needs data.title", id))
+			if node.str("type") == "option" {
+				if _, ok := node.obj("data")["title"].(string); !ok {
+					return artifactInvalid(fmt.Sprintf("option %q needs data.title", id))
+				}
 			}
-		}
+			if node.str("type") == "prototype" {
+				data := node.obj("data")
+				html := data.str("html")
+				src := data.str("src")
+				if html == "" && src == "" {
+					return artifactInvalid(fmt.Sprintf("prototype %q needs data.html or data.src", id))
+				}
+				if src != "" && !strings.HasPrefix(src, "/api/files/") {
+					return artifactInvalid(fmt.Sprintf("prototype %q data.src must be a project file URL", id))
+				}
+				if rawW, has := data["viewportWidth"]; has {
+					if w, ok := number(rawW); !ok || w <= 0 || w > 10000 {
+						return artifactInvalid(fmt.Sprintf("prototype %q data.viewportWidth must be a positive number", id))
+					}
+				}
+				if rawH, has := data["viewportHeight"]; has {
+					if h, ok := number(rawH); !ok || h <= 0 || h > 10000 {
+						return artifactInvalid(fmt.Sprintf("prototype %q data.viewportHeight must be a positive number", id))
+					}
+				}
+			}
 		if node.str("type") == "group" || node.str("type") == "option" {
 			containers[id] = true
 		}

@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import type { ArtifactCommentThreadView, WhiteboardContent } from '@ariadne/core'
+import type {
+  ArtifactCommentAnchor,
+  ArtifactCommentThreadView,
+  WhiteboardContent,
+} from '@ariadne/core'
 import {
   DouFlowControls,
   DouFlowEditor,
@@ -24,6 +28,7 @@ import {
   type DecisionGroupData,
   type DecisionGroupSummary,
 } from './decision-groups'
+import { inspectPrototypePoint, resolvePrototypeViewportPoint } from './prototype-bridge'
 import type { SharedArtifact } from './shared'
 import { whiteboardExtensions } from './whiteboard-extensions'
 
@@ -42,7 +47,7 @@ const props = defineProps<{
   comments?: ArtifactCommentThreadView[]
 }>()
 const emit = defineEmits<{
-  comment: [action: CommentAction, anchor: { node: string } | { edge: string } | null]
+  comment: [action: CommentAction, anchor: ArtifactCommentAnchor | null]
   decisionSummary: [summary: DecisionGroupSummary]
 }>()
 const active = defineModel<string | null>('activeComment', { default: null })
@@ -85,15 +90,25 @@ watch(
 
 const anchorOf = (id: string) => editor.value?.getCommentAnchors()[id] ?? null
 
-function onComment(action: CommentAction) {
+async function onComment(action: CommentAction) {
   if (action.type !== 'create') return emit('comment', action, null)
   const anchor = anchorOf(action.thread.id)
+  if (!anchor) return emit('comment', action, null)
+  if ('edge' in anchor) return emit('comment', action, { edge: anchor.edge })
+
+  const out: ArtifactCommentAnchor = { node: anchor.node }
+  const targetNode = board.value.nodes.find((n) => n.id === anchor.node)
+  const pins = targetNode?.commentPins as Record<string, { x: number; y: number }> | undefined
+  const pin = anchor.at ?? pins?.[action.thread.id]
+  if (pin && typeof pin.x === 'number' && typeof pin.y === 'number') {
+    const hit = resolvePrototypeViewportPoint(board.value, anchor.node, pin.x, pin.y)
+    if (hit) {
+      const element = await inspectPrototypePoint(hit.prototypeNodeId, hit.viewportX, hit.viewportY)
+      if (element) out.element = element
+    }
+  }
   // Where on the item it is pinned stays in the board itself (its commentPins).
-  emit(
-    'comment',
-    action,
-    anchor && ('node' in anchor ? { node: anchor.node } : { edge: anchor.edge }),
-  )
+  emit('comment', action, out)
 }
 
 const ready = computed(() => !props.shared || props.shared.ready.value)

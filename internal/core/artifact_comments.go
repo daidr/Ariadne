@@ -19,6 +19,39 @@ func commentText(body string) (string, error) {
 	}
 	return clean, nil
 }
+
+func cleanCommentElement(raw any) object {
+	elem := asObject(raw)
+	if elem == nil {
+		return nil
+	}
+	clean := object{}
+	if label := utf16Slice(textutil.Trim(elem.str("label")), 0, 120); label != "" {
+		clean["label"] = label
+	}
+	if role := utf16Slice(textutil.Trim(elem.str("role")), 0, 40); role != "" {
+		clean["role"] = role
+	}
+	if tag := utf16Slice(strings.ToLower(textutil.Trim(elem.str("tag"))), 0, 40); tag != "" {
+		clean["tag"] = tag
+	}
+	if selector := utf16Slice(textutil.Trim(elem.str("selector")), 0, 240); selector != "" {
+		clean["selector"] = selector
+	}
+	if len(clean) == 0 {
+		return nil
+	}
+	if rect := asObject(elem["rect"]); rect != nil {
+		x, okX := number(rect["x"])
+		y, okY := number(rect["y"])
+		w, okW := number(rect["w"])
+		h, okH := number(rect["h"])
+		if okX && okY && okW && okH && w >= 0 && h >= 0 && x >= -0.1 && x <= 1.1 && y >= -0.1 && y <= 1.1 && w <= 1.1 && h <= 1.1 {
+			clean["rect"] = object{"x": x, "y": y, "w": w, "h": h}
+		}
+	}
+	return clean
+}
 func checkedComment(kind, by string, action, thread object) (object, error) {
 	checked := except(action, "")
 	if action.str("type") == "create" {
@@ -53,16 +86,21 @@ func checkedComment(kind, by string, action, thread object) (object, error) {
 			if kind == "document" {
 				quote = utf16Slice(textutil.Trim(action.str("quote")), 0, maxCommentQuote)
 			}
-			cleanAnchor := object{}
-			if isNode {
-				cleanAnchor["node"] = text
-			} else {
-				cleanAnchor["edge"] = text
-			}
-			if truthy(block) {
-				cleanAnchor["block"] = block
-			}
-			return object{"type": "create", "threadId": action["threadId"], "commentId": action["commentId"], "quote": quote, "body": body, "anchor": cleanAnchor}, nil
+				cleanAnchor := object{}
+				if isNode {
+					cleanAnchor["node"] = text
+				} else {
+					cleanAnchor["edge"] = text
+				}
+				if truthy(block) {
+					cleanAnchor["block"] = block
+				}
+				if isNode {
+					if elem := cleanCommentElement(anchor["element"]); elem != nil {
+						cleanAnchor["element"] = elem
+					}
+				}
+				return object{"type": "create", "threadId": action["threadId"], "commentId": action["commentId"], "quote": quote, "body": body, "anchor": cleanAnchor}, nil
 		}
 		quote := textutil.Trim(action.str("quote"))
 		if quote == "" || utf16Length(quote) > maxCommentQuote {

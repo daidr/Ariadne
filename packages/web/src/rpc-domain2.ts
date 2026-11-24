@@ -972,32 +972,61 @@ function fromProtoArtifactCommentAnchor(
   anchor?: ProtoArtifactCommentAnchor,
 ): ArtifactCommentAnchor | null {
   if (!anchor) return null
+  const element = anchor.element
+    ? {
+        ...(anchor.element.label ? { label: anchor.element.label } : {}),
+        ...(anchor.element.role ? { role: anchor.element.role } : {}),
+        ...(anchor.element.tag ? { tag: anchor.element.tag } : {}),
+        ...(anchor.element.selector ? { selector: anchor.element.selector } : {}),
+        ...(anchor.element.rect
+          ? {
+              rect: {
+                x: anchor.element.rect.x,
+                y: anchor.element.rect.y,
+                w: anchor.element.rect.w,
+                h: anchor.element.rect.h,
+              },
+            }
+          : {}),
+      }
+    : undefined
+  const extra = {
+    ...(anchor.block === undefined ? {} : { block: anchor.block }),
+    ...(element && Object.keys(element).length > 0 ? { element } : {}),
+  }
   switch (anchor.target.case) {
     case 'node':
-      return {
-        node: anchor.target.value,
-        ...(anchor.block === undefined ? {} : { block: anchor.block }),
-      }
+      return { node: anchor.target.value, ...extra }
     case 'edge':
-      return {
-        edge: anchor.target.value,
-        ...(anchor.block === undefined ? {} : { block: anchor.block }),
-      }
+      return { edge: anchor.target.value, ...extra }
     default:
       return null
   }
 }
 
 function toProtoArtifactCommentAnchorInput(anchor: ArtifactCommentAnchor) {
+  const element = anchor.element
+    ? {
+        ...(anchor.element.label ? { label: anchor.element.label } : {}),
+        ...(anchor.element.role ? { role: anchor.element.role } : {}),
+        ...(anchor.element.tag ? { tag: anchor.element.tag } : {}),
+        ...(anchor.element.selector ? { selector: anchor.element.selector } : {}),
+        ...(anchor.element.rect ? { rect: anchor.element.rect } : {}),
+      }
+    : undefined
+  const extra = {
+    ...(anchor.block === undefined ? {} : { block: anchor.block }),
+    ...(element && Object.keys(element).length > 0 ? { element } : {}),
+  }
   if ('node' in anchor) {
     return {
       target: { case: 'node' as const, value: anchor.node },
-      ...(anchor.block === undefined ? {} : { block: anchor.block }),
+      ...extra,
     }
   }
   return {
     target: { case: 'edge' as const, value: anchor.edge },
-    ...(anchor.block === undefined ? {} : { block: anchor.block }),
+    ...extra,
   }
 }
 
@@ -1062,6 +1091,35 @@ function fromProtoArtifactFeedback(
         break
       case 'board':
         items.push({ kind: 'board', changes: [...item.item.value.changes] })
+        break
+      case 'answer':
+        items.push({
+          kind: 'answer',
+          answers: item.item.value.answers.map((a) => ({
+            id: a.id,
+            question: a.question,
+            values: [...a.values],
+            ...(a.note ? { note: a.note } : {}),
+          })),
+        })
+        break
+      case 'tweak':
+        items.push({
+          kind: 'tweak',
+          tweaks: item.item.value.tweaks.map((entry) => ({
+            nodeId: entry.nodeId,
+            title: entry.title,
+            ...(entry.optionId ? { optionId: entry.optionId } : {}),
+            ...(entry.optionTitle ? { optionTitle: entry.optionTitle } : {}),
+            changes: entry.changes.map((c) => ({
+              key: c.key,
+              label: c.label,
+              value: c.value,
+              ...(c.previous !== undefined ? { previous: c.previous } : {}),
+              ...(c.unit ? { unit: c.unit } : {}),
+            })),
+          })),
+        })
         break
       default:
         break

@@ -101,12 +101,28 @@ message ArtifactVersionView {
   int64 created_at = 5 [jstype = JS_NUMBER];
 }
 
+message ArtifactCommentElementRect {
+  double x = 1;
+  double y = 2;
+  double w = 3;
+  double h = 4;
+}
+
+message ArtifactCommentElement {
+  optional string label = 1;
+  optional string role = 2;
+  optional string tag = 3;
+  optional string selector = 4;
+  optional ArtifactCommentElementRect rect = 5;
+}
+
 message ArtifactCommentAnchor {
   oneof target {
     string node = 1;
     string edge = 2;
   }
   optional string block = 3;
+  optional ArtifactCommentElement element = 4;
 }
 
 message ArtifactCommentView {

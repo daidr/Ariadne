@@ -747,6 +747,150 @@ func (x *ArtifactVersionView) GetCreatedAt() int64 {
 	return 0
 }
 
+type ArtifactCommentElementRect struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	X             float64                `protobuf:"fixed64,1,opt,name=x,proto3" json:"x,omitempty"`
+	Y             float64                `protobuf:"fixed64,2,opt,name=y,proto3" json:"y,omitempty"`
+	W             float64                `protobuf:"fixed64,3,opt,name=w,proto3" json:"w,omitempty"`
+	H             float64                `protobuf:"fixed64,4,opt,name=h,proto3" json:"h,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactCommentElementRect) Reset() {
+	*x = ArtifactCommentElementRect{}
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactCommentElementRect) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactCommentElementRect) ProtoMessage() {}
+
+func (x *ArtifactCommentElementRect) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactCommentElementRect.ProtoReflect.Descriptor instead.
+func (*ArtifactCommentElementRect) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ArtifactCommentElementRect) GetX() float64 {
+	if x != nil {
+		return x.X
+	}
+	return 0
+}
+
+func (x *ArtifactCommentElementRect) GetY() float64 {
+	if x != nil {
+		return x.Y
+	}
+	return 0
+}
+
+func (x *ArtifactCommentElementRect) GetW() float64 {
+	if x != nil {
+		return x.W
+	}
+	return 0
+}
+
+func (x *ArtifactCommentElementRect) GetH() float64 {
+	if x != nil {
+		return x.H
+	}
+	return 0
+}
+
+type ArtifactCommentElement struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Label         *string                     `protobuf:"bytes,1,opt,name=label,proto3,oneof" json:"label,omitempty"`
+	Role          *string                     `protobuf:"bytes,2,opt,name=role,proto3,oneof" json:"role,omitempty"`
+	Tag           *string                     `protobuf:"bytes,3,opt,name=tag,proto3,oneof" json:"tag,omitempty"`
+	Selector      *string                     `protobuf:"bytes,4,opt,name=selector,proto3,oneof" json:"selector,omitempty"`
+	Rect          *ArtifactCommentElementRect `protobuf:"bytes,5,opt,name=rect,proto3,oneof" json:"rect,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactCommentElement) Reset() {
+	*x = ArtifactCommentElement{}
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactCommentElement) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactCommentElement) ProtoMessage() {}
+
+func (x *ArtifactCommentElement) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactCommentElement.ProtoReflect.Descriptor instead.
+func (*ArtifactCommentElement) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ArtifactCommentElement) GetLabel() string {
+	if x != nil && x.Label != nil {
+		return *x.Label
+	}
+	return ""
+}
+
+func (x *ArtifactCommentElement) GetRole() string {
+	if x != nil && x.Role != nil {
+		return *x.Role
+	}
+	return ""
+}
+
+func (x *ArtifactCommentElement) GetTag() string {
+	if x != nil && x.Tag != nil {
+		return *x.Tag
+	}
+	return ""
+}
+
+func (x *ArtifactCommentElement) GetSelector() string {
+	if x != nil && x.Selector != nil {
+		return *x.Selector
+	}
+	return ""
+}
+
+func (x *ArtifactCommentElement) GetRect() *ArtifactCommentElementRect {
+	if x != nil {
+		return x.Rect
+	}
+	return nil
+}
+
 type ArtifactCommentAnchor struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Target:
@@ -755,13 +899,14 @@ type ArtifactCommentAnchor struct {
 	//	*ArtifactCommentAnchor_Edge
 	Target        isArtifactCommentAnchor_Target `protobuf_oneof:"target"`
 	Block         *string                        `protobuf:"bytes,3,opt,name=block,proto3,oneof" json:"block,omitempty"`
+	Element       *ArtifactCommentElement        `protobuf:"bytes,4,opt,name=element,proto3,oneof" json:"element,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ArtifactCommentAnchor) Reset() {
 	*x = ArtifactCommentAnchor{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[8]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -773,7 +918,7 @@ func (x *ArtifactCommentAnchor) String() string {
 func (*ArtifactCommentAnchor) ProtoMessage() {}
 
 func (x *ArtifactCommentAnchor) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[8]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -786,7 +931,7 @@ func (x *ArtifactCommentAnchor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactCommentAnchor.ProtoReflect.Descriptor instead.
 func (*ArtifactCommentAnchor) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{8}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ArtifactCommentAnchor) GetTarget() isArtifactCommentAnchor_Target {
@@ -821,6 +966,13 @@ func (x *ArtifactCommentAnchor) GetBlock() string {
 	return ""
 }
 
+func (x *ArtifactCommentAnchor) GetElement() *ArtifactCommentElement {
+	if x != nil {
+		return x.Element
+	}
+	return nil
+}
+
 type isArtifactCommentAnchor_Target interface {
 	isArtifactCommentAnchor_Target()
 }
@@ -850,7 +1002,7 @@ type ArtifactCommentView struct {
 
 func (x *ArtifactCommentView) Reset() {
 	*x = ArtifactCommentView{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[9]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -862,7 +1014,7 @@ func (x *ArtifactCommentView) String() string {
 func (*ArtifactCommentView) ProtoMessage() {}
 
 func (x *ArtifactCommentView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[9]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -875,7 +1027,7 @@ func (x *ArtifactCommentView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactCommentView.ProtoReflect.Descriptor instead.
 func (*ArtifactCommentView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{9}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ArtifactCommentView) GetId() string {
@@ -923,7 +1075,7 @@ type ArtifactCommentResolution struct {
 
 func (x *ArtifactCommentResolution) Reset() {
 	*x = ArtifactCommentResolution{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[10]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -935,7 +1087,7 @@ func (x *ArtifactCommentResolution) String() string {
 func (*ArtifactCommentResolution) ProtoMessage() {}
 
 func (x *ArtifactCommentResolution) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[10]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -948,7 +1100,7 @@ func (x *ArtifactCommentResolution) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactCommentResolution.ProtoReflect.Descriptor instead.
 func (*ArtifactCommentResolution) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{10}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ArtifactCommentResolution) GetBy() string {
@@ -980,7 +1132,7 @@ type ArtifactCommentThreadView struct {
 
 func (x *ArtifactCommentThreadView) Reset() {
 	*x = ArtifactCommentThreadView{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[11]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -992,7 +1144,7 @@ func (x *ArtifactCommentThreadView) String() string {
 func (*ArtifactCommentThreadView) ProtoMessage() {}
 
 func (x *ArtifactCommentThreadView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[11]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1005,7 +1157,7 @@ func (x *ArtifactCommentThreadView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactCommentThreadView.ProtoReflect.Descriptor instead.
 func (*ArtifactCommentThreadView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{11}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ArtifactCommentThreadView) GetId() string {
@@ -1069,7 +1221,7 @@ type ArtifactAttachment struct {
 
 func (x *ArtifactAttachment) Reset() {
 	*x = ArtifactAttachment{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[12]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1081,7 +1233,7 @@ func (x *ArtifactAttachment) String() string {
 func (*ArtifactAttachment) ProtoMessage() {}
 
 func (x *ArtifactAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[12]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1094,7 +1246,7 @@ func (x *ArtifactAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactAttachment.ProtoReflect.Descriptor instead.
 func (*ArtifactAttachment) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{12}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ArtifactAttachment) GetFileId() string {
@@ -1143,7 +1295,7 @@ type ArtifactFeedbackView struct {
 
 func (x *ArtifactFeedbackView) Reset() {
 	*x = ArtifactFeedbackView{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[13]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1155,7 +1307,7 @@ func (x *ArtifactFeedbackView) String() string {
 func (*ArtifactFeedbackView) ProtoMessage() {}
 
 func (x *ArtifactFeedbackView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[13]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1168,7 +1320,7 @@ func (x *ArtifactFeedbackView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactFeedbackView.ProtoReflect.Descriptor instead.
 func (*ArtifactFeedbackView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{13}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ArtifactFeedbackView) GetArtifactId() string {
@@ -1252,7 +1404,7 @@ type ListArtifactsRequest struct {
 
 func (x *ListArtifactsRequest) Reset() {
 	*x = ListArtifactsRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[14]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1264,7 +1416,7 @@ func (x *ListArtifactsRequest) String() string {
 func (*ListArtifactsRequest) ProtoMessage() {}
 
 func (x *ListArtifactsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[14]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1277,7 +1429,7 @@ func (x *ListArtifactsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListArtifactsRequest.ProtoReflect.Descriptor instead.
 func (*ListArtifactsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{14}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListArtifactsRequest) GetProjectId() string {
@@ -1312,7 +1464,7 @@ type ListArtifactsResponse struct {
 
 func (x *ListArtifactsResponse) Reset() {
 	*x = ListArtifactsResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[15]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1324,7 +1476,7 @@ func (x *ListArtifactsResponse) String() string {
 func (*ListArtifactsResponse) ProtoMessage() {}
 
 func (x *ListArtifactsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[15]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1337,7 +1489,7 @@ func (x *ListArtifactsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListArtifactsResponse.ProtoReflect.Descriptor instead.
 func (*ListArtifactsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{15}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListArtifactsResponse) GetArtifacts() []*ArtifactSummary {
@@ -1372,7 +1524,7 @@ type CreateArtifactRequest struct {
 
 func (x *CreateArtifactRequest) Reset() {
 	*x = CreateArtifactRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[16]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1384,7 +1536,7 @@ func (x *CreateArtifactRequest) String() string {
 func (*CreateArtifactRequest) ProtoMessage() {}
 
 func (x *CreateArtifactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[16]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1397,7 +1549,7 @@ func (x *CreateArtifactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateArtifactRequest.ProtoReflect.Descriptor instead.
 func (*CreateArtifactRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{16}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CreateArtifactRequest) GetProjectId() string {
@@ -1432,7 +1584,7 @@ type CreateArtifactResponse struct {
 
 func (x *CreateArtifactResponse) Reset() {
 	*x = CreateArtifactResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[17]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1444,7 +1596,7 @@ func (x *CreateArtifactResponse) String() string {
 func (*CreateArtifactResponse) ProtoMessage() {}
 
 func (x *CreateArtifactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[17]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1457,7 +1609,7 @@ func (x *CreateArtifactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateArtifactResponse.ProtoReflect.Descriptor instead.
 func (*CreateArtifactResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{17}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *CreateArtifactResponse) GetArtifact() *ArtifactView {
@@ -1494,7 +1646,7 @@ type GetArtifactRequest struct {
 
 func (x *GetArtifactRequest) Reset() {
 	*x = GetArtifactRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[18]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1506,7 +1658,7 @@ func (x *GetArtifactRequest) String() string {
 func (*GetArtifactRequest) ProtoMessage() {}
 
 func (x *GetArtifactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[18]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1519,7 +1671,7 @@ func (x *GetArtifactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetArtifactRequest.ProtoReflect.Descriptor instead.
 func (*GetArtifactRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{18}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *GetArtifactRequest) GetArtifactId() string {
@@ -1570,7 +1722,7 @@ type GetArtifactResponse struct {
 
 func (x *GetArtifactResponse) Reset() {
 	*x = GetArtifactResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[19]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1582,7 +1734,7 @@ func (x *GetArtifactResponse) String() string {
 func (*GetArtifactResponse) ProtoMessage() {}
 
 func (x *GetArtifactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[19]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1595,7 +1747,7 @@ func (x *GetArtifactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetArtifactResponse.ProtoReflect.Descriptor instead.
 func (*GetArtifactResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{19}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *GetArtifactResponse) GetArtifact() *ArtifactView {
@@ -1644,7 +1796,7 @@ type ListArtifactVersionsRequest struct {
 
 func (x *ListArtifactVersionsRequest) Reset() {
 	*x = ListArtifactVersionsRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[20]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1656,7 +1808,7 @@ func (x *ListArtifactVersionsRequest) String() string {
 func (*ListArtifactVersionsRequest) ProtoMessage() {}
 
 func (x *ListArtifactVersionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[20]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1669,7 +1821,7 @@ func (x *ListArtifactVersionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListArtifactVersionsRequest.ProtoReflect.Descriptor instead.
 func (*ListArtifactVersionsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{20}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ListArtifactVersionsRequest) GetArtifactId() string {
@@ -1704,7 +1856,7 @@ type ListArtifactVersionsResponse struct {
 
 func (x *ListArtifactVersionsResponse) Reset() {
 	*x = ListArtifactVersionsResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[21]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1716,7 +1868,7 @@ func (x *ListArtifactVersionsResponse) String() string {
 func (*ListArtifactVersionsResponse) ProtoMessage() {}
 
 func (x *ListArtifactVersionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[21]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1729,7 +1881,7 @@ func (x *ListArtifactVersionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListArtifactVersionsResponse.ProtoReflect.Descriptor instead.
 func (*ListArtifactVersionsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{21}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListArtifactVersionsResponse) GetVersions() []*ArtifactVersionView {
@@ -1768,7 +1920,7 @@ type SaveArtifactRequest struct {
 
 func (x *SaveArtifactRequest) Reset() {
 	*x = SaveArtifactRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[22]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1780,7 +1932,7 @@ func (x *SaveArtifactRequest) String() string {
 func (*SaveArtifactRequest) ProtoMessage() {}
 
 func (x *SaveArtifactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[22]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1793,7 +1945,7 @@ func (x *SaveArtifactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveArtifactRequest.ProtoReflect.Descriptor instead.
 func (*SaveArtifactRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{22}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *SaveArtifactRequest) GetArtifactId() string {
@@ -1856,7 +2008,7 @@ type SaveArtifactResponse struct {
 
 func (x *SaveArtifactResponse) Reset() {
 	*x = SaveArtifactResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[23]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1868,7 +2020,7 @@ func (x *SaveArtifactResponse) String() string {
 func (*SaveArtifactResponse) ProtoMessage() {}
 
 func (x *SaveArtifactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[23]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1881,7 +2033,7 @@ func (x *SaveArtifactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveArtifactResponse.ProtoReflect.Descriptor instead.
 func (*SaveArtifactResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{23}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *SaveArtifactResponse) GetArtifact() *ArtifactView {
@@ -1914,7 +2066,7 @@ type RefreshDashboardRequest struct {
 
 func (x *RefreshDashboardRequest) Reset() {
 	*x = RefreshDashboardRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[24]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1926,7 +2078,7 @@ func (x *RefreshDashboardRequest) String() string {
 func (*RefreshDashboardRequest) ProtoMessage() {}
 
 func (x *RefreshDashboardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[24]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1939,7 +2091,7 @@ func (x *RefreshDashboardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefreshDashboardRequest.ProtoReflect.Descriptor instead.
 func (*RefreshDashboardRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{24}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *RefreshDashboardRequest) GetArtifactId() string {
@@ -1958,7 +2110,7 @@ type RefreshDashboardResponse struct {
 
 func (x *RefreshDashboardResponse) Reset() {
 	*x = RefreshDashboardResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[25]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1970,7 +2122,7 @@ func (x *RefreshDashboardResponse) String() string {
 func (*RefreshDashboardResponse) ProtoMessage() {}
 
 func (x *RefreshDashboardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[25]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1983,7 +2135,7 @@ func (x *RefreshDashboardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefreshDashboardResponse.ProtoReflect.Descriptor instead.
 func (*RefreshDashboardResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{25}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *RefreshDashboardResponse) GetArtifact() *ArtifactView {
@@ -2003,7 +2155,7 @@ type SendArtifactFeedbackRequest struct {
 
 func (x *SendArtifactFeedbackRequest) Reset() {
 	*x = SendArtifactFeedbackRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[26]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2015,7 +2167,7 @@ func (x *SendArtifactFeedbackRequest) String() string {
 func (*SendArtifactFeedbackRequest) ProtoMessage() {}
 
 func (x *SendArtifactFeedbackRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[26]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2028,7 +2180,7 @@ func (x *SendArtifactFeedbackRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendArtifactFeedbackRequest.ProtoReflect.Descriptor instead.
 func (*SendArtifactFeedbackRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{26}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *SendArtifactFeedbackRequest) GetArtifactId() string {
@@ -2054,7 +2206,7 @@ type SendArtifactFeedbackResponse struct {
 
 func (x *SendArtifactFeedbackResponse) Reset() {
 	*x = SendArtifactFeedbackResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[27]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2066,7 +2218,7 @@ func (x *SendArtifactFeedbackResponse) String() string {
 func (*SendArtifactFeedbackResponse) ProtoMessage() {}
 
 func (x *SendArtifactFeedbackResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[27]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2079,7 +2231,7 @@ func (x *SendArtifactFeedbackResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendArtifactFeedbackResponse.ProtoReflect.Descriptor instead.
 func (*SendArtifactFeedbackResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{27}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *SendArtifactFeedbackResponse) GetFeedback() *ArtifactFeedbackView {
@@ -2099,7 +2251,7 @@ type WithdrawArtifactFeedbackRequest struct {
 
 func (x *WithdrawArtifactFeedbackRequest) Reset() {
 	*x = WithdrawArtifactFeedbackRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[28]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2111,7 +2263,7 @@ func (x *WithdrawArtifactFeedbackRequest) String() string {
 func (*WithdrawArtifactFeedbackRequest) ProtoMessage() {}
 
 func (x *WithdrawArtifactFeedbackRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[28]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2124,7 +2276,7 @@ func (x *WithdrawArtifactFeedbackRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WithdrawArtifactFeedbackRequest.ProtoReflect.Descriptor instead.
 func (*WithdrawArtifactFeedbackRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{28}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *WithdrawArtifactFeedbackRequest) GetArtifactId() string {
@@ -2150,7 +2302,7 @@ type WithdrawArtifactFeedbackResponse struct {
 
 func (x *WithdrawArtifactFeedbackResponse) Reset() {
 	*x = WithdrawArtifactFeedbackResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[29]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2162,7 +2314,7 @@ func (x *WithdrawArtifactFeedbackResponse) String() string {
 func (*WithdrawArtifactFeedbackResponse) ProtoMessage() {}
 
 func (x *WithdrawArtifactFeedbackResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[29]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2175,7 +2327,7 @@ func (x *WithdrawArtifactFeedbackResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WithdrawArtifactFeedbackResponse.ProtoReflect.Descriptor instead.
 func (*WithdrawArtifactFeedbackResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{29}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *WithdrawArtifactFeedbackResponse) GetWithdrawn() bool {
@@ -2199,7 +2351,7 @@ type CreateArtifactCommentRequest struct {
 
 func (x *CreateArtifactCommentRequest) Reset() {
 	*x = CreateArtifactCommentRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[30]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2211,7 +2363,7 @@ func (x *CreateArtifactCommentRequest) String() string {
 func (*CreateArtifactCommentRequest) ProtoMessage() {}
 
 func (x *CreateArtifactCommentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[30]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2224,7 +2376,7 @@ func (x *CreateArtifactCommentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateArtifactCommentRequest.ProtoReflect.Descriptor instead.
 func (*CreateArtifactCommentRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{30}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *CreateArtifactCommentRequest) GetArtifactId() string {
@@ -2278,7 +2430,7 @@ type CreateArtifactCommentResponse struct {
 
 func (x *CreateArtifactCommentResponse) Reset() {
 	*x = CreateArtifactCommentResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[31]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2290,7 +2442,7 @@ func (x *CreateArtifactCommentResponse) String() string {
 func (*CreateArtifactCommentResponse) ProtoMessage() {}
 
 func (x *CreateArtifactCommentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[31]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2303,7 +2455,7 @@ func (x *CreateArtifactCommentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateArtifactCommentResponse.ProtoReflect.Descriptor instead.
 func (*CreateArtifactCommentResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{31}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *CreateArtifactCommentResponse) GetComments() []*ArtifactCommentThreadView {
@@ -2325,7 +2477,7 @@ type ReplyArtifactCommentRequest struct {
 
 func (x *ReplyArtifactCommentRequest) Reset() {
 	*x = ReplyArtifactCommentRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[32]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2337,7 +2489,7 @@ func (x *ReplyArtifactCommentRequest) String() string {
 func (*ReplyArtifactCommentRequest) ProtoMessage() {}
 
 func (x *ReplyArtifactCommentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[32]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2350,7 +2502,7 @@ func (x *ReplyArtifactCommentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplyArtifactCommentRequest.ProtoReflect.Descriptor instead.
 func (*ReplyArtifactCommentRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{32}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ReplyArtifactCommentRequest) GetArtifactId() string {
@@ -2390,7 +2542,7 @@ type ReplyArtifactCommentResponse struct {
 
 func (x *ReplyArtifactCommentResponse) Reset() {
 	*x = ReplyArtifactCommentResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[33]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2402,7 +2554,7 @@ func (x *ReplyArtifactCommentResponse) String() string {
 func (*ReplyArtifactCommentResponse) ProtoMessage() {}
 
 func (x *ReplyArtifactCommentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[33]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2415,7 +2567,7 @@ func (x *ReplyArtifactCommentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplyArtifactCommentResponse.ProtoReflect.Descriptor instead.
 func (*ReplyArtifactCommentResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{33}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ReplyArtifactCommentResponse) GetComments() []*ArtifactCommentThreadView {
@@ -2437,7 +2589,7 @@ type EditArtifactCommentRequest struct {
 
 func (x *EditArtifactCommentRequest) Reset() {
 	*x = EditArtifactCommentRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[34]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2449,7 +2601,7 @@ func (x *EditArtifactCommentRequest) String() string {
 func (*EditArtifactCommentRequest) ProtoMessage() {}
 
 func (x *EditArtifactCommentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[34]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2462,7 +2614,7 @@ func (x *EditArtifactCommentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EditArtifactCommentRequest.ProtoReflect.Descriptor instead.
 func (*EditArtifactCommentRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{34}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *EditArtifactCommentRequest) GetArtifactId() string {
@@ -2502,7 +2654,7 @@ type EditArtifactCommentResponse struct {
 
 func (x *EditArtifactCommentResponse) Reset() {
 	*x = EditArtifactCommentResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[35]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2514,7 +2666,7 @@ func (x *EditArtifactCommentResponse) String() string {
 func (*EditArtifactCommentResponse) ProtoMessage() {}
 
 func (x *EditArtifactCommentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[35]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2527,7 +2679,7 @@ func (x *EditArtifactCommentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EditArtifactCommentResponse.ProtoReflect.Descriptor instead.
 func (*EditArtifactCommentResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{35}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *EditArtifactCommentResponse) GetComments() []*ArtifactCommentThreadView {
@@ -2548,7 +2700,7 @@ type DeleteArtifactCommentRequest struct {
 
 func (x *DeleteArtifactCommentRequest) Reset() {
 	*x = DeleteArtifactCommentRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[36]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2560,7 +2712,7 @@ func (x *DeleteArtifactCommentRequest) String() string {
 func (*DeleteArtifactCommentRequest) ProtoMessage() {}
 
 func (x *DeleteArtifactCommentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[36]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2573,7 +2725,7 @@ func (x *DeleteArtifactCommentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteArtifactCommentRequest.ProtoReflect.Descriptor instead.
 func (*DeleteArtifactCommentRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{36}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *DeleteArtifactCommentRequest) GetArtifactId() string {
@@ -2606,7 +2758,7 @@ type DeleteArtifactCommentResponse struct {
 
 func (x *DeleteArtifactCommentResponse) Reset() {
 	*x = DeleteArtifactCommentResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[37]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2618,7 +2770,7 @@ func (x *DeleteArtifactCommentResponse) String() string {
 func (*DeleteArtifactCommentResponse) ProtoMessage() {}
 
 func (x *DeleteArtifactCommentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[37]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2631,7 +2783,7 @@ func (x *DeleteArtifactCommentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteArtifactCommentResponse.ProtoReflect.Descriptor instead.
 func (*DeleteArtifactCommentResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{37}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *DeleteArtifactCommentResponse) GetComments() []*ArtifactCommentThreadView {
@@ -2651,7 +2803,7 @@ type ResolveArtifactCommentThreadRequest struct {
 
 func (x *ResolveArtifactCommentThreadRequest) Reset() {
 	*x = ResolveArtifactCommentThreadRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[38]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2663,7 +2815,7 @@ func (x *ResolveArtifactCommentThreadRequest) String() string {
 func (*ResolveArtifactCommentThreadRequest) ProtoMessage() {}
 
 func (x *ResolveArtifactCommentThreadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[38]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2676,7 +2828,7 @@ func (x *ResolveArtifactCommentThreadRequest) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ResolveArtifactCommentThreadRequest.ProtoReflect.Descriptor instead.
 func (*ResolveArtifactCommentThreadRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{38}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ResolveArtifactCommentThreadRequest) GetArtifactId() string {
@@ -2702,7 +2854,7 @@ type ResolveArtifactCommentThreadResponse struct {
 
 func (x *ResolveArtifactCommentThreadResponse) Reset() {
 	*x = ResolveArtifactCommentThreadResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[39]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2714,7 +2866,7 @@ func (x *ResolveArtifactCommentThreadResponse) String() string {
 func (*ResolveArtifactCommentThreadResponse) ProtoMessage() {}
 
 func (x *ResolveArtifactCommentThreadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[39]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2727,7 +2879,7 @@ func (x *ResolveArtifactCommentThreadResponse) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use ResolveArtifactCommentThreadResponse.ProtoReflect.Descriptor instead.
 func (*ResolveArtifactCommentThreadResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{39}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ResolveArtifactCommentThreadResponse) GetComments() []*ArtifactCommentThreadView {
@@ -2747,7 +2899,7 @@ type ReopenArtifactCommentThreadRequest struct {
 
 func (x *ReopenArtifactCommentThreadRequest) Reset() {
 	*x = ReopenArtifactCommentThreadRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[40]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2759,7 +2911,7 @@ func (x *ReopenArtifactCommentThreadRequest) String() string {
 func (*ReopenArtifactCommentThreadRequest) ProtoMessage() {}
 
 func (x *ReopenArtifactCommentThreadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[40]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2772,7 +2924,7 @@ func (x *ReopenArtifactCommentThreadRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ReopenArtifactCommentThreadRequest.ProtoReflect.Descriptor instead.
 func (*ReopenArtifactCommentThreadRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{40}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ReopenArtifactCommentThreadRequest) GetArtifactId() string {
@@ -2798,7 +2950,7 @@ type ReopenArtifactCommentThreadResponse struct {
 
 func (x *ReopenArtifactCommentThreadResponse) Reset() {
 	*x = ReopenArtifactCommentThreadResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[41]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2810,7 +2962,7 @@ func (x *ReopenArtifactCommentThreadResponse) String() string {
 func (*ReopenArtifactCommentThreadResponse) ProtoMessage() {}
 
 func (x *ReopenArtifactCommentThreadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[41]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2823,7 +2975,7 @@ func (x *ReopenArtifactCommentThreadResponse) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ReopenArtifactCommentThreadResponse.ProtoReflect.Descriptor instead.
 func (*ReopenArtifactCommentThreadResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{41}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ReopenArtifactCommentThreadResponse) GetComments() []*ArtifactCommentThreadView {
@@ -2843,7 +2995,7 @@ type RemoveArtifactCommentThreadRequest struct {
 
 func (x *RemoveArtifactCommentThreadRequest) Reset() {
 	*x = RemoveArtifactCommentThreadRequest{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[42]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2855,7 +3007,7 @@ func (x *RemoveArtifactCommentThreadRequest) String() string {
 func (*RemoveArtifactCommentThreadRequest) ProtoMessage() {}
 
 func (x *RemoveArtifactCommentThreadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[42]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2868,7 +3020,7 @@ func (x *RemoveArtifactCommentThreadRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use RemoveArtifactCommentThreadRequest.ProtoReflect.Descriptor instead.
 func (*RemoveArtifactCommentThreadRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{42}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *RemoveArtifactCommentThreadRequest) GetArtifactId() string {
@@ -2894,7 +3046,7 @@ type RemoveArtifactCommentThreadResponse struct {
 
 func (x *RemoveArtifactCommentThreadResponse) Reset() {
 	*x = RemoveArtifactCommentThreadResponse{}
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[43]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2906,7 +3058,7 @@ func (x *RemoveArtifactCommentThreadResponse) String() string {
 func (*RemoveArtifactCommentThreadResponse) ProtoMessage() {}
 
 func (x *RemoveArtifactCommentThreadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_artifacts_proto_msgTypes[43]
+	mi := &file_ariadne_v1_artifacts_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2919,7 +3071,7 @@ func (x *RemoveArtifactCommentThreadResponse) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use RemoveArtifactCommentThreadResponse.ProtoReflect.Descriptor instead.
 func (*RemoveArtifactCommentThreadResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{43}
+	return file_ariadne_v1_artifacts_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *RemoveArtifactCommentThreadResponse) GetComments() []*ArtifactCommentThreadView {
@@ -3020,13 +3172,32 @@ const file_ariadne_v1_artifacts_proto_rawDesc = "" +
 	"\x06author\x18\x03 \x01(\tR\x06author\x12\x16\n" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason\x12!\n" +
 	"\n" +
-	"created_at\x18\x05 \x01(\x03B\x020\x02R\tcreatedAt\"r\n" +
+	"created_at\x18\x05 \x01(\x03B\x020\x02R\tcreatedAt\"T\n" +
+	"\x1aArtifactCommentElementRect\x12\f\n" +
+	"\x01x\x18\x01 \x01(\x01R\x01x\x12\f\n" +
+	"\x01y\x18\x02 \x01(\x01R\x01y\x12\f\n" +
+	"\x01w\x18\x03 \x01(\x01R\x01w\x12\f\n" +
+	"\x01h\x18\x04 \x01(\x01R\x01h\"\xf6\x01\n" +
+	"\x16ArtifactCommentElement\x12\x19\n" +
+	"\x05label\x18\x01 \x01(\tH\x00R\x05label\x88\x01\x01\x12\x17\n" +
+	"\x04role\x18\x02 \x01(\tH\x01R\x04role\x88\x01\x01\x12\x15\n" +
+	"\x03tag\x18\x03 \x01(\tH\x02R\x03tag\x88\x01\x01\x12\x1f\n" +
+	"\bselector\x18\x04 \x01(\tH\x03R\bselector\x88\x01\x01\x12?\n" +
+	"\x04rect\x18\x05 \x01(\v2&.ariadne.v1.ArtifactCommentElementRectH\x04R\x04rect\x88\x01\x01B\b\n" +
+	"\x06_labelB\a\n" +
+	"\x05_roleB\x06\n" +
+	"\x04_tagB\v\n" +
+	"\t_selectorB\a\n" +
+	"\x05_rect\"\xc1\x01\n" +
 	"\x15ArtifactCommentAnchor\x12\x14\n" +
 	"\x04node\x18\x01 \x01(\tH\x00R\x04node\x12\x14\n" +
 	"\x04edge\x18\x02 \x01(\tH\x00R\x04edge\x12\x19\n" +
-	"\x05block\x18\x03 \x01(\tH\x01R\x05block\x88\x01\x01B\b\n" +
+	"\x05block\x18\x03 \x01(\tH\x01R\x05block\x88\x01\x01\x12A\n" +
+	"\aelement\x18\x04 \x01(\v2\".ariadne.v1.ArtifactCommentElementH\x02R\aelement\x88\x01\x01B\b\n" +
 	"\x06targetB\b\n" +
-	"\x06_block\"\xa8\x01\n" +
+	"\x06_blockB\n" +
+	"\n" +
+	"\b_element\"\xa8\x01\n" +
 	"\x13ArtifactCommentView\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06author\x18\x02 \x01(\tR\x06author\x12\x12\n" +
@@ -3245,7 +3416,7 @@ func file_ariadne_v1_artifacts_proto_rawDescGZIP() []byte {
 	return file_ariadne_v1_artifacts_proto_rawDescData
 }
 
-var file_ariadne_v1_artifacts_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
+var file_ariadne_v1_artifacts_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
 var file_ariadne_v1_artifacts_proto_goTypes = []any{
 	(*DocumentArtifactPreview)(nil),              // 0: ariadne.v1.DocumentArtifactPreview
 	(*WhiteboardArtifactPreview)(nil),            // 1: ariadne.v1.WhiteboardArtifactPreview
@@ -3255,44 +3426,46 @@ var file_ariadne_v1_artifacts_proto_goTypes = []any{
 	(*ArtifactSummary)(nil),                      // 5: ariadne.v1.ArtifactSummary
 	(*ArtifactView)(nil),                         // 6: ariadne.v1.ArtifactView
 	(*ArtifactVersionView)(nil),                  // 7: ariadne.v1.ArtifactVersionView
-	(*ArtifactCommentAnchor)(nil),                // 8: ariadne.v1.ArtifactCommentAnchor
-	(*ArtifactCommentView)(nil),                  // 9: ariadne.v1.ArtifactCommentView
-	(*ArtifactCommentResolution)(nil),            // 10: ariadne.v1.ArtifactCommentResolution
-	(*ArtifactCommentThreadView)(nil),            // 11: ariadne.v1.ArtifactCommentThreadView
-	(*ArtifactAttachment)(nil),                   // 12: ariadne.v1.ArtifactAttachment
-	(*ArtifactFeedbackView)(nil),                 // 13: ariadne.v1.ArtifactFeedbackView
-	(*ListArtifactsRequest)(nil),                 // 14: ariadne.v1.ListArtifactsRequest
-	(*ListArtifactsResponse)(nil),                // 15: ariadne.v1.ListArtifactsResponse
-	(*CreateArtifactRequest)(nil),                // 16: ariadne.v1.CreateArtifactRequest
-	(*CreateArtifactResponse)(nil),               // 17: ariadne.v1.CreateArtifactResponse
-	(*GetArtifactRequest)(nil),                   // 18: ariadne.v1.GetArtifactRequest
-	(*GetArtifactResponse)(nil),                  // 19: ariadne.v1.GetArtifactResponse
-	(*ListArtifactVersionsRequest)(nil),          // 20: ariadne.v1.ListArtifactVersionsRequest
-	(*ListArtifactVersionsResponse)(nil),         // 21: ariadne.v1.ListArtifactVersionsResponse
-	(*SaveArtifactRequest)(nil),                  // 22: ariadne.v1.SaveArtifactRequest
-	(*SaveArtifactResponse)(nil),                 // 23: ariadne.v1.SaveArtifactResponse
-	(*RefreshDashboardRequest)(nil),              // 24: ariadne.v1.RefreshDashboardRequest
-	(*RefreshDashboardResponse)(nil),             // 25: ariadne.v1.RefreshDashboardResponse
-	(*SendArtifactFeedbackRequest)(nil),          // 26: ariadne.v1.SendArtifactFeedbackRequest
-	(*SendArtifactFeedbackResponse)(nil),         // 27: ariadne.v1.SendArtifactFeedbackResponse
-	(*WithdrawArtifactFeedbackRequest)(nil),      // 28: ariadne.v1.WithdrawArtifactFeedbackRequest
-	(*WithdrawArtifactFeedbackResponse)(nil),     // 29: ariadne.v1.WithdrawArtifactFeedbackResponse
-	(*CreateArtifactCommentRequest)(nil),         // 30: ariadne.v1.CreateArtifactCommentRequest
-	(*CreateArtifactCommentResponse)(nil),        // 31: ariadne.v1.CreateArtifactCommentResponse
-	(*ReplyArtifactCommentRequest)(nil),          // 32: ariadne.v1.ReplyArtifactCommentRequest
-	(*ReplyArtifactCommentResponse)(nil),         // 33: ariadne.v1.ReplyArtifactCommentResponse
-	(*EditArtifactCommentRequest)(nil),           // 34: ariadne.v1.EditArtifactCommentRequest
-	(*EditArtifactCommentResponse)(nil),          // 35: ariadne.v1.EditArtifactCommentResponse
-	(*DeleteArtifactCommentRequest)(nil),         // 36: ariadne.v1.DeleteArtifactCommentRequest
-	(*DeleteArtifactCommentResponse)(nil),        // 37: ariadne.v1.DeleteArtifactCommentResponse
-	(*ResolveArtifactCommentThreadRequest)(nil),  // 38: ariadne.v1.ResolveArtifactCommentThreadRequest
-	(*ResolveArtifactCommentThreadResponse)(nil), // 39: ariadne.v1.ResolveArtifactCommentThreadResponse
-	(*ReopenArtifactCommentThreadRequest)(nil),   // 40: ariadne.v1.ReopenArtifactCommentThreadRequest
-	(*ReopenArtifactCommentThreadResponse)(nil),  // 41: ariadne.v1.ReopenArtifactCommentThreadResponse
-	(*RemoveArtifactCommentThreadRequest)(nil),   // 42: ariadne.v1.RemoveArtifactCommentThreadRequest
-	(*RemoveArtifactCommentThreadResponse)(nil),  // 43: ariadne.v1.RemoveArtifactCommentThreadResponse
-	nil,                          // 44: ariadne.v1.SaveArtifactRequest.QuotesEntry
-	(*ArtifactFeedbackItem)(nil), // 45: ariadne.v1.ArtifactFeedbackItem
+	(*ArtifactCommentElementRect)(nil),           // 8: ariadne.v1.ArtifactCommentElementRect
+	(*ArtifactCommentElement)(nil),               // 9: ariadne.v1.ArtifactCommentElement
+	(*ArtifactCommentAnchor)(nil),                // 10: ariadne.v1.ArtifactCommentAnchor
+	(*ArtifactCommentView)(nil),                  // 11: ariadne.v1.ArtifactCommentView
+	(*ArtifactCommentResolution)(nil),            // 12: ariadne.v1.ArtifactCommentResolution
+	(*ArtifactCommentThreadView)(nil),            // 13: ariadne.v1.ArtifactCommentThreadView
+	(*ArtifactAttachment)(nil),                   // 14: ariadne.v1.ArtifactAttachment
+	(*ArtifactFeedbackView)(nil),                 // 15: ariadne.v1.ArtifactFeedbackView
+	(*ListArtifactsRequest)(nil),                 // 16: ariadne.v1.ListArtifactsRequest
+	(*ListArtifactsResponse)(nil),                // 17: ariadne.v1.ListArtifactsResponse
+	(*CreateArtifactRequest)(nil),                // 18: ariadne.v1.CreateArtifactRequest
+	(*CreateArtifactResponse)(nil),               // 19: ariadne.v1.CreateArtifactResponse
+	(*GetArtifactRequest)(nil),                   // 20: ariadne.v1.GetArtifactRequest
+	(*GetArtifactResponse)(nil),                  // 21: ariadne.v1.GetArtifactResponse
+	(*ListArtifactVersionsRequest)(nil),          // 22: ariadne.v1.ListArtifactVersionsRequest
+	(*ListArtifactVersionsResponse)(nil),         // 23: ariadne.v1.ListArtifactVersionsResponse
+	(*SaveArtifactRequest)(nil),                  // 24: ariadne.v1.SaveArtifactRequest
+	(*SaveArtifactResponse)(nil),                 // 25: ariadne.v1.SaveArtifactResponse
+	(*RefreshDashboardRequest)(nil),              // 26: ariadne.v1.RefreshDashboardRequest
+	(*RefreshDashboardResponse)(nil),             // 27: ariadne.v1.RefreshDashboardResponse
+	(*SendArtifactFeedbackRequest)(nil),          // 28: ariadne.v1.SendArtifactFeedbackRequest
+	(*SendArtifactFeedbackResponse)(nil),         // 29: ariadne.v1.SendArtifactFeedbackResponse
+	(*WithdrawArtifactFeedbackRequest)(nil),      // 30: ariadne.v1.WithdrawArtifactFeedbackRequest
+	(*WithdrawArtifactFeedbackResponse)(nil),     // 31: ariadne.v1.WithdrawArtifactFeedbackResponse
+	(*CreateArtifactCommentRequest)(nil),         // 32: ariadne.v1.CreateArtifactCommentRequest
+	(*CreateArtifactCommentResponse)(nil),        // 33: ariadne.v1.CreateArtifactCommentResponse
+	(*ReplyArtifactCommentRequest)(nil),          // 34: ariadne.v1.ReplyArtifactCommentRequest
+	(*ReplyArtifactCommentResponse)(nil),         // 35: ariadne.v1.ReplyArtifactCommentResponse
+	(*EditArtifactCommentRequest)(nil),           // 36: ariadne.v1.EditArtifactCommentRequest
+	(*EditArtifactCommentResponse)(nil),          // 37: ariadne.v1.EditArtifactCommentResponse
+	(*DeleteArtifactCommentRequest)(nil),         // 38: ariadne.v1.DeleteArtifactCommentRequest
+	(*DeleteArtifactCommentResponse)(nil),        // 39: ariadne.v1.DeleteArtifactCommentResponse
+	(*ResolveArtifactCommentThreadRequest)(nil),  // 40: ariadne.v1.ResolveArtifactCommentThreadRequest
+	(*ResolveArtifactCommentThreadResponse)(nil), // 41: ariadne.v1.ResolveArtifactCommentThreadResponse
+	(*ReopenArtifactCommentThreadRequest)(nil),   // 42: ariadne.v1.ReopenArtifactCommentThreadRequest
+	(*ReopenArtifactCommentThreadResponse)(nil),  // 43: ariadne.v1.ReopenArtifactCommentThreadResponse
+	(*RemoveArtifactCommentThreadRequest)(nil),   // 44: ariadne.v1.RemoveArtifactCommentThreadRequest
+	(*RemoveArtifactCommentThreadResponse)(nil),  // 45: ariadne.v1.RemoveArtifactCommentThreadResponse
+	nil,                          // 46: ariadne.v1.SaveArtifactRequest.QuotesEntry
+	(*ArtifactFeedbackItem)(nil), // 47: ariadne.v1.ArtifactFeedbackItem
 }
 var file_ariadne_v1_artifacts_proto_depIdxs = []int32{
 	2,  // 0: ariadne.v1.DashboardArtifactPreview.tiles:type_name -> ariadne.v1.ArtifactPreviewTile
@@ -3301,68 +3474,70 @@ var file_ariadne_v1_artifacts_proto_depIdxs = []int32{
 	3,  // 3: ariadne.v1.ArtifactPreview.dashboard:type_name -> ariadne.v1.DashboardArtifactPreview
 	4,  // 4: ariadne.v1.ArtifactSummary.preview:type_name -> ariadne.v1.ArtifactPreview
 	4,  // 5: ariadne.v1.ArtifactView.preview:type_name -> ariadne.v1.ArtifactPreview
-	8,  // 6: ariadne.v1.ArtifactCommentThreadView.anchor:type_name -> ariadne.v1.ArtifactCommentAnchor
-	9,  // 7: ariadne.v1.ArtifactCommentThreadView.comments:type_name -> ariadne.v1.ArtifactCommentView
-	10, // 8: ariadne.v1.ArtifactCommentThreadView.resolved:type_name -> ariadne.v1.ArtifactCommentResolution
-	45, // 9: ariadne.v1.ArtifactFeedbackView.items:type_name -> ariadne.v1.ArtifactFeedbackItem
-	12, // 10: ariadne.v1.ArtifactFeedbackView.images:type_name -> ariadne.v1.ArtifactAttachment
-	5,  // 11: ariadne.v1.ListArtifactsResponse.artifacts:type_name -> ariadne.v1.ArtifactSummary
-	6,  // 12: ariadne.v1.CreateArtifactResponse.artifact:type_name -> ariadne.v1.ArtifactView
-	7,  // 13: ariadne.v1.CreateArtifactResponse.versions:type_name -> ariadne.v1.ArtifactVersionView
-	11, // 14: ariadne.v1.CreateArtifactResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
-	6,  // 15: ariadne.v1.GetArtifactResponse.artifact:type_name -> ariadne.v1.ArtifactView
-	7,  // 16: ariadne.v1.GetArtifactResponse.versions:type_name -> ariadne.v1.ArtifactVersionView
-	11, // 17: ariadne.v1.GetArtifactResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
-	7,  // 18: ariadne.v1.ListArtifactVersionsResponse.versions:type_name -> ariadne.v1.ArtifactVersionView
-	44, // 19: ariadne.v1.SaveArtifactRequest.quotes:type_name -> ariadne.v1.SaveArtifactRequest.QuotesEntry
-	6,  // 20: ariadne.v1.SaveArtifactResponse.artifact:type_name -> ariadne.v1.ArtifactView
-	7,  // 21: ariadne.v1.SaveArtifactResponse.versions:type_name -> ariadne.v1.ArtifactVersionView
-	11, // 22: ariadne.v1.SaveArtifactResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
-	6,  // 23: ariadne.v1.RefreshDashboardResponse.artifact:type_name -> ariadne.v1.ArtifactView
-	13, // 24: ariadne.v1.SendArtifactFeedbackResponse.feedback:type_name -> ariadne.v1.ArtifactFeedbackView
-	8,  // 25: ariadne.v1.CreateArtifactCommentRequest.anchor:type_name -> ariadne.v1.ArtifactCommentAnchor
-	11, // 26: ariadne.v1.CreateArtifactCommentResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
-	11, // 27: ariadne.v1.ReplyArtifactCommentResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
-	11, // 28: ariadne.v1.EditArtifactCommentResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
-	11, // 29: ariadne.v1.DeleteArtifactCommentResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
-	11, // 30: ariadne.v1.ResolveArtifactCommentThreadResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
-	11, // 31: ariadne.v1.ReopenArtifactCommentThreadResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
-	11, // 32: ariadne.v1.RemoveArtifactCommentThreadResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
-	14, // 33: ariadne.v1.ArtifactService.ListArtifacts:input_type -> ariadne.v1.ListArtifactsRequest
-	16, // 34: ariadne.v1.ArtifactService.CreateArtifact:input_type -> ariadne.v1.CreateArtifactRequest
-	18, // 35: ariadne.v1.ArtifactService.GetArtifact:input_type -> ariadne.v1.GetArtifactRequest
-	20, // 36: ariadne.v1.ArtifactService.ListArtifactVersions:input_type -> ariadne.v1.ListArtifactVersionsRequest
-	22, // 37: ariadne.v1.ArtifactService.SaveArtifact:input_type -> ariadne.v1.SaveArtifactRequest
-	24, // 38: ariadne.v1.ArtifactService.RefreshDashboard:input_type -> ariadne.v1.RefreshDashboardRequest
-	26, // 39: ariadne.v1.ArtifactService.SendArtifactFeedback:input_type -> ariadne.v1.SendArtifactFeedbackRequest
-	28, // 40: ariadne.v1.ArtifactService.WithdrawArtifactFeedback:input_type -> ariadne.v1.WithdrawArtifactFeedbackRequest
-	30, // 41: ariadne.v1.ArtifactService.CreateArtifactComment:input_type -> ariadne.v1.CreateArtifactCommentRequest
-	32, // 42: ariadne.v1.ArtifactService.ReplyArtifactComment:input_type -> ariadne.v1.ReplyArtifactCommentRequest
-	34, // 43: ariadne.v1.ArtifactService.EditArtifactComment:input_type -> ariadne.v1.EditArtifactCommentRequest
-	36, // 44: ariadne.v1.ArtifactService.DeleteArtifactComment:input_type -> ariadne.v1.DeleteArtifactCommentRequest
-	38, // 45: ariadne.v1.ArtifactService.ResolveArtifactCommentThread:input_type -> ariadne.v1.ResolveArtifactCommentThreadRequest
-	40, // 46: ariadne.v1.ArtifactService.ReopenArtifactCommentThread:input_type -> ariadne.v1.ReopenArtifactCommentThreadRequest
-	42, // 47: ariadne.v1.ArtifactService.RemoveArtifactCommentThread:input_type -> ariadne.v1.RemoveArtifactCommentThreadRequest
-	15, // 48: ariadne.v1.ArtifactService.ListArtifacts:output_type -> ariadne.v1.ListArtifactsResponse
-	17, // 49: ariadne.v1.ArtifactService.CreateArtifact:output_type -> ariadne.v1.CreateArtifactResponse
-	19, // 50: ariadne.v1.ArtifactService.GetArtifact:output_type -> ariadne.v1.GetArtifactResponse
-	21, // 51: ariadne.v1.ArtifactService.ListArtifactVersions:output_type -> ariadne.v1.ListArtifactVersionsResponse
-	23, // 52: ariadne.v1.ArtifactService.SaveArtifact:output_type -> ariadne.v1.SaveArtifactResponse
-	25, // 53: ariadne.v1.ArtifactService.RefreshDashboard:output_type -> ariadne.v1.RefreshDashboardResponse
-	27, // 54: ariadne.v1.ArtifactService.SendArtifactFeedback:output_type -> ariadne.v1.SendArtifactFeedbackResponse
-	29, // 55: ariadne.v1.ArtifactService.WithdrawArtifactFeedback:output_type -> ariadne.v1.WithdrawArtifactFeedbackResponse
-	31, // 56: ariadne.v1.ArtifactService.CreateArtifactComment:output_type -> ariadne.v1.CreateArtifactCommentResponse
-	33, // 57: ariadne.v1.ArtifactService.ReplyArtifactComment:output_type -> ariadne.v1.ReplyArtifactCommentResponse
-	35, // 58: ariadne.v1.ArtifactService.EditArtifactComment:output_type -> ariadne.v1.EditArtifactCommentResponse
-	37, // 59: ariadne.v1.ArtifactService.DeleteArtifactComment:output_type -> ariadne.v1.DeleteArtifactCommentResponse
-	39, // 60: ariadne.v1.ArtifactService.ResolveArtifactCommentThread:output_type -> ariadne.v1.ResolveArtifactCommentThreadResponse
-	41, // 61: ariadne.v1.ArtifactService.ReopenArtifactCommentThread:output_type -> ariadne.v1.ReopenArtifactCommentThreadResponse
-	43, // 62: ariadne.v1.ArtifactService.RemoveArtifactCommentThread:output_type -> ariadne.v1.RemoveArtifactCommentThreadResponse
-	48, // [48:63] is the sub-list for method output_type
-	33, // [33:48] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	8,  // 6: ariadne.v1.ArtifactCommentElement.rect:type_name -> ariadne.v1.ArtifactCommentElementRect
+	9,  // 7: ariadne.v1.ArtifactCommentAnchor.element:type_name -> ariadne.v1.ArtifactCommentElement
+	10, // 8: ariadne.v1.ArtifactCommentThreadView.anchor:type_name -> ariadne.v1.ArtifactCommentAnchor
+	11, // 9: ariadne.v1.ArtifactCommentThreadView.comments:type_name -> ariadne.v1.ArtifactCommentView
+	12, // 10: ariadne.v1.ArtifactCommentThreadView.resolved:type_name -> ariadne.v1.ArtifactCommentResolution
+	47, // 11: ariadne.v1.ArtifactFeedbackView.items:type_name -> ariadne.v1.ArtifactFeedbackItem
+	14, // 12: ariadne.v1.ArtifactFeedbackView.images:type_name -> ariadne.v1.ArtifactAttachment
+	5,  // 13: ariadne.v1.ListArtifactsResponse.artifacts:type_name -> ariadne.v1.ArtifactSummary
+	6,  // 14: ariadne.v1.CreateArtifactResponse.artifact:type_name -> ariadne.v1.ArtifactView
+	7,  // 15: ariadne.v1.CreateArtifactResponse.versions:type_name -> ariadne.v1.ArtifactVersionView
+	13, // 16: ariadne.v1.CreateArtifactResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
+	6,  // 17: ariadne.v1.GetArtifactResponse.artifact:type_name -> ariadne.v1.ArtifactView
+	7,  // 18: ariadne.v1.GetArtifactResponse.versions:type_name -> ariadne.v1.ArtifactVersionView
+	13, // 19: ariadne.v1.GetArtifactResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
+	7,  // 20: ariadne.v1.ListArtifactVersionsResponse.versions:type_name -> ariadne.v1.ArtifactVersionView
+	46, // 21: ariadne.v1.SaveArtifactRequest.quotes:type_name -> ariadne.v1.SaveArtifactRequest.QuotesEntry
+	6,  // 22: ariadne.v1.SaveArtifactResponse.artifact:type_name -> ariadne.v1.ArtifactView
+	7,  // 23: ariadne.v1.SaveArtifactResponse.versions:type_name -> ariadne.v1.ArtifactVersionView
+	13, // 24: ariadne.v1.SaveArtifactResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
+	6,  // 25: ariadne.v1.RefreshDashboardResponse.artifact:type_name -> ariadne.v1.ArtifactView
+	15, // 26: ariadne.v1.SendArtifactFeedbackResponse.feedback:type_name -> ariadne.v1.ArtifactFeedbackView
+	10, // 27: ariadne.v1.CreateArtifactCommentRequest.anchor:type_name -> ariadne.v1.ArtifactCommentAnchor
+	13, // 28: ariadne.v1.CreateArtifactCommentResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
+	13, // 29: ariadne.v1.ReplyArtifactCommentResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
+	13, // 30: ariadne.v1.EditArtifactCommentResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
+	13, // 31: ariadne.v1.DeleteArtifactCommentResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
+	13, // 32: ariadne.v1.ResolveArtifactCommentThreadResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
+	13, // 33: ariadne.v1.ReopenArtifactCommentThreadResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
+	13, // 34: ariadne.v1.RemoveArtifactCommentThreadResponse.comments:type_name -> ariadne.v1.ArtifactCommentThreadView
+	16, // 35: ariadne.v1.ArtifactService.ListArtifacts:input_type -> ariadne.v1.ListArtifactsRequest
+	18, // 36: ariadne.v1.ArtifactService.CreateArtifact:input_type -> ariadne.v1.CreateArtifactRequest
+	20, // 37: ariadne.v1.ArtifactService.GetArtifact:input_type -> ariadne.v1.GetArtifactRequest
+	22, // 38: ariadne.v1.ArtifactService.ListArtifactVersions:input_type -> ariadne.v1.ListArtifactVersionsRequest
+	24, // 39: ariadne.v1.ArtifactService.SaveArtifact:input_type -> ariadne.v1.SaveArtifactRequest
+	26, // 40: ariadne.v1.ArtifactService.RefreshDashboard:input_type -> ariadne.v1.RefreshDashboardRequest
+	28, // 41: ariadne.v1.ArtifactService.SendArtifactFeedback:input_type -> ariadne.v1.SendArtifactFeedbackRequest
+	30, // 42: ariadne.v1.ArtifactService.WithdrawArtifactFeedback:input_type -> ariadne.v1.WithdrawArtifactFeedbackRequest
+	32, // 43: ariadne.v1.ArtifactService.CreateArtifactComment:input_type -> ariadne.v1.CreateArtifactCommentRequest
+	34, // 44: ariadne.v1.ArtifactService.ReplyArtifactComment:input_type -> ariadne.v1.ReplyArtifactCommentRequest
+	36, // 45: ariadne.v1.ArtifactService.EditArtifactComment:input_type -> ariadne.v1.EditArtifactCommentRequest
+	38, // 46: ariadne.v1.ArtifactService.DeleteArtifactComment:input_type -> ariadne.v1.DeleteArtifactCommentRequest
+	40, // 47: ariadne.v1.ArtifactService.ResolveArtifactCommentThread:input_type -> ariadne.v1.ResolveArtifactCommentThreadRequest
+	42, // 48: ariadne.v1.ArtifactService.ReopenArtifactCommentThread:input_type -> ariadne.v1.ReopenArtifactCommentThreadRequest
+	44, // 49: ariadne.v1.ArtifactService.RemoveArtifactCommentThread:input_type -> ariadne.v1.RemoveArtifactCommentThreadRequest
+	17, // 50: ariadne.v1.ArtifactService.ListArtifacts:output_type -> ariadne.v1.ListArtifactsResponse
+	19, // 51: ariadne.v1.ArtifactService.CreateArtifact:output_type -> ariadne.v1.CreateArtifactResponse
+	21, // 52: ariadne.v1.ArtifactService.GetArtifact:output_type -> ariadne.v1.GetArtifactResponse
+	23, // 53: ariadne.v1.ArtifactService.ListArtifactVersions:output_type -> ariadne.v1.ListArtifactVersionsResponse
+	25, // 54: ariadne.v1.ArtifactService.SaveArtifact:output_type -> ariadne.v1.SaveArtifactResponse
+	27, // 55: ariadne.v1.ArtifactService.RefreshDashboard:output_type -> ariadne.v1.RefreshDashboardResponse
+	29, // 56: ariadne.v1.ArtifactService.SendArtifactFeedback:output_type -> ariadne.v1.SendArtifactFeedbackResponse
+	31, // 57: ariadne.v1.ArtifactService.WithdrawArtifactFeedback:output_type -> ariadne.v1.WithdrawArtifactFeedbackResponse
+	33, // 58: ariadne.v1.ArtifactService.CreateArtifactComment:output_type -> ariadne.v1.CreateArtifactCommentResponse
+	35, // 59: ariadne.v1.ArtifactService.ReplyArtifactComment:output_type -> ariadne.v1.ReplyArtifactCommentResponse
+	37, // 60: ariadne.v1.ArtifactService.EditArtifactComment:output_type -> ariadne.v1.EditArtifactCommentResponse
+	39, // 61: ariadne.v1.ArtifactService.DeleteArtifactComment:output_type -> ariadne.v1.DeleteArtifactCommentResponse
+	41, // 62: ariadne.v1.ArtifactService.ResolveArtifactCommentThread:output_type -> ariadne.v1.ResolveArtifactCommentThreadResponse
+	43, // 63: ariadne.v1.ArtifactService.ReopenArtifactCommentThread:output_type -> ariadne.v1.ReopenArtifactCommentThreadResponse
+	45, // 64: ariadne.v1.ArtifactService.RemoveArtifactCommentThread:output_type -> ariadne.v1.RemoveArtifactCommentThreadResponse
+	50, // [50:65] is the sub-list for method output_type
+	35, // [35:50] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_ariadne_v1_artifacts_proto_init() }
@@ -3380,24 +3555,25 @@ func file_ariadne_v1_artifacts_proto_init() {
 	}
 	file_ariadne_v1_artifacts_proto_msgTypes[5].OneofWrappers = []any{}
 	file_ariadne_v1_artifacts_proto_msgTypes[6].OneofWrappers = []any{}
-	file_ariadne_v1_artifacts_proto_msgTypes[8].OneofWrappers = []any{
+	file_ariadne_v1_artifacts_proto_msgTypes[9].OneofWrappers = []any{}
+	file_ariadne_v1_artifacts_proto_msgTypes[10].OneofWrappers = []any{
 		(*ArtifactCommentAnchor_Node)(nil),
 		(*ArtifactCommentAnchor_Edge)(nil),
 	}
-	file_ariadne_v1_artifacts_proto_msgTypes[9].OneofWrappers = []any{}
 	file_ariadne_v1_artifacts_proto_msgTypes[11].OneofWrappers = []any{}
 	file_ariadne_v1_artifacts_proto_msgTypes[13].OneofWrappers = []any{}
-	file_ariadne_v1_artifacts_proto_msgTypes[18].OneofWrappers = []any{}
-	file_ariadne_v1_artifacts_proto_msgTypes[22].OneofWrappers = []any{}
-	file_ariadne_v1_artifacts_proto_msgTypes[27].OneofWrappers = []any{}
-	file_ariadne_v1_artifacts_proto_msgTypes[30].OneofWrappers = []any{}
+	file_ariadne_v1_artifacts_proto_msgTypes[15].OneofWrappers = []any{}
+	file_ariadne_v1_artifacts_proto_msgTypes[20].OneofWrappers = []any{}
+	file_ariadne_v1_artifacts_proto_msgTypes[24].OneofWrappers = []any{}
+	file_ariadne_v1_artifacts_proto_msgTypes[29].OneofWrappers = []any{}
+	file_ariadne_v1_artifacts_proto_msgTypes[32].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ariadne_v1_artifacts_proto_rawDesc), len(file_ariadne_v1_artifacts_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   45,
+			NumMessages:   47,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

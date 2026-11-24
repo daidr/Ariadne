@@ -40,6 +40,7 @@ type boardOption struct {
 	hasRecommended                        bool
 	pictures                              []boardPicture
 	baselinePictures                      []boardPicture
+	prototype                             *boardPrototype
 }
 
 func boardGroups(raw any) ([]boardGroup, error) {
@@ -125,6 +126,20 @@ func (turn *turn) boardOptions(ctx context.Context, raw any) ([]boardOption, err
 				return nil, err
 			}
 			option.baselinePictures = append(option.baselinePictures, picture)
+		}
+		if rawProto, hasProto := candidate["prototype"]; hasProto && rawProto != nil {
+			protoMap, ok := rawProto.(args)
+			if !ok {
+				return nil, fmt.Errorf("option %q prototype must be an object", option.id)
+			}
+			proto, err := turn.resolvePrototype(ctx, protoMap)
+			if err != nil {
+				return nil, fmt.Errorf("option %q prototype: %w", option.id, err)
+			}
+			if proto.title == "" {
+				proto.title = option.title
+			}
+			option.prototype = &proto
 		}
 		result = append(result, option)
 	}
@@ -433,6 +448,7 @@ func (board *whiteboard) placeSingleOption(option boardOption, pick string, grou
 		option.id + "-text":           true,
 		option.id + "-baseline-label": true,
 		option.id + "-actual-label":   true,
+		option.id + "-prototype":      true,
 	}
 	for i := range 50 {
 		mine[fmt.Sprintf("%s-image-%d", option.id, i+1)] = true
@@ -444,8 +460,32 @@ func (board *whiteboard) placeSingleOption(option boardOption, pick string, grou
 		}
 	}
 	frameWidth := width
+	if option.prototype != nil {
+		if option.prototype.viewportWidth >= option.prototype.viewportHeight {
+			frameWidth = max(frameWidth, 512.0)
+		} else {
+			frameWidth = max(frameWidth, 340.0)
+		}
+	}
 	var inner []args
 	cursor := y + inset
+	if option.prototype != nil {
+		protoWidth := frameWidth - 2*padding
+		_, protoHeight := prototypeCardSize(option.prototype.viewportWidth, option.prototype.viewportHeight, protoWidth)
+		protoID := option.id + "-prototype"
+		protoData := prototypeNodeData(*option.prototype, nodes[protoID])
+		inner = append(inner, args{
+			"id":     protoID,
+			"type":   "prototype",
+			"parent": option.id,
+			"x":      x + padding,
+			"y":      cursor,
+			"width":  protoWidth,
+			"height": protoHeight,
+			"data":   protoData,
+		})
+		cursor += protoHeight + gap
+	}
 	if len(option.baselinePictures) > 0 && len(option.pictures) > 0 {
 		frameWidth = 720.0
 		colWidth := (frameWidth - 2*padding - gap) / 2

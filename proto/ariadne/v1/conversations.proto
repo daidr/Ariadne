@@ -504,6 +504,26 @@ message ArtifactFeedbackAnswerItem {
   repeated ArtifactFeedbackAnswerEntry answers = 1;
 }
 
+message ArtifactFeedbackTweakChange {
+  string key = 1;
+  string label = 2;
+  string value = 3;
+  optional string previous = 4;
+  optional string unit = 5;
+}
+
+message ArtifactFeedbackTweakEntry {
+  string node_id = 1;
+  string title = 2;
+  optional string option_id = 3;
+  optional string option_title = 4;
+  repeated ArtifactFeedbackTweakChange changes = 5;
+}
+
+message ArtifactFeedbackTweakItem {
+  repeated ArtifactFeedbackTweakEntry tweaks = 1;
+}
+
 message ArtifactFeedbackItem {
   oneof item {
     ArtifactFeedbackEditItem edit = 1;
@@ -512,6 +532,7 @@ message ArtifactFeedbackItem {
     ArtifactFeedbackMarkItem mark = 4;
     ArtifactFeedbackBoardItem board = 5;
     ArtifactFeedbackAnswerItem answer = 6;
+    ArtifactFeedbackTweakItem tweak = 7;
   }
 }
 

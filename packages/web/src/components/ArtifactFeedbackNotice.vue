@@ -22,6 +22,7 @@ const count = computed(() =>
   props.notice.items.reduce((n, item) => {
     if (item.kind === 'board') return n + item.changes.length
     if (item.kind === 'answer') return n + Math.max(1, item.answers.length)
+    if (item.kind === 'tweak') return n + Math.max(1, item.tweaks.length)
     return n + 1
   }, 0),
 )
@@ -63,6 +64,13 @@ function line(item: ArtifactFeedbackItem): string[] {
           ? t('notice.feedback.answer', { question: a.question, answer: segments.join(' · ') })
           : t('notice.feedback.answerEmpty', { question: a.question })
       })
+    case 'tweak':
+      return item.tweaks.map((entry) =>
+        t('notice.feedback.tweak', {
+          title: entry.optionTitle ? `${entry.optionTitle} / ${entry.title}` : entry.title,
+          changes: list(entry.changes.map((c) => `${c.label || c.key}=${c.value}${c.unit ?? ''}`)),
+        }),
+      )
   }
 }
 const lines = computed(() => {

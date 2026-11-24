@@ -361,8 +361,43 @@ export type ArtifactCommentAction =
   | { type: 'reopen'; threadId: string }
   | { type: 'remove'; threadId: string }
 
+export interface ArtifactCommentElementRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** Semantic element hit inside an interactive prototype frame when pinning a comment. */
+export interface ArtifactCommentElement {
+  label?: string
+  role?: string
+  tag?: string
+  selector?: string
+  rect?: ArtifactCommentElementRect
+}
+
 /** An item or connector; `block` scopes it to a whiteboard inside a document. */
-export type ArtifactCommentAnchor = ({ node: string } | { edge: string }) & { block?: string }
+export type ArtifactCommentAnchor = ({ node: string } | { edge: string }) & {
+  block?: string
+  element?: ArtifactCommentElement
+}
+
+export interface ArtifactFeedbackTweakChange {
+  key: string
+  label: string
+  value: string
+  previous?: string
+  unit?: string
+}
+
+export interface ArtifactFeedbackTweakEntry {
+  nodeId: string
+  title: string
+  optionId?: string
+  optionTitle?: string
+  changes: ArtifactFeedbackTweakChange[]
+}
 
 /**
  * One thing the user did in an artifact since the last round of feedback, as the agent
@@ -398,6 +433,11 @@ export type ArtifactFeedbackItem =
         values: string[]
         note?: string
       }[]
+    }
+  /** Structured parameter tweaks adjusted by the user on interactive prototype frames. */
+  | {
+      kind: 'tweak'
+      tweaks: ArtifactFeedbackTweakEntry[]
     }
 
 /** How the checks of a commit stand, all together. */
