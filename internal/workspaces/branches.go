@@ -279,7 +279,7 @@ func (manager *Manager) removeSourceWorktree(ctx context.Context, project, threa
 			return "orphan-changed", nil
 		}
 	} else {
-		removed, err = branches.Remove(ctx, thread, sdk.WorktreeRemoveOptions{Spare: reason == "idle"})
+		removed, err = branches.Remove(ctx, thread, sdk.WorktreeRemoveOptions{Spare: reason == "idle", Merged: reason == "merged"})
 	}
 	if err != nil {
 		return "", err

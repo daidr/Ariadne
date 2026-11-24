@@ -61,6 +61,7 @@ type UndoMergeRequest struct {
 type WorktreeRemoveOptions struct {
 	Discard bool `json:"discard,omitempty"`
 	Spare   bool `json:"spare,omitempty"`
+	Merged  bool `json:"merged,omitempty"`
 }
 type BranchCapability struct {
 	Changes func(context.Context, ThreadBranch, string) (*BranchChanges, error)
