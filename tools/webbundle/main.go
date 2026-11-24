@@ -8,8 +8,19 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 )
+
+func zipMethodForPath(name string) uint16 {
+	switch strings.ToLower(path.Ext(name)) {
+	case ".br", ".gz", ".png", ".jpg", ".jpeg", ".webp", ".avif", ".woff2", ".zip":
+		return zip.Store
+	default:
+		return zip.Deflate
+	}
+}
 
 func main() {
 	if len(os.Args) != 3 {
@@ -37,19 +48,22 @@ func pack(directory, target string) error {
 	}
 	defer os.Remove(output.Name())
 	archive := zip.NewWriter(output)
-	walkErr := fs.WalkDir(source, ".", func(path string, info fs.DirEntry, err error) error {
+	walkErr := fs.WalkDir(source, ".", func(filePath string, info fs.DirEntry, err error) error {
 		if err != nil || info.IsDir() {
 			return err
 		}
 		if !info.Type().IsRegular() {
-			return fmt.Errorf("unexpected frontend file type: %s", path)
+			return fmt.Errorf("unexpected frontend file type: %s", filePath)
 		}
-		in, err := source.Open(path)
+		in, err := source.Open(filePath)
 		if err != nil {
 			return err
 		}
 		defer in.Close()
-		out, err := archive.Create(path)
+		out, err := archive.CreateHeader(&zip.FileHeader{
+			Name:   filePath,
+			Method: zipMethodForPath(filePath),
+		})
 		if err != nil {
 			return err
 		}

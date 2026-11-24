@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -220,22 +221,112 @@ func (store Store) Read(ctx context.Context, id string) (Content, error) {
 	return content, err
 }
 
+const fileBlobChunkBytes = 1 << 20 // 1 MiB per SQLite substr read
+
+type sqliteBlobReader struct {
+	ctx    context.Context
+	db     *sql.DB
+	id     string
+	size   int64
+	offset int64
+	buf    []byte
+	bufPos int
+	reads  int
+}
+
+func (r *sqliteBlobReader) Seek(offset int64, whence int) (int64, error) {
+	var next int64
+	switch whence {
+	case io.SeekStart:
+		next = offset
+	case io.SeekCurrent:
+		next = r.offset + offset
+	case io.SeekEnd:
+		next = r.size + offset
+	default:
+		return 0, errors.New("files: invalid seek whence")
+	}
+	if next < 0 {
+		return 0, errors.New("files: negative seek offset")
+	}
+	if next != r.offset {
+		r.buf = nil
+		r.bufPos = 0
+		r.offset = next
+	}
+	return r.offset, nil
+}
+
+func (r *sqliteBlobReader) Read(p []byte) (int, error) {
+	if r.offset >= r.size {
+		return 0, io.EOF
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if r.bufPos < len(r.buf) {
+		n := copy(p, r.buf[r.bufPos:])
+		r.bufPos += n
+		r.offset += int64(n)
+		if r.bufPos >= len(r.buf) {
+			r.buf = nil
+			r.bufPos = 0
+		}
+		return n, nil
+	}
+
+	remaining := r.size - r.offset
+	fetchSize := int64(len(p))
+	if fetchSize >= 32*1024 && fetchSize < fileBlobChunkBytes {
+		fetchSize = fileBlobChunkBytes
+	}
+	if fetchSize > remaining {
+		fetchSize = remaining
+	}
+
+	var chunk []byte
+	err := r.db.QueryRowContext(
+		r.ctx,
+		"SELECT substr(data, ?, ?) FROM files WHERE id = ?",
+		r.offset+1,
+		fetchSize,
+		r.id,
+	).Scan(&chunk)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, io.ErrUnexpectedEOF
+	}
+	if err != nil {
+		return 0, err
+	}
+	if len(chunk) == 0 {
+		return 0, io.ErrUnexpectedEOF
+	}
+	r.reads++
+
+	n := copy(p, chunk)
+	r.offset += int64(n)
+	if n < len(chunk) {
+		r.buf = chunk[n:]
+		r.bufPos = 0
+	}
+	return n, nil
+}
+
 // Serve must be registered behind httpauth.Middleware. It has no public fallback
-// path and uses SQLite length(data) so HEAD does not load a large BLOB into Go.
+// path, checks sha256/size metadata before touching the BLOB, and streams data
+// in bounded chunks with ETag/304 and HTTP Range support.
 func (store Store) Serve(writer http.ResponseWriter, request *http.Request) {
 	id := request.PathValue("fileId")
-	var mime string
-	var size int64
-	var data []byte
-	var err error
-	if request.Method == http.MethodHead {
-		err = store.Events.DB().QueryRowContext(request.Context(), "SELECT mime, length(data) FROM files WHERE id = ?", id).Scan(&mime, &size)
-	} else {
-		var content Content
-		content, err = store.Read(request.Context(), id)
-		mime, data = content.MIME, content.Data
-		size = int64(len(data))
-	}
+	var (
+		mime   string
+		size   int64
+		digest string
+	)
+	err := store.Events.DB().QueryRowContext(
+		request.Context(),
+		"SELECT mime, size, sha256 FROM files WHERE id = ?",
+		id,
+	).Scan(&mime, &size, &digest)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = domainerr.NotFound(id)
 	}
@@ -243,21 +334,35 @@ func (store Store) Serve(writer http.ResponseWriter, request *http.Request) {
 		domainerr.Write(writer, err)
 		return
 	}
+	if size < 0 {
+		size = 0
+	}
+
 	contentType := mime
-	if contentType == "text/plain" {
+	switch contentType {
+	case "":
+		contentType = "application/octet-stream"
+	case "text/plain":
 		contentType = "text/plain; charset=utf-8"
 	}
-	headers := map[string]string{
-		"Content-Type": contentType, "Cache-Control": "private, no-store", "Content-Length": fmt.Sprint(size),
-		"Cross-Origin-Resource-Policy": "same-origin", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'",
-	}
+	header := writer.Header()
+	header.Set("Content-Type", contentType)
+	header.Set("Cache-Control", "private, no-cache")
+	header.Set("Cross-Origin-Resource-Policy", "same-origin")
+	header.Set("X-Content-Type-Options", "nosniff")
+	header.Set("Content-Security-Policy", "default-src 'none'")
 	if !isInlineServed(mime) {
-		headers["Content-Disposition"] = "attachment"
+		header.Set("Content-Disposition", "attachment")
 	}
-	for key, value := range headers {
-		writer.Header().Set(key, value)
+	if digest != "" {
+		header.Set("ETag", fmt.Sprintf("%q", digest))
 	}
-	if request.Method != http.MethodHead {
-		_, _ = writer.Write(data)
+
+	reader := &sqliteBlobReader{
+		ctx:  request.Context(),
+		db:   store.Events.DB(),
+		id:   id,
+		size: size,
 	}
+	http.ServeContent(writer, request, "", time.Time{}, reader)
 }
