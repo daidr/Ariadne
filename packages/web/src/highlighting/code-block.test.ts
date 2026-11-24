@@ -7,6 +7,7 @@ import { defineComponent, h, nextTick } from 'vue'
 import { sanitizeUrl } from '../markdown/links'
 import { createCodeBlockHighlighter, plainCodeLinesHtml } from './code-block'
 import { createShikiService } from './shiki'
+import { createShikiWorkerPool } from './shiki-worker-pool'
 
 async function flushHighlights() {
   for (let i = 0; i < 6; i++) {
@@ -45,6 +46,30 @@ describe('DouCodeBlock Shiki highlighter', () => {
     const highlight = createCodeBlockHighlighter(async () => '')
     const result = await highlight('const a = 1 < 2', 'ts')
     expect(result).toBe(plainCodeLinesHtml('const a = 1 < 2'))
+  })
+
+  test('returns cached worker-pool results synchronously on subsequent renders without re-running Shiki', async () => {
+    const shiki = createShikiService(() => createJavaScriptRegexEngine())
+    const spy = vi.fn((code: string, lang: string) => shiki.highlightToHtml(code, lang))
+    const pool = createShikiWorkerPool({
+      createWorker: () => null,
+      fallback: spy,
+    })
+    const highlight = createCodeBlockHighlighter(pool)
+
+    const first = highlight('export const n = 1', 'ts')
+    expect(first).toBeInstanceOf(Promise)
+    const html = await first
+    expect(html).toContain('--shiki-light:')
+    expect(html).toContain('--shiki-dark:')
+
+    // Scrolling back to the same block hits the pool cache synchronously.
+    const second = highlight('export const n = 1', 'typescript')
+    expect(typeof second).toBe('string')
+    expect(second).toBe(html)
+    expect(spy).toHaveBeenCalledTimes(1)
+
+    pool.dispose()
   })
 
   test('highlights multi-language code blocks inside assistant DouChatMessage via DouConfigProvider defaults', async () => {

@@ -19,6 +19,7 @@ import { CloseIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError } from '../api'
 import { shownAttachments } from '../components/attachments'
+import { acquireCodeEditorWorker } from '../highlighting/code-worker-pool'
 import { duration, locale, t, tm } from '../i18n'
 import type { TraceRow } from './rows'
 import TraceMessages from './TraceMessages.vue'
@@ -273,6 +274,7 @@ const title = computed(() =>
               <DouCodeEditor
                 :model-value="body"
                 :language="jsonLanguage"
+                :worker="body.length > 50_000 ? acquireCodeEditorWorker : false"
                 :keys="false"
                 :aria-label="t('trace.tab.body')"
                 readonly

@@ -1,5 +1,6 @@
 import type { CodeBlockHighlighter } from 'dou-ui'
 import { resolveShikiLanguage } from './languages'
+import { shikiWorkerPool, type HighlightOptions } from './shiki-worker-pool'
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -13,27 +14,45 @@ export function plainCodeLinesHtml(code: string): string {
     .join('\n')
 }
 
-export type CodeHtmlHighlighter = (code: string, lang: string) => Promise<string>
+export type CodeHtmlHighlighter = (
+  code: string,
+  lang: string,
+  options?: HighlightOptions,
+) => Promise<string>
 
-async function defaultHtmlHighlighter(code: string, lang: string): Promise<string> {
-  const { highlightCodeToHtml } = await import('./shiki')
-  return highlightCodeToHtml(code, lang)
+export interface CodeHtmlHighlighterSource {
+  peek?(code: string, lang: string): string | null
+  highlight(code: string, lang: string, options?: HighlightOptions): Promise<string>
+}
+
+export interface CodeBlockHighlightContext {
+  signal?: AbortSignal
 }
 
 /**
  * Create a `DouCodeBlock` highlighter backed by lazy Shiki dual-theme highlighting.
  * Plain text and unsupported languages resolve synchronously as escaped plain lines without
- * loading Shiki, so `DouCodeBlock` keeps rendering their full text cleanly.
+ * starting workers or loading Shiki. Cached results also return synchronously so scrolling back
+ * through long conversations paints highlighted blocks immediately without flashing.
  */
 export function createCodeBlockHighlighter(
-  highlightHtml: CodeHtmlHighlighter = defaultHtmlHighlighter,
+  source: CodeHtmlHighlighter | CodeHtmlHighlighterSource = shikiWorkerPool,
 ): CodeBlockHighlighter {
-  return (code, lang) => {
+  const peek = typeof source === 'function' ? undefined : source.peek?.bind(source)
+  const highlightHtml = typeof source === 'function' ? source : source.highlight.bind(source)
+
+  return (code: string, lang: string, context?: CodeBlockHighlightContext) => {
     if (!code) return ''
     if (!resolveShikiLanguage(lang)) return plainCodeLinesHtml(code)
-    return highlightHtml(code, lang).then((html) => html || plainCodeLinesHtml(code))
+    const cached = peek?.(code, lang)
+    if (cached) return cached
+    const options = context?.signal ? { signal: context.signal } : undefined
+    return highlightHtml(code, lang, options).then(
+      (html) => html || plainCodeLinesHtml(code),
+      () => plainCodeLinesHtml(code),
+    )
   }
 }
 
-/** Shared Shiki highlighter configured as the default for `DouCodeBlock` across the app. */
+/** Shared Shiki worker-pool highlighter configured as the default for `DouCodeBlock` across the app. */
 export const highlightCodeBlock: CodeBlockHighlighter = createCodeBlockHighlighter()
