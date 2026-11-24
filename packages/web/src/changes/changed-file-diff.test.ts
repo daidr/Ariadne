@@ -259,7 +259,7 @@ describe('ChangedFileDiff syntax highlighting', () => {
 })
 
 describe('ChangedFileDiff gutters', () => {
-  test('omits the review-comments gutter column when the file has no review notes, and shows it reactively when notes arrive', async () => {
+  test('overlays line comments, omits the review-comments gutter column when empty, and shows it reactively when notes arrive', async () => {
     const file: ChangedFile = {
       path: 'internal/runner/prompt.go',
       previousPath: null,
@@ -280,10 +280,14 @@ describe('ChangedFileDiff gutters', () => {
     })
 
     await nextTick()
-    const cellsWithoutNotes = wrapper.find('.dou-code-editor__number .dou-code-editor__cells')
+    const rowWithoutNotes = wrapper.find('.dou-code-editor__number')
+    const cellsWithoutNotes = rowWithoutNotes.find('.dou-code-editor__cells')
     expect(cellsWithoutNotes.exists()).toBe(true)
-    // Inline mode columns: line-comments + diff-original + diff-modified + diff sign (no empty review-comments column).
-    expect(cellsWithoutNotes.findAll('.dou-code-editor__cell')).toHaveLength(4)
+    // Inline mode flow columns: diff-original + diff-modified + diff sign (line-comments overlays; no empty review-comments column).
+    expect(cellsWithoutNotes.findAll('.dou-code-editor__cell')).toHaveLength(3)
+    expect(
+      rowWithoutNotes.findAll('.dou-code-editor__overlays > .dou-code-editor__cell.is-overlay'),
+    ).toHaveLength(1)
     expect(wrapper.find('.review-comment-mark').exists()).toBe(false)
 
     await wrapper.setProps({
@@ -324,8 +328,12 @@ describe('ChangedFileDiff gutters', () => {
     })
     await nextTick()
 
-    const cellsWithNotes = wrapper.find('.dou-code-editor__number .dou-code-editor__cells')
-    expect(cellsWithNotes.findAll('.dou-code-editor__cell')).toHaveLength(5)
+    const rowWithNotes = wrapper.find('.dou-code-editor__number')
+    const cellsWithNotes = rowWithNotes.find('.dou-code-editor__cells')
+    expect(cellsWithNotes.findAll('.dou-code-editor__cell')).toHaveLength(4)
+    expect(
+      rowWithNotes.findAll('.dou-code-editor__overlays > .dou-code-editor__cell.is-overlay'),
+    ).toHaveLength(1)
     expect(wrapper.find('.review-comment-mark').exists()).toBe(true)
     wrapper.unmount()
   })

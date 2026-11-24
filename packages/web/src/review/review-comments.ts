@@ -115,6 +115,7 @@ export function useReviewComments(
   const gutter = computed<CodeDiffGutter>(() => ({
     name: 'review-comments',
     width: 18,
+    overlay: 'compact',
     markers: [...placed.value.keys()].map((line) => ({
       side: 'modified' as const,
       line,
