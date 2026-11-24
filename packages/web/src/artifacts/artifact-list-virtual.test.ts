@@ -215,4 +215,97 @@ describe('ArtifactThumb IntersectionObserver lazy rendering', () => {
     second.unmount()
     expect(observer.disconnected).toBe(true)
   })
+
+  test('does not eagerly fetch offscreen whiteboard after items clear then refill', async () => {
+    const getArtifact = vi.spyOn(api, 'getArtifact').mockResolvedValue({
+      artifact: {
+        content: JSON.stringify({
+          version: 1,
+          nodes: [{ id: 'n1', type: 'rect', x: 0, y: 0 }],
+          edges: [],
+        }),
+      },
+    } as Awaited<ReturnType<typeof api.getArtifact>>)
+
+    const initial = makeBoardArtifact('wb_clear')
+    const wrapper = mount(ArtifactThumb, { props: { artifact: initial } })
+    await flushPromises()
+
+    const firstObserver = FakeIntersectionObserver.instances[0]!
+    firstObserver.trigger(wrapper.element, true)
+    await flushPromises()
+    expect(getArtifact).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('img.thumb-board').exists()).toBe(true)
+
+    // Board becomes empty (items: 0) -> resets visibility and drops thumbnail.
+    await wrapper.setProps({
+      artifact: {
+        ...initial,
+        updatedAt: initial.updatedAt + 1_000,
+        preview: { kind: 'whiteboard', items: 0, connectors: 0, texts: [] },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('img.thumb-board').exists()).toBe(false)
+
+    // Board regains items while offscreen -> must wait for IntersectionObserver again.
+    await wrapper.setProps({
+      artifact: {
+        ...initial,
+        updatedAt: initial.updatedAt + 2_000,
+        preview: { kind: 'whiteboard', items: 3, connectors: 1, texts: ['A'] },
+      },
+    })
+    await flushPromises()
+    expect(getArtifact).toHaveBeenCalledTimes(1)
+
+    const activeObserver = FakeIntersectionObserver.instances.at(-1)!
+    activeObserver.trigger(wrapper.element, true)
+    await flushPromises()
+    expect(getArtifact).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('img.thumb-board').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  test('re-checks visibility instead of eagerly fetching when ArtifactThumb switches artifact id', async () => {
+    const getArtifact = vi.spyOn(api, 'getArtifact').mockResolvedValue({
+      artifact: {
+        content: JSON.stringify({
+          version: 1,
+          nodes: [{ id: 'n1', type: 'rect', x: 0, y: 0 }],
+          edges: [],
+        }),
+      },
+    } as Awaited<ReturnType<typeof api.getArtifact>>)
+
+    const wrapper = mount(ArtifactThumb, { props: { artifact: makeBoardArtifact('wb_a') } })
+    await flushPromises()
+
+    FakeIntersectionObserver.instances[0]!.trigger(wrapper.element, true)
+    await flushPromises()
+    expect(getArtifact).toHaveBeenCalledTimes(1)
+    expect(getArtifact).toHaveBeenLastCalledWith(
+      'wb_a',
+      expect.objectContaining({ versions: false }),
+    )
+
+    // Switch the same component instance to a different whiteboard ID while offscreen.
+    await wrapper.setProps({ artifact: makeBoardArtifact('wb_b') })
+    await flushPromises()
+    expect(getArtifact).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('img.thumb-board').exists()).toBe(false)
+
+    // Only once the new element is reported visible should wb_b be fetched.
+    FakeIntersectionObserver.instances.at(-1)!.trigger(wrapper.element, true)
+    await flushPromises()
+    expect(getArtifact).toHaveBeenCalledTimes(2)
+    expect(getArtifact).toHaveBeenLastCalledWith(
+      'wb_b',
+      expect.objectContaining({ versions: false }),
+    )
+    expect(wrapper.find('img.thumb-board').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
 })

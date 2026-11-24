@@ -56,9 +56,6 @@ const canReorder = computed(() => state.projects.length > 1)
 const menuOpen = ref(false)
 const inspecting = ref<string>()
 const inPopover = computed(() => props.surface === 'popover')
-const activityDisabled = computed(
-  () => !!props.compact || inPopover.value || !props.active || menuOpen.value,
-)
 const virtualized = computed(() => state.projects.length > PROJECT_VIRTUALIZE_THRESHOLD)
 const rowStride = computed(() => (props.compact ? 44 : inPopover.value ? 36 : 32) + ROW_GAP)
 
@@ -82,6 +79,14 @@ const virtualSortable = useSortable({
     canceled: (label) => douT('sortable.canceled', { label }),
   }),
 })
+const activityDisabled = computed(
+  () =>
+    !!props.compact ||
+    inPopover.value ||
+    !props.active ||
+    menuOpen.value ||
+    virtualSortable.dragging.value !== null,
+)
 
 watch(
   [virtualized, virtualList],
@@ -253,6 +258,7 @@ async function confirmDelete(id: string) {
           :item-size="rowStride"
           :overscan="6"
           v-bind="virtualSortable.listAttrs.value"
+          @scroll="inspecting = undefined"
         >
           <template #default="{ item, index }">
             <div class="projects-virtual-slot">

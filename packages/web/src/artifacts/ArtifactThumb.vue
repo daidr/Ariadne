@@ -24,20 +24,25 @@ const boardTarget = computed(() =>
     ? ([props.artifact.id, props.artifact.updatedAt, resolved.value] as const)
     : null,
 )
-const visible = ref(typeof IntersectionObserver === 'undefined')
+const noObserver = () => typeof IntersectionObserver === 'undefined'
+const visible = ref(noObserver())
 
 watch(
   () => props.artifact.id,
   () => {
     picture.value = null
+    visible.value = noObserver()
   },
 )
 
 watch(
   [thumb, () => boardTarget.value !== null, () => props.artifact.id],
   ([el, needsBoard], _prev, cleanup) => {
-    if (!needsBoard) return
-    if (typeof IntersectionObserver === 'undefined') {
+    if (!needsBoard) {
+      visible.value = noObserver()
+      return
+    }
+    if (noObserver()) {
       visible.value = true
       return
     }
@@ -66,7 +71,7 @@ watch(
       if (ask === asked) picture.value = null
     }
   },
-  { immediate: true },
+  { flush: 'post', immediate: true },
 )
 
 const rows = computed(() =>

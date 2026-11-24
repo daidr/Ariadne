@@ -2,6 +2,7 @@
 import type { ProjectView } from '@ariadne/core'
 import { DouBadge, DouSpinner } from 'dou-ui'
 import { FolderIcon } from '@dou-ui/icons'
+import { onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import ProjectActivityPopover from './ProjectActivityPopover.vue'
 
@@ -23,6 +24,10 @@ function onSelect(dismiss: () => void) {
   dismiss()
   emit('select', props.project.id)
 }
+
+onBeforeUnmount(() => {
+  if (props.inspecting) emit('inspect', props.project.id, false)
+})
 </script>
 
 <template>
