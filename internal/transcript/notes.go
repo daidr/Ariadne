@@ -270,24 +270,6 @@ func describeFeedback(note map[string]any) string {
 			lines = append(lines, fmt.Sprintf("- They put a %s (%s) %s%s", text(item["type"]), text(item["nodeId"]), text(item["where"]), extra))
 		case "board":
 			lines = append(lines, "- "+joined(item["changes"], "\n- "))
-		case "verify":
-			if len(arr(item["verdicts"])) == 0 {
-				lines = append(lines, "- They cleared all verification verdicts.")
-			} else {
-				entries := []string{}
-				for _, raw := range arr(item["verdicts"]) {
-					value := obj(raw)
-					verdict := text(value["verdict"])
-					label := `"` + text(value["title"]) + `" (` + text(value["id"]) + `): ` + verdict
-					if groupTitle := text(value["groupTitle"]); groupTitle != "" {
-						label = "[" + groupTitle + "] " + label
-					} else if groupID := text(value["group"]); groupID != "" {
-						label = "[" + groupID + "] " + label
-					}
-					entries = append(entries, label)
-				}
-				lines = append(lines, "- Verification verdicts: "+strings.Join(entries, "; "))
-			}
 		case "answer":
 			for _, raw := range arr(item["answers"]) {
 				value := obj(raw)

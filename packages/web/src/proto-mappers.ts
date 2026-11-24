@@ -742,17 +742,6 @@ function fromProtoFeedbackItem(item: ProtoArtifactFeedbackItem): ArtifactFeedbac
       }
     case 'board':
       return { kind: 'board', changes: [...item.item.value.changes] }
-    case 'verify':
-      return {
-        kind: 'verify',
-        verdicts: item.item.value.verdicts.map((v) => ({
-          id: v.id,
-          title: v.title,
-          verdict: v.verdict === 'approved' ? 'approved' : 'changes_requested',
-          ...(v.group ? { group: v.group } : {}),
-          ...(v.groupTitle ? { groupTitle: v.groupTitle } : {}),
-        })),
-      }
     case 'answer':
       return {
         kind: 'answer',

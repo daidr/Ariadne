@@ -8,29 +8,19 @@ export interface DecisionGroupData {
   note?: string
   pick?: 'one' | 'many'
   round?: number
-  mode?: 'choose' | 'verify'
   confirmed?: boolean
 }
 
 export interface DecisionGroupSummary {
-  /** Number of active (unconfirmed) decision or verification groups on the board. */
+  /** Number of active (unconfirmed) decision groups on the board. */
   totalGroups: number
-  /** Active groups in choose mode. */
-  chooseGroups: number
-  /** Active groups in verify mode. */
-  verifyGroups: number
-  /** Active choose groups where the user manually picked at least one option. */
+  /** Active groups where the user manually picked at least one option. */
   pickedGroups: number
-  /** Active unpicked choose groups that have at least one recommended option. */
+  /** Active unpicked groups that have at least one recommended option. */
   recommendedFallbackGroups: number
-  /** Active unpicked choose groups that have no recommended option. */
+  /** Active unpicked groups that have no recommended option. */
   remainingGroups: number
-  /** Active verification items total / approved / changes_requested / pending. */
-  verifyItemsTotal: number
-  verifyApproved: number
-  verifyChangesRequested: number
-  verifyPending: number
-  /** True when the board has at least one active decision or verification group. */
+  /** True when the board has at least one active decision group. */
   hasActiveDecisionGroups: boolean
 }
 
@@ -55,18 +45,6 @@ export function optionPickMode(
   return 'one'
 }
 
-export function optionGroupMode(
-  node: FlowNode,
-  byId: ReadonlyMap<string, FlowNode>,
-): 'choose' | 'verify' {
-  const groupId = optionGroupId(node, byId)
-  if (groupId) {
-    const groupData = byId.get(groupId)?.data as DecisionGroupData | undefined
-    if (groupData?.mode === 'verify') return 'verify'
-  }
-  return 'choose'
-}
-
 export function isDecisionGroupNode(
   node: FlowNode,
   optionsByGroup?: ReadonlyMap<string, FlowNode[]>,
@@ -74,8 +52,6 @@ export function isDecisionGroupNode(
   if (node.type !== 'group') return false
   const data = node.data as DecisionGroupData | undefined
   if (
-    data?.mode === 'choose' ||
-    data?.mode === 'verify' ||
     (typeof data?.round === 'number' && data.round > 0) ||
     data?.pick === 'one' ||
     data?.pick === 'many' ||
@@ -106,33 +82,15 @@ export function groupOptionsMap(doc: FlowDocument): {
 export function summarizeDecisionGroups(doc: FlowDocument): DecisionGroupSummary {
   const { optionsByGroup } = groupOptionsMap(doc)
   let totalGroups = 0
-  let chooseGroups = 0
-  let verifyGroups = 0
   let pickedGroups = 0
   let recommendedFallbackGroups = 0
   let remainingGroups = 0
-  let verifyItemsTotal = 0
-  let verifyApproved = 0
-  let verifyChangesRequested = 0
-  let verifyPending = 0
   for (const node of doc.nodes) {
     if (!isDecisionGroupNode(node, optionsByGroup)) continue
     const data = node.data as DecisionGroupData | undefined
     if (data?.confirmed) continue
     totalGroups++
     const options = optionsByGroup.get(node.id) ?? []
-    if (data?.mode === 'verify') {
-      verifyGroups++
-      for (const opt of options) {
-        verifyItemsTotal++
-        const verdict = (opt.data as OptionNodeData | undefined)?.verdict
-        if (verdict === 'approved') verifyApproved++
-        else if (verdict === 'changes_requested') verifyChangesRequested++
-        else verifyPending++
-      }
-      continue
-    }
-    chooseGroups++
     const hasChosen = options.some((opt) => (opt.data as OptionNodeData | undefined)?.chosen)
     if (hasChosen) {
       pickedGroups++
@@ -146,15 +104,9 @@ export function summarizeDecisionGroups(doc: FlowDocument): DecisionGroupSummary
   }
   return {
     totalGroups,
-    chooseGroups,
-    verifyGroups,
     pickedGroups,
     recommendedFallbackGroups,
     remainingGroups,
-    verifyItemsTotal,
-    verifyApproved,
-    verifyChangesRequested,
-    verifyPending,
     hasActiveDecisionGroups: totalGroups > 0,
   }
 }
@@ -169,7 +121,7 @@ export function collectAutoRecommendedOptionIds(doc: FlowDocument): string[] {
   for (const node of doc.nodes) {
     if (!isDecisionGroupNode(node, optionsByGroup)) continue
     const data = node.data as DecisionGroupData | undefined
-    if (data?.confirmed || data?.mode === 'verify') continue
+    if (data?.confirmed) continue
     const options = optionsByGroup.get(node.id) ?? []
     if (options.some((opt) => (opt.data as OptionNodeData | undefined)?.chosen)) continue
     const recommended = options.filter(

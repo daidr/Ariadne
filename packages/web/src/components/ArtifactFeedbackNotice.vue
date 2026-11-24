@@ -21,7 +21,6 @@ const open = ref(false)
 const count = computed(() =>
   props.notice.items.reduce((n, item) => {
     if (item.kind === 'board') return n + item.changes.length
-    if (item.kind === 'verify') return n + Math.max(1, item.verdicts.length)
     if (item.kind === 'answer') return n + Math.max(1, item.answers.length)
     return n + 1
   }, 0),
@@ -55,25 +54,6 @@ function line(item: ArtifactFeedbackItem): string[] {
       return [t('notice.feedback.mark')]
     case 'board':
       return item.changes.map(() => t('notice.feedback.board'))
-    case 'verify': {
-      const approved = item.verdicts
-        .filter((v) => v.verdict === 'approved')
-        .map((v) => (v.groupTitle ? `${v.groupTitle}：${v.title}` : v.title))
-      const changes = item.verdicts
-        .filter((v) => v.verdict === 'changes_requested')
-        .map((v) => (v.groupTitle ? `${v.groupTitle}：${v.title}` : v.title))
-      const out: string[] = []
-      if (approved.length) {
-        out.push(t('notice.feedback.verifyApproved', { titles: list(approved) }))
-      }
-      if (changes.length) {
-        out.push(t('notice.feedback.verifyChanges', { titles: list(changes) }))
-      }
-      if (out.length === 0) {
-        out.push(t('notice.feedback.noVerify'))
-      }
-      return out
-    }
     case 'answer':
       return item.answers.map((a) => {
         const segments: string[] = []

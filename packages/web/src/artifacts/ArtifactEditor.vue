@@ -423,44 +423,22 @@ const decisionBarText = computed(() => {
   const s = decisionSummary.value
   if (!s) return ''
   let base: string
-  if (s.verifyGroups > 0 && s.chooseGroups === 0) {
-    if (s.verifyChangesRequested > 0) {
-      base = t('artifact.feedback.verifySummaryWithChanges', {
-        approved: s.verifyApproved,
-        changes: s.verifyChangesRequested,
-        total: s.verifyItemsTotal,
-      })
-    } else if (s.verifyApproved > 0) {
-      base = t('artifact.feedback.verifySummary', {
-        approved: s.verifyApproved,
-        total: s.verifyItemsTotal,
-      })
-    } else {
-      base = t('artifact.feedback.verifyPendingAll', { total: s.verifyItemsTotal })
-    }
-  } else if (s.verifyGroups > 0 && s.chooseGroups > 0) {
-    base = t('artifact.feedback.mixedSummary', {
-      picked: s.pickedGroups,
-      chooseTotal: s.chooseGroups,
-      reviewed: s.verifyApproved + s.verifyChangesRequested,
-      verifyTotal: s.verifyItemsTotal,
-    })
-  } else if (s.remainingGroups === 0 && s.pickedGroups === s.chooseGroups) {
+  if (s.remainingGroups === 0 && s.pickedGroups === s.totalGroups) {
     base = t('artifact.feedback.decisionAllPicked', {
       picked: s.pickedGroups,
-      total: s.chooseGroups,
+      total: s.totalGroups,
     })
   } else if (s.remainingGroups === 0 && s.pickedGroups > 0) {
     base = t('artifact.feedback.decisionWithRecommended', {
       picked: s.pickedGroups,
-      total: s.chooseGroups,
+      total: s.totalGroups,
     })
   } else if (s.remainingGroups === 0) {
-    base = t('artifact.feedback.decisionAllRecommended', { total: s.chooseGroups })
+    base = t('artifact.feedback.decisionAllRecommended', { total: s.totalGroups })
   } else {
     base = t('artifact.feedback.decisionRemaining', {
       picked: s.pickedGroups,
-      total: s.chooseGroups,
+      total: s.totalGroups,
       remaining: s.remainingGroups,
     })
   }
@@ -470,24 +448,10 @@ const decisionBarText = computed(() => {
   return base
 })
 
-const decisionSubmitLabel = computed(() => {
-  const s = decisionSummary.value
-  if (s && s.verifyGroups > 0 && s.chooseGroups === 0) {
-    return t('artifact.feedback.submitVerify')
-  }
-  return t('artifact.feedback.submitRound')
-})
-
 const canSubmitDecision = computed(() => {
   const s = decisionSummary.value
   if (!s || sending.value) return false
-  return (
-    s.pickedGroups > 0 ||
-    s.recommendedFallbackGroups > 0 ||
-    s.verifyApproved > 0 ||
-    s.verifyChangesRequested > 0 ||
-    waiting.value
-  )
+  return s.pickedGroups > 0 || s.recommendedFallbackGroups > 0 || waiting.value
 })
 
 const askBarText = computed(() => {
@@ -926,7 +890,7 @@ async function rename() {
           @click="sendFeedback(false, true)"
         >
           <template #leading><SendIcon /></template>
-          {{ decisionSubmitLabel }}
+          {{ t('artifact.feedback.submitRound') }}
         </DouButton>
       </template>
       <template v-else-if="feedbackBarState === 'ask'">

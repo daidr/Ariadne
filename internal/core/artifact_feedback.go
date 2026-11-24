@@ -149,7 +149,7 @@ func HasPendingDecisionGroups(content string) bool {
 		}
 		round, _ := number(data["round"])
 		mode := data.str("mode")
-		if mode == "choose" || mode == "verify" || round > 0 || optionGroups[node.str("id")] {
+		if mode == "choose" || round > 0 || optionGroups[node.str("id")] {
 			return true
 		}
 	}
@@ -478,36 +478,6 @@ func describeBoardChanges(previous, current []object) []any {
 	slices.Sort(after)
 	if !slices.Equal(before, after) {
 		items = append(items, object{"kind": "choice", "chosen": now})
-	}
-	verdicts := func(nodes []object, index map[string]object) ([]string, []object) {
-		keys, values := []string{}, []object{}
-		for _, node := range nodes {
-			if node.str("type") != "option" {
-				continue
-			}
-			verdict := node.obj("data").str("verdict")
-			if verdict != "approved" && verdict != "changes_requested" {
-				continue
-			}
-			gid := optionGroupID(node, index)
-			keys = append(keys, gid+":"+node.str("id")+":"+verdict)
-			entry := object{"id": node["id"], "title": boardNodeName(node), "verdict": verdict}
-			if gid != "" {
-				entry["group"] = gid
-				if title := groupNodeTitle(index[gid]); title != "" {
-					entry["groupTitle"] = title
-				}
-			}
-			values = append(values, entry)
-		}
-		return keys, values
-	}
-	beforeVerdicts, _ := verdicts(previous, old)
-	afterVerdicts, nowVerdicts := verdicts(current, new)
-	slices.Sort(beforeVerdicts)
-	slices.Sort(afterVerdicts)
-	if !slices.Equal(beforeVerdicts, afterVerdicts) {
-		items = append(items, object{"kind": "verify", "verdicts": nowVerdicts})
 	}
 	changes := []string{}
 	for _, node := range current {

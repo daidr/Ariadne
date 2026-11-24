@@ -128,7 +128,7 @@ func TestWhiteboardDecisionGroupsAndRounds(t *testing.T) {
 		}
 	}
 
-func TestWhiteboardStandaloneImagesAndVerifyMode(t *testing.T) {
+func TestWhiteboardStandaloneImagesAndBaselineComparison(t *testing.T) {
 	ctx := t.Context()
 	tmp := t.TempDir()
 	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(tmp, "app.sqlite")})
@@ -167,18 +167,18 @@ func TestWhiteboardStandaloneImagesAndVerifyMode(t *testing.T) {
 	}
 
 	created, err := agent.createWhiteboard(ctx, args{
-		"title": "视觉验收与参考图",
+		"title": "视觉对照与参考图",
 		"items": []any{
 			args{"id": "ref-shot", "kind": "image", "file": saved.ID, "alt": "设计参考截图"},
 		},
 		"groups": []any{
-			args{"id": "grp-verify", "title": "首页视觉验收", "mode": "verify", "round": float64(1), "note": "请核对实现截图"},
+			args{"id": "grp-compare", "title": "首页改动对照", "round": float64(1), "note": "请在图上直接打点评论"},
 		},
 		"options": []any{
 			args{
 				"id":             "v-hero",
 				"title":          "Hero 区域",
-				"group":          "grp-verify",
+				"group":          "grp-compare",
 				"baselineImages": []any{args{"file": saved.ID, "alt": "设计稿"}},
 				"images":         []any{args{"file": saved.ID, "alt": "当前实现"}},
 			},
@@ -224,8 +224,10 @@ func TestWhiteboardStandaloneImagesAndVerifyMode(t *testing.T) {
 	if alt, _ := imgNode.Data["alt"].(string); alt != "设计参考截图" {
 		t.Fatalf("expected alt to be preserved, got %q", alt)
 	}
-	verifyGroup := doc.Nodes[byID["grp-verify"]]
-	if mode, _ := verifyGroup.Data["mode"].(string); mode != "verify" {
-		t.Fatalf("expected grp-verify mode=verify, got %+v", verifyGroup.Data)
+	if _, ok := byID["v-hero-baseline-1"]; !ok {
+		t.Fatalf("expected side-by-side baseline image node v-hero-baseline-1, got nodes=%+v", byID)
+	}
+	if _, ok := byID["v-hero-image-1"]; !ok {
+		t.Fatalf("expected side-by-side actual image node v-hero-image-1, got nodes=%+v", byID)
 	}
 }

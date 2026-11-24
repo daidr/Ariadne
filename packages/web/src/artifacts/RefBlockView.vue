@@ -37,7 +37,7 @@ import { computed, ref, watch } from 'vue'
 import { list, t } from '../i18n'
 import { openView, state } from '../store'
 import { requestArtifactFocus } from './artifact-focus'
-import { groupOptionsMap, optionGroupMode, type DecisionGroupData } from './decision-groups'
+import { groupOptionsMap, type DecisionGroupData } from './decision-groups'
 import { kindIcon } from './kinds'
 import type { OptionNodeData } from './option-node'
 import { normalizeRefProps } from './document-block-data'
@@ -119,27 +119,10 @@ const boardPreview = computed<BoardPreview | null>(() => {
     const opt = byId.get(r.optionId)
     if (!opt) return null
     const data = (opt.data ?? {}) as OptionNodeData
-    const mode = optionGroupMode(opt, byId)
     const groupNode = opt.parent ? byId.get(opt.parent) : undefined
     const groupLabel = (groupNode?.data as DecisionGroupData | undefined)?.label
-    let statusText: string
-    let statusTone: BoardPreview['statusTone'] = 'neutral'
-    if (mode === 'verify') {
-      if (data.verdict === 'approved') {
-        statusText = t('artifact.ref.approved')
-        statusTone = 'success'
-      } else if (data.verdict === 'changes_requested') {
-        statusText = t('artifact.ref.changesRequested')
-        statusTone = 'danger'
-      } else {
-        statusText = t('artifact.ref.pendingVerify')
-      }
-    } else if (data.chosen) {
-      statusText = t('artifact.ref.chosen')
-      statusTone = 'primary'
-    } else {
-      statusText = t('artifact.ref.unpicked')
-    }
+    const statusText = data.chosen ? t('artifact.ref.chosen') : t('artifact.ref.unpicked')
+    const statusTone: BoardPreview['statusTone'] = data.chosen ? 'primary' : 'neutral'
     return {
       title: data.title || r.label || art.title,
       subtitle: [art.title, groupLabel, data.note].filter(Boolean).join(' · '),
@@ -154,48 +137,19 @@ const boardPreview = computed<BoardPreview | null>(() => {
     if (!group) return null
     const data = (group.data ?? {}) as DecisionGroupData
     const options = optionsByGroup.get(group.id) ?? []
-    let statusText: string | undefined
-    let statusTone: BoardPreview['statusTone'] = 'neutral'
-    let subtitleDetail = ''
-    if (data.mode === 'verify') {
-      let approved = 0
-      let changes = 0
-      for (const opt of options) {
-        const verdict = (opt.data as OptionNodeData | undefined)?.verdict
-        if (verdict === 'approved') approved++
-        else if (verdict === 'changes_requested') changes++
-      }
-      if (data.confirmed) {
-        statusText = t('artifact.group.confirmed')
-      } else if (changes > 0) {
-        statusText = t('artifact.group.verifyProgressChanges', {
-          approved,
-          changes,
-          total: options.length,
-        })
-        statusTone = 'danger'
-      } else {
-        statusText = t('artifact.ref.verifyProgress', { approved, total: options.length })
-        statusTone = approved > 0 ? 'success' : 'neutral'
-      }
-    } else {
-      const chosenTitles = options
-        .filter((opt) => (opt.data as OptionNodeData | undefined)?.chosen)
-        .map((opt) => (opt.data as OptionNodeData | undefined)?.title)
-        .filter((title): title is string => !!title)
-      if (chosenTitles.length > 0) {
-        subtitleDetail = list(chosenTitles)
-      }
-      if (data.confirmed) {
-        statusText = t('artifact.group.confirmed')
-      } else {
-        statusText = t('artifact.ref.groupProgress', {
+    const chosenTitles = options
+      .filter((opt) => (opt.data as OptionNodeData | undefined)?.chosen)
+      .map((opt) => (opt.data as OptionNodeData | undefined)?.title)
+      .filter((title): title is string => !!title)
+    const subtitleDetail = chosenTitles.length > 0 ? list(chosenTitles) : ''
+    const statusText = data.confirmed
+      ? t('artifact.group.confirmed')
+      : t('artifact.ref.groupProgress', {
           picked: chosenTitles.length,
           total: options.length,
         })
-        statusTone = chosenTitles.length > 0 ? 'primary' : 'neutral'
-      }
-    }
+    const statusTone: BoardPreview['statusTone'] =
+      !data.confirmed && chosenTitles.length > 0 ? 'primary' : 'neutral'
     return {
       title: data.label || r.label || art.title,
       subtitle: [art.title, subtitleDetail || data.note].filter(Boolean).join(' · '),

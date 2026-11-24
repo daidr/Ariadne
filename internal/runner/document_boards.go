@@ -83,7 +83,7 @@ func (board whiteboard) summary(positions bool) (items, connectors []args) {
 			if title := text(data, "label"); title != "" {
 				item["title"] = title
 			}
-			for _, key := range []string{"note", "pick", "mode"} {
+			for _, key := range []string{"note", "pick"} {
 				if value := text(data, key); value != "" {
 					item[key] = value
 				}
@@ -95,7 +95,7 @@ func (board whiteboard) summary(positions bool) (items, connectors []args) {
 				item["confirmed"] = true
 			}
 		case "option":
-			for _, key := range []string{"title", "note", "chosen", "group", "recommended", "pick", "verdict"} {
+			for _, key := range []string{"title", "note", "chosen", "group", "recommended", "pick"} {
 				if value := data[key]; value != nil && value != false && value != "" {
 					item[key] = value
 				}

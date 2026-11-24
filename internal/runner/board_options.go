@@ -25,12 +25,12 @@ type boardPicture struct {
 }
 
 type boardGroup struct {
-	id, title, note, pick, mode string
-	hasNote                     bool
-	round                       int
-	hasRound                    bool
-	confirmed                   bool
-	hasConfirmed                bool
+	id, title, note, pick string
+	hasNote               bool
+	round                 int
+	hasRound              bool
+	confirmed             bool
+	hasConfirmed          bool
 }
 
 type boardOption struct {
@@ -54,7 +54,6 @@ func boardGroups(raw any) ([]boardGroup, error) {
 			id:    text(candidate, "id"),
 			title: text(candidate, "title"),
 			pick:  text(candidate, "pick"),
-			mode:  text(candidate, "mode"),
 		}
 		group.note, group.hasNote = candidate["note"].(string)
 		if group.id == "" || group.title == "" || seen[group.id] {
@@ -62,9 +61,6 @@ func boardGroups(raw any) ([]boardGroup, error) {
 		}
 		if group.pick != "" && group.pick != "one" && group.pick != "many" {
 			return nil, fmt.Errorf("group %q pick must be one or many", group.id)
-		}
-		if group.mode != "" && group.mode != "choose" && group.mode != "verify" {
-			return nil, fmt.Errorf("group %q mode must be choose or verify", group.id)
 		}
 		if rawRound, exists := candidate["round"]; exists && rawRound != nil {
 			round, err := artifactInteger(rawRound, "round")
@@ -326,11 +322,6 @@ func (board *whiteboard) placeGroupsAndOptions(groups []boardGroup, options []bo
 		}
 		if g.hasRound {
 			data["round"] = g.round
-		}
-		if g.mode != "" {
-			data["mode"] = g.mode
-		} else if existing == nil {
-			data["mode"] = "choose"
 		}
 		if g.hasConfirmed {
 			if g.confirmed {

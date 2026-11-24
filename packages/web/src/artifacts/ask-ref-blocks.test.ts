@@ -327,8 +327,8 @@ describe('RefBlockView resilience and race protection', () => {
   })
 })
 
-describe('ArtifactFeedbackNotice empty verify verdicts', () => {
-  test('renders cleared-verdicts message when verify item has empty verdicts', async () => {
+describe('ArtifactFeedbackNotice inline ask answers', () => {
+  test('renders answered inline questions when expanded', async () => {
     setLocale('zh-CN')
     const wrapper = mount(ArtifactFeedbackNotice, {
       props: {
@@ -336,12 +336,24 @@ describe('ArtifactFeedbackNotice empty verify verdicts', () => {
           kind: 'artifact-feedback',
           id: 'ntc_1',
           conversationId: 'conv_1',
-          artifactId: 'art_board_1',
-          title: '视觉验收',
+          artifactId: 'art_doc_1',
+          title: '架构设计',
           round: 1,
           done: false,
           summary: null,
-          items: [{ kind: 'verify', verdicts: [] }],
+          items: [
+            {
+              kind: 'answer',
+              answers: [
+                {
+                  id: 'ask-auth',
+                  question: '登录方式选哪种？',
+                  values: ['JWT'],
+                  note: '无状态部署',
+                },
+              ],
+            },
+          ],
           createdAt: Date.now(),
         },
       },
@@ -349,7 +361,9 @@ describe('ArtifactFeedbackNotice empty verify verdicts', () => {
     await wrapper.get('.feedback-toggle').trigger('click')
     const items = wrapper.findAll('.feedback-items li')
     expect(items).toHaveLength(1)
-    expect(items[0]?.text()).toContain('清空了验收结论')
+    expect(items[0]?.text()).toContain('登录方式选哪种？')
+    expect(items[0]?.text()).toContain('JWT')
+    expect(items[0]?.text()).toContain('无状态部署')
     wrapper.unmount()
   })
 })
