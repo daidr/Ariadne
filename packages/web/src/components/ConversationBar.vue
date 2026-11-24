@@ -186,7 +186,7 @@ onBeforeUnmount(() => {
   overscroll-behavior-x: contain;
   scrollbar-width: none;
 }
-.conversation-bar > * {
+.conversation-bar > :deep(*) {
   flex-shrink: 0;
 }
 .conversation-bar::-webkit-scrollbar {
