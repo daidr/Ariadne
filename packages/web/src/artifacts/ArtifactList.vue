@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DouButton, DouDropdown, DouEmpty } from 'dou-ui'
+import { DouButton, DouDropdown, DouEmpty, DouSpinner } from 'dou-ui'
 import { LayoutGridIcon, PlusIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
@@ -29,16 +29,27 @@ const open = computed(() => {
 </script>
 
 <template>
-  <DouButton
-    size="sm"
-    variant="ghost"
-    class="artifact-all"
-    @click="openMain({ kind: 'artifacts' })"
-  >
-    <template #leading><LayoutGridIcon /></template>
-    {{ t('artifacts.overview') }}
-  </DouButton>
-  <div v-if="state.artifacts.length" class="artifact-cards">
+  <div class="artifact-actions">
+    <DouButton
+      size="sm"
+      variant="ghost"
+      class="artifact-all"
+      @click="openMain({ kind: 'artifacts' })"
+    >
+      <template #leading><LayoutGridIcon /></template>
+      {{ t('artifacts.overview') }}
+    </DouButton>
+    <DouDropdown v-if="state.artifacts.length" :items="createItems" placement="bottom-end">
+      <DouButton size="sm" variant="ghost">
+        <template #leading><PlusIcon /></template>
+        {{ t('artifacts.create') }}
+      </DouButton>
+    </DouDropdown>
+  </div>
+  <div v-if="state.currentId && !state.artifactsLoaded" class="artifact-loading" role="status">
+    <DouSpinner size="sm" />
+  </div>
+  <div v-else-if="state.artifacts.length" class="artifact-cards">
     <ArtifactCard
       v-for="artifact in state.artifacts"
       :key="artifact.id"
@@ -58,8 +69,18 @@ const open = computed(() => {
 </template>
 
 <style scoped>
-.artifact-all {
+.artifact-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 8px;
+}
+
+.artifact-loading {
+  display: grid;
+  place-items: center;
+  padding: 24px 0;
 }
 
 /* One column in a narrow panel, more as it widens. */

@@ -56,6 +56,12 @@ const canCheck = computed(() => {
   })
 })
 
+const savedSnapshot = ref('')
+const dirty = computed(
+  () =>
+    !!search.value && savedSnapshot.value !== '' && JSON.stringify(input()) !== savedSnapshot.value,
+)
+
 function load(value: SearchSettings, preserveDrafts = false) {
   search.value = value
   if (!preserveDrafts || !value.services.some((item) => item.kind === provider.value)) {
@@ -69,6 +75,7 @@ function load(value: SearchSettings, preserveDrafts = false) {
         : { ...service.values }
   }
   drafts.value = next
+  if (!preserveDrafts) savedSnapshot.value = JSON.stringify(input())
 }
 
 async function reload(preserveDrafts = false) {
@@ -158,7 +165,7 @@ async function save(): Promise<boolean> {
   }
 }
 
-defineExpose({ save, checking, reload })
+defineExpose({ save, checking, reload, dirty })
 </script>
 
 <template>

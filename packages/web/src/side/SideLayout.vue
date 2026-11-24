@@ -32,6 +32,7 @@ import ThreadList from '../components/ThreadList.vue'
 import { lastPanel } from '../shortcuts'
 import {
   activeThreadId,
+  closeOtherPanes,
   closePane,
   openedViewOf,
   openMain,
@@ -180,14 +181,20 @@ function bring(group: DockGroup, key: side.ListKey) {
       @remove="(key) => closePane(key as PaneKey, compact)"
     >
       <template #label="{ value }">
-        <span v-if="threadAt(value as PaneKey)" class="pane-thread-label">
+        <span
+          v-if="threadAt(value as PaneKey)"
+          class="pane-thread-label"
+          :title="threadAt(value as PaneKey)!.title"
+        >
           <StageIcon
             :stage="threadAt(value as PaneKey)!.stage"
             :pull-request-state="threadAt(value as PaneKey)!.pullRequest?.state"
           />
           <span class="pane-thread-title">{{ threadAt(value as PaneKey)!.title }}</span>
         </span>
-        <template v-else>{{ labelOf(value as PaneKey) }}</template>
+        <span v-else class="pane-label-text" :title="labelOf(value as PaneKey)">
+          {{ labelOf(value as PaneKey) }}
+        </span>
       </template>
       <template #default="{ value }">
         <div
@@ -212,12 +219,7 @@ function bring(group: DockGroup, key: side.ListKey) {
       </template>
       <template #extra="{ group, active }">
         <DouTooltip
-          v-if="
-            !compact &&
-            active !== undefined &&
-            side.listOf(active) === 'plan' &&
-            state.plan?.nodes.length
-          "
+          v-if="active !== undefined && side.listOf(active) === 'plan' && state.plan?.nodes.length"
           :content="t('plan.expand')"
           placement="bottom"
         >
@@ -278,7 +280,7 @@ function bring(group: DockGroup, key: side.ListKey) {
               v-if="group.tabs.some((key) => key !== active && !side.isPinned(key))"
               value="close-others"
               divided
-              @click="setSide(side.closeOthers(state.side, active as PaneKey))"
+              @click="closeOtherPanes(active as PaneKey)"
             >
               {{ t('side.closeOthers') }}
             </DouDropdownItem>
@@ -325,11 +327,15 @@ function bring(group: DockGroup, key: side.ListKey) {
 
 /* Trimmed to its letters, so the stage icon centres on them; see ThreadRow. Clipped
    sideways only: CJK letters reach below the trimmed baseline. */
-.pane-thread-title {
+.pane-thread-title,
+.pane-label-text {
   max-width: 16em;
   overflow-x: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pane-thread-title {
   text-box: trim-both cap alphabetic;
 }
 </style>

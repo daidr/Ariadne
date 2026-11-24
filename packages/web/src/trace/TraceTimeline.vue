@@ -368,7 +368,7 @@ defineExpose({ reset })
   display: flex;
   align-items: center;
   color: var(--dou-color-text-tertiary);
-  font-size: var(--dou-font-size-xs);
+  font-size: 11px;
   line-height: 1;
 }
 

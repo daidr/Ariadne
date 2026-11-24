@@ -249,7 +249,7 @@ async function connect(server: DraftServer) {
   else await check(server.id)
 }
 
-defineExpose({ save })
+defineExpose({ save, dirty })
 
 const savedIds = computed(
   () => new Set((JSON.parse(saved.value) as McpServerInput[]).map((s) => s.id)),

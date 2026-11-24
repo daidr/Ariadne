@@ -243,8 +243,8 @@ function openReferenced() {
   padding: 10px 12px;
   margin: 4px 0;
   border: 1px solid var(--dou-color-border);
-  border-radius: var(--dou-radius-md, 10px);
-  background: var(--dou-color-surface-subtle, var(--dou-color-surface));
+  border-radius: var(--dou-radius-container);
+  background: var(--dou-color-bg-muted);
   transition: border-color 0.15s ease;
 }
 

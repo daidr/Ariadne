@@ -149,15 +149,17 @@ describe('side layout', () => {
     ])
     expect(focusedGroup(layout).active).toBe('list:plan:1')
     layout = move(layout, 'artifacts', right!.id)
+    layout = open(layout, 'artifacts')
     layout = move(layout, 'list:plan:1', left!.id)
     expect(tabs(layout)).toEqual([
       ['plan', 'threads', 'artifacts'],
       ['list:threads:1', 'list:artifacts:1'],
     ])
     expect(groupsOf(layout.root)[0]?.active).toBe('plan')
+    expect(layout.focused).toBe(left!.id)
   })
 
-  test('dragging a fixed tab copies it, and a copy returned to the first panel leaves its selection alone', () => {
+  test('dragging a fixed tab copies it, and returning a copy to the first panel activates the fixed tab', () => {
     let layout = open(defaultLayout(), threadKey('a'))
     const first = focusedGroup(layout).id
     layout = updateDock(layout, splitDockTab(layout.root, 'plan', first, 'bottom'))
@@ -173,7 +175,8 @@ describe('side layout', () => {
     layout = updateDock(layout, moveDockTab(layout.root, 'list:plan:1', first))
     expect(groupsOf(layout.root).find((group) => group.id === second)).toBeUndefined()
     expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts', 'thread:a'], ['list:plan:2']])
-    expect(groupsOf(layout.root)[0]?.active).toBe('thread:a')
+    expect(groupsOf(layout.root)[0]?.active).toBe('plan')
+    expect(layout.focused).toBe(first)
     expect(parseLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout)
   })
 

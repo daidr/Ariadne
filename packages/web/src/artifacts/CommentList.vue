@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { ArtifactCommentThreadView } from '@ariadne/core'
+import type { ArtifactCommentThreadView, ArtifactKind } from '@ariadne/core'
 import { MessageIcon } from '@dou-ui/icons'
 import { DouButton, DouCommentThread, DouPopover, DouText, type CommentAction } from 'dou-ui'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { authorName } from './author'
 import { commentAuthor, toCommentThread } from './comment-threads'
@@ -13,6 +13,7 @@ import { commentAuthor, toCommentThread } from './comment-threads'
  */
 const props = defineProps<{
   comments: ArtifactCommentThreadView[]
+  kind?: ArtifactKind
   /** Ids of the threads whose text is in the document now. */
   anchored: () => Set<string>
 }>()
@@ -28,8 +29,25 @@ const sorted = computed(() =>
   props.comments.toSorted((a, b) => Number(!!a.resolved) - Number(!!b.resolved)),
 )
 
+const fallbackQuote = computed(() => t(`artifact.kind.${props.kind ?? 'document'}`))
+
+function refreshAnchored() {
+  marked.value = props.anchored()
+}
+
+watch(
+  [open, () => props.comments],
+  ([isOpen], _prev, onCleanup) => {
+    if (!isOpen) return
+    refreshAnchored()
+    const timer = setInterval(refreshAnchored, 1000)
+    onCleanup(() => clearInterval(timer))
+  },
+  { deep: true },
+)
+
 function onOpen(value: boolean) {
-  if (value) marked.value = props.anchored()
+  if (value) refreshAnchored()
   open.value = value
 }
 
@@ -62,7 +80,7 @@ function jump(id: string) {
             @click="jump(thread.id)"
           >
             <DouText size="sm" variant="secondary" class="comment-quote" truncate>
-              {{ thread.quote || t('artifact.kind.whiteboard') }}
+              {{ thread.quote || fallbackQuote }}
             </DouText>
             <DouText size="sm" truncate>
               {{
@@ -88,7 +106,7 @@ function jump(id: string) {
                 <template v-if="!thread.resolved && !marked.has(thread.id)">
                   {{ t('artifact.commentGone') }}
                 </template>
-                {{ thread.quote || t('artifact.kind.whiteboard') }}
+                {{ thread.quote || fallbackQuote }}
               </DouText>
             </template>
           </DouCommentThread>

@@ -159,12 +159,17 @@ function withRoot(layout: SideLayout, root: DockNode, focused = layout.focused):
   const nextPinned = first.tabs.filter(isPinned)
   const pinned = nextPinned.length === LISTS.length ? nextPinned : pinnedTabsOf(previous)
   const tabs = [...pinned, ...first.tabs.filter((key) => !listOf(key))]
+  const returnedList =
+    first.active != null && !tabs.includes(first.active) ? listOf(first.active) : null
   const active =
     first.active != null && tabs.includes(first.active)
       ? first.active
-      : previous.active != null && tabs.includes(previous.active)
-        ? previous.active
-        : tabs[0]
+      : returnedList && tabs.includes(returnedList)
+        ? returnedList
+        : previous.active != null && tabs.includes(previous.active)
+          ? previous.active
+          : tabs[0]
+  if (returnedList && !focused) focused = first.id
   if (
     first.active !== active ||
     tabs.some((key, i) => first.tabs[i] !== key) ||
@@ -303,7 +308,9 @@ export function split(layout: SideLayout, key: PaneKey, direction: SplitDirectio
 /** Move `key` to the end of the group `groupId`, in front there. */
 export function move(layout: SideLayout, key: PaneKey, groupId: string): SideLayout {
   const list = listOf(key)
-  if (list && groupId === groupsOf(layout.root)[0]!.id) return close(layout, key)
+  if (list && groupId === groupsOf(layout.root)[0]!.id) {
+    return activate(close(layout, key), list)
+  }
   const target = groupsOf(layout.root).find((item) => item.id === groupId)
   if (!target) return layout
   if (groupWith(layout, key)?.id === groupId) return layout

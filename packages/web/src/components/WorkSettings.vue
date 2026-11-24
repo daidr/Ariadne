@@ -29,11 +29,19 @@ const actionOptions = computed(() =>
 
 /** Loaded: before that, saving would send nothing over what is saved. */
 const loaded = ref(false)
+const savedSnapshot = ref('')
+
+function currentSnapshot() {
+  return JSON.stringify(props.part === 'instructions' ? instructions.value : rules.value)
+}
+
+const dirty = computed(() => loaded.value && currentSnapshot() !== savedSnapshot.value)
 
 function load(work: WorkSettings) {
   loaded.value = true
   instructions.value = work.instructions
   rules.value = work.rules.map((rule) => ({ ...rule }))
+  savedSnapshot.value = currentSnapshot()
 }
 
 onMounted(async () => {
@@ -60,7 +68,7 @@ async function save(): Promise<boolean> {
   }
 }
 
-defineExpose({ save })
+defineExpose({ save, dirty })
 </script>
 
 <template>

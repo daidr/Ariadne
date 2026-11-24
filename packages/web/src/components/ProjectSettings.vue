@@ -155,13 +155,45 @@ const mcpOptions = computed(() =>
   mcpServers.value.map((server) => ({ value: server.id, label: server.name })),
 )
 
+const loadedProjectId = ref<string | null>(null)
+const savedSnapshot = ref('')
+
+function currentSnapshot() {
+  return JSON.stringify({
+    settings: settings.value,
+    setup: setup.value,
+    check: check.value,
+    env: env.value,
+    slots: slots.value,
+    mcp: mcp.value,
+  })
+}
+
+const hasUnsavedChanges = computed(
+  () => !!settings.value && savedSnapshot.value !== '' && currentSnapshot() !== savedSnapshot.value,
+)
+const showSaveFooter = computed(() => tab.value !== 'usage' || hasUnsavedChanges.value)
+
+function discardAndClose() {
+  loadedProjectId.value = null
+  savedSnapshot.value = ''
+  settings.value = null
+  error.value = null
+  state.projectSettingsOpen = false
+}
+
 watch(
   () => state.projectSettingsOpen,
   async (open) => {
     const project = state.detail?.project
     if (!open || !project) return
+    if (loadedProjectId.value === project.id && settings.value && hasUnsavedChanges.value) {
+      now.value = Date.now()
+      return
+    }
     error.value = null
     settings.value = null
+    savedSnapshot.value = ''
     now.value = Date.now()
     slots.value = project.slots
     mcp.value = [...project.mcp]
@@ -184,6 +216,8 @@ watch(
       check.value = auto.check ? found.check : view.settings.workspace.check
       env.value = storedPairs(view.env)
       mcpServers.value = servers.servers
+      loadedProjectId.value = project.id
+      savedSnapshot.value = currentSnapshot()
     } catch (cause) {
       error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
     }
@@ -239,7 +273,11 @@ async function save() {
     mcp.value,
   )
   saving.value = false
-  if (!error.value) state.projectSettingsOpen = false
+  if (!error.value) {
+    loadedProjectId.value = null
+    savedSnapshot.value = ''
+    state.projectSettingsOpen = false
+  }
 }
 </script>
 
@@ -466,10 +504,13 @@ async function save() {
       <DouAlert v-if="error" tone="danger" class="project-error">{{ error }}</DouAlert>
     </div>
     <template #footer="{ close }">
-      <DouButton variant="ghost" @click="close">{{ t('settings.cancel') }}</DouButton>
-      <DouButton tone="primary" :loading="saving" :disabled="!settings" @click="save">
-        {{ t('settings.save') }}
-      </DouButton>
+      <DouButton v-if="!showSaveFooter" @click="close">{{ t('view.close') }}</DouButton>
+      <template v-else>
+        <DouButton variant="ghost" @click="discardAndClose">{{ t('settings.cancel') }}</DouButton>
+        <DouButton tone="primary" :loading="saving" :disabled="!settings" @click="save">
+          {{ t('settings.save') }}
+        </DouButton>
+      </template>
     </template>
   </DouDialog>
 </template>

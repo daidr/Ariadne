@@ -30,6 +30,13 @@ const sections = computed(() => {
         { label: t('shortcuts.snippet'), keys: ['/'] },
       ],
     },
+    {
+      title: t('shortcuts.navigation'),
+      rows: [
+        { label: t('shortcuts.reorderProject'), keys: ['alt+up', 'alt+down'] },
+        { label: t('shortcuts.openBeside'), text: t('shortcuts.altClick') },
+      ],
+    },
   ]
 })
 </script>
@@ -42,7 +49,12 @@ const sections = computed(() => {
         <div v-for="row in section.rows" :key="row.label" class="sheet-row">
           <span>{{ row.label }}</span>
           <span class="sheet-keys">
-            <DouKbd v-for="keys in row.keys" :key="keys" size="sm" :keys="keys" />
+            <template v-if="row.keys">
+              <DouKbd v-for="keys in row.keys" :key="keys" size="sm" :keys="keys" />
+            </template>
+            <DouText v-else-if="row.text" size="sm" variant="secondary" class="sheet-text-key">
+              {{ row.text }}
+            </DouText>
           </span>
         </div>
       </section>
@@ -72,6 +84,15 @@ const sections = computed(() => {
 
 .sheet-keys {
   display: inline-flex;
+  align-items: center;
   gap: 4px;
+}
+
+.sheet-text-key {
+  padding: 1px 6px;
+  border: 1px solid var(--dou-color-border);
+  border-radius: var(--dou-radius-control);
+  background: var(--dou-color-bg-muted);
+  white-space: nowrap;
 }
 </style>

@@ -10,15 +10,8 @@ import {
   useColorMode,
   type ComponentDefaults,
 } from 'dou-ui'
-import {
-  computed,
-  defineAsyncComponent,
-  onScopeDispose,
-  provide,
-  ref,
-  watch,
-  watchEffect,
-} from 'vue'
+import { computed, onScopeDispose, provide, ref, watch, watchEffect } from 'vue'
+import { defineAsyncView } from './components/async-view'
 import ConversationPanel from './components/ConversationPanel.vue'
 import DuoSafeAreaRail from './components/DuoSafeAreaRail.vue'
 import ModelSettings, { type SettingsTab } from './components/ModelSettings.vue'
@@ -149,9 +142,9 @@ const contentSplit = computed({
 })
 
 // The flow and document editors are large; load them when first opened.
-const PlanMain = defineAsyncComponent(() => import('./plan/PlanMain.vue'))
-const ArtifactsOverview = defineAsyncComponent(() => import('./artifacts/ArtifactsOverview.vue'))
-const TraceView = defineAsyncComponent(() => import('./trace/TraceView.vue'))
+const PlanMain = defineAsyncView(() => import('./plan/PlanMain.vue'))
+const ArtifactsOverview = defineAsyncView(() => import('./artifacts/ArtifactsOverview.vue'))
+const TraceView = defineAsyncView(() => import('./trace/TraceView.vue'))
 
 // The tab says how many things wait on the user, across projects.
 watchEffect(() => {
