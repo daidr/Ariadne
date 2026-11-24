@@ -581,4 +581,26 @@ describe('Shiki Web Worker pool', () => {
 
     pool.dispose()
   })
+
+  test('highlights embedded-language grammars with light/dark themes on the worker-unavailable fallback path', async () => {
+    const shiki = createShikiService(() => createJavaScriptRegexEngine())
+    const pool = createShikiWorkerPool({
+      createWorker: () => null,
+      fallback: (code, lang) => shiki.highlightToHtml(code, lang),
+    })
+
+    const [cppHtml, phpHtml, vueHtml] = await Promise.all([
+      pool.highlight('#include <iostream>\nint main() { return 0; }', 'cpp'),
+      pool.highlight('<?php echo "hello"; ?>', 'php'),
+      pool.highlight('<template><div>{{ msg }}</div></template>', 'vue'),
+    ])
+
+    for (const html of [cppHtml, phpHtml, vueHtml]) {
+      expect(html).toContain('--shiki-light:')
+      expect(html).toContain('--shiki-dark:')
+    }
+    expect(pool.stats().fallbackMode).toBe(true)
+
+    pool.dispose()
+  })
 })

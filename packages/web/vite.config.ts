@@ -6,6 +6,7 @@ import { colorModeScript } from 'dou-ui'
 import type { Plugin } from 'vite'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { sharedShikiPlugin } from './shiki-bundle-plugin'
 import { COLOR_MODE_KEY, THEME_COLORS, themeColorScript } from './src/color-mode'
 
 const PRECOMPRESS_MIN_BYTES = 256
@@ -79,6 +80,7 @@ export default defineConfig({
     format: 'es',
   },
   plugins: [
+    sharedShikiPlugin(),
     vue(),
     {
       // Write data-dou-theme before the first paint, so dark mode does not flash light.
