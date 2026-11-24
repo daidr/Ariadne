@@ -11,17 +11,26 @@ import { resolveHighlightPoolSize } from './shiki-worker-pool'
 const workerUnavailable = ref(false)
 
 /** Whether browser Web Workers are available and healthy for `@dou-ui/code` highlighting. */
-export function canUseCodeWorker(): boolean {
-  return (
-    typeof Worker !== 'undefined' && import.meta.env.MODE !== 'test' && !workerUnavailable.value
-  )
+export function canUseCodeWorker(mode: string = import.meta.env.MODE): boolean {
+  return typeof Worker !== 'undefined' && mode !== 'test' && !workerUnavailable.value
 }
 
-function createDefaultCodeWorker(): Worker {
-  const worker = new Worker(codeWorkerUrl(), {
-    type: 'module',
-    name: 'ariadne-code',
-  })
+/** Test helper to clear the cached worker-failure fallback flag between tests. */
+export function resetCodeWorkerAvailability(): void {
+  workerUnavailable.value = false
+}
+
+export function createDefaultCodeWorker(): Worker {
+  let worker: Worker
+  try {
+    worker = new Worker(codeWorkerUrl(), {
+      type: 'module',
+      name: 'ariadne-code',
+    })
+  } catch (error) {
+    workerUnavailable.value = true
+    throw error
+  }
   worker.addEventListener(
     'error',
     () => {
@@ -55,6 +64,6 @@ export const codeWorkerPool: CodeWorkerPool = createAriadneCodeWorkerPool()
  * Reactive `:worker` prop value for `DouCodeEditor` and `DouCodeDiff`: returns the shared
  * lazy `codeWorkerPool` in real browsers, and `false` in Vitest or when Workers are unavailable.
  */
-export function codeEditorWorker(): CodeWorkerOption {
-  return canUseCodeWorker() ? codeWorkerPool : false
+export function codeEditorWorker(mode: string = import.meta.env.MODE): CodeWorkerOption {
+  return canUseCodeWorker(mode) ? codeWorkerPool : false
 }

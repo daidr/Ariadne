@@ -1,7 +1,17 @@
+import type { CodeLanguage } from '@dou-ui/code'
 import type { WorkerMessageScope } from '@dou-ui/code/worker'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
-import { describe, expect, test, vi } from 'vitest'
-import { createAriadneCodeWorkerPool } from './code-worker-pool'
+import { afterEach, describe, expect, test, vi } from 'vitest'
+import { effectScope, ref } from 'vue'
+import { resetCodeLanguageCache, useCodeLanguage } from './code-language'
+import {
+  canUseCodeWorker,
+  codeEditorWorker,
+  codeWorkerPool,
+  createAriadneCodeWorkerPool,
+  createDefaultCodeWorker,
+  resetCodeWorkerAvailability,
+} from './code-worker-pool'
 import { attachCodeWorker } from './code-worker-runtime'
 import { createShikiService } from './shiki'
 
@@ -24,6 +34,12 @@ class FakeWorkerScope implements WorkerMessageScope {
 }
 
 describe('CodeEditor / CodeDiff worker pool and worker runtime', () => {
+  afterEach(() => {
+    resetCodeWorkerAvailability()
+    resetCodeLanguageCache()
+    vi.unstubAllGlobals()
+  })
+
   test('creates a native @dou-ui/code lazy worker pool handle', () => {
     const factory = vi.fn(() => ({}) as Worker)
     const pool = createAriadneCodeWorkerPool({ maxWorkers: 2, idleTimeout: 0 }, factory)
@@ -34,6 +50,87 @@ describe('CodeEditor / CodeDiff worker pool and worker runtime', () => {
     expect(factory).not.toHaveBeenCalled()
 
     pool.dispose()
+  })
+
+  test('marks workers unavailable and falls back to main-thread Shiki when new Worker throws synchronously', async () => {
+    vi.stubGlobal(
+      'Worker',
+      vi.fn(function ThrowingWorker() {
+        throw new DOMException('Blocked by CSP worker-src', 'SecurityError')
+      }),
+    )
+
+    expect(canUseCodeWorker('production')).toBe(true)
+    expect(codeEditorWorker('production')).toBe(codeWorkerPool)
+
+    const fakeGo = { name: 'go' } as CodeLanguage
+    const loader = vi.fn(async () => fakeGo)
+    const path = ref('internal/core/server.go')
+    const scope = effectScope()
+    const binding = scope.run(() =>
+      useCodeLanguage(() => path.value, {
+        loader,
+        remote: () => canUseCodeWorker('production'),
+      }),
+    )!
+
+    expect(binding.language.value?.workerMode).toBe('tokens')
+    expect(loader).not.toHaveBeenCalled()
+
+    expect(() => createDefaultCodeWorker()).toThrow('Blocked by CSP worker-src')
+    expect(canUseCodeWorker('production')).toBe(false)
+    expect(codeEditorWorker('production')).toBe(false)
+
+    await vi.waitFor(() => {
+      expect(binding.language.value).toBe(fakeGo)
+    })
+    expect(loader).toHaveBeenCalledTimes(1)
+
+    scope.stop()
+  })
+
+  test('marks workers unavailable and falls back to main-thread Shiki when a worker emits an error event', async () => {
+    const errorListeners = new Set<() => void>()
+    vi.stubGlobal(
+      'Worker',
+      vi.fn(function StubWorker() {
+        return {
+          addEventListener(type: string, listener: () => void) {
+            if (type === 'error') errorListeners.add(listener)
+          },
+        }
+      }),
+    )
+
+    expect(canUseCodeWorker('production')).toBe(true)
+    expect(codeEditorWorker('production')).toBe(codeWorkerPool)
+
+    const fakeGo = { name: 'go' } as CodeLanguage
+    const loader = vi.fn(async () => fakeGo)
+    const path = ref('internal/core/server.go')
+    const scope = effectScope()
+    const binding = scope.run(() =>
+      useCodeLanguage(() => path.value, {
+        loader,
+        remote: () => canUseCodeWorker('production'),
+      }),
+    )!
+
+    expect(binding.language.value?.workerMode).toBe('tokens')
+    createDefaultCodeWorker()
+    expect(canUseCodeWorker('production')).toBe(true)
+
+    for (const listener of Array.from(errorListeners)) listener()
+
+    expect(canUseCodeWorker('production')).toBe(false)
+    expect(codeEditorWorker('production')).toBe(false)
+
+    await vi.waitFor(() => {
+      expect(binding.language.value).toBe(fakeGo)
+    })
+    expect(loader).toHaveBeenCalledTimes(1)
+
+    scope.stop()
   })
 
   test('code worker resolves Shiki languages lazily in flat tokens mode and handles async diff', async () => {
