@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/core"
@@ -14,11 +15,21 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
+const defaultConcurrency = 4
+
 type Watcher struct {
-	Repository *core.Repository
-	Repo       func(context.Context, string) (*sdk.RepoCapability, error)
-	ThreadRepo func(context.Context, core.ThreadView) (*sdk.RepoCapability, error)
-	OnError    func(error)
+	Repository  *core.Repository
+	Repo        func(context.Context, string) (*sdk.RepoCapability, error)
+	ThreadRepo  func(context.Context, core.ThreadView) (*sdk.RepoCapability, error)
+	OnError     func(error)
+	Concurrency int
+}
+
+func (watcher Watcher) concurrency() int {
+	if watcher.Concurrency > 0 {
+		return watcher.Concurrency
+	}
+	return defaultConcurrency
 }
 
 func (watcher Watcher) Run(ctx context.Context, interval time.Duration) {
@@ -51,6 +62,10 @@ func (watcher Watcher) report(ctx context.Context, err error) {
 func (watcher Watcher) Poll(ctx context.Context) error {
 	after := ""
 	const pageSize = 64
+	sem := make(chan struct{}, watcher.concurrency())
+	var wg sync.WaitGroup
+	var reportMu sync.Mutex
+	defer wg.Wait()
 	for {
 		page, err := watcher.Repository.OpenPullRequests(ctx, after, pageSize)
 		if err != nil {
@@ -60,10 +75,25 @@ func (watcher Watcher) Poll(ctx context.Context) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			watcher.report(ctx, watcher.refresh(ctx, item))
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case sem <- struct{}{}:
+			}
+			wg.Add(1)
+			go func(item core.OpenPullRequest) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				if err := watcher.refresh(ctx, item); err != nil {
+					reportMu.Lock()
+					watcher.report(ctx, err)
+					reportMu.Unlock()
+				}
+			}(item)
 		}
 		if len(page) < pageSize {
-			return nil
+			wg.Wait()
+			return ctx.Err()
 		}
 		after = page[len(page)-1].ThreadID
 	}

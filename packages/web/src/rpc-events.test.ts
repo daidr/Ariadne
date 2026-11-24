@@ -541,4 +541,110 @@ describe('ConnectRPC EventService.StreamEvents client', () => {
 
     wrapper.unmount()
   })
+
+  test('assembles incremental reply draft frames and reuses unchanged blocks', async () => {
+    const initialBlocks = [{ type: 'steps', items: [] }]
+    const updatedBlocks = [{ type: 'confirm', title: 'Proceed?' }]
+    const frames: StreamEventsResponse[] = [
+      create(StreamEventsResponseSchema, {
+        payload: { case: 'ready', value: create(StreamReadySchema, { lastSeq: 1n }) },
+      }),
+      create(StreamEventsResponseSchema, {
+        payload: {
+          case: 'draft',
+          value: create(ReplyDraftUpdateSchema, {
+            projectId: 'prj_1',
+            conversationId: 'thr_1',
+            draft: create(ReplyDraftSchema, {
+              messageId: 'msg_1',
+              text: '你好',
+              blocksJson: encoder.encode(JSON.stringify(initialBlocks)),
+              startedAt: 300n,
+              posted: false,
+            }),
+          }),
+        },
+      }),
+      create(StreamEventsResponseSchema, {
+        payload: {
+          case: 'draft',
+          value: create(ReplyDraftUpdateSchema, {
+            projectId: 'prj_1',
+            conversationId: 'thr_1',
+            draft: create(ReplyDraftSchema, {
+              messageId: 'msg_1',
+              text: '，世界😀',
+              startedAt: 300n,
+              posted: false,
+              append: true,
+              keepBlocks: true,
+            }),
+          }),
+        },
+      }),
+      create(StreamEventsResponseSchema, {
+        payload: {
+          case: 'draft',
+          value: create(ReplyDraftUpdateSchema, {
+            projectId: 'prj_1',
+            conversationId: 'thr_1',
+            draft: create(ReplyDraftSchema, {
+              messageId: 'msg_1',
+              text: '！',
+              blocksJson: encoder.encode(JSON.stringify(updatedBlocks)),
+              startedAt: 300n,
+              posted: true,
+              append: true,
+              keepBlocks: false,
+            }),
+          }),
+        },
+      }),
+      create(StreamEventsResponseSchema, {
+        payload: {
+          case: 'draft',
+          value: create(ReplyDraftUpdateSchema, {
+            projectId: 'prj_1',
+            conversationId: 'thr_1',
+          }),
+        },
+      }),
+    ]
+
+    vi.spyOn(api, 'streamEvents').mockImplementationOnce((_opts, signal) =>
+      (async function* () {
+        for (const frame of frames) yield frame
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener('abort', () => resolve(), { once: true })
+        })
+      })(),
+    )
+
+    const drafts: unknown[] = []
+    const stop = followEvents(
+      null,
+      () => {},
+      () => {},
+      undefined,
+      undefined,
+      undefined,
+      (d) => drafts.push(d),
+    )
+
+    await flushPromises()
+    stop()
+
+    expect(drafts).toHaveLength(4)
+    const first = drafts[0] as { draft: { text: string; blocks?: unknown } }
+    const second = drafts[1] as { draft: { text: string; blocks?: unknown } }
+    const third = drafts[2] as { draft: { text: string; blocks?: unknown; posted?: boolean } }
+    const fourth = drafts[3] as { draft: null }
+    expect(first.draft.text).toBe('你好')
+    expect(second.draft.text).toBe('你好，世界😀')
+    expect(second.draft.blocks).toBe(first.draft.blocks)
+    expect(third.draft.text).toBe('你好，世界😀！')
+    expect(third.draft.blocks).toEqual(updatedBlocks)
+    expect(third.draft.posted).toBe(true)
+    expect(fourth.draft).toBeNull()
+  })
 })

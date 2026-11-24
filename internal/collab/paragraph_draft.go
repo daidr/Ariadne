@@ -55,7 +55,7 @@ func (draft *Draft) WriteParagraph(anchor string, replacement *string) (bool, er
 	if active.draft != draft {
 		return true, nil
 	}
-	if active.artifact.Kind != "document" || len(active.state) > maxRoomState/2 {
+	if active.artifact.Kind != "document" || active.exceedsHalfStateLimit() {
 		return false, nil
 	}
 	if draft.paragraph == nil {
@@ -96,33 +96,46 @@ func (draft *Draft) WriteParagraph(anchor string, replacement *string) (bool, er
 	if text == nil {
 		return false, nil
 	}
-	vector := crdt.EncodeStateVector(active.doc)
-	cursor := observeWriter(active, func() {
-		active.doc.Transact(func(*crdt.Transaction) {
-			writeDocumentText(text, blocks[0].inline)
-		}, draft)
-	}, draft.writer)
+	var cursor map[string]any
+	change, err := captureUpdates(active.doc, func() error {
+		cursor = observeWriter(active, func() {
+			active.doc.Transact(func(*crdt.Transaction) {
+				writeDocumentText(text, blocks[0].inline)
+			}, draft)
+		}, draft.writer)
+		return nil
+	})
 	draft.changed = true
-	state, err := roomState(active.doc)
 	if err == nil {
-		var change []byte
-		change, err = crdt.EncodeStateAsUpdate(active.doc, vector)
+		var compacted []byte
+		compacted, err = active.checkStateLimit(active.doc, len(change))
 		if err == nil {
-			active.state = state
-			active.broadcast(protocol.EncodeUpdate(change), nil)
+			if len(change) > 0 {
+				active.recordApplied(change, compacted)
+				if draft.shadow != nil {
+					if syncErr := crdt.ApplyUpdate(draft.shadow, change, "sync"); syncErr != nil {
+						draft.dropShadow()
+					}
+				}
+				active.broadcast(protocol.EncodeUpdate(change), nil)
+			}
 			draft.cursor = cursor
 			draft.publishDocumentWriter()
 			paragraph.rendered = rendered
-			draft.last = paragraph.before + rendered + paragraph.after
 			draft.pieces++
 			draft.wroteAt = time.Now()
 			return true, nil
 		}
 	}
+	if len(change) > 0 {
+		active.recordApplied(change, nil)
+	}
 	// Roll back the draft if we cannot encode the resulting shared state.
 	active.cancelDraft()
 	// Peers never received the failed delta and need all of the rollback's
 	// dependencies to integrate its new clocks.
-	active.broadcast(protocol.EncodeUpdate(active.state), nil)
+	if state, stateErr := active.compactState(); stateErr == nil {
+		active.broadcast(protocol.EncodeUpdate(state), nil)
+	}
 	return true, err
 }

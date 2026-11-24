@@ -85,6 +85,12 @@ message ReplyDraft {
   bytes blocks_json = 3;
   int64 started_at = 4 [jstype = JS_NUMBER];
   bool posted = 5;
+  // When true, text is a suffix to append to the previous draft text for the
+  // same conversation_id and message_id on this stream.
+  bool append = 6;
+  // When true on an append update, blocks are unchanged from the previous frame
+  // and blocks_json is omitted to avoid resending them.
+  bool keep_blocks = 7;
 }
 
 message ReplyDraftUpdate {

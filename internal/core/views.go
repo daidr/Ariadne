@@ -152,6 +152,24 @@ func (reader Reader) snapshot(ctx context.Context, read func(*sql.Tx) error) err
 	return err
 }
 
+const (
+	archiveLandedAfterMs = int64(24 * time.Hour / time.Millisecond)
+	archiveIdleAfterMs   = int64(7 * 24 * time.Hour / time.Millisecond)
+)
+
+func threadArchivedAt(row record, stage string, activeAt, at int64) bool {
+	if stage != "done" {
+		return false
+	}
+	if row.present("landed_at") &&
+		row.integer("landed_at") >= row.integer("reported_at") &&
+		row.integer("user_at") <= row.integer("landed_at") &&
+		at-row.integer("landed_at") >= archiveLandedAfterMs {
+		return true
+	}
+	return at-activeAt >= archiveIdleAfterMs
+}
+
 const threadSelect = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.last_turn_at,
  c.wait_id, c.input_tokens, c.output_tokens, c.cached_tokens, c.cache_write_tokens,
  c.reasoning_tokens, c.cost_usd, c.cost_cny, c.turn_started_at,
@@ -190,7 +208,7 @@ func toThread(row record, now int64) (ThreadView, error) {
 	view.Stage = ThreadStage(facts)
 	view.needsUser = facts.needsUser(view.Stage)
 	view.ActiveAt = max(row.integer("updated_at"), row.integer("message_at"), row.integer("transcript_at"), row.integer("todo_at"), row.integer("turn_started_at"))
-	view.Archived = view.Stage == "done" && (row.present("landed_at") && row.integer("landed_at") >= row.integer("reported_at") && row.integer("user_at") <= row.integer("landed_at") && now-row.integer("landed_at") >= int64(24*time.Hour/time.Millisecond) || now-view.ActiveAt >= int64(7*24*time.Hour/time.Millisecond))
+	view.Archived = threadArchivedAt(row, view.Stage, view.ActiveAt, now)
 	if row.present("workspace_label") {
 		view.Workspace = &WorkspaceView{SourceID: row.text("workspace_source_id"), Label: row.text("workspace_label"), Branch: row["workspace_branch"], Base: row["workspace_base"], Removed: row.flag("workspace_removed"), Parked: row.flag("workspace_parked")}
 	}
@@ -521,6 +539,26 @@ func (reader Reader) GetProjectDetail(ctx context.Context, projectID string) (re
 	return
 }
 
+const archiveCandidateSelect = `SELECT t.id
+ FROM threads t
+ LEFT JOIN todos td ON td.conversation_id = t.id
+ WHERE t.project_id = ?
+  AND t.changed_seq <= ?
+  AND t.last_report IN ('done', 'ready')
+  AND (
+   (t.landed_at IS NOT NULL AND t.landed_at > ? AND t.landed_at <= ?)
+   OR (
+    t.updated_at <= ?
+    AND coalesce(td.updated_at, 0) <= ?
+    AND max(
+     t.updated_at,
+     coalesce(t.user_at, 0),
+     coalesce(td.updated_at, 0),
+     coalesce((SELECT e.at FROM events e WHERE e.seq = t.changed_seq), 0)
+    ) > ?
+   )
+  )`
+
 func listThreadsChangedSince(ctx context.Context, db queryer, projectID string, sinceSeq, sinceAt, now int64) ([]ThreadView, error) {
 	rows, err := records(ctx, db, threadSelect+" WHERE t.project_id = ? AND t.changed_seq > ? ORDER BY t.id", projectID, sinceSeq)
 	if err != nil {
@@ -535,11 +573,15 @@ func listThreadsChangedSince(ctx context.Context, db queryer, projectID string, 
 		views = append(views, view)
 	}
 	if now > sinceAt {
-		dayMs := int64(24 * time.Hour / time.Millisecond)
-		archivedRows, err := records(ctx, db, `SELECT id FROM threads
-		 WHERE project_id = ? AND changed_seq <= ? AND last_report IN ('done', 'ready')
-		 AND landed_at IS NOT NULL AND landed_at > ? AND landed_at <= ?
-		 ORDER BY id`, projectID, sinceSeq, sinceAt-dayMs, now-dayMs)
+		archivedRows, err := records(ctx, db, archiveCandidateSelect,
+			projectID,
+			sinceSeq,
+			sinceAt-archiveLandedAfterMs,
+			now-archiveLandedAfterMs,
+			now-archiveIdleAfterMs,
+			now-archiveIdleAfterMs,
+			sinceAt-archiveIdleAfterMs,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -556,14 +598,20 @@ func listThreadsChangedSince(ctx context.Context, db queryer, projectID string, 
 			if err != nil {
 				return nil, err
 			}
+			added := false
 			for _, row := range extraRows {
 				view, err := toThread(row, now)
 				if err != nil {
 					return nil, err
 				}
-				views = append(views, view)
+				if view.Archived != threadArchivedAt(row, view.Stage, view.ActiveAt, sinceAt) {
+					views = append(views, view)
+					added = true
+				}
 			}
-			slices.SortFunc(views, func(a, b ThreadView) int { return cmp.Compare(a.ID, b.ID) })
+			if added {
+				slices.SortFunc(views, func(a, b ThreadView) int { return cmp.Compare(a.ID, b.ID) })
+			}
 		}
 	}
 	return views, nil
@@ -594,8 +642,7 @@ func (reader Reader) GetProjectDetailSince(ctx context.Context, projectID string
 			threadIDs = append(threadIDs, id)
 			known[id] = true
 		}
-		const hourMs = int64(time.Hour / time.Millisecond)
-		partial := canPartial && sinceSeq >= 0 && sinceSeq <= currentSeq && now >= sinceAt && now/hourMs == sinceAt/hourMs
+		partial := canPartial && sinceSeq >= 0 && sinceSeq <= currentSeq && sinceAt > 0 && now >= sinceAt
 		var threads []ThreadView
 		var needs []object
 		if partial {

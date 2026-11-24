@@ -7,6 +7,7 @@ import {
   languageFor,
   markdown,
   python,
+  remoteCodeLanguage,
   scss,
   shell,
   sql,
@@ -17,6 +18,7 @@ import {
   type CodeLanguage,
 } from '@dou-ui/code'
 import { computed, shallowRef, watch, type ComputedRef } from 'vue'
+import { canUseCodeWorker } from './code-worker-pool'
 import { languageHintOf, resolveShikiLanguage, type ShikiLanguageKey } from './languages'
 
 const BUILT_IN_LANGUAGES = [
@@ -45,11 +47,30 @@ async function defaultShikiLoader(key: ShikiLanguageKey): Promise<CodeLanguage |
 
 const cachedShiki = new Map<ShikiLanguageKey, CodeLanguage>()
 const pendingShiki = new Map<ShikiLanguageKey, Promise<CodeLanguage | null>>()
+const cachedRemote = new Map<ShikiLanguageKey, CodeLanguage>()
 
 /** Built-in `@dou-ui/code` language for a file path, available synchronously without loading Shiki. */
 export function builtInCodeLanguage(path: string): CodeLanguage | null {
   const hint = languageHintOf(path)
   return hint ? languageFor(BUILT_IN_LANGUAGES, hint) : null
+}
+
+/**
+ * Lightweight `@dou-ui/code` remote language descriptor for a Shiki-backed file path.
+ * Highlighting executes entirely inside `code.worker.ts` via flat per-line tokens so the main
+ * thread never loads Shiki or Oniguruma WASM.
+ */
+export function remoteShikiCodeLanguage(path: string): CodeLanguage | null {
+  if (builtInCodeLanguage(path)) return null
+  const hint = languageHintOf(path)
+  const key = hint ? resolveShikiLanguage(hint) : null
+  if (!key) return null
+  let remote = cachedRemote.get(key)
+  if (!remote) {
+    remote = remoteCodeLanguage({ name: key })
+    cachedRemote.set(key, remote)
+  }
+  return remote
 }
 
 /** Synchronous language lookup: built-in first, then any previously loaded Shiki grammar. */
@@ -95,22 +116,46 @@ export async function loadCodeLanguage(
   return task
 }
 
-/** Reactive `@dou-ui/code` language binding with synchronous built-ins and lazy Shiki fallback. */
+export interface UseCodeLanguageOptions {
+  loader?: ShikiCodeLanguageLoader
+  /** Override whether non-built-in Shiki languages resolve to `remoteCodeLanguage` for worker execution. */
+  remote?: () => boolean
+}
+
+/**
+ * Reactive `@dou-ui/code` language binding:
+ * - Built-in languages resolve synchronously.
+ * - Non-built-in Shiki languages resolve synchronously to a lightweight `remoteCodeLanguage`
+ *   when Web Workers are available (keeping Shiki + WASM completely off the main thread in
+ *   `code.worker.ts`), and fall back to lazy main-thread `loadCodeLanguage` if Workers are
+ *   unavailable, fail at runtime, or a custom `loader` is supplied.
+ */
 export function useCodeLanguage(
   path: () => string,
-  loader: ShikiCodeLanguageLoader = defaultShikiLoader,
+  loaderOrOptions: ShikiCodeLanguageLoader | UseCodeLanguageOptions = defaultShikiLoader,
 ): {
   language: ComputedRef<CodeLanguage | null>
   isBuiltIn: ComputedRef<boolean>
 } {
+  const loader =
+    typeof loaderOrOptions === 'function'
+      ? loaderOrOptions
+      : (loaderOrOptions.loader ?? defaultShikiLoader)
+  const useRemote =
+    typeof loaderOrOptions === 'function'
+      ? () => loader === defaultShikiLoader && canUseCodeWorker()
+      : (loaderOrOptions.remote ?? (() => loader === defaultShikiLoader && canUseCodeWorker()))
+
   const builtIn = computed(() => builtInCodeLanguage(path()))
+  const remote = computed(() => (useRemote() ? remoteShikiCodeLanguage(path()) : null))
   const extra = shallowRef<CodeLanguage | null>(null)
 
   watch(
-    path,
-    async (current, _previous, cleanup) => {
+    [path, useRemote],
+    async ([current, preferRemote], _previous, cleanup) => {
       extra.value = null
       if (builtInCodeLanguage(current)) return
+      if (preferRemote && remoteShikiCodeLanguage(current)) return
       const cached = loader === defaultShikiLoader ? peekCodeLanguage(current) : null
       if (cached) {
         extra.value = cached
@@ -131,7 +176,7 @@ export function useCodeLanguage(
   )
 
   return {
-    language: computed(() => builtIn.value ?? extra.value),
+    language: computed(() => builtIn.value ?? remote.value ?? extra.value),
     isBuiltIn: computed(() => builtIn.value !== null),
   }
 }

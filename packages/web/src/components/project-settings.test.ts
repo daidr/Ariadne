@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { defineComponent, h, ref } from 'vue'
 import { api, type ProjectDetail, type ProjectSettingsView } from '../api'
 import { locale } from '../i18n'
 import { state } from '../store'
@@ -164,5 +165,68 @@ describe('ProjectSettings', () => {
     expect(getProjectSettings).toHaveBeenCalledTimes(1)
     expect(getProjectSettings).toHaveBeenCalledWith('prj_test')
     expect(wrapper.findAll('[role="tab"]')).toHaveLength(5)
+  })
+
+  test('tracks FileSourcesForm dirty state on usage tab and across close/reopen', async () => {
+    const getProjectSettings = vi
+      .spyOn(api, 'getProjectSettings')
+      .mockResolvedValue(makeProjectSettingsView())
+    vi.spyOn(api, 'getMcpSettings').mockResolvedValue({ servers: [], status: [] })
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+
+    const FileSourcesStub = defineComponent({
+      name: 'FileSourcesForm',
+      setup() {
+        const dirty = ref(false)
+        return { dirty, ready: true, save: async () => true }
+      },
+      render() {
+        return h('div', { class: 'sources-stub' })
+      },
+    })
+
+    const wrapper = mount(ProjectSettingsDialog, {
+      props: { layoutMode: 'wide' },
+      global: {
+        stubs: {
+          FileSourcesForm: FileSourcesStub,
+          SourceNotes: true,
+          MemoryList: true,
+          ProjectUsage: true,
+          SecretPairs: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+
+    state.projectSettingsOpen = true
+    await flushPromises()
+    expect(getProjectSettings).toHaveBeenCalledTimes(1)
+
+    // Clean usage tab hides Save and only shows Close.
+    state.projectSettingsTab = 'usage'
+    await flushPromises()
+    expect(
+      Array.from(document.body.querySelectorAll('button')).some(
+        (b) => b.textContent?.trim() === '保存',
+      ),
+    ).toBe(false)
+
+    // Dirty FileSourcesForm keeps Save visible on usage tab and preserves form across close/reopen.
+    ;(wrapper.findComponent(FileSourcesStub).vm as unknown as { dirty: boolean }).dirty = true
+    await flushPromises()
+    expect(
+      Array.from(document.body.querySelectorAll('button')).some(
+        (b) => b.textContent?.trim() === '保存',
+      ),
+    ).toBe(true)
+
+    state.projectSettingsOpen = false
+    await flushPromises()
+    expect(wrapper.findComponent(FileSourcesStub).exists()).toBe(true)
+
+    state.projectSettingsOpen = true
+    await flushPromises()
+    expect(getProjectSettings).toHaveBeenCalledTimes(1)
   })
 })

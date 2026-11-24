@@ -627,9 +627,15 @@ type ReplyDraft struct {
 	MessageId string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	Text      string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
 	// Optional JSON-encoded display blocks array (empty when omitted).
-	BlocksJson    []byte `protobuf:"bytes,3,opt,name=blocks_json,json=blocksJson,proto3" json:"blocks_json,omitempty"`
-	StartedAt     int64  `protobuf:"varint,4,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	Posted        bool   `protobuf:"varint,5,opt,name=posted,proto3" json:"posted,omitempty"`
+	BlocksJson []byte `protobuf:"bytes,3,opt,name=blocks_json,json=blocksJson,proto3" json:"blocks_json,omitempty"`
+	StartedAt  int64  `protobuf:"varint,4,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	Posted     bool   `protobuf:"varint,5,opt,name=posted,proto3" json:"posted,omitempty"`
+	// When true, text is a suffix to append to the previous draft text for the
+	// same conversation_id and message_id on this stream.
+	Append bool `protobuf:"varint,6,opt,name=append,proto3" json:"append,omitempty"`
+	// When true on an append update, blocks are unchanged from the previous frame
+	// and blocks_json is omitted to avoid resending them.
+	KeepBlocks    bool `protobuf:"varint,7,opt,name=keep_blocks,json=keepBlocks,proto3" json:"keep_blocks,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -695,6 +701,20 @@ func (x *ReplyDraft) GetStartedAt() int64 {
 func (x *ReplyDraft) GetPosted() bool {
 	if x != nil {
 		return x.Posted
+	}
+	return false
+}
+
+func (x *ReplyDraft) GetAppend() bool {
+	if x != nil {
+		return x.Append
+	}
+	return false
+}
+
+func (x *ReplyDraft) GetKeepBlocks() bool {
+	if x != nil {
+		return x.KeepBlocks
 	}
 	return false
 }
@@ -815,7 +835,7 @@ const file_ariadne_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12'\n" +
 	"\x0fconversation_id\x18\x02 \x01(\tR\x0econversationId\x12=\n" +
-	"\bcommands\x18\x03 \x03(\v2!.ariadne.v1.BackgroundCommandViewR\bcommands\"\x9b\x01\n" +
+	"\bcommands\x18\x03 \x03(\v2!.ariadne.v1.BackgroundCommandViewR\bcommands\"\xd4\x01\n" +
 	"\n" +
 	"ReplyDraft\x12\x1d\n" +
 	"\n" +
@@ -825,7 +845,10 @@ const file_ariadne_v1_events_proto_rawDesc = "" +
 	"blocksJson\x12!\n" +
 	"\n" +
 	"started_at\x18\x04 \x01(\x03B\x020\x02R\tstartedAt\x12\x16\n" +
-	"\x06posted\x18\x05 \x01(\bR\x06posted\"\x97\x01\n" +
+	"\x06posted\x18\x05 \x01(\bR\x06posted\x12\x16\n" +
+	"\x06append\x18\x06 \x01(\bR\x06append\x12\x1f\n" +
+	"\vkeep_blocks\x18\a \x01(\bR\n" +
+	"keepBlocks\"\x97\x01\n" +
 	"\x10ReplyDraftUpdate\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12'\n" +

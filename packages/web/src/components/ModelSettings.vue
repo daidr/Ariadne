@@ -143,7 +143,9 @@ const saving = ref(false)
 const error = ref<string | null>(null)
 // The models just saved that did not answer when asked, shown where each is set up.
 const problems = ref<ModelProblem[]>([])
-let savedModelDraft = ''
+const savedModelDraft = ref('')
+/** Keeps child settings mounted across accidental close/reopen while unsaved edits remain. */
+const mounted = ref(false)
 function modelDraft() {
   return JSON.stringify([
     providers.value.map((provider) => [
@@ -405,10 +407,38 @@ const WORK_PART_ICONS: Record<WorkPart, Component> = {
   commands: TerminalIcon,
 }
 
+const modelsDirty = computed(
+  () =>
+    hiddenRoles.value !== null &&
+    savedModelDraft.value !== '' &&
+    modelDraft() !== savedModelDraft.value,
+)
+const hasUnsavedChanges = computed(
+  () =>
+    modelsDirty.value ||
+    !!search.value?.dirty ||
+    !!work.value.instructions?.dirty ||
+    !!work.value.commands?.dirty ||
+    !!input.value?.dirty ||
+    !!mcp.value?.dirty,
+)
+const isReadOnlyTab = computed(
+  () => tab.value === 'updates' || tab.value === 'plugins' || tab.value === 'data',
+)
+const showSaveFooter = computed(() => !isReadOnlyTab.value || hasUnsavedChanges.value)
+
+function discardAndClose() {
+  mounted.value = false
+  savedModelDraft.value = ''
+  error.value = null
+  problems.value = []
+  open.value = false
+}
+
 /** Reload protocols and hydrate settings for providers whose plugin was just re-enabled. */
 async function reloadKinds() {
   try {
-    const cleanBefore = hiddenRoles.value !== null && modelDraft() === savedModelDraft
+    const cleanBefore = hiddenRoles.value !== null && modelDraft() === savedModelDraft.value
     const previousKinds = new Set(kinds.value.map((k) => k.kind))
     const latest = await api.getModelSettings()
     applyModelSettings(latest)
@@ -423,7 +453,7 @@ async function reloadKinds() {
       provider.secretsSet = [...saved.secretsSet]
     }
     if (cleanBefore) {
-      savedModelDraft = modelDraft()
+      savedModelDraft.value = modelDraft()
     }
   } catch {
     // The models tab shows the protocols it had.
@@ -433,7 +463,17 @@ async function reloadKinds() {
 watch(
   open,
   async (isOpen) => {
-    if (!isOpen) return
+    if (!isOpen) {
+      if (!hasUnsavedChanges.value) {
+        mounted.value = false
+        savedModelDraft.value = ''
+        error.value = null
+        problems.value = []
+      }
+      return
+    }
+    if (mounted.value && hasUnsavedChanges.value) return
+    mounted.value = true
     error.value = null
     problems.value = []
     // Not loaded yet: saving now would send an empty list over the saved one.
@@ -442,7 +482,7 @@ watch(
       const [saved, slots] = await Promise.all([api.getModelSettings(), api.getConcurrency()])
       load(saved)
       concurrency.value = slots
-      savedModelDraft = modelDraft()
+      savedModelDraft.value = modelDraft()
     } catch (cause) {
       error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
     }
@@ -698,7 +738,10 @@ async function saveAll() {
     }
     // A model that did not answer is saved all the same, and shown to be put right.
     if (problems.value.length) tab.value = 'models'
-    else if (tab.value !== 'mcp') open.value = false
+    else if (tab.value !== 'mcp') {
+      mounted.value = false
+      open.value = false
+    }
   } finally {
     saving.value = false
   }
@@ -707,7 +750,7 @@ async function saveAll() {
 async function saveModels(): Promise<boolean> {
   if (!hiddenRoles.value) return true
   // Saving another tab must not contact every model again when none was edited.
-  if (tab.value !== 'models' && modelDraft() === savedModelDraft) return true
+  if (tab.value !== 'models' && modelDraft() === savedModelDraft.value) return true
   error.value = null
   try {
     // A name typed and saved at once has its settings filled in first.
@@ -792,7 +835,7 @@ async function saveModels(): Promise<boolean> {
     void refreshConversationModels()
     problems.value = saved.problems
     if (concurrency.value) concurrency.value = await api.saveConcurrency(concurrency.value)
-    savedModelDraft = modelDraft()
+    savedModelDraft.value = modelDraft()
     return true
   } catch (cause) {
     error.value =
@@ -1074,7 +1117,7 @@ async function saveModels(): Promise<boolean> {
         </div>
       </DouTabPanel>
       <DouTabPanel value="search" :label="t('settings.tab.search')" :icon="GlobeIcon">
-        <SearchSettings v-if="open" ref="search" />
+        <SearchSettings v-if="mounted" ref="search" />
       </DouTabPanel>
       <DouTabPanel
         v-for="part in WORK_PARTS"
@@ -1084,16 +1127,16 @@ async function saveModels(): Promise<boolean> {
         :icon="WORK_PART_ICONS[part]"
       >
         <WorkSettings
-          v-if="open"
+          v-if="mounted"
           :ref="(el) => (work[part] = el as InstanceType<typeof WorkSettings> | null)"
           :part="part"
         />
       </DouTabPanel>
       <DouTabPanel value="input" :label="t('settings.tab.input')" :icon="SlidersIcon">
-        <InputSettings v-if="open" ref="input" />
+        <InputSettings v-if="mounted" ref="input" />
       </DouTabPanel>
       <DouTabPanel value="mcp" :label="t('settings.tab.mcp')" :icon="McpServerIcon">
-        <McpSettings v-if="open" ref="mcp" />
+        <McpSettings v-if="mounted" ref="mcp" />
       </DouTabPanel>
       <DouTabPanel value="plugins" :label="t('settings.tab.plugins')" :icon="PlugIcon">
         <PluginSettings v-if="open && tab === 'plugins'" @changed="reloadKinds" />
@@ -1106,11 +1149,9 @@ async function saveModels(): Promise<boolean> {
       </DouTabPanel>
     </DouTabs>
     <template #footer="{ close }">
-      <DouButton v-if="tab === 'updates' || tab === 'plugins'" @click="close">{{
-        t('view.close')
-      }}</DouButton>
+      <DouButton v-if="!showSaveFooter" @click="close">{{ t('view.close') }}</DouButton>
       <template v-else>
-        <DouButton variant="ghost" @click="close">{{ t('settings.cancel') }}</DouButton>
+        <DouButton variant="ghost" @click="discardAndClose">{{ t('settings.cancel') }}</DouButton>
         <DouButton tone="primary" :loading="saving" :disabled="search?.checking" @click="saveAll">
           {{ t('settings.save') }}
         </DouButton>
@@ -1154,11 +1195,12 @@ async function saveModels(): Promise<boolean> {
 
 .settings-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
 .settings-grow {
-  flex: 1;
+  flex: 1 1 180px;
   min-width: 0;
 }
 
@@ -1166,6 +1208,12 @@ async function saveModels(): Promise<boolean> {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+@media (max-width: 520px) {
+  .settings-role-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 580px) {

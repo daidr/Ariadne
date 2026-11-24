@@ -73,10 +73,10 @@ func TestSlowConsumerDropsPendingMemory(t *testing.T) {
 			if sub.bytes != 0 || sub.queue.Len() != 0 || len(sub.byKey) != 0 {
 				t.Fatal("overflow retained pending updates")
 			}
-			stop()
-			if len(hub.clients) != 0 {
-				t.Fatal("closed stream retained subscription")
-			}
+				stop()
+				if hub.clientCount() != 0 {
+					t.Fatal("closed stream retained subscription")
+				}
 		})
 	}
 }

@@ -20,12 +20,14 @@ import (
 )
 
 const (
-	maxRooms       = 16
-	maxPeers       = 16
-	maxAwareness   = 8 // identities owned by one connection
-	maxRoomState   = 12 << 20
-	maxQueuedBytes = 16 << 20
-	saveDelay      = 1500 * time.Millisecond
+	maxRooms         = 16
+	maxPeers         = 16
+	maxAwareness     = 8 // identities owned by one connection
+	maxRoomState     = 12 << 20
+	maxQueuedBytes   = 16 << 20
+	maxPendingBytes  = 512 << 10
+	maxPendingDeltas = 4096
+	saveDelay        = 1500 * time.Millisecond
 )
 
 type Rooms struct {
@@ -41,7 +43,9 @@ type room struct {
 	mu          sync.Mutex
 	artifact    core.ArtifactView
 	doc         *crdt.Doc
-	state       []byte
+	state       []byte   // last compacted full CRDT state snapshot
+	pending     [][]byte // incremental V1 updates applied since state
+	pendingLen  int      // sum of len(u) in pending
 	peers       map[*peer]bool
 	timer       *time.Timer
 	due         time.Time
@@ -135,6 +139,135 @@ func roomState(doc *crdt.Doc) ([]byte, error) {
 		return nil, errors.New("collaboration state is too large")
 	}
 	return state, err
+}
+
+func captureUpdates(doc *crdt.Doc, run func() error) ([]byte, error) {
+	var updates [][]byte
+	handler := doc.OnUpdate(func(update []byte, _ any) {
+		if len(update) > 0 {
+			updates = append(updates, update)
+		}
+	})
+	defer doc.OffUpdate(handler)
+	if err := run(); err != nil {
+		if len(updates) > 0 {
+			return updates[0], err
+		}
+		return nil, err
+	}
+	switch len(updates) {
+	case 0:
+		return nil, nil
+	case 1:
+		return updates[0], nil
+	default:
+		return crdt.MergeUpdates(updates)
+	}
+}
+
+func observeSnapshotChange(doc *crdt.Doc, run func() error) (bool, error) {
+	changed := false
+	snapshot := doc.GetMap("snapshot")
+	listener := func(payload, _ any) {
+		if events, ok := payload.([]crdt.IEventType); ok && len(events) > 0 {
+			changed = true
+		}
+	}
+	snapshot.ObserveDeep(listener)
+	defer snapshot.UnobserveDeep(listener)
+	err := run()
+	return changed, err
+}
+
+// pendingSyncPayload returns the V1 update to log for an accepted client sync
+// frame so restoreDoc reproduces both integrated changes and any unintegrated
+// pendingStructs/pendingDeleteSet buffered inside doc.
+func pendingSyncPayload(doc *crdt.Doc, update, body []byte) []byte {
+	if len(body) <= 2 {
+		return update
+	}
+	if bytes.Equal(update, body) {
+		return update
+	}
+	if rem, err := crdt.DiffUpdate(body, crdt.EncodeStateVector(doc)); err == nil && len(rem) <= 2 {
+		return update
+	}
+	return bytes.Clone(body)
+}
+
+func (active *room) estimatedStateSize() int {
+	return len(active.state) + active.pendingLen
+}
+
+func (active *room) exceedsHalfStateLimit() bool {
+	if active.estimatedStateSize() <= maxRoomState/2 {
+		return false
+	}
+	state, err := active.compactState()
+	return err != nil || len(state) > maxRoomState/2
+}
+
+func (active *room) setCompactedState(state []byte) {
+	active.state = state
+	active.pending = nil
+	active.pendingLen = 0
+}
+
+func (active *room) compactState() ([]byte, error) {
+	if len(active.pending) == 0 && len(active.state) > 0 {
+		return active.state, nil
+	}
+	state, err := roomState(active.doc)
+	if err != nil {
+		return nil, err
+	}
+	active.setCompactedState(state)
+	return state, nil
+}
+
+// checkStateLimit enforces maxRoomState and compacts lazily once the
+// uncompacted delta log crosses a bounded threshold. It returns a non-nil
+// snapshot only when compaction ran.
+func (active *room) checkStateLimit(doc *crdt.Doc, deltaLen int) ([]byte, error) {
+	if deltaLen <= 0 {
+		return nil, nil
+	}
+	nextPendingLen := active.pendingLen + deltaLen
+	nextPendingCount := len(active.pending) + 1
+	if len(active.state)+nextPendingLen > maxRoomState ||
+		nextPendingLen >= maxPendingBytes || nextPendingCount >= maxPendingDeltas {
+		return roomState(doc)
+	}
+	return nil, nil
+}
+
+func (active *room) recordApplied(entry, compacted []byte) {
+	if compacted != nil {
+		active.setCompactedState(compacted)
+		return
+	}
+	if len(entry) > 0 {
+		active.pending = append(active.pending, entry)
+		active.pendingLen += len(entry)
+	}
+}
+
+func (active *room) restoreDoc() (*crdt.Doc, error) {
+	doc, err := Load(active.artifact.Kind, active.state)
+	if err != nil {
+		return nil, err
+	}
+	for _, delta := range active.pending {
+		if err := crdt.ApplyUpdate(doc, delta, "load"); err != nil {
+			doc.Destroy()
+			return nil, err
+		}
+	}
+	return doc, nil
+}
+
+func (active *room) cloneDoc() (*crdt.Doc, error) {
+	return active.restoreDoc()
 }
 
 func (rooms *Rooms) lock(ctx context.Context, id string) (*room, error) {
@@ -274,59 +407,113 @@ func (active *room) receive(client *peer, frame []byte) error {
 		if info.SyncType != protocol.SyncMessageStep2 && info.SyncType != protocol.SyncMessageUpdate {
 			return nil
 		}
-		vector := crdt.EncodeStateVector(active.doc)
-		var snapshot any
-		if active.artifact.Kind == "dashboard" {
-			snapshot = active.doc.GetMap("snapshot").ToJSON()
-		}
+		isDashboard := active.artifact.Kind == "dashboard"
 		if active.draft != nil {
-			trial, err := Load(active.artifact.Kind, active.state)
+			trial, err := active.draft.ensureShadow()
 			if err != nil {
 				return err
 			}
-			if locks := active.draft.locked; len(locks) != 0 {
-				var changed map[string]bool
-				changed, err = changedDocumentBlocks(trial, func() error {
+			var snapshotChanged bool
+			var lockedChanged bool
+			update, err := captureUpdates(trial, func() error {
+				apply := func() error {
 					_, err := HandleSync(trial, frame, client)
 					return err
-				})
-				if err == nil && documentLocksChanged(active.doc, trial, locks, changed) {
-					err = errDocumentBlockLocked
 				}
-			} else {
-				_, err = HandleSync(trial, frame, client)
+				if isDashboard {
+					inner := apply
+					apply = func() error {
+						var err error
+						snapshotChanged, err = observeSnapshotChange(trial, inner)
+						return err
+					}
+				}
+				if locks := active.draft.locked; len(locks) != 0 {
+					changed, err := collectChangedTypes(trial, apply)
+					if err == nil && documentLocksChanged(active.doc, trial, locks, changed) {
+						lockedChanged = true
+					}
+					return err
+				}
+				return apply()
+			})
+			if err == nil && lockedChanged {
+				err = errDocumentBlockLocked
 			}
-			if err == nil && snapshot != nil && !equalJSON(snapshot, trial.GetMap("snapshot").ToJSON()) {
+			if err == nil && snapshotChanged {
 				err = errors.New("dashboard data comes from the server")
 			}
+			var entry []byte
+			var compacted []byte
 			if err == nil {
-				_, err = roomState(trial)
+				entry = pendingSyncPayload(trial, update, info.Body)
+				compacted, err = active.checkStateLimit(trial, max(len(update), len(entry)))
 			}
-			trial.Destroy()
 			if err != nil {
+				active.draft.dropShadow()
 				return err
 			}
-		}
-		if _, err := HandleSync(active.doc, frame, client); err != nil {
-			active.restore()
-			return err
-		}
-		if snapshot != nil && !equalJSON(snapshot, active.doc.GetMap("snapshot").ToJSON()) {
-			active.restore()
-			return errors.New("dashboard data comes from the server")
-		}
-		state, err := roomState(active.doc)
-		if err != nil {
-			active.restore()
-			return err
-		}
-		if !bytes.Equal(state, active.state) {
-			update, err := crdt.EncodeStateAsUpdate(active.doc, vector)
+			actualUpdate, err := captureUpdates(active.doc, func() error {
+				_, err := HandleSync(active.doc, frame, client)
+				return err
+			})
 			if err != nil {
 				active.restore()
 				return err
 			}
-			active.state = state
+			if !bytes.Equal(actualUpdate, update) {
+				if isDashboard || len(active.draft.locked) != 0 {
+					active.restore()
+					return errors.New("collaboration state diverged during draft")
+				}
+				active.draft.dropShadow()
+				update = actualUpdate
+				entry = pendingSyncPayload(active.doc, update, info.Body)
+				compacted = nil
+				if deltaLen := max(len(update), len(entry)); deltaLen > 0 {
+					compacted, err = active.checkStateLimit(active.doc, deltaLen)
+					if err != nil {
+						active.restore()
+						return err
+					}
+				}
+			}
+			active.recordApplied(entry, compacted)
+			if len(update) > 0 {
+				active.broadcast(protocol.EncodeUpdate(update), client)
+				active.changed()
+			}
+			return nil
+		}
+		var snapshotChanged bool
+		update, err := captureUpdates(active.doc, func() error {
+			apply := func() error {
+				_, err := HandleSync(active.doc, frame, client)
+				return err
+			}
+			if isDashboard {
+				var err error
+				snapshotChanged, err = observeSnapshotChange(active.doc, apply)
+				return err
+			}
+			return apply()
+		})
+		if err != nil {
+			active.restore()
+			return err
+		}
+		if snapshotChanged {
+			active.restore()
+			return errors.New("dashboard data comes from the server")
+		}
+		entry := pendingSyncPayload(active.doc, update, info.Body)
+		compacted, err := active.checkStateLimit(active.doc, max(len(update), len(entry)))
+		if err != nil {
+			active.restore()
+			return err
+		}
+		active.recordApplied(entry, compacted)
+		if len(update) > 0 {
 			active.broadcast(protocol.EncodeUpdate(update), client)
 			active.changed()
 		}
@@ -343,7 +530,7 @@ func (active *room) restore() {
 		active.cancelDraft()
 	}
 	active.doc.Destroy()
-	doc, err := Load(active.artifact.Kind, active.state)
+	doc, err := active.restoreDoc()
 	active.doc = doc
 	if err != nil {
 		for client := range active.peers {
@@ -397,6 +584,10 @@ func (active *room) save(ctx context.Context, input core.ArtifactRevision) (core
 	if active.draft != nil {
 		return core.ArtifactView{}, errors.New("artifact has an unfinished draft")
 	}
+	state, err := active.compactState()
+	if err != nil {
+		return core.ArtifactView{}, err
+	}
 	content, err := readContent(active.doc, active.artifact.Kind)
 	if err != nil {
 		return core.ArtifactView{}, err
@@ -416,7 +607,7 @@ func (active *room) save(ctx context.Context, input core.ArtifactRevision) (core
 			content = active.artifact.Content
 		}
 	}
-	input.Content, input.BaseVersion, input.Shared, input.SharedState = content, &active.artifact.Version, true, active.state
+	input.Content, input.BaseVersion, input.Shared, input.SharedState = content, &active.artifact.Version, true, state
 	result, err := active.owner.repo.ReviseArtifact(ctx, active.artifact.ID, input)
 	if err != nil {
 		return core.ArtifactView{}, err
@@ -575,38 +766,42 @@ func (rooms *Rooms) revise(ctx context.Context, id string, input core.ArtifactRe
 			return core.ArtifactView{}, err
 		}
 	}
-	before := active.state
+	before, err := active.compactState()
+	if err != nil {
+		return core.ArtifactView{}, err
+	}
 	var update []byte
 	var writerState map[string]any
 	if change != nil {
-		vector := crdt.EncodeStateVector(active.doc)
-		writerState = observeWriter(active, func() { err = change(active) }, input.WriterName)
+		update, err = captureUpdates(active.doc, func() error {
+			var changeErr error
+			writerState = observeWriter(active, func() { changeErr = change(active) }, input.WriterName)
+			return changeErr
+		})
 		if err != nil {
+			if len(update) > 0 {
+				active.restore()
+			}
 			return core.ArtifactView{}, err
 		}
-		state, err := roomState(active.doc)
-		if err != nil {
-			active.restore()
-			return core.ArtifactView{}, err
-		}
-		if !bytes.Equal(state, before) {
-			update, err = crdt.EncodeStateAsUpdate(active.doc, vector)
+		if len(update) > 0 {
+			state, err := roomState(active.doc)
 			if err != nil {
 				active.restore()
 				return core.ArtifactView{}, err
 			}
-			active.state = state
+			active.setCompactedState(state)
 		}
 	}
 	result, err := active.save(ctx, input)
 	if err != nil {
-		if update != nil {
-			active.state = before
+		if len(update) > 0 {
+			active.setCompactedState(before)
 			active.restore()
 		}
 		return result, err
 	}
-	if update != nil {
+	if len(update) > 0 {
 		active.broadcast(protocol.EncodeUpdate(update), nil)
 		active.publishWriter(input.WriterName, writerState)
 		if writerState != nil {
@@ -643,16 +838,22 @@ func (rooms *Rooms) retire(ctx context.Context, active *room, save bool) {
 		if _, err := active.save(ctx, core.ArtifactRevision{Author: "user"}); err != nil {
 			rooms.report(err)
 			// A temporary invalid board can still be recovered by its editor.
-			if saveErr := rooms.repo.CheckpointSharedState(ctx, active.artifact.ID,
-				core.SharedState{Version: active.artifact.Version, State: active.state}); saveErr != nil {
+			if state, stateErr := active.compactState(); stateErr != nil {
+				rooms.report(stateErr)
+			} else if saveErr := rooms.repo.CheckpointSharedState(ctx, active.artifact.ID,
+				core.SharedState{Version: active.artifact.Version, State: state}); saveErr != nil {
 				rooms.report(saveErr)
 			}
 		}
 	} else if save && active.doc != nil && active.checkpoint {
 		// A reconnecting peer can still have the draft's updates. Keep their
 		// deletion history even when the document content never changed.
-		rooms.report(rooms.repo.CheckpointSharedState(ctx, active.artifact.ID,
-			core.SharedState{Version: active.artifact.Version, State: active.state}))
+		if state, err := active.compactState(); err != nil {
+			rooms.report(err)
+		} else {
+			rooms.report(rooms.repo.CheckpointSharedState(ctx, active.artifact.ID,
+				core.SharedState{Version: active.artifact.Version, State: state}))
+		}
 	}
 	if active.timer != nil {
 		active.timer.Stop()
@@ -665,7 +866,7 @@ func (rooms *Rooms) retire(ctx context.Context, active *room, save bool) {
 	if active.doc != nil {
 		active.doc.Destroy()
 	}
-	active.doc, active.state = nil, nil
+	active.doc, active.state, active.pending, active.pendingLen = nil, nil, nil, 0
 	delete(rooms.active, active.artifact.ID)
 }
 

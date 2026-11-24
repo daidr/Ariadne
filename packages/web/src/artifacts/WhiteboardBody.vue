@@ -369,15 +369,16 @@ defineExpose({
 .whiteboard-offscreen {
   position: absolute;
   right: 16px;
-  bottom: 16px;
+  bottom: max(16px, var(--ariadne-safe-bottom));
   z-index: 10;
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  max-width: calc(100% - 32px);
   padding: 6px 8px 6px 12px;
   border: 1px solid var(--dou-color-border);
-  border-radius: var(--dou-radius-lg, 10px);
-  background: var(--dou-color-surface, var(--dou-color-bg));
+  border-radius: var(--dou-radius-container);
+  background: var(--dou-color-bg-surface);
   box-shadow: var(--dou-shadow-md, 0 4px 12px rgb(0 0 0 / 0.08));
 }
 </style>

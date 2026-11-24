@@ -169,6 +169,8 @@ interface State {
   threads: Record<string, ConversationState>
   plan: PlanView | null
   artifacts: ArtifactSummary[]
+  /** True once the open project's artifacts list has been fetched at least once. */
+  artifactsLoaded: boolean
   /** The project's memory: standing preferences every conversation sees. */
   memories: MemoryView[]
   main: MainView
@@ -231,6 +233,7 @@ export const state = reactive<State>({
   threads: {},
   plan: null,
   artifacts: [],
+  artifactsLoaded: false,
   memories: [],
   main: { kind: 'conversation' },
   workspaceLevel: 'projects',
@@ -455,7 +458,10 @@ async function loadParts(parts: ReadonlySet<RefreshKey>) {
   }
   if (plan) state.plan = reuse(toRaw(state.plan), plan.plan)
   settleSide()
-  if (artifacts) state.artifacts = reuse(toRaw(state.artifacts), artifacts.artifacts)
+  if (artifacts) {
+    state.artifacts = reuse(toRaw(state.artifacts), artifacts.artifacts)
+    state.artifactsLoaded = true
+  }
   if (memory) state.memories = reuse(toRaw(state.memories), memory.memories)
 }
 
@@ -691,6 +697,7 @@ function prepareProject(id: string | null) {
   state.detail = null
   state.plan = null
   state.artifacts = []
+  state.artifactsLoaded = false
   state.memories = []
   resetMain()
   state.focus = null
@@ -892,6 +899,10 @@ export function openThreadFrom(event: MouseEvent | KeyboardEvent | undefined, th
 
 export function closePane(key: PaneKey, acrossGroups = false) {
   setSide(side.close(state.side, key, acrossGroups))
+}
+
+export function closeOtherPanes(key: PaneKey) {
+  setSide(side.closeOthers(state.side, key))
 }
 
 export function splitPane(key: PaneKey, direction: SplitDirection) {

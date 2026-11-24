@@ -63,11 +63,11 @@ func TestLiveAndDraftSnapshots(t *testing.T) {
 		draftValues := []DraftUpdate{}
 		for update := range state.Snapshots("") {
 			if update.Kind == "draft" {
-				var value DraftUpdate
-				if err := json.Unmarshal(update.Data, &value); err != nil {
-					t.Fatal(err)
+				value, ok := update.Value.(*DraftUpdate)
+				if !ok || value == nil {
+					t.Fatalf("expected typed *DraftUpdate, got %#v", update.Value)
 				}
-				draftValues = append(draftValues, value)
+				draftValues = append(draftValues, *value)
 			}
 		}
 		states = append(states, map[string]any{"live": live.List(""), "drafts": draftValues})
@@ -149,9 +149,8 @@ func TestDraftDropAndCloseCannotResurrectOldHandlesOrTimers(t *testing.T) {
 	one.Write("stale")
 	one.Withdraw()
 	for update := range state.Snapshots("p") {
-		var value DraftUpdate
-		json.Unmarshal(update.Data, &value)
-		if value.Draft == nil || value.Draft.MessageID != "m2" || value.Draft.Text != "new" {
+		value, ok := update.Value.(*DraftUpdate)
+		if !ok || value == nil || value.Draft == nil || value.Draft.MessageID != "m2" || value.Draft.Text != "new" {
 			t.Fatal("stale handle replaced draft")
 		}
 	}
@@ -195,5 +194,27 @@ func TestDraftRejectsOversizedPendingTextAndPostedSnapshotIsRemoved(t *testing.T
 	drafts.mu.Unlock()
 	if bytes != 0 {
 		t.Fatal("posted text not released")
+	}
+}
+
+func TestJSONEscapedLenMatchesEncodingJSON(t *testing.T) {
+	samples := []string{
+		"",
+		"hello world",
+		`quotes "and" \backslashes\`,
+		"lines\n\r\t\b\f\x00\x1f",
+		"html <script>&</script>",
+		"中文😀测试\u2028\u2029done",
+		string([]byte{'a', 0xff, 'b', 0xfe, 'c'}),
+	}
+	for _, sample := range samples {
+		encoded, err := json.Marshal(sample)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := len(encoded) - 2
+		if got := jsonEscapedLen(sample); got != want {
+			t.Fatalf("jsonEscapedLen(%q) = %d, want %d (encoded=%s)", sample, got, want, encoded)
+		}
 	}
 }

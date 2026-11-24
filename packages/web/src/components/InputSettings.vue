@@ -45,10 +45,25 @@ const submitOptions = computed(() => [
   { value: 'mod-enter', label: t('input.submitModEnter') },
 ])
 
+const savedSnapshot = ref('')
+
+function currentSnapshot() {
+  return JSON.stringify({
+    submitOn: submitOn.value,
+    snippets: snippets.value,
+    keys: keys.value,
+  })
+}
+
+const dirty = computed(
+  () => savedSnapshot.value !== '' && currentSnapshot() !== savedSnapshot.value,
+)
+
 function load(input: InputSettings) {
   submitOn.value = input.submitOn
   snippets.value = input.snippets.map((snippet) => ({ ...snippet }))
   keys.value = { ...DEFAULT_KEYS, ...input.keys }
+  savedSnapshot.value = currentSnapshot()
 }
 
 onMounted(async () => {
@@ -85,7 +100,7 @@ async function save(): Promise<boolean> {
   }
 }
 
-defineExpose({ save })
+defineExpose({ save, dirty })
 </script>
 
 <template>
@@ -174,9 +189,10 @@ defineExpose({ save })
 
 .input-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px 12px;
 }
 
 .input-heading {
@@ -187,6 +203,7 @@ defineExpose({ save })
 
 .snippet {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 8px;
 }
@@ -197,7 +214,13 @@ defineExpose({ save })
 }
 
 .snippet-text {
-  flex: 1;
+  flex: 1 1 200px;
   min-width: 0;
+}
+
+@media (max-width: 520px) {
+  .snippet-name {
+    width: 100%;
+  }
 }
 </style>

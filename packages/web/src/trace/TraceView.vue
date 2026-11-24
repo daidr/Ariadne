@@ -8,9 +8,10 @@ import {
   DouSplitter,
   DouTable,
   DouText,
+  useElementSize,
   type TableColumn,
 } from 'dou-ui'
-import { ChevronLeftIcon, DownloadIcon } from '@dou-ui/icons'
+import { ChevronLeftIcon, DownloadIcon, RotateCwIcon } from '@dou-ui/icons'
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { coalescedRefresh } from '../coalesced-refresh'
@@ -250,6 +251,9 @@ const timeline = computed(() => timelineModel(rows.value, mode.value, now.value)
 const hovered = ref<string | null>(null)
 // The rows in the marked stretch stand out; the rest fade.
 const inRange = computed(() => rowsInRange(rows.value, timeline.value, range.value))
+const root = useTemplateRef<HTMLElement>('root')
+const { width: containerWidth } = useElementSize(root)
+const narrow = computed(() => containerWidth.value > 0 && containerWidth.value < 760)
 const table = useTemplateRef<{ scrollToRow: (key: string) => void }>('table')
 
 function rowClass(row: TraceRow) {
@@ -283,7 +287,7 @@ function pick(key: string) {
 </script>
 
 <template>
-  <div class="trace">
+  <div ref="root" class="trace" :class="{ 'is-narrow': narrow }">
     <div class="trace-header">
       <DouButton variant="ghost" size="sm" @click="backMain">
         <template #leading><ChevronLeftIcon /></template>
@@ -307,7 +311,15 @@ function pick(key: string) {
         {{ t('trace.export') }}
       </DouButton>
     </div>
-    <DouAlert v-if="problem" tone="danger" class="trace-problem">{{ problem }}</DouAlert>
+    <DouAlert v-if="problem" tone="danger" class="trace-problem">
+      {{ problem }}
+      <template #action>
+        <DouButton size="sm" variant="outline" @click="() => void load()">
+          <template #leading><RotateCwIcon /></template>
+          {{ t('conversation.retry') }}
+        </DouButton>
+      </template>
+    </DouAlert>
     <div v-if="loading" class="trace-empty"><DouSpinner /></div>
     <TraceTimeline
       v-if="!loading && timeline"
@@ -320,8 +332,59 @@ function pick(key: string) {
       @select="pick"
       @hover="hovered = $event"
     />
+    <div v-if="!loading && narrow" class="trace-body trace-body--narrow">
+      <div v-if="selected" class="trace-narrow-detail">
+        <div class="trace-narrow-bar">
+          <DouButton size="sm" variant="ghost" @click="current = null">
+            <template #leading><ChevronLeftIcon /></template>
+            {{ t('trace.backToTable') }}
+          </DouButton>
+        </div>
+        <TraceInspector
+          :key="selected.key"
+          :row="selected"
+          :conversation-id="conversationId"
+          class="trace-inspector"
+          @close="current = null"
+        />
+      </div>
+      <div v-else class="trace-table">
+        <DouTable
+          ref="table"
+          class="trace-rows"
+          v-model:current="current"
+          v-model:expanded="expanded"
+          :data="rows"
+          :columns="columns"
+          row-key="key"
+          children-key="children"
+          size="sm"
+          :indent="14"
+          highlight-current
+          hoverable
+          max-height="100%"
+          :empty-text="t('trace.empty')"
+          :row-class="rowClass"
+        >
+          <template #cell-event="{ row }">
+            <span :class="['trace-event', `trace-event--${row.kind}`]">{{ row.event }}</span>
+          </template>
+          <template #cell-content="{ row }">
+            <span :class="['trace-content', `trace-content--${row.kind}`]">{{ row.content }}</span>
+          </template>
+          <template #cell-input="{ value }">{{ tokens(value) }}</template>
+          <template #cell-cached="{ value }">{{ tokens(value) }}</template>
+          <template #cell-cacheWrite="{ value }">{{ tokens(value) }}</template>
+          <template #cell-output="{ value }">{{ tokens(value) }}</template>
+          <template #cell-reasoning="{ value }">{{ tokens(value) }}</template>
+          <template #cell-duration="{ value }">
+            {{ typeof value === 'number' ? duration(value) : '' }}
+          </template>
+        </DouTable>
+      </div>
+    </div>
     <DouSplitter
-      v-if="!loading"
+      v-else-if="!loading"
       v-model="shownSplit"
       :min="30"
       :max="selected ? 80 : 100"
@@ -392,15 +455,35 @@ function pick(key: string) {
 
 .trace-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--dou-color-border);
 }
 
 .trace-title {
-  flex: 1;
+  flex: 1 1 160px;
   min-width: 0;
+}
+
+.trace-body--narrow {
+  display: flex;
+  flex-direction: column;
+}
+
+.trace-narrow-detail {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.trace-narrow-bar {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--dou-color-border-subtle);
 }
 
 .trace-problem {

@@ -238,6 +238,8 @@ function onWindowMessage(event: MessageEvent) {
   }
 }
 
+const INSPECT_TIMEOUT_MS = 2000
+
 function inspectPoint(
   viewportX: number,
   viewportY: number,
@@ -246,7 +248,14 @@ function inspectPoint(
   if (!win) return Promise.resolve(null)
   const requestId = `${frameId}-${++inspectSeq}`
   return new Promise((resolve) => {
-    pendingInspects.set(requestId, resolve)
+    const timer = setTimeout(() => {
+      if (!pendingInspects.delete(requestId)) return
+      resolve(null)
+    }, INSPECT_TIMEOUT_MS)
+    pendingInspects.set(requestId, (element) => {
+      clearTimeout(timer)
+      resolve(element)
+    })
     win.postMessage(
       { type: 'ariadne:inspect-point', frameId, requestId, x: viewportX, y: viewportY },
       '*',
@@ -385,7 +394,7 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
   height: 100%;
   overflow: hidden;
   border-radius: inherit;
-  background: var(--dou-color-surface, var(--dou-color-bg));
+  background: var(--dou-color-bg-surface);
 }
 
 .proto-node.is-interacting {
@@ -401,8 +410,8 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
   box-sizing: border-box;
   height: 36px;
   padding: 0 6px 0 10px;
-  border-bottom: 1px solid var(--dou-color-border-subtle, var(--dou-color-border));
-  background: var(--dou-color-surface-subtle, var(--dou-color-surface, var(--dou-color-bg)));
+  border-bottom: 1px solid var(--dou-color-border-subtle);
+  background: var(--dou-color-bg-muted);
 }
 
 .proto-title {
@@ -435,7 +444,7 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
   padding: 0 4px;
   border-radius: 999px;
   background: var(--dou-color-primary);
-  color: var(--dou-color-on-primary, #fff);
+  color: var(--dou-color-primary-on);
   font-size: 11px;
   line-height: 1;
 }
@@ -449,7 +458,7 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: var(--dou-color-bg-subtle, #f8fafc);
+  background: var(--dou-color-bg-canvas);
 }
 
 .proto-iframe {

@@ -20,7 +20,7 @@ const labelId = useId()
 const secretsSet = ref<Record<string, string[]>>({})
 const problem = ref<string | null>(null)
 const loaded = ref(false)
-let opened = ''
+const opened = ref('')
 
 const defaultKind = computed(() =>
   kinds.value.find((kind) => kind.provides.includes('workspace') && kind.plugin?.ready !== false),
@@ -39,6 +39,9 @@ const primaryName = computed(() =>
   active.value ? nameFrom(kindOf(active.value.kind), active.value.settings) : '',
 )
 const ready = computed(() => loaded.value && editing.value === null)
+const dirty = computed(
+  () => loaded.value && opened.value !== '' && JSON.stringify(input()) !== opened.value,
+)
 
 function sourceLabel(source: Pick<SourceInput, 'kind' | 'settings'>) {
   const kind = kindOf(source.kind)
@@ -74,7 +77,7 @@ onMounted(async () => {
       primary.value = stored.primaryId || null
       secretsSet.value = stored.secretsSet
     }
-    opened = JSON.stringify(input())
+    opened.value = JSON.stringify(input())
     loaded.value = true
   } catch (error) {
     problem.value = error instanceof ApiError ? tm(error.localized) : String(error)
@@ -133,7 +136,7 @@ async function save() {
   if (!props.projectId || !ready.value) return false
   const values = input()
   const key = JSON.stringify(values)
-  if (key === opened) return true
+  if (key === opened.value) return true
   problem.value = await saveFileSources(props.projectId, values)
   if (!problem.value) {
     const saved = state.detail?.project
@@ -142,12 +145,12 @@ async function save() {
       drafts.value = sources.map(({ name: _name, ...item }) => ({ ...item, key: item.id }))
       primary.value = primaryId
     }
-    opened = JSON.stringify(input())
+    opened.value = JSON.stringify(input())
   }
   return !problem.value
 }
 
-defineExpose({ ready, primaryName, input, save })
+defineExpose({ ready, primaryName, input, save, dirty })
 </script>
 
 <template>

@@ -33,19 +33,22 @@ func TestPostUIDraftStaysTransientUntilValidated(t *testing.T) {
 	defer drafts.Close()
 	agent := turn{Runner: &Runner{Repository: repo, Drafts: drafts}, conversation: conversation}
 
-	snapshot := func() *realtime.ReplyDraft {
-		t.Helper()
-		for update := range state.Snapshots(project.ID) {
-			if update.Kind == "draft" {
-				var payload realtime.DraftUpdate
-				if err := json.Unmarshal(update.Data, &payload); err != nil {
-					t.Fatal(err)
+		snapshot := func() *realtime.ReplyDraft {
+			t.Helper()
+			for update := range state.Snapshots(project.ID) {
+				if update.Kind == "draft" {
+					if payload, ok := update.Value.(*realtime.DraftUpdate); ok && payload != nil {
+						return payload.Draft
+					}
+					var payload realtime.DraftUpdate
+					if err := json.Unmarshal(update.Data, &payload); err != nil {
+						t.Fatal(err)
+					}
+					return payload.Draft
 				}
-				return payload.Draft
 			}
+			return nil
 		}
-		return nil
-	}
 
 	agent.preview(new(0), "post_ui", `{"blocks":[{"type":"choice","question":"Where?","options":[{"label":"Prev`)
 	draft := snapshot()

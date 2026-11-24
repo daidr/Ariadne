@@ -3,6 +3,7 @@
 package eventstore
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -49,16 +51,28 @@ type Options struct {
 	Check       func(context.Context, *sql.Tx, NewEvent) error
 }
 
+const (
+	recentEventLimit = 256
+	recentByteLimit  = 2 * 1024 * 1024
+)
+
 type Store struct {
-	db          *sql.DB
-	writeMu     sync.Mutex
-	watchMu     sync.Mutex
-	watches     map[uint64]chan struct{}
-	nextWatch   uint64
-	closed      bool
-	projections []Projection
-	now         func() time.Time
-	check       func(context.Context, *sql.Tx, NewEvent) error
+	db             *sql.DB
+	writeMu        sync.Mutex
+	watchMu        sync.Mutex
+	watches        map[uint64]chan struct{}
+	projectWatches map[string]map[uint64]chan struct{}
+	nextWatch      uint64
+	closed         bool
+	recentMu       sync.RWMutex
+	recentClosed   bool
+	recentBaseSeq  int64
+	recentMaxSeq   int64
+	recentBytes    int
+	recent         []Event
+	projections    []Projection
+	now            func() time.Time
+	check          func(context.Context, *sql.Tx, NewEvent) error
 }
 
 const schema = `CREATE TABLE IF NOT EXISTS events (
@@ -136,6 +150,12 @@ func Open(ctx context.Context, options Options) (*Store, error) {
 				return err
 			}
 		}
+		var latest int64
+		if err := tx.SQL().QueryRowContext(ctx, "SELECT coalesce(max(seq), 0) FROM events").Scan(&latest); err != nil {
+			return err
+		}
+		store.recentBaseSeq = latest
+		store.recentMaxSeq = latest
 		return nil
 	}); err != nil {
 		_ = db.Close()
@@ -148,12 +168,18 @@ func Open(ctx context.Context, options Options) (*Store, error) {
 // materialized state commit together.
 func (store *Store) DB() *sql.DB { return store.db }
 
+type txEventOp struct {
+	purgeProject string
+	event        Event
+}
+
 type Transaction struct {
 	store       *Store
 	tx          *sql.Tx
 	ctx         context.Context
 	count       int
 	save        int
+	ops         []txEventOp
 	afterCommit []func()
 }
 
@@ -190,11 +216,15 @@ func (store *Store) Within(ctx context.Context, work func(*Transaction) error) e
 		}
 		return err
 	}
+	var projects []string
+	if len(tx.ops) > 0 {
+		projects = store.recordCommitted(tx.ops)
+	}
 	for _, callback := range tx.afterCommit {
 		callback()
 	}
 	if tx.count > 0 {
-		store.notify()
+		store.notify(projects)
 	}
 	return nil
 }
@@ -208,12 +238,14 @@ func (tx *Transaction) Within(work func(*Transaction) error) (err error) {
 		return err
 	}
 	count := tx.count
+	ops := len(tx.ops)
 	callbacks := len(tx.afterCommit)
 	defer func() {
 		if cause := recover(); cause != nil {
 			_, _ = tx.tx.ExecContext(tx.ctx, "ROLLBACK TO "+name)
 			_, _ = tx.tx.ExecContext(tx.ctx, "RELEASE "+name)
 			tx.count = count
+			tx.ops = tx.ops[:ops]
 			tx.afterCommit = tx.afterCommit[:callbacks]
 			panic(cause)
 		}
@@ -222,6 +254,7 @@ func (tx *Transaction) Within(work func(*Transaction) error) (err error) {
 		_, rollbackErr := tx.tx.ExecContext(tx.ctx, "ROLLBACK TO "+name)
 		_, releaseErr := tx.tx.ExecContext(tx.ctx, "RELEASE "+name)
 		tx.count = count
+		tx.ops = tx.ops[:ops]
 		tx.afterCommit = tx.afterCommit[:callbacks]
 		return errors.Join(err, rollbackErr, releaseErr)
 	}
@@ -268,6 +301,7 @@ func (tx *Transaction) Append(events []NewEvent) ([]Event, error) {
 				}
 			}
 			stored = append(stored, event)
+			tx.ops = append(tx.ops, txEventOp{event: event})
 			tx.count++
 		}
 		return nil
@@ -286,9 +320,15 @@ type ReadOptions struct {
 }
 
 func (store *Store) Read(ctx context.Context, options ReadOptions) ([]Event, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	limit := options.Limit
 	if limit <= 0 {
 		limit = 1000
+	}
+	if events, ok := store.readRecent(options, limit); ok {
+		return events, nil
 	}
 	data := "data"
 	if options.OmitData {
@@ -321,9 +361,18 @@ func (store *Store) Read(ctx context.Context, options ReadOptions) ([]Event, err
 }
 
 func (store *Store) LastSeq(ctx context.Context) (int64, error) {
-	var seq int64
-	err := store.db.QueryRowContext(ctx, "SELECT coalesce(max(seq), 0) FROM events").Scan(&seq)
-	return seq, err
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	store.recentMu.RLock()
+	closed, seq := store.recentClosed, store.recentMaxSeq
+	store.recentMu.RUnlock()
+	if !closed {
+		return seq, nil
+	}
+	var dbSeq int64
+	err := store.db.QueryRowContext(ctx, "SELECT coalesce(max(seq), 0) FROM events").Scan(&dbSeq)
+	return dbSeq, err
 }
 
 // Purge removes one project's log and projections atomically. The only new event
@@ -370,6 +419,7 @@ func (tx *Transaction) Purge(projectID string, tombstone NewEvent, also func(con
 			event.ID, event.Type, event.ProjectID, string(event.Data), event.At).Scan(&event.Seq); err != nil {
 			return err
 		}
+		tx.ops = append(tx.ops, txEventOp{purgeProject: projectID, event: event})
 		tx.count++
 		return nil
 	})
@@ -452,9 +502,110 @@ func (store *Store) Backup(ctx context.Context, path string) (err error) {
 	return err
 }
 
+func (store *Store) recordCommitted(ops []txEventOp) []string {
+	var projects []string
+	addProject := func(projectID string) {
+		if projectID == "" {
+			return
+		}
+		for _, existing := range projects {
+			if existing == projectID {
+				return
+			}
+		}
+		projects = append(projects, projectID)
+	}
+	store.recentMu.Lock()
+	defer store.recentMu.Unlock()
+	for _, op := range ops {
+		if op.purgeProject != "" {
+			addProject(op.purgeProject)
+			kept := store.recent[:0]
+			for _, existing := range store.recent {
+				if existing.ProjectID == op.purgeProject {
+					store.recentBytes -= len(existing.Data)
+					continue
+				}
+				kept = append(kept, existing)
+			}
+			clear(store.recent[len(kept):])
+			store.recent = kept
+		}
+		ev := op.event
+		addProject(ev.ProjectID)
+		if ev.Seq > store.recentMaxSeq {
+			store.recentMaxSeq = ev.Seq
+		}
+		if len(ev.Data) > recentByteLimit {
+			clear(store.recent)
+			store.recent = store.recent[:0]
+			store.recentBytes = 0
+			store.recentBaseSeq = ev.Seq
+			continue
+		}
+		store.recent = append(store.recent, ev)
+		store.recentBytes += len(ev.Data)
+		evict := 0
+		for len(store.recent)-evict > recentEventLimit || store.recentBytes > recentByteLimit {
+			store.recentBytes -= len(store.recent[evict].Data)
+			store.recentBaseSeq = store.recent[evict].Seq
+			evict++
+		}
+		if evict > 0 {
+			copy(store.recent, store.recent[evict:])
+			clear(store.recent[len(store.recent)-evict:])
+			store.recent = store.recent[:len(store.recent)-evict]
+		}
+	}
+	return projects
+}
+
+func (store *Store) readRecent(options ReadOptions, limit int) ([]Event, bool) {
+	store.recentMu.RLock()
+	defer store.recentMu.RUnlock()
+	if store.recentClosed {
+		return nil, false
+	}
+	if options.AfterSeq >= store.recentMaxSeq {
+		return []Event{}, true
+	}
+	if options.AfterSeq < store.recentBaseSeq {
+		return nil, false
+	}
+	start, _ := slices.BinarySearchFunc(store.recent, options.AfterSeq+1, func(ev Event, target int64) int {
+		if ev.Seq < target {
+			return -1
+		}
+		if ev.Seq > target {
+			return 1
+		}
+		return 0
+	})
+	events := make([]Event, 0, min(limit, len(store.recent)-start))
+	for i := start; i < len(store.recent) && len(events) < limit; i++ {
+		ev := store.recent[i]
+		if options.ProjectID != "" && ev.ProjectID != options.ProjectID {
+			continue
+		}
+		if options.OmitData {
+			ev.Data = json.RawMessage("")
+		} else {
+			ev.Data = bytes.Clone(ev.Data)
+		}
+		events = append(events, ev)
+	}
+	return events, true
+}
+
 // Watch wakes a subscriber when the durable log changes. It never queues events
 // in memory; consumers read from their own cursor. Cancel releases its channel.
 func (store *Store) Watch() (<-chan struct{}, func()) {
+	return store.WatchProject("")
+}
+
+// WatchProject wakes a subscriber when the durable log changes for projectID,
+// or for any project when projectID is empty. Cancel releases its channel.
+func (store *Store) WatchProject(projectID string) (<-chan struct{}, func()) {
 	store.watchMu.Lock()
 	defer store.watchMu.Unlock()
 	channel := make(chan struct{}, 1)
@@ -464,27 +615,59 @@ func (store *Store) Watch() (<-chan struct{}, func()) {
 	}
 	store.nextWatch++
 	id := store.nextWatch
-	store.watches[id] = channel
+	if projectID == "" {
+		store.watches[id] = channel
+	} else {
+		if store.projectWatches == nil {
+			store.projectWatches = make(map[string]map[uint64]chan struct{})
+		}
+		group := store.projectWatches[projectID]
+		if group == nil {
+			group = make(map[uint64]chan struct{})
+			store.projectWatches[projectID] = group
+		}
+		group[id] = channel
+	}
 	var once sync.Once
 	return channel, func() {
 		once.Do(func() {
 			store.watchMu.Lock()
 			defer store.watchMu.Unlock()
-			if channel, ok := store.watches[id]; ok {
-				delete(store.watches, id)
-				close(channel)
+			if projectID == "" {
+				if channel, ok := store.watches[id]; ok {
+					delete(store.watches, id)
+					close(channel)
+				}
+				return
+			}
+			if group := store.projectWatches[projectID]; group != nil {
+				if channel, ok := group[id]; ok {
+					delete(group, id)
+					close(channel)
+				}
+				if len(group) == 0 {
+					delete(store.projectWatches, projectID)
+				}
 			}
 		})
 	}
 }
 
-func (store *Store) notify() {
+func (store *Store) notify(projects []string) {
 	store.watchMu.Lock()
 	defer store.watchMu.Unlock()
 	for _, channel := range store.watches {
 		select {
 		case channel <- struct{}{}:
 		default:
+		}
+	}
+	for _, projectID := range projects {
+		for _, channel := range store.projectWatches[projectID] {
+			select {
+			case channel <- struct{}{}:
+			default:
+			}
 		}
 	}
 }
@@ -502,6 +685,19 @@ func (store *Store) Close() error {
 		delete(store.watches, id)
 		close(channel)
 	}
+	for projectID, group := range store.projectWatches {
+		for id, channel := range group {
+			delete(group, id)
+			close(channel)
+		}
+		delete(store.projectWatches, projectID)
+	}
 	store.watchMu.Unlock()
+	store.recentMu.Lock()
+	store.recentClosed = true
+	clear(store.recent)
+	store.recent = nil
+	store.recentBytes = 0
+	store.recentMu.Unlock()
 	return store.db.Close()
 }

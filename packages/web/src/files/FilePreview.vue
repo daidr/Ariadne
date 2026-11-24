@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { CloseIcon, DownloadIcon } from '@dou-ui/icons'
 import { DouButton, DouDialog, DouLink, DouSpinner, DouTooltip } from 'dou-ui'
-import { computed, defineAsyncComponent, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, shallowRef, useTemplateRef, watch } from 'vue'
+import { defineAsyncView } from '../components/async-view'
 import { fetchStoredFile } from '../api'
 import { useImageViewport } from '../components/use-image-viewport'
 import { t } from '../i18n'
 import { fileSrc } from '../markdown/links'
 import { parseDelimited, previewFile, previewKind, type SheetPreviewSource } from './preview'
 
-const FileCodePreview = defineAsyncComponent(() => import('./FileCodePreview.vue'))
-const FileSheetPreview = defineAsyncComponent(() => import('./FileSheetPreview.vue'))
+const FileCodePreview = defineAsyncView(() => import('./FileCodePreview.vue'))
+const FileSheetPreview = defineAsyncView(() => import('./FileSheetPreview.vue'))
 
 type Content =
   | { kind: 'text'; text: string }
@@ -229,7 +230,7 @@ watch(
   display: grid;
   flex: 1;
   place-items: center;
-  color: var(--dou-color-text-muted);
+  color: var(--dou-color-text-tertiary);
 }
 
 .file-media {

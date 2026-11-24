@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ThreadView } from '@ariadne/core'
-import { DouButton, DouEmpty, DouMenu, DouText, type MenuOption } from 'dou-ui'
+import { DouButton, DouEmpty, DouMenu, DouSpinner, DouText, type MenuOption } from 'dou-ui'
 import { ChevronDownIcon, ChevronRightIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
@@ -84,8 +84,11 @@ const noteBeside = (event: MouseEvent | KeyboardEvent) => (beside = event.altKey
 </script>
 
 <template>
+  <div v-if="state.currentId && !state.detail" class="thread-loading" role="status">
+    <DouSpinner size="sm" />
+  </div>
   <div
-    v-if="groups.length"
+    v-else-if="groups.length"
     class="thread-list"
     @click.capture="noteBeside"
     @keydown.capture="noteBeside"
@@ -141,10 +144,16 @@ const noteBeside = (event: MouseEvent | KeyboardEvent) => (beside = event.altKey
       </DouMenu>
     </section>
   </div>
-  <DouEmpty v-else size="sm" />
+  <DouEmpty v-else size="sm" :description="t('threads.empty')" />
 </template>
 
 <style scoped>
+.thread-loading {
+  display: grid;
+  place-items: center;
+  padding: 24px 0;
+}
+
 .thread-list {
   display: flex;
   flex-direction: column;

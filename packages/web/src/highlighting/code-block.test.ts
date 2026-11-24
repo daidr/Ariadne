@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { mount } from '@vue/test-utils'
-import { DouChatMessage, DouConfigProvider, type ComponentDefaults } from 'dou-ui'
+import { DouChatMessage, DouCodeBlock, DouConfigProvider, type ComponentDefaults } from 'dou-ui'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
 import { describe, expect, test, vi } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
@@ -215,5 +215,49 @@ describe('DouCodeBlock Shiki highlighter', () => {
     })
 
     wrapper.unmount()
+  })
+
+  test('passes DouCodeBlock AbortSignal to shikiWorkerPool and cancels queued highlights on update or unmount', async () => {
+    const signals: AbortSignal[] = []
+    const resolvers: Array<(html: string) => void> = []
+    const spy = vi.fn(
+      (_code: string, _lang: string, options?: { signal?: AbortSignal }) =>
+        new Promise<string>((resolve, reject) => {
+          const signal = options?.signal
+          if (signal) {
+            signals.push(signal)
+            signal.addEventListener(
+              'abort',
+              () => reject(new DOMException('aborted', 'AbortError')),
+              { once: true },
+            )
+          }
+          resolvers.push(resolve)
+        }),
+    )
+
+    const highlight = createCodeBlockHighlighter(spy)
+    const wrapper = mount(DouCodeBlock, {
+      props: {
+        code: 'const first = 1',
+        lang: 'ts',
+        highlight,
+      },
+    })
+
+    await nextTick()
+    expect(signals).toHaveLength(1)
+    expect(signals[0]!.aborted).toBe(false)
+
+    // Updating code before the first run resolves aborts the previous signal.
+    await wrapper.setProps({ code: 'const second = 2' })
+    await nextTick()
+    expect(signals[0]!.aborted).toBe(true)
+    expect(signals).toHaveLength(2)
+    expect(signals[1]!.aborted).toBe(false)
+
+    // Unmounting before the second run resolves aborts its signal too.
+    wrapper.unmount()
+    expect(signals[1]!.aborted).toBe(true)
   })
 })

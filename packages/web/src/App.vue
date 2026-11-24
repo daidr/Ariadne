@@ -19,6 +19,7 @@ import {
   watch,
   watchEffect,
 } from 'vue'
+import { defineAsyncView } from './components/async-view'
 import ConversationPanel from './components/ConversationPanel.vue'
 import type { SettingsTab } from './components/ModelSettings.vue'
 import ProjectList from './components/ProjectList.vue'
@@ -145,10 +146,12 @@ const contentSplit = computed({
   },
 })
 
-// Heavy views and modal dialogs are loaded lazily on first use.
-const PlanMain = defineAsyncComponent(() => import('./plan/PlanMain.vue'))
-const ArtifactsOverview = defineAsyncComponent(() => import('./artifacts/ArtifactsOverview.vue'))
-const TraceView = defineAsyncComponent(() => import('./trace/TraceView.vue'))
+// The flow and document editors are large; load them when first opened.
+const PlanMain = defineAsyncView(() => import('./plan/PlanMain.vue'))
+const ArtifactsOverview = defineAsyncView(() => import('./artifacts/ArtifactsOverview.vue'))
+const TraceView = defineAsyncView(() => import('./trace/TraceView.vue'))
+
+// Modal dialogs and secondary overlays are loaded lazily on first use.
 const DuoSafeAreaRail = defineAsyncComponent(() => import('./components/DuoSafeAreaRail.vue'))
 const ModelSettings = defineAsyncComponent(() => import('./components/ModelSettings.vue'))
 const ProjectSettings = defineAsyncComponent(() => import('./components/ProjectSettings.vue'))

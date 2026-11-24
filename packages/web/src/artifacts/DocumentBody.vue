@@ -200,12 +200,13 @@ defineExpose({ quotes, anchored, revealComment, applyRecommendedPicks })
 .document {
   height: 100%;
   overflow-y: auto;
-  /* Room on the left for the block handle with its "+", which floats outside the text. */
-  padding: 32px 48px 96px;
-  box-sizing: border-box;
+  container-type: inline-size;
 }
 
 .document-text {
+  box-sizing: border-box;
+  /* Room on the left for the block handle on wide panes while staying comfortable on narrow screens. */
+  padding: clamp(16px, 3cqw, 32px) clamp(16px, 5cqw, 48px) 96px;
   --dou-editor-line-height: 1.8;
   --dou-editor-reading-width: 48em;
   --dou-editor-block-gap: 10px;

@@ -19,6 +19,7 @@ import {
   MessagesIcon,
   MoonIcon,
   PlusIcon,
+  RotateCwIcon,
   SearchIcon,
   SettingsIcon,
   SunIcon,
@@ -52,32 +53,50 @@ const openView = useOpenView()
 const query = ref('')
 const result = ref<SearchResult | null>(null)
 const loading = ref(false)
+const searchError = ref(false)
 
 // Ask the server once typing pauses; an answer to an older query is dropped.
 let timer: ReturnType<typeof setTimeout> | undefined
 let asked = 0
-watch(query, (value) => {
+function runSearch(value: string, immediate = false) {
   clearTimeout(timer)
   const projectId = state.currentId
   const text = value.trim()
   if (!text || !projectId) {
     result.value = null
+    searchError.value = false
     loading.value = false
     return
   }
+  searchError.value = false
   loading.value = true
   const ask = ++asked
-  timer = setTimeout(async () => {
+  const execute = async () => {
     try {
       const found = await api.search(projectId, text)
-      if (ask === asked) result.value = found
+      if (ask === asked) {
+        result.value = found
+        searchError.value = false
+      }
     } catch (error) {
-      if (ask === asked) report(error)
+      if (ask === asked) {
+        result.value = null
+        searchError.value = true
+        report(error)
+      }
     } finally {
       if (ask === asked) loading.value = false
     }
-  }, 200)
-})
+  }
+  if (immediate) void execute()
+  else timer = setTimeout(() => void execute(), 200)
+}
+
+watch(query, (value) => runSearch(value))
+
+function retrySearch() {
+  runSearch(query.value, true)
+}
 
 const stageOf = (threadId: string): ThreadStage | null =>
   state.detail?.threads.find((thread) => thread.id === threadId)?.stage ?? null
@@ -238,6 +257,10 @@ function select(item: CommandItem) {
     :hotkey="state.input.keys.search"
     @select="select"
   >
+    <template #prefix>
+      <DouSpinner v-if="loading" size="sm" />
+      <SearchIcon v-else />
+    </template>
     <template #item="{ item }">
       <span v-if="actionOf(item.value)" class="hit-line">
         <span class="hit-icon"><component :is="actionOf(item.value)!.icon" /></span>
@@ -269,7 +292,29 @@ function select(item: CommandItem) {
     </template>
     <template #empty>
       <DouSpinner v-if="loading" size="sm" />
+      <div v-else-if="searchError" class="search-status">
+        <DouText size="sm" variant="secondary">{{ t('search.error') }}</DouText>
+        <DouButton size="sm" variant="outline" @click="retrySearch">
+          <template #leading><RotateCwIcon /></template>
+          {{ t('conversation.retry') }}
+        </DouButton>
+      </div>
       <template v-else-if="query.trim()">{{ t('search.empty') }}</template>
+    </template>
+    <template v-if="(loading || searchError) && items.length" #footer>
+      <div class="search-footer" role="status" aria-live="polite">
+        <template v-if="loading">
+          <DouSpinner size="sm" />
+          <DouText size="sm" variant="tertiary">{{ t('search.loading') }}</DouText>
+        </template>
+        <template v-else-if="searchError">
+          <DouText size="sm" variant="secondary">{{ t('search.error') }}</DouText>
+          <DouButton size="sm" variant="ghost" @click="retrySearch">
+            <template #leading><RotateCwIcon /></template>
+            {{ t('conversation.retry') }}
+          </DouButton>
+        </template>
+      </div>
     </template>
   </DouCommandDialog>
 </template>
@@ -316,5 +361,20 @@ function select(item: CommandItem) {
 
 .hit-detail {
   padding-left: 24px;
+}
+
+.search-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--dou-color-border-subtle);
 }
 </style>
