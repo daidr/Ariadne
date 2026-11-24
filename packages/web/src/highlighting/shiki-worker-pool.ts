@@ -61,6 +61,7 @@ const DEFAULT_MAX_CACHE_ENTRIES = 200
 const DEFAULT_MAX_CACHE_CHARS = 2_000_000
 const DEFAULT_MAX_SINGLE_ENTRY_CHARS = 250_000
 const DEFAULT_MAX_QUEUE_SIZE = 64
+const MAX_CONSECUTIVE_WORKER_FAILURES = 2
 
 /** Compute a conservative worker pool upper bound from `navigator.hardwareConcurrency`. */
 export function resolveHighlightPoolSize(
@@ -125,6 +126,7 @@ interface TaskRecord {
 interface WorkerSlot {
   port: ShikiWorkerPort
   busy: boolean
+  healthy: boolean
   currentTask: TaskRecord | null
   loadedLanguages: Set<ShikiLanguageKey>
   idleTimer: ReturnType<typeof setTimeout> | null
@@ -157,9 +159,9 @@ export function createShikiWorkerPool(options: ShikiWorkerPoolOptions = {}): Shi
     Math.floor(options.maxCacheEntries ?? DEFAULT_MAX_CACHE_ENTRIES),
   )
   const maxCacheChars = Math.max(0, Math.floor(options.maxCacheChars ?? DEFAULT_MAX_CACHE_CHARS))
-  const maxSingleEntryChars = Math.max(
-    0,
-    Math.floor(options.maxSingleEntryChars ?? DEFAULT_MAX_SINGLE_ENTRY_CHARS),
+  const maxSingleEntryChars = Math.min(
+    maxCacheChars,
+    Math.max(0, Math.floor(options.maxSingleEntryChars ?? DEFAULT_MAX_SINGLE_ENTRY_CHARS)),
   )
   const maxQueueSize = Math.max(1, Math.floor(options.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE))
 
@@ -172,6 +174,7 @@ export function createShikiWorkerPool(options: ShikiWorkerPoolOptions = {}): Shi
 
   let nextRequestId = 1
   let nextSeq = 1
+  let consecutiveWorkerFailures = 0
   let workerUnavailable = false
   let disposed = false
 
@@ -186,7 +189,7 @@ export function createShikiWorkerPool(options: ShikiWorkerPoolOptions = {}): Shi
 
   function writeCache(cacheKey: string, html: string): void {
     if (!html || maxCacheEntries === 0 || maxCacheChars === 0) return
-    if (html.length > maxSingleEntryChars) return
+    if (html.length > maxSingleEntryChars || html.length > maxCacheChars) return
 
     const existing = cache.get(cacheKey)
     if (existing !== undefined) {
@@ -258,6 +261,10 @@ export function createShikiWorkerPool(options: ShikiWorkerPoolOptions = {}): Shi
 
   function runFallback(task: TaskRecord): void {
     if (task.state === 'settled') return
+    if (task.waiters.size === 0) {
+      settleTask(task, '')
+      return
+    }
     task.state = 'running'
     void fallback(task.code, task.lang).then(
       (html) => settleTask(task, html),
@@ -282,6 +289,7 @@ export function createShikiWorkerPool(options: ShikiWorkerPoolOptions = {}): Shi
     const slot: WorkerSlot = {
       port,
       busy: false,
+      healthy: false,
       currentTask: null,
       loadedLanguages: new Set(),
       idleTimer: null,
@@ -301,11 +309,16 @@ export function createShikiWorkerPool(options: ShikiWorkerPoolOptions = {}): Shi
     if (!task || task.id !== response.id) return
 
     slot.busy = false
+    slot.healthy = true
     slot.currentTask = null
+    consecutiveWorkerFailures = 0
+    workerUnavailable = false
 
     if (response.ok) {
       slot.loadedLanguages.add(task.lang)
       settleTask(task, response.html)
+    } else if (task.waiters.size === 0) {
+      settleTask(task, '')
     } else if (task.retries < 1) {
       task.retries++
       runFallback(task)
@@ -318,13 +331,24 @@ export function createShikiWorkerPool(options: ShikiWorkerPoolOptions = {}): Shi
   }
 
   function handleSlotError(slot: WorkerSlot): void {
+    if (!slots.includes(slot)) return
     const task = slot.currentTask
     slot.busy = false
     slot.currentTask = null
     destroySlot(slot)
 
+    consecutiveWorkerFailures++
+    if (
+      consecutiveWorkerFailures >= MAX_CONSECUTIVE_WORKER_FAILURES &&
+      !slots.some((activeSlot) => activeSlot.healthy)
+    ) {
+      workerUnavailable = true
+    }
+
     if (task && task.state === 'running') {
-      if (task.retries < 1 && !disposed) {
+      if (task.waiters.size === 0) {
+        settleTask(task, '')
+      } else if (task.retries < 1 && !disposed && !workerUnavailable) {
         task.retries++
         task.state = 'queued'
         queue.push(task)

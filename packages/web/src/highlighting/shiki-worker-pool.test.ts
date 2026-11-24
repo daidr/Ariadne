@@ -406,6 +406,161 @@ describe('Shiki Web Worker pool', () => {
     fallbackPool.dispose()
   })
 
+  test('does not evict existing cache entries when a single result exceeds maxCacheChars', async () => {
+    const workers: FakeWorkerPort[] = []
+    const pool = createShikiWorkerPool({
+      maxWorkers: 1,
+      idleTimeoutMs: 0,
+      maxCacheChars: 50,
+      createWorker: () => {
+        const port = new FakeWorkerPort()
+        workers.push(port)
+        return port
+      },
+    })
+
+    const run = async (code: string, html: string) => {
+      const promise = pool.highlight(code, 'ts')
+      const req = workers[0]!.received.at(-1)!
+      workers[0]!.emitMessage({ id: req.id, ok: true, html })
+      return promise
+    }
+
+    const smallA = '<span>aaaaaaaa</span>' // 21 chars
+    const smallB = '<span>bbbbbbbb</span>' // 21 chars
+    const oversized = `<span>${'x'.repeat(60)}</span>` // 73 chars > maxCacheChars (50)
+
+    await run('a', smallA)
+    await run('b', smallB)
+    expect(await run('big', oversized)).toBe(oversized)
+
+    expect(pool.peek('a', 'ts')).toBe(smallA)
+    expect(pool.peek('b', 'ts')).toBe(smallB)
+    expect(pool.peek('big', 'ts')).toBeNull()
+    expect(pool.stats().cacheEntries).toBe(2)
+    expect(pool.stats().cacheChars).toBe(smallA.length + smallB.length)
+
+    pool.dispose()
+  })
+
+  test('enters fallbackMode after consecutive async worker failures and resets failure count after recovery', async () => {
+    const failingWorkers: FakeWorkerPort[] = []
+    const fallback = vi.fn(
+      async (code: string, lang: string) => `<fallback data-lang="${lang}">${code}</fallback>`,
+    )
+    const failingPool = createShikiWorkerPool({
+      maxWorkers: 2,
+      idleTimeoutMs: 0,
+      createWorker: () => {
+        const port = new FakeWorkerPort()
+        failingWorkers.push(port)
+        return port
+      },
+      fallback,
+    })
+
+    const first = failingPool.highlight('const a = 1', 'ts')
+    expect(failingWorkers).toHaveLength(1)
+    // Simulate async module worker load failure (CSP / 404).
+    failingWorkers[0]!.emitError('Failed to fetch worker module')
+    expect(failingWorkers).toHaveLength(2)
+    failingWorkers[1]!.emitError('Failed to fetch worker module')
+
+    expect(await first).toBe('<fallback data-lang="typescript">const a = 1</fallback>')
+    expect(failingPool.stats().fallbackMode).toBe(true)
+    expect(failingPool.stats().activeWorkers).toBe(0)
+
+    // Subsequent requests go directly to fallback without spawning doomed workers.
+    const second = await failingPool.highlight('const b = 2', 'ts')
+    expect(second).toBe('<fallback data-lang="typescript">const b = 2</fallback>')
+    expect(failingWorkers).toHaveLength(2)
+    expect(fallback).toHaveBeenCalledTimes(2)
+    failingPool.dispose()
+
+    // Isolated crashes separated by healthy responses reset the failure counter.
+    const recoveringWorkers: FakeWorkerPort[] = []
+    const recoveringFallback = vi.fn(async () => '<span>fallback</span>')
+    const recoveringPool = createShikiWorkerPool({
+      maxWorkers: 1,
+      idleTimeoutMs: 0,
+      createWorker: () => {
+        const port = new FakeWorkerPort()
+        recoveringWorkers.push(port)
+        return port
+      },
+      fallback: recoveringFallback,
+    })
+
+    const p1 = recoveringPool.highlight('one', 'ts')
+    recoveringWorkers[0]!.emitError('transient crash 1')
+    recoveringWorkers[1]!.emitMessage({
+      id: recoveringWorkers[1]!.received[0]!.id,
+      ok: true,
+      html: '<span>1</span>',
+    })
+    expect(await p1).toBe('<span>1</span>')
+
+    const p2 = recoveringPool.highlight('two', 'ts')
+    recoveringWorkers[1]!.emitError('transient crash 2')
+    recoveringWorkers[2]!.emitMessage({
+      id: recoveringWorkers[2]!.received[0]!.id,
+      ok: true,
+      html: '<span>2</span>',
+    })
+    expect(await p2).toBe('<span>2</span>')
+    expect(recoveringPool.stats().fallbackMode).toBe(false)
+    expect(recoveringFallback).not.toHaveBeenCalled()
+    recoveringPool.dispose()
+  })
+
+  test('settles aborted running tasks without retrying or running fallback on worker error', async () => {
+    const workers: FakeWorkerPort[] = []
+    const fallback = vi.fn(async () => '<span>fallback</span>')
+    const pool = createShikiWorkerPool({
+      maxWorkers: 1,
+      idleTimeoutMs: 0,
+      createWorker: () => {
+        const port = new FakeWorkerPort()
+        workers.push(port)
+        return port
+      },
+      fallback,
+    })
+
+    const controller = new AbortController()
+    const promise = pool.highlight('const cancelled = 1', 'ts', { signal: controller.signal })
+    expect(workers).toHaveLength(1)
+    expect(pool.stats().inFlightTasks).toBe(1)
+
+    controller.abort()
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+
+    // Worker crashes while executing the now-unawaited task.
+    workers[0]!.emitError('OOM')
+
+    expect(workers).toHaveLength(1)
+    expect(pool.stats().inFlightTasks).toBe(0)
+    expect(pool.stats().queuedTasks).toBe(0)
+    expect(fallback).not.toHaveBeenCalled()
+
+    // Same for an error protocol response on an aborted running task.
+    const controller2 = new AbortController()
+    const promise2 = pool.highlight('const cancelled2 = 2', 'ts', { signal: controller2.signal })
+    expect(workers).toHaveLength(2)
+    controller2.abort()
+    await expect(promise2).rejects.toMatchObject({ name: 'AbortError' })
+
+    workers[1]!.emitMessage({
+      id: workers[1]!.received[0]!.id,
+      ok: false,
+      error: 'grammar failed',
+    })
+    expect(pool.stats().inFlightTasks).toBe(0)
+    expect(fallback).not.toHaveBeenCalled()
+
+    pool.dispose()
+  })
+
   test('highlights dual-theme HTML end-to-end through attachShikiWorker', async () => {
     const pool = createShikiWorkerPool({
       maxWorkers: 2,
