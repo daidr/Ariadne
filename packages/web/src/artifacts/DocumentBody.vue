@@ -7,14 +7,22 @@ import { markdownToBlocks } from '@dou-ui/editor/markdown'
 import '@dou-ui/editor/style.css'
 import '@dou-ui/flow/style.css'
 import type { CommentAction, CommentThread } from 'dou-ui'
-import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { anchoredIds, anchorQuotes, commentTarget } from './comment-anchors'
 import { commentAuthor, toCommentThread } from './comment-threads'
 import { api } from '../api'
 import { t } from '../i18n'
+import { askDocumentBlock, normalizeAskProps, type AskBlockProps } from './ask-block'
+import {
+  applyRecommendedDocumentAsks,
+  readSharedDocumentAsks,
+  summarizeDocumentAsks,
+  type DocumentAskSummary,
+} from './document-asks'
 import { documentCodeLanguages, highlightDocumentCode } from './document-code'
 import { documentLocks } from './document-locks'
 import { pendingDocumentBlock } from './pending-block'
+import { refDocumentBlock } from './ref-block'
 import type { SharedArtifact } from './shared'
 
 /**
@@ -33,6 +41,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   comment: [action: CommentAction, target: string | ArtifactCommentAnchor | null, quote?: string]
+  'ask-summary': [summary: DocumentAskSummary]
 }>()
 const active = defineModel<string | null>('activeComment', { default: null })
 
@@ -49,6 +58,8 @@ const blocks = [
   }),
   whiteboardBlock({ upload, commentable: true }),
   pendingDocumentBlock,
+  askDocumentBlock,
+  refDocumentBlock,
 ]
 const extensions = props.shared
   ? [
@@ -84,6 +95,41 @@ function load() {
 watch(() => props.content, load, { immediate: true })
 
 const ready = computed(() => !props.shared || props.shared.ready.value)
+
+function emitAskSummary() {
+  if (props.shared) {
+    const entries = readSharedDocumentAsks(props.shared.doc.getMap('document'))
+    emit('ask-summary', summarizeDocumentAsks(entries.map((entry) => entry.ask)))
+    return
+  }
+  const asks: AskBlockProps[] = []
+  const collect = (list: readonly PartialBlock[]) => {
+    for (const block of list) {
+      if (block.type === 'ask' && block.props) {
+        const normalized = normalizeAskProps(block.props as Record<string, unknown>)
+        if (normalized) asks.push(normalized)
+      }
+      if (Array.isArray(block.children) && block.children.length) collect(block.children)
+    }
+  }
+  collect(doc.value.blocks)
+  emit('ask-summary', summarizeDocumentAsks(asks))
+}
+
+if (props.shared) {
+  const root = props.shared.doc.getMap('document')
+  const onDocChange = () => emitAskSummary()
+  root.observeDeep(onDocChange)
+  watch(ready, (now) => now && emitAskSummary(), { immediate: true })
+  onBeforeUnmount(() => root.unobserveDeep(onDocChange))
+} else {
+  watch(() => doc.value.blocks, emitAskSummary, { immediate: true })
+}
+
+function applyRecommendedPicks(): number {
+  if (!props.shared) return 0
+  return applyRecommendedDocumentAsks(props.shared.doc)
+}
 
 // A thread started elsewhere (an agent's) is marked on the text it quotes.
 watch(
@@ -127,7 +173,7 @@ function revealComment(id: string) {
   editor.value?.scrollToComment(id)
 }
 
-defineExpose({ quotes, anchored, revealComment })
+defineExpose({ quotes, anchored, revealComment, applyRecommendedPicks })
 </script>
 
 <template>

@@ -350,7 +350,7 @@ func (reader Reader) ListArtifactFeedback(ctx context.Context, id string) ([]obj
 	return artifactFeedback(ctx, reader.DB, id)
 }
 func artifactFeedback(ctx context.Context, db queryer, id string) ([]object, error) {
-	return feedbackRows(ctx, db, "SELECT * FROM artifact_feedback WHERE artifact_id = ? ORDER BY round DESC", id)
+	return feedbackRows(ctx, db, "SELECT * FROM artifact_feedback WHERE artifact_id = ? AND withdrawn_at IS NULL ORDER BY round DESC", id)
 }
 
 func feedbackRows(ctx context.Context, db queryer, query string, args ...any) ([]object, error) {

@@ -361,8 +361,43 @@ export type ArtifactCommentAction =
   | { type: 'reopen'; threadId: string }
   | { type: 'remove'; threadId: string }
 
+export interface ArtifactCommentElementRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** Semantic element hit inside an interactive prototype frame when pinning a comment. */
+export interface ArtifactCommentElement {
+  label?: string
+  role?: string
+  tag?: string
+  selector?: string
+  rect?: ArtifactCommentElementRect
+}
+
 /** An item or connector; `block` scopes it to a whiteboard inside a document. */
-export type ArtifactCommentAnchor = ({ node: string } | { edge: string }) & { block?: string }
+export type ArtifactCommentAnchor = ({ node: string } | { edge: string }) & {
+  block?: string
+  element?: ArtifactCommentElement
+}
+
+export interface ArtifactFeedbackTweakChange {
+  key: string
+  label: string
+  value: string
+  previous?: string
+  unit?: string
+}
+
+export interface ArtifactFeedbackTweakEntry {
+  nodeId: string
+  title: string
+  optionId?: string
+  optionTitle?: string
+  changes: ArtifactFeedbackTweakChange[]
+}
 
 /**
  * One thing the user did in an artifact since the last round of feedback, as the agent
@@ -373,11 +408,14 @@ export type ArtifactFeedbackItem =
   /** A document's changed lines (- removed, + added), cut to a bounded length. */
   | { kind: 'edit'; diff: string }
   /** The options picked on a whiteboard now, by id and title; empty when none is. */
-  | { kind: 'choice'; chosen: { id: string; title: string }[] }
+  | {
+      kind: 'choice'
+      chosen: { id: string; title: string; group?: string; groupTitle?: string }[]
+    }
   | {
       kind: 'comment'
       threadId: string
-      action: 'create' | 'reply'
+      action: 'create' | 'reply' | 'edit' | 'reopen'
       body: string
       /** The document's text or, on a whiteboard, where the item is. */
       where: string
@@ -386,6 +424,21 @@ export type ArtifactFeedbackItem =
   | { kind: 'mark'; nodeId: string; type: string; text: string; where: string }
   /** Other changes to a whiteboard, in words: moved, removed, retitled. */
   | { kind: 'board'; changes: string[] }
+  /** Structured answers recorded in inline document question blocks. */
+  | {
+      kind: 'answer'
+      answers: {
+        id: string
+        question: string
+        values: string[]
+        note?: string
+      }[]
+    }
+  /** Structured parameter tweaks adjusted by the user on interactive prototype frames. */
+  | {
+      kind: 'tweak'
+      tweaks: ArtifactFeedbackTweakEntry[]
+    }
 
 /** How the checks of a commit stand, all together. */
 export type ChecksState = 'none' | 'pending' | 'success' | 'failure'
@@ -1080,6 +1133,13 @@ export interface EventMap {
     round: number
     by: string
     summary: string
+  }
+  /** The user withdrew a feedback round before the agent started consuming it. */
+  'artifact.feedback_withdrawn': {
+    artifactId: string
+    round: number
+    notify: string
+    eventSeq: number
   }
 }
 

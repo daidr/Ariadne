@@ -19,7 +19,12 @@ const MARK = '\u0000'
 const open = ref(false)
 
 const count = computed(() =>
-  props.notice.items.reduce((n, item) => n + (item.kind === 'board' ? item.changes.length : 1), 0),
+  props.notice.items.reduce((n, item) => {
+    if (item.kind === 'board') return n + item.changes.length
+    if (item.kind === 'answer') return n + Math.max(1, item.answers.length)
+    if (item.kind === 'tweak') return n + Math.max(1, item.tweaks.length)
+    return n + 1
+  }, 0),
 )
 
 const parts = computed(() => {
@@ -35,15 +40,37 @@ function line(item: ArtifactFeedbackItem): string[] {
     case 'choice':
       return [
         item.chosen.length
-          ? t('notice.feedback.choice', { titles: list(item.chosen.map((c) => c.title)) })
+          ? t('notice.feedback.choice', {
+              titles: list(
+                item.chosen.map((c) => (c.groupTitle ? `${c.groupTitle}：${c.title}` : c.title)),
+              ),
+            })
           : t('notice.feedback.noChoice'),
       ]
     case 'comment':
+      if (item.action === 'reopen') return [t('notice.feedback.commentReopen')]
+      if (item.action === 'edit') return [t('notice.feedback.commentEdit', { body: item.body })]
       return [t('notice.feedback.comment', { body: item.body })]
     case 'mark':
       return [t('notice.feedback.mark')]
     case 'board':
       return item.changes.map(() => t('notice.feedback.board'))
+    case 'answer':
+      return item.answers.map((a) => {
+        const segments: string[] = []
+        if (a.values.length) segments.push(list(a.values))
+        if (a.note) segments.push(a.note)
+        return segments.length
+          ? t('notice.feedback.answer', { question: a.question, answer: segments.join(' · ') })
+          : t('notice.feedback.answerEmpty', { question: a.question })
+      })
+    case 'tweak':
+      return item.tweaks.map((entry) =>
+        t('notice.feedback.tweak', {
+          title: entry.optionTitle ? `${entry.optionTitle} / ${entry.title}` : entry.title,
+          changes: list(entry.changes.map((c) => `${c.label || c.key}=${c.value}${c.unit ?? ''}`)),
+        }),
+      )
   }
 }
 const lines = computed(() => {

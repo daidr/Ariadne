@@ -259,6 +259,24 @@ func (s *artifactService) SendArtifactFeedback(
 	}), nil
 }
 
+func (s *artifactService) WithdrawArtifactFeedback(
+	ctx context.Context,
+	req *connect.Request[ariadnev1.WithdrawArtifactFeedbackRequest],
+) (*connect.Response[ariadnev1.WithdrawArtifactFeedbackResponse], error) {
+	id := req.Msg.ArtifactId
+	round := req.Msg.Round
+	if id == "" || round <= 0 {
+		return nil, badInput("round")
+	}
+	withdrawn, err := s.api.options.Repository.WithdrawArtifactFeedback(ctx, id, round)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&ariadnev1.WithdrawArtifactFeedbackResponse{
+		Withdrawn: withdrawn,
+	}), nil
+}
+
 // ---- D-5: Dedicated comment lifecycle RPCs ----
 
 func (s *artifactService) CreateArtifactComment(
@@ -302,6 +320,32 @@ func (s *artifactService) CreateArtifactComment(
 				return nil, badInput("anchor.block")
 			}
 			anchor["block"] = *msg.Anchor.Block
+		}
+		if elem := msg.Anchor.Element; elem != nil {
+			el := object{}
+			if elem.Label != nil && textutil.Trim(*elem.Label) != "" {
+				el["label"] = *elem.Label
+			}
+			if elem.Role != nil && textutil.Trim(*elem.Role) != "" {
+				el["role"] = *elem.Role
+			}
+			if elem.Tag != nil && textutil.Trim(*elem.Tag) != "" {
+				el["tag"] = *elem.Tag
+			}
+			if elem.Selector != nil && textutil.Trim(*elem.Selector) != "" {
+				el["selector"] = *elem.Selector
+			}
+			if elem.Rect != nil {
+				el["rect"] = object{
+					"x": elem.Rect.X,
+					"y": elem.Rect.Y,
+					"w": elem.Rect.W,
+					"h": elem.Rect.H,
+				}
+			}
+			if len(el) > 0 {
+				anchor["element"] = el
+			}
 		}
 		action["anchor"] = anchor
 		action["quote"] = msg.Quote
@@ -583,6 +627,23 @@ func toProtoArtifactCommentAnchor(raw any) *ariadnev1.ArtifactCommentAnchor {
 		anchor.Target = &ariadnev1.ArtifactCommentAnchor_Node{Node: node}
 	} else if edge := anyString(m["edge"]); edge != "" {
 		anchor.Target = &ariadnev1.ArtifactCommentAnchor_Edge{Edge: edge}
+	}
+	if em := asMap(m["element"]); em != nil {
+		elem := &ariadnev1.ArtifactCommentElement{
+			Label:    anyStringPtr(em["label"]),
+			Role:     anyStringPtr(em["role"]),
+			Tag:      anyStringPtr(em["tag"]),
+			Selector: anyStringPtr(em["selector"]),
+		}
+		if rm := asMap(em["rect"]); rm != nil {
+			elem.Rect = &ariadnev1.ArtifactCommentElementRect{
+				X: anyFloat64(rm["x"]),
+				Y: anyFloat64(rm["y"]),
+				W: anyFloat64(rm["w"]),
+				H: anyFloat64(rm["h"]),
+			}
+		}
+		anchor.Element = elem
 	}
 	return anchor
 }

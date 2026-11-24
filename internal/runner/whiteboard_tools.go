@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
 	"slices"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/daidr/Ariadne/internal/jsonutil"
@@ -19,10 +21,10 @@ type whiteboard struct {
 }
 
 func (turn *turn) createWhiteboard(ctx context.Context, input args) (string, error) {
-	if input["items"] == nil && input["options"] == nil {
-		return "", errors.New("give items or options for the new whiteboard")
+	if input["items"] == nil && input["options"] == nil && input["groups"] == nil {
+		return "", errors.New("give items, groups or options for the new whiteboard")
 	}
-	change, err := turn.whiteboardChange(ctx, input)
+	change, err := turn.whiteboardChange(ctx, input, "")
 	if err != nil {
 		return "", err
 	}
@@ -41,14 +43,19 @@ func (turn *turn) updateWhiteboard(ctx context.Context, input args) (string, err
 	if artifact.Kind != "whiteboard" {
 		return "", errors.New("a whiteboard is required")
 	}
-	change, err := turn.whiteboardChange(ctx, input)
+	change, err := turn.whiteboardChange(ctx, input, artifact.Content)
 	if err != nil {
 		return "", err
 	}
 	return turn.editArtifact(ctx, "whiteboard", input, input["baseVersion"] != nil, change)
 }
 
-func (turn *turn) whiteboardChange(ctx context.Context, input args) (func(string) (string, error), error) {
+func isPrototypeHTMLPath(p string) bool {
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(p)))
+	return ext == ".html" || ext == ".htm"
+}
+
+func (turn *turn) whiteboardChange(ctx context.Context, input args, baseContent string) (func(string) (string, error), error) {
 	items, err := artifactObjects(input["items"])
 	if err != nil {
 		return nil, err
@@ -72,19 +79,61 @@ func (turn *turn) whiteboardChange(ctx context.Context, input args) (func(string
 	if pick != "" && pick != "one" && pick != "many" {
 		return nil, errors.New("pick must be one or many")
 	}
+	groups, err := boardGroups(input["groups"])
+	if err != nil {
+		return nil, err
+	}
 	options, err := turn.boardOptions(ctx, input["options"])
 	if err != nil {
 		return nil, err
+	}
+	existingNodes := map[string]args{}
+	if baseContent != "" {
+		var existing whiteboard
+		if err := json.Unmarshal([]byte(baseContent), &existing); err == nil {
+			existingNodes = boardItems(existing.Nodes)
+		}
+	}
+	resolvedImages := map[string]boardPicture{}
+	resolvedPrototypes := map[string]boardPrototype{}
+	for _, item := range items {
+		id := text(item, "id")
+		kind := text(item, "kind")
+		effectiveKind := kind
+		if effectiveKind == "" {
+			effectiveKind = boardKind(existingNodes[id])
+		}
+		hasHTML := text(item, "html") != ""
+		hasFile := text(item, "file") != "" || text(item, "path") != ""
+		if effectiveKind == "prototype" || hasHTML || (effectiveKind == "" && isPrototypeHTMLPath(text(item, "path"))) {
+			if hasHTML || hasFile {
+				proto, err := turn.resolvePrototype(ctx, item)
+				if err != nil {
+					return nil, fmt.Errorf("item %q: %w", id, err)
+				}
+				resolvedPrototypes[id] = proto
+			}
+			continue
+		}
+		if effectiveKind == "image" || hasFile {
+			if hasFile {
+				pic, err := turn.boardPicture(ctx, item)
+				if err != nil {
+					return nil, fmt.Errorf("item %q: %w", id, err)
+				}
+				resolvedImages[id] = pic
+			}
+		}
 	}
 	return func(base string) (string, error) {
 		var board whiteboard
 		if err := json.Unmarshal([]byte(base), &board); err != nil {
 			return "", err
 		}
-		if err := board.change(items, connectors, removeItems, removeEdges, direction, input["relayout"] == true); err != nil {
+		if err := board.change(items, connectors, removeItems, removeEdges, direction, input["relayout"] == true, resolvedImages, resolvedPrototypes); err != nil {
 			return "", err
 		}
-		if err := board.placeOptions(options, pick); err != nil {
+		if err := board.placeGroupsAndOptions(groups, options, pick); err != nil {
 			return "", err
 		}
 		encoded, err := jsonutil.Encode(board)
@@ -93,7 +142,7 @@ func (turn *turn) whiteboardChange(ctx context.Context, input args) (func(string
 }
 
 var boardSizes = map[string][2]float64{
-	"rect": {160, 90}, "ellipse": {160, 90}, "diamond": {160, 110}, "sticky": {160, 160}, "text": {200, 40}, "pending": {160, 90},
+	"rect": {160, 90}, "ellipse": {160, 90}, "diamond": {160, 110}, "sticky": {160, 160}, "text": {200, 40}, "pending": {160, 90}, "image": {320, 240}, "prototype": {480, 336},
 }
 
 func boardItems(values []args) map[string]args {
@@ -123,12 +172,18 @@ func boardKind(node args) string {
 	return kind
 }
 
-func applyBoardItem(node, input args) error {
+func applyBoardItem(node, input args, resolvedImages map[string]boardPicture, resolvedPrototypes map[string]boardPrototype) error {
 	before, kind := boardKind(node), text(input, "kind")
 	if kind == "" {
 		kind = before
 		if kind == "" {
-			kind = "rect"
+			if text(input, "html") != "" || isPrototypeHTMLPath(text(input, "path")) {
+				kind = "prototype"
+			} else if text(input, "file") != "" || text(input, "path") != "" {
+				kind = "image"
+			} else {
+				kind = "rect"
+			}
 		}
 	}
 	size, supported := boardSizes[kind]
@@ -149,6 +204,100 @@ func applyBoardItem(node, input args) error {
 	}
 	data := objectField(node, "data")
 	node["data"], node["type"] = data, kind
+	if kind == "prototype" {
+		id := text(node, "id")
+		if proto, hasProto := resolvedPrototypes[id]; hasProto {
+			data = prototypeNodeData(proto, node)
+			node["data"] = data
+			_, hasW := input["width"].(float64)
+			_, hasH := input["height"].(float64)
+			if !hasW && !hasH {
+				w, h := prototypeCardSize(proto.viewportWidth, proto.viewportHeight, 0)
+				node["width"], node["height"] = w, h
+			} else if hasW && !hasH {
+				_, h := prototypeCardSize(proto.viewportWidth, proto.viewportHeight, asNumber(node["width"]))
+				node["height"] = h
+			}
+		} else if text(data, "html") == "" && text(data, "src") == "" {
+			return errors.New("prototype item requires html, file, or path")
+		} else {
+			if title, ok := input["title"].(string); ok {
+				data["title"] = title
+			}
+			if note, ok := input["note"].(string); ok {
+				if note == "" {
+					delete(data, "note")
+				} else {
+					data["note"] = note
+				}
+			}
+			if input["tweaks"] != nil {
+				tweaks, err := normalizePrototypeTweaks(input["tweaks"])
+				if err != nil {
+					return fmt.Errorf("tweaks: %w", err)
+				}
+				data["tweaks"] = tweaks
+			}
+		}
+		if text(data, "title") == "" {
+			if label, ok := input["text"].(string); ok && label != "" {
+				data["title"] = label
+			}
+		}
+		if asNumber(node["width"]) <= 0 {
+			node["width"] = size[0]
+		}
+		if asNumber(node["height"]) <= 0 {
+			node["height"] = size[1]
+		}
+		return nil
+	}
+	if kind == "image" {
+		delete(data, "shape")
+		delete(data, "tone")
+		id := text(node, "id")
+		if pic, hasPic := resolvedImages[id]; hasPic {
+			data["src"] = pic.src
+			if pic.alt != "" {
+				data["alt"] = pic.alt
+			}
+			_, hasW := input["width"].(float64)
+			_, hasH := input["height"].(float64)
+			if pic.width > 0 && pic.height > 0 {
+				switch {
+				case !hasW && !hasH:
+					const maxSide = 320.0
+					scale := min(1.0, maxSide/float64(max(pic.width, pic.height)))
+					node["width"] = max(80.0, math.Round(float64(pic.width)*scale))
+					node["height"] = max(60.0, math.Round(float64(pic.height)*scale))
+				case hasW && !hasH:
+					w := asNumber(node["width"])
+					node["height"] = max(40.0, math.Round(w*float64(pic.height)/float64(pic.width)))
+				case !hasW && hasH:
+					h := asNumber(node["height"])
+					node["width"] = max(40.0, math.Round(h*float64(pic.width)/float64(pic.height)))
+				}
+			}
+		} else if text(data, "src") == "" {
+			return errors.New("image item requires file or path")
+		}
+		if alt, ok := input["alt"].(string); ok {
+			if alt == "" {
+				delete(data, "alt")
+			} else {
+				data["alt"] = alt
+			}
+		} else if altText, ok := input["text"].(string); ok && altText != "" && text(data, "alt") == "" {
+			data["alt"] = altText
+		}
+		if asNumber(node["width"]) <= 0 {
+			node["width"] = size[0]
+		}
+		if asNumber(node["height"]) <= 0 {
+			node["height"] = size[1]
+		}
+		return nil
+	}
 	if kind == "rect" || kind == "ellipse" || kind == "diamond" {
 		node["type"], data["shape"] = "shape", kind
 	} else {
@@ -179,7 +328,7 @@ func boardEndpoint(edge args, end string) string {
 	return text(objectField(edge, end), "node")
 }
 
-func (board *whiteboard) change(items, connectors []args, removeItems, removeEdges []string, direction string, relayout bool) error {
+func (board *whiteboard) change(items, connectors []args, removeItems, removeEdges []string, direction string, relayout bool, resolvedImages map[string]boardPicture, resolvedPrototypes map[string]boardPrototype) error {
 	removed := map[string]bool{}
 	for _, id := range removeItems {
 		removed[id] = true
@@ -209,7 +358,7 @@ func (board *whiteboard) change(items, connectors []args, removeItems, removeEdg
 			nodes[id] = node
 			board.Nodes = append(board.Nodes, node)
 		}
-		if err := applyBoardItem(node, item); err != nil {
+		if err := applyBoardItem(node, item, resolvedImages, resolvedPrototypes); err != nil {
 			return fmt.Errorf("item %q: %w", id, err)
 		}
 		moved[id] = true

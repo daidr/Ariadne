@@ -78,6 +78,7 @@ export const WHITEBOARD_NODE_TYPES = [
   'group',
   'option',
   'pending',
+  'prototype',
 ] as const
 
 /**

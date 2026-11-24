@@ -7,6 +7,8 @@ CREATE TABLE artifact_comments (
       comments TEXT NOT NULL,
       resolved_by TEXT,
       resolved_at INTEGER,
+      reopened_by TEXT,
+      reopened_at INTEGER,
       created_at INTEGER NOT NULL
     );
 
@@ -17,6 +19,9 @@ CREATE TABLE artifact_feedback (
       notify TEXT NOT NULL,
       items TEXT NOT NULL,
       images TEXT NOT NULL,
+      fingerprints TEXT NOT NULL DEFAULT '[]',
+      withdrawn_at INTEGER,
+      event_seq INTEGER NOT NULL DEFAULT 0,
       done_by TEXT,
       done_at INTEGER,
       summary TEXT,
@@ -394,7 +399,8 @@ CREATE TABLE transcript (
       seq INTEGER NOT NULL,
       kind TEXT NOT NULL,
       ref TEXT,
-      payload TEXT
+      payload TEXT,
+      woke INTEGER NOT NULL DEFAULT 0
     );
 
 CREATE TABLE used_approvals (

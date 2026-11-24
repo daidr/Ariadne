@@ -467,6 +467,8 @@ message ArtifactFeedbackEditItem {
 message ArtifactFeedbackChoiceOption {
   string id = 1;
   string title = 2;
+  optional string group = 3;
+  optional string group_title = 4;
 }
 
 message ArtifactFeedbackChoiceItem {
@@ -491,6 +493,37 @@ message ArtifactFeedbackBoardItem {
   repeated string changes = 1;
 }
 
+message ArtifactFeedbackAnswerEntry {
+  string id = 1;
+  string question = 2;
+  repeated string values = 3;
+  optional string note = 4;
+}
+
+message ArtifactFeedbackAnswerItem {
+  repeated ArtifactFeedbackAnswerEntry answers = 1;
+}
+
+message ArtifactFeedbackTweakChange {
+  string key = 1;
+  string label = 2;
+  string value = 3;
+  optional string previous = 4;
+  optional string unit = 5;
+}
+
+message ArtifactFeedbackTweakEntry {
+  string node_id = 1;
+  string title = 2;
+  optional string option_id = 3;
+  optional string option_title = 4;
+  repeated ArtifactFeedbackTweakChange changes = 5;
+}
+
+message ArtifactFeedbackTweakItem {
+  repeated ArtifactFeedbackTweakEntry tweaks = 1;
+}
+
 message ArtifactFeedbackItem {
   oneof item {
     ArtifactFeedbackEditItem edit = 1;
@@ -498,6 +531,8 @@ message ArtifactFeedbackItem {
     ArtifactFeedbackCommentItem comment = 3;
     ArtifactFeedbackMarkItem mark = 4;
     ArtifactFeedbackBoardItem board = 5;
+    ArtifactFeedbackAnswerItem answer = 6;
+    ArtifactFeedbackTweakItem tweak = 7;
   }
 }
 
@@ -508,6 +543,7 @@ message ArtifactFeedbackNotice {
   repeated ArtifactFeedbackItem items = 4;
   bool done = 5;
   optional string summary = 6;
+  bool withdrawn = 7;
 }
 
 message ArtifactCommentNotice {

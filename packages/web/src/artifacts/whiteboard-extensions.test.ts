@@ -9,5 +9,6 @@ test('every node the whiteboard editor can make passes the content check', () =>
     .map((spec) => spec.type)
   expect(types).toContain('option')
   expect(types).toContain('group')
+  expect(types).toContain('prototype')
   for (const type of types) expect(WHITEBOARD_NODE_TYPES).toContain(type)
 })

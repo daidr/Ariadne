@@ -388,6 +388,7 @@ export type NoticeView = {
       items: ArtifactFeedbackItem[]
       done: boolean
       summary: string | null
+      withdrawn?: boolean
     }
   /**
    * A comment on an artifact: the user's, where the conversation woken for it is followed,

@@ -12,6 +12,8 @@ export interface OptionNodeData {
   note?: string
   chosen?: boolean
   pick?: 'one' | 'many'
+  group?: string
+  recommended?: boolean
 }
 
 export const optionNode = defineNodeType<OptionNodeData>({

@@ -4440,6 +4440,8 @@ type ArtifactFeedbackChoiceOption struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Group         *string                `protobuf:"bytes,3,opt,name=group,proto3,oneof" json:"group,omitempty"`
+	GroupTitle    *string                `protobuf:"bytes,4,opt,name=group_title,json=groupTitle,proto3,oneof" json:"group_title,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4484,6 +4486,20 @@ func (x *ArtifactFeedbackChoiceOption) GetId() string {
 func (x *ArtifactFeedbackChoiceOption) GetTitle() string {
 	if x != nil {
 		return x.Title
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackChoiceOption) GetGroup() string {
+	if x != nil && x.Group != nil {
+		return *x.Group
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackChoiceOption) GetGroupTitle() string {
+	if x != nil && x.GroupTitle != nil {
+		return *x.GroupTitle
 	}
 	return ""
 }
@@ -4712,6 +4728,314 @@ func (x *ArtifactFeedbackBoardItem) GetChanges() []string {
 	return nil
 }
 
+type ArtifactFeedbackAnswerEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Question      string                 `protobuf:"bytes,2,opt,name=question,proto3" json:"question,omitempty"`
+	Values        []string               `protobuf:"bytes,3,rep,name=values,proto3" json:"values,omitempty"`
+	Note          *string                `protobuf:"bytes,4,opt,name=note,proto3,oneof" json:"note,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactFeedbackAnswerEntry) Reset() {
+	*x = ArtifactFeedbackAnswerEntry{}
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[67]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactFeedbackAnswerEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactFeedbackAnswerEntry) ProtoMessage() {}
+
+func (x *ArtifactFeedbackAnswerEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[67]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactFeedbackAnswerEntry.ProtoReflect.Descriptor instead.
+func (*ArtifactFeedbackAnswerEntry) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{67}
+}
+
+func (x *ArtifactFeedbackAnswerEntry) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackAnswerEntry) GetQuestion() string {
+	if x != nil {
+		return x.Question
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackAnswerEntry) GetValues() []string {
+	if x != nil {
+		return x.Values
+	}
+	return nil
+}
+
+func (x *ArtifactFeedbackAnswerEntry) GetNote() string {
+	if x != nil && x.Note != nil {
+		return *x.Note
+	}
+	return ""
+}
+
+type ArtifactFeedbackAnswerItem struct {
+	state         protoimpl.MessageState         `protogen:"open.v1"`
+	Answers       []*ArtifactFeedbackAnswerEntry `protobuf:"bytes,1,rep,name=answers,proto3" json:"answers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactFeedbackAnswerItem) Reset() {
+	*x = ArtifactFeedbackAnswerItem{}
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[68]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactFeedbackAnswerItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactFeedbackAnswerItem) ProtoMessage() {}
+
+func (x *ArtifactFeedbackAnswerItem) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[68]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactFeedbackAnswerItem.ProtoReflect.Descriptor instead.
+func (*ArtifactFeedbackAnswerItem) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{68}
+}
+
+func (x *ArtifactFeedbackAnswerItem) GetAnswers() []*ArtifactFeedbackAnswerEntry {
+	if x != nil {
+		return x.Answers
+	}
+	return nil
+}
+
+type ArtifactFeedbackTweakChange struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Label         string                 `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
+	Value         string                 `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
+	Previous      *string                `protobuf:"bytes,4,opt,name=previous,proto3,oneof" json:"previous,omitempty"`
+	Unit          *string                `protobuf:"bytes,5,opt,name=unit,proto3,oneof" json:"unit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactFeedbackTweakChange) Reset() {
+	*x = ArtifactFeedbackTweakChange{}
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[69]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactFeedbackTweakChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactFeedbackTweakChange) ProtoMessage() {}
+
+func (x *ArtifactFeedbackTweakChange) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[69]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactFeedbackTweakChange.ProtoReflect.Descriptor instead.
+func (*ArtifactFeedbackTweakChange) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{69}
+}
+
+func (x *ArtifactFeedbackTweakChange) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackTweakChange) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackTweakChange) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackTweakChange) GetPrevious() string {
+	if x != nil && x.Previous != nil {
+		return *x.Previous
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackTweakChange) GetUnit() string {
+	if x != nil && x.Unit != nil {
+		return *x.Unit
+	}
+	return ""
+}
+
+type ArtifactFeedbackTweakEntry struct {
+	state         protoimpl.MessageState         `protogen:"open.v1"`
+	NodeId        string                         `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Title         string                         `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	OptionId      *string                        `protobuf:"bytes,3,opt,name=option_id,json=optionId,proto3,oneof" json:"option_id,omitempty"`
+	OptionTitle   *string                        `protobuf:"bytes,4,opt,name=option_title,json=optionTitle,proto3,oneof" json:"option_title,omitempty"`
+	Changes       []*ArtifactFeedbackTweakChange `protobuf:"bytes,5,rep,name=changes,proto3" json:"changes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactFeedbackTweakEntry) Reset() {
+	*x = ArtifactFeedbackTweakEntry{}
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[70]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactFeedbackTweakEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactFeedbackTweakEntry) ProtoMessage() {}
+
+func (x *ArtifactFeedbackTweakEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[70]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactFeedbackTweakEntry.ProtoReflect.Descriptor instead.
+func (*ArtifactFeedbackTweakEntry) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{70}
+}
+
+func (x *ArtifactFeedbackTweakEntry) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackTweakEntry) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackTweakEntry) GetOptionId() string {
+	if x != nil && x.OptionId != nil {
+		return *x.OptionId
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackTweakEntry) GetOptionTitle() string {
+	if x != nil && x.OptionTitle != nil {
+		return *x.OptionTitle
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackTweakEntry) GetChanges() []*ArtifactFeedbackTweakChange {
+	if x != nil {
+		return x.Changes
+	}
+	return nil
+}
+
+type ArtifactFeedbackTweakItem struct {
+	state         protoimpl.MessageState        `protogen:"open.v1"`
+	Tweaks        []*ArtifactFeedbackTweakEntry `protobuf:"bytes,1,rep,name=tweaks,proto3" json:"tweaks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactFeedbackTweakItem) Reset() {
+	*x = ArtifactFeedbackTweakItem{}
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[71]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactFeedbackTweakItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactFeedbackTweakItem) ProtoMessage() {}
+
+func (x *ArtifactFeedbackTweakItem) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[71]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactFeedbackTweakItem.ProtoReflect.Descriptor instead.
+func (*ArtifactFeedbackTweakItem) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{71}
+}
+
+func (x *ArtifactFeedbackTweakItem) GetTweaks() []*ArtifactFeedbackTweakEntry {
+	if x != nil {
+		return x.Tweaks
+	}
+	return nil
+}
+
 type ArtifactFeedbackItem struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Item:
@@ -4721,6 +5045,8 @@ type ArtifactFeedbackItem struct {
 	//	*ArtifactFeedbackItem_Comment
 	//	*ArtifactFeedbackItem_Mark
 	//	*ArtifactFeedbackItem_Board
+	//	*ArtifactFeedbackItem_Answer
+	//	*ArtifactFeedbackItem_Tweak
 	Item          isArtifactFeedbackItem_Item `protobuf_oneof:"item"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4728,7 +5054,7 @@ type ArtifactFeedbackItem struct {
 
 func (x *ArtifactFeedbackItem) Reset() {
 	*x = ArtifactFeedbackItem{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[67]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4740,7 +5066,7 @@ func (x *ArtifactFeedbackItem) String() string {
 func (*ArtifactFeedbackItem) ProtoMessage() {}
 
 func (x *ArtifactFeedbackItem) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[67]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4753,7 +5079,7 @@ func (x *ArtifactFeedbackItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactFeedbackItem.ProtoReflect.Descriptor instead.
 func (*ArtifactFeedbackItem) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{67}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *ArtifactFeedbackItem) GetItem() isArtifactFeedbackItem_Item {
@@ -4808,6 +5134,24 @@ func (x *ArtifactFeedbackItem) GetBoard() *ArtifactFeedbackBoardItem {
 	return nil
 }
 
+func (x *ArtifactFeedbackItem) GetAnswer() *ArtifactFeedbackAnswerItem {
+	if x != nil {
+		if x, ok := x.Item.(*ArtifactFeedbackItem_Answer); ok {
+			return x.Answer
+		}
+	}
+	return nil
+}
+
+func (x *ArtifactFeedbackItem) GetTweak() *ArtifactFeedbackTweakItem {
+	if x != nil {
+		if x, ok := x.Item.(*ArtifactFeedbackItem_Tweak); ok {
+			return x.Tweak
+		}
+	}
+	return nil
+}
+
 type isArtifactFeedbackItem_Item interface {
 	isArtifactFeedbackItem_Item()
 }
@@ -4832,6 +5176,14 @@ type ArtifactFeedbackItem_Board struct {
 	Board *ArtifactFeedbackBoardItem `protobuf:"bytes,5,opt,name=board,proto3,oneof"`
 }
 
+type ArtifactFeedbackItem_Answer struct {
+	Answer *ArtifactFeedbackAnswerItem `protobuf:"bytes,6,opt,name=answer,proto3,oneof"`
+}
+
+type ArtifactFeedbackItem_Tweak struct {
+	Tweak *ArtifactFeedbackTweakItem `protobuf:"bytes,7,opt,name=tweak,proto3,oneof"`
+}
+
 func (*ArtifactFeedbackItem_Edit) isArtifactFeedbackItem_Item() {}
 
 func (*ArtifactFeedbackItem_Choice) isArtifactFeedbackItem_Item() {}
@@ -4842,6 +5194,10 @@ func (*ArtifactFeedbackItem_Mark) isArtifactFeedbackItem_Item() {}
 
 func (*ArtifactFeedbackItem_Board) isArtifactFeedbackItem_Item() {}
 
+func (*ArtifactFeedbackItem_Answer) isArtifactFeedbackItem_Item() {}
+
+func (*ArtifactFeedbackItem_Tweak) isArtifactFeedbackItem_Item() {}
+
 type ArtifactFeedbackNotice struct {
 	state         protoimpl.MessageState  `protogen:"open.v1"`
 	ArtifactId    string                  `protobuf:"bytes,1,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
@@ -4850,13 +5206,14 @@ type ArtifactFeedbackNotice struct {
 	Items         []*ArtifactFeedbackItem `protobuf:"bytes,4,rep,name=items,proto3" json:"items,omitempty"`
 	Done          bool                    `protobuf:"varint,5,opt,name=done,proto3" json:"done,omitempty"`
 	Summary       *string                 `protobuf:"bytes,6,opt,name=summary,proto3,oneof" json:"summary,omitempty"`
+	Withdrawn     bool                    `protobuf:"varint,7,opt,name=withdrawn,proto3" json:"withdrawn,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ArtifactFeedbackNotice) Reset() {
 	*x = ArtifactFeedbackNotice{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[68]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4868,7 +5225,7 @@ func (x *ArtifactFeedbackNotice) String() string {
 func (*ArtifactFeedbackNotice) ProtoMessage() {}
 
 func (x *ArtifactFeedbackNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[68]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4881,7 +5238,7 @@ func (x *ArtifactFeedbackNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactFeedbackNotice.ProtoReflect.Descriptor instead.
 func (*ArtifactFeedbackNotice) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{68}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *ArtifactFeedbackNotice) GetArtifactId() string {
@@ -4926,6 +5283,13 @@ func (x *ArtifactFeedbackNotice) GetSummary() string {
 	return ""
 }
 
+func (x *ArtifactFeedbackNotice) GetWithdrawn() bool {
+	if x != nil {
+		return x.Withdrawn
+	}
+	return false
+}
+
 type ArtifactCommentNotice struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ArtifactId    string                 `protobuf:"bytes,1,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
@@ -4939,7 +5303,7 @@ type ArtifactCommentNotice struct {
 
 func (x *ArtifactCommentNotice) Reset() {
 	*x = ArtifactCommentNotice{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[69]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4951,7 +5315,7 @@ func (x *ArtifactCommentNotice) String() string {
 func (*ArtifactCommentNotice) ProtoMessage() {}
 
 func (x *ArtifactCommentNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[69]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4964,7 +5328,7 @@ func (x *ArtifactCommentNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactCommentNotice.ProtoReflect.Descriptor instead.
 func (*ArtifactCommentNotice) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{69}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *ArtifactCommentNotice) GetArtifactId() string {
@@ -5013,7 +5377,7 @@ type MergeConflictNotice struct {
 
 func (x *MergeConflictNotice) Reset() {
 	*x = MergeConflictNotice{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[70]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5025,7 +5389,7 @@ func (x *MergeConflictNotice) String() string {
 func (*MergeConflictNotice) ProtoMessage() {}
 
 func (x *MergeConflictNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[70]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5038,7 +5402,7 @@ func (x *MergeConflictNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeConflictNotice.ProtoReflect.Descriptor instead.
 func (*MergeConflictNotice) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{70}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *MergeConflictNotice) GetBase() string {
@@ -5071,7 +5435,7 @@ type WorktreeRemovedNotice struct {
 
 func (x *WorktreeRemovedNotice) Reset() {
 	*x = WorktreeRemovedNotice{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[71]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5083,7 +5447,7 @@ func (x *WorktreeRemovedNotice) String() string {
 func (*WorktreeRemovedNotice) ProtoMessage() {}
 
 func (x *WorktreeRemovedNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[71]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5096,7 +5460,7 @@ func (x *WorktreeRemovedNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorktreeRemovedNotice.ProtoReflect.Descriptor instead.
 func (*WorktreeRemovedNotice) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{71}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *WorktreeRemovedNotice) GetReason() string {
@@ -5118,7 +5482,7 @@ type PlanChangedNotice struct {
 
 func (x *PlanChangedNotice) Reset() {
 	*x = PlanChangedNotice{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[72]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5130,7 +5494,7 @@ func (x *PlanChangedNotice) String() string {
 func (*PlanChangedNotice) ProtoMessage() {}
 
 func (x *PlanChangedNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[72]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5143,7 +5507,7 @@ func (x *PlanChangedNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanChangedNotice.ProtoReflect.Descriptor instead.
 func (*PlanChangedNotice) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{72}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *PlanChangedNotice) GetRevisionId() string {
@@ -5184,7 +5548,7 @@ type ThreadAutoStartedNotice struct {
 
 func (x *ThreadAutoStartedNotice) Reset() {
 	*x = ThreadAutoStartedNotice{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[73]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5196,7 +5560,7 @@ func (x *ThreadAutoStartedNotice) String() string {
 func (*ThreadAutoStartedNotice) ProtoMessage() {}
 
 func (x *ThreadAutoStartedNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[73]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5209,7 +5573,7 @@ func (x *ThreadAutoStartedNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ThreadAutoStartedNotice.ProtoReflect.Descriptor instead.
 func (*ThreadAutoStartedNotice) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{73}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *ThreadAutoStartedNotice) GetThreadId() string {
@@ -5239,7 +5603,7 @@ type ReviewNotice struct {
 
 func (x *ReviewNotice) Reset() {
 	*x = ReviewNotice{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[74]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5251,7 +5615,7 @@ func (x *ReviewNotice) String() string {
 func (*ReviewNotice) ProtoMessage() {}
 
 func (x *ReviewNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[74]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5264,7 +5628,7 @@ func (x *ReviewNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviewNotice.ProtoReflect.Descriptor instead.
 func (*ReviewNotice) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{74}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *ReviewNotice) GetThreadId() string {
@@ -5315,7 +5679,7 @@ type TurnFile struct {
 
 func (x *TurnFile) Reset() {
 	*x = TurnFile{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[75]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5327,7 +5691,7 @@ func (x *TurnFile) String() string {
 func (*TurnFile) ProtoMessage() {}
 
 func (x *TurnFile) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[75]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5340,7 +5704,7 @@ func (x *TurnFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TurnFile.ProtoReflect.Descriptor instead.
 func (*TurnFile) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{75}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *TurnFile) GetPath() string {
@@ -5392,7 +5756,7 @@ type TurnChangesNotice struct {
 
 func (x *TurnChangesNotice) Reset() {
 	*x = TurnChangesNotice{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[76]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5404,7 +5768,7 @@ func (x *TurnChangesNotice) String() string {
 func (*TurnChangesNotice) ProtoMessage() {}
 
 func (x *TurnChangesNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[76]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5417,7 +5781,7 @@ func (x *TurnChangesNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TurnChangesNotice.ProtoReflect.Descriptor instead.
 func (*TurnChangesNotice) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{76}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *TurnChangesNotice) GetTurnId() string {
@@ -5499,7 +5863,7 @@ type NoticeView struct {
 
 func (x *NoticeView) Reset() {
 	*x = NoticeView{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[77]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5511,7 +5875,7 @@ func (x *NoticeView) String() string {
 func (*NoticeView) ProtoMessage() {}
 
 func (x *NoticeView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[77]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5524,7 +5888,7 @@ func (x *NoticeView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NoticeView.ProtoReflect.Descriptor instead.
 func (*NoticeView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{77}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *NoticeView) GetId() string {
@@ -5918,7 +6282,7 @@ type MemoryView struct {
 
 func (x *MemoryView) Reset() {
 	*x = MemoryView{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[78]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5930,7 +6294,7 @@ func (x *MemoryView) String() string {
 func (*MemoryView) ProtoMessage() {}
 
 func (x *MemoryView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[78]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5943,7 +6307,7 @@ func (x *MemoryView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemoryView.ProtoReflect.Descriptor instead.
 func (*MemoryView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{78}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *MemoryView) GetId() string {
@@ -5999,7 +6363,7 @@ type SkillView struct {
 
 func (x *SkillView) Reset() {
 	*x = SkillView{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[79]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6011,7 +6375,7 @@ func (x *SkillView) String() string {
 func (*SkillView) ProtoMessage() {}
 
 func (x *SkillView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[79]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6024,7 +6388,7 @@ func (x *SkillView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SkillView.ProtoReflect.Descriptor instead.
 func (*SkillView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{79}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *SkillView) GetName() string {
@@ -6058,7 +6422,7 @@ type TraceCost struct {
 
 func (x *TraceCost) Reset() {
 	*x = TraceCost{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[80]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6070,7 +6434,7 @@ func (x *TraceCost) String() string {
 func (*TraceCost) ProtoMessage() {}
 
 func (x *TraceCost) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[80]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6083,7 +6447,7 @@ func (x *TraceCost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceCost.ProtoReflect.Descriptor instead.
 func (*TraceCost) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{80}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *TraceCost) GetAmount() float64 {
@@ -6115,7 +6479,7 @@ type TraceTokenUsage struct {
 
 func (x *TraceTokenUsage) Reset() {
 	*x = TraceTokenUsage{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[81]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6127,7 +6491,7 @@ func (x *TraceTokenUsage) String() string {
 func (*TraceTokenUsage) ProtoMessage() {}
 
 func (x *TraceTokenUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[81]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6140,7 +6504,7 @@ func (x *TraceTokenUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceTokenUsage.ProtoReflect.Descriptor instead.
 func (*TraceTokenUsage) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{81}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *TraceTokenUsage) GetContextInput() int64 {
@@ -6202,7 +6566,7 @@ type TraceReasoning struct {
 
 func (x *TraceReasoning) Reset() {
 	*x = TraceReasoning{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[82]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6214,7 +6578,7 @@ func (x *TraceReasoning) String() string {
 func (*TraceReasoning) ProtoMessage() {}
 
 func (x *TraceReasoning) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[82]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6227,7 +6591,7 @@ func (x *TraceReasoning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceReasoning.ProtoReflect.Descriptor instead.
 func (*TraceReasoning) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{82}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *TraceReasoning) GetText() string {
@@ -6256,7 +6620,7 @@ type TraceToolCallResult struct {
 
 func (x *TraceToolCallResult) Reset() {
 	*x = TraceToolCallResult{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[83]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6268,7 +6632,7 @@ func (x *TraceToolCallResult) String() string {
 func (*TraceToolCallResult) ProtoMessage() {}
 
 func (x *TraceToolCallResult) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[83]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6281,7 +6645,7 @@ func (x *TraceToolCallResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceToolCallResult.ProtoReflect.Descriptor instead.
 func (*TraceToolCallResult) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{83}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *TraceToolCallResult) GetContent() string {
@@ -6326,7 +6690,7 @@ type TraceToolCall struct {
 
 func (x *TraceToolCall) Reset() {
 	*x = TraceToolCall{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[84]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6338,7 +6702,7 @@ func (x *TraceToolCall) String() string {
 func (*TraceToolCall) ProtoMessage() {}
 
 func (x *TraceToolCall) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[84]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6351,7 +6715,7 @@ func (x *TraceToolCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceToolCall.ProtoReflect.Descriptor instead.
 func (*TraceToolCall) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{84}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *TraceToolCall) GetId() string {
@@ -6418,7 +6782,7 @@ type TraceRequest struct {
 
 func (x *TraceRequest) Reset() {
 	*x = TraceRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[85]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6430,7 +6794,7 @@ func (x *TraceRequest) String() string {
 func (*TraceRequest) ProtoMessage() {}
 
 func (x *TraceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[85]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6443,7 +6807,7 @@ func (x *TraceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceRequest.ProtoReflect.Descriptor instead.
 func (*TraceRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{85}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *TraceRequest) GetSeq() int64 {
@@ -6562,7 +6926,7 @@ type TraceAgentError struct {
 
 func (x *TraceAgentError) Reset() {
 	*x = TraceAgentError{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[86]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6574,7 +6938,7 @@ func (x *TraceAgentError) String() string {
 func (*TraceAgentError) ProtoMessage() {}
 
 func (x *TraceAgentError) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[86]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6587,7 +6951,7 @@ func (x *TraceAgentError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceAgentError.ProtoReflect.Descriptor instead.
 func (*TraceAgentError) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{86}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *TraceAgentError) GetOperation() string {
@@ -6679,7 +7043,7 @@ type TraceRequestFailure struct {
 
 func (x *TraceRequestFailure) Reset() {
 	*x = TraceRequestFailure{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[87]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6691,7 +7055,7 @@ func (x *TraceRequestFailure) String() string {
 func (*TraceRequestFailure) ProtoMessage() {}
 
 func (x *TraceRequestFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[87]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6704,7 +7068,7 @@ func (x *TraceRequestFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceRequestFailure.ProtoReflect.Descriptor instead.
 func (*TraceRequestFailure) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{87}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *TraceRequestFailure) GetSeq() int64 {
@@ -6796,7 +7160,7 @@ type TraceRetry struct {
 
 func (x *TraceRetry) Reset() {
 	*x = TraceRetry{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[88]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6808,7 +7172,7 @@ func (x *TraceRetry) String() string {
 func (*TraceRetry) ProtoMessage() {}
 
 func (x *TraceRetry) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[88]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6821,7 +7185,7 @@ func (x *TraceRetry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceRetry.ProtoReflect.Descriptor instead.
 func (*TraceRetry) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{88}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *TraceRetry) GetAt() int64 {
@@ -6864,7 +7228,7 @@ type TraceFallback struct {
 
 func (x *TraceFallback) Reset() {
 	*x = TraceFallback{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[89]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6876,7 +7240,7 @@ func (x *TraceFallback) String() string {
 func (*TraceFallback) ProtoMessage() {}
 
 func (x *TraceFallback) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[89]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6889,7 +7253,7 @@ func (x *TraceFallback) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceFallback.ProtoReflect.Descriptor instead.
 func (*TraceFallback) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{89}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *TraceFallback) GetAt() int64 {
@@ -6930,7 +7294,7 @@ type TraceCompactionFailed struct {
 
 func (x *TraceCompactionFailed) Reset() {
 	*x = TraceCompactionFailed{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[90]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6942,7 +7306,7 @@ func (x *TraceCompactionFailed) String() string {
 func (*TraceCompactionFailed) ProtoMessage() {}
 
 func (x *TraceCompactionFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[90]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6955,7 +7319,7 @@ func (x *TraceCompactionFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceCompactionFailed.ProtoReflect.Descriptor instead.
 func (*TraceCompactionFailed) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{90}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *TraceCompactionFailed) GetAt() int64 {
@@ -6981,7 +7345,7 @@ type TraceResultsCleared struct {
 
 func (x *TraceResultsCleared) Reset() {
 	*x = TraceResultsCleared{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[91]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6993,7 +7357,7 @@ func (x *TraceResultsCleared) String() string {
 func (*TraceResultsCleared) ProtoMessage() {}
 
 func (x *TraceResultsCleared) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[91]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7006,7 +7370,7 @@ func (x *TraceResultsCleared) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceResultsCleared.ProtoReflect.Descriptor instead.
 func (*TraceResultsCleared) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{91}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *TraceResultsCleared) GetAt() int64 {
@@ -7029,7 +7393,7 @@ type TraceInstructions struct {
 
 func (x *TraceInstructions) Reset() {
 	*x = TraceInstructions{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[92]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7041,7 +7405,7 @@ func (x *TraceInstructions) String() string {
 func (*TraceInstructions) ProtoMessage() {}
 
 func (x *TraceInstructions) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[92]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7054,7 +7418,7 @@ func (x *TraceInstructions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceInstructions.ProtoReflect.Descriptor instead.
 func (*TraceInstructions) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{92}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *TraceInstructions) GetAt() int64 {
@@ -7110,7 +7474,7 @@ type TraceItem struct {
 
 func (x *TraceItem) Reset() {
 	*x = TraceItem{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[93]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7122,7 +7486,7 @@ func (x *TraceItem) String() string {
 func (*TraceItem) ProtoMessage() {}
 
 func (x *TraceItem) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[93]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7135,7 +7499,7 @@ func (x *TraceItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceItem.ProtoReflect.Descriptor instead.
 func (*TraceItem) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{93}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *TraceItem) GetItem() isTraceItem_Item {
@@ -7271,7 +7635,7 @@ type TraceTurn struct {
 
 func (x *TraceTurn) Reset() {
 	*x = TraceTurn{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[94]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7283,7 +7647,7 @@ func (x *TraceTurn) String() string {
 func (*TraceTurn) ProtoMessage() {}
 
 func (x *TraceTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[94]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7296,7 +7660,7 @@ func (x *TraceTurn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceTurn.ProtoReflect.Descriptor instead.
 func (*TraceTurn) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{94}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{99}
 }
 
 func (x *TraceTurn) GetTurnId() string {
@@ -7373,7 +7737,7 @@ type TraceToolCallRecord struct {
 
 func (x *TraceToolCallRecord) Reset() {
 	*x = TraceToolCallRecord{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[95]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7385,7 +7749,7 @@ func (x *TraceToolCallRecord) String() string {
 func (*TraceToolCallRecord) ProtoMessage() {}
 
 func (x *TraceToolCallRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[95]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7398,7 +7762,7 @@ func (x *TraceToolCallRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceToolCallRecord.ProtoReflect.Descriptor instead.
 func (*TraceToolCallRecord) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{95}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *TraceToolCallRecord) GetId() string {
@@ -7433,7 +7797,7 @@ type TraceReasoningRecord struct {
 
 func (x *TraceReasoningRecord) Reset() {
 	*x = TraceReasoningRecord{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[96]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7445,7 +7809,7 @@ func (x *TraceReasoningRecord) String() string {
 func (*TraceReasoningRecord) ProtoMessage() {}
 
 func (x *TraceReasoningRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[96]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7458,7 +7822,7 @@ func (x *TraceReasoningRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceReasoningRecord.ProtoReflect.Descriptor instead.
 func (*TraceReasoningRecord) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{96}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{101}
 }
 
 func (x *TraceReasoningRecord) GetText() string {
@@ -7491,7 +7855,7 @@ type TraceSystemMessage struct {
 
 func (x *TraceSystemMessage) Reset() {
 	*x = TraceSystemMessage{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[97]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7503,7 +7867,7 @@ func (x *TraceSystemMessage) String() string {
 func (*TraceSystemMessage) ProtoMessage() {}
 
 func (x *TraceSystemMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[97]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7516,7 +7880,7 @@ func (x *TraceSystemMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceSystemMessage.ProtoReflect.Descriptor instead.
 func (*TraceSystemMessage) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{97}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *TraceSystemMessage) GetContent() string {
@@ -7536,7 +7900,7 @@ type TraceUserMessage struct {
 
 func (x *TraceUserMessage) Reset() {
 	*x = TraceUserMessage{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[98]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7548,7 +7912,7 @@ func (x *TraceUserMessage) String() string {
 func (*TraceUserMessage) ProtoMessage() {}
 
 func (x *TraceUserMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[98]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7561,7 +7925,7 @@ func (x *TraceUserMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceUserMessage.ProtoReflect.Descriptor instead.
 func (*TraceUserMessage) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{98}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{103}
 }
 
 func (x *TraceUserMessage) GetContent() string {
@@ -7589,7 +7953,7 @@ type TraceAssistantMessage struct {
 
 func (x *TraceAssistantMessage) Reset() {
 	*x = TraceAssistantMessage{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[99]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7601,7 +7965,7 @@ func (x *TraceAssistantMessage) String() string {
 func (*TraceAssistantMessage) ProtoMessage() {}
 
 func (x *TraceAssistantMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[99]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7614,7 +7978,7 @@ func (x *TraceAssistantMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceAssistantMessage.ProtoReflect.Descriptor instead.
 func (*TraceAssistantMessage) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{99}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{104}
 }
 
 func (x *TraceAssistantMessage) GetContent() string {
@@ -7650,7 +8014,7 @@ type TraceToolMessage struct {
 
 func (x *TraceToolMessage) Reset() {
 	*x = TraceToolMessage{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[100]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[105]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7662,7 +8026,7 @@ func (x *TraceToolMessage) String() string {
 func (*TraceToolMessage) ProtoMessage() {}
 
 func (x *TraceToolMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[100]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[105]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7675,7 +8039,7 @@ func (x *TraceToolMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceToolMessage.ProtoReflect.Descriptor instead.
 func (*TraceToolMessage) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{100}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{105}
 }
 
 func (x *TraceToolMessage) GetToolCallId() string {
@@ -7721,7 +8085,7 @@ type TraceMessage struct {
 
 func (x *TraceMessage) Reset() {
 	*x = TraceMessage{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[101]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7733,7 +8097,7 @@ func (x *TraceMessage) String() string {
 func (*TraceMessage) ProtoMessage() {}
 
 func (x *TraceMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[101]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7746,7 +8110,7 @@ func (x *TraceMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceMessage.ProtoReflect.Descriptor instead.
 func (*TraceMessage) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{101}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{106}
 }
 
 func (x *TraceMessage) GetMessage() isTraceMessage_Message {
@@ -7831,7 +8195,7 @@ type TraceToolDefinition struct {
 
 func (x *TraceToolDefinition) Reset() {
 	*x = TraceToolDefinition{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[102]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7843,7 +8207,7 @@ func (x *TraceToolDefinition) String() string {
 func (*TraceToolDefinition) ProtoMessage() {}
 
 func (x *TraceToolDefinition) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[102]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7856,7 +8220,7 @@ func (x *TraceToolDefinition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceToolDefinition.ProtoReflect.Descriptor instead.
 func (*TraceToolDefinition) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{102}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{107}
 }
 
 func (x *TraceToolDefinition) GetName() string {
@@ -7891,7 +8255,7 @@ type TraceRequestCall struct {
 
 func (x *TraceRequestCall) Reset() {
 	*x = TraceRequestCall{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[103]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7903,7 +8267,7 @@ func (x *TraceRequestCall) String() string {
 func (*TraceRequestCall) ProtoMessage() {}
 
 func (x *TraceRequestCall) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[103]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7916,7 +8280,7 @@ func (x *TraceRequestCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceRequestCall.ProtoReflect.Descriptor instead.
 func (*TraceRequestCall) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{103}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{108}
 }
 
 func (x *TraceRequestCall) GetProvider() string {
@@ -7955,7 +8319,7 @@ type TraceRequestDetail struct {
 
 func (x *TraceRequestDetail) Reset() {
 	*x = TraceRequestDetail{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[104]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[109]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7967,7 +8331,7 @@ func (x *TraceRequestDetail) String() string {
 func (*TraceRequestDetail) ProtoMessage() {}
 
 func (x *TraceRequestDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[104]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[109]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7980,7 +8344,7 @@ func (x *TraceRequestDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceRequestDetail.ProtoReflect.Descriptor instead.
 func (*TraceRequestDetail) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{104}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{109}
 }
 
 func (x *TraceRequestDetail) GetMessages() []*TraceMessage {
@@ -8045,7 +8409,7 @@ type GetConversationRequest struct {
 
 func (x *GetConversationRequest) Reset() {
 	*x = GetConversationRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[105]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[110]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8057,7 +8421,7 @@ func (x *GetConversationRequest) String() string {
 func (*GetConversationRequest) ProtoMessage() {}
 
 func (x *GetConversationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[105]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[110]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8070,7 +8434,7 @@ func (x *GetConversationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConversationRequest.ProtoReflect.Descriptor instead.
 func (*GetConversationRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{105}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{110}
 }
 
 func (x *GetConversationRequest) GetConversationId() string {
@@ -8124,7 +8488,7 @@ type GetConversationResponse struct {
 
 func (x *GetConversationResponse) Reset() {
 	*x = GetConversationResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[106]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[111]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8136,7 +8500,7 @@ func (x *GetConversationResponse) String() string {
 func (*GetConversationResponse) ProtoMessage() {}
 
 func (x *GetConversationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[106]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[111]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8149,7 +8513,7 @@ func (x *GetConversationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConversationResponse.ProtoReflect.Descriptor instead.
 func (*GetConversationResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{106}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{111}
 }
 
 func (x *GetConversationResponse) GetConversation() *ConversationView {
@@ -8222,7 +8586,7 @@ type PostMessageRequest struct {
 
 func (x *PostMessageRequest) Reset() {
 	*x = PostMessageRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[107]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[112]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8234,7 +8598,7 @@ func (x *PostMessageRequest) String() string {
 func (*PostMessageRequest) ProtoMessage() {}
 
 func (x *PostMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[107]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[112]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8247,7 +8611,7 @@ func (x *PostMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostMessageRequest.ProtoReflect.Descriptor instead.
 func (*PostMessageRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{107}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{112}
 }
 
 func (x *PostMessageRequest) GetProjectId() string {
@@ -8301,7 +8665,7 @@ type PostMessageResponse struct {
 
 func (x *PostMessageResponse) Reset() {
 	*x = PostMessageResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[108]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[113]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8313,7 +8677,7 @@ func (x *PostMessageResponse) String() string {
 func (*PostMessageResponse) ProtoMessage() {}
 
 func (x *PostMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[108]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[113]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8326,7 +8690,7 @@ func (x *PostMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostMessageResponse.ProtoReflect.Descriptor instead.
 func (*PostMessageResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{108}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{113}
 }
 
 func (x *PostMessageResponse) GetMessage() *MessageView {
@@ -8346,7 +8710,7 @@ type MarkReadRequest struct {
 
 func (x *MarkReadRequest) Reset() {
 	*x = MarkReadRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[109]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[114]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8358,7 +8722,7 @@ func (x *MarkReadRequest) String() string {
 func (*MarkReadRequest) ProtoMessage() {}
 
 func (x *MarkReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[109]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[114]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8371,7 +8735,7 @@ func (x *MarkReadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkReadRequest.ProtoReflect.Descriptor instead.
 func (*MarkReadRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{109}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{114}
 }
 
 func (x *MarkReadRequest) GetConversationId() string {
@@ -8396,7 +8760,7 @@ type MarkReadResponse struct {
 
 func (x *MarkReadResponse) Reset() {
 	*x = MarkReadResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[110]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[115]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8408,7 +8772,7 @@ func (x *MarkReadResponse) String() string {
 func (*MarkReadResponse) ProtoMessage() {}
 
 func (x *MarkReadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[110]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[115]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8421,7 +8785,7 @@ func (x *MarkReadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkReadResponse.ProtoReflect.Descriptor instead.
 func (*MarkReadResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{110}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{115}
 }
 
 type NoteReturnRequest struct {
@@ -8434,7 +8798,7 @@ type NoteReturnRequest struct {
 
 func (x *NoteReturnRequest) Reset() {
 	*x = NoteReturnRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[111]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[116]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8446,7 +8810,7 @@ func (x *NoteReturnRequest) String() string {
 func (*NoteReturnRequest) ProtoMessage() {}
 
 func (x *NoteReturnRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[111]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[116]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8459,7 +8823,7 @@ func (x *NoteReturnRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NoteReturnRequest.ProtoReflect.Descriptor instead.
 func (*NoteReturnRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{111}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{116}
 }
 
 func (x *NoteReturnRequest) GetProjectId() string {
@@ -8484,7 +8848,7 @@ type NoteReturnResponse struct {
 
 func (x *NoteReturnResponse) Reset() {
 	*x = NoteReturnResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[112]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[117]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8496,7 +8860,7 @@ func (x *NoteReturnResponse) String() string {
 func (*NoteReturnResponse) ProtoMessage() {}
 
 func (x *NoteReturnResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[112]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[117]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8509,7 +8873,7 @@ func (x *NoteReturnResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NoteReturnResponse.ProtoReflect.Descriptor instead.
 func (*NoteReturnResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{112}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{117}
 }
 
 type AnswerAttentionRequest struct {
@@ -8522,7 +8886,7 @@ type AnswerAttentionRequest struct {
 
 func (x *AnswerAttentionRequest) Reset() {
 	*x = AnswerAttentionRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[113]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[118]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8534,7 +8898,7 @@ func (x *AnswerAttentionRequest) String() string {
 func (*AnswerAttentionRequest) ProtoMessage() {}
 
 func (x *AnswerAttentionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[113]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[118]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8547,7 +8911,7 @@ func (x *AnswerAttentionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerAttentionRequest.ProtoReflect.Descriptor instead.
 func (*AnswerAttentionRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{113}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{118}
 }
 
 func (x *AnswerAttentionRequest) GetAttentionId() string {
@@ -8572,7 +8936,7 @@ type AnswerAttentionResponse struct {
 
 func (x *AnswerAttentionResponse) Reset() {
 	*x = AnswerAttentionResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[114]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[119]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8584,7 +8948,7 @@ func (x *AnswerAttentionResponse) String() string {
 func (*AnswerAttentionResponse) ProtoMessage() {}
 
 func (x *AnswerAttentionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[114]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[119]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8597,7 +8961,7 @@ func (x *AnswerAttentionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerAttentionResponse.ProtoReflect.Descriptor instead.
 func (*AnswerAttentionResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{114}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{119}
 }
 
 type AddReactionRequest struct {
@@ -8610,7 +8974,7 @@ type AddReactionRequest struct {
 
 func (x *AddReactionRequest) Reset() {
 	*x = AddReactionRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[115]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[120]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8622,7 +8986,7 @@ func (x *AddReactionRequest) String() string {
 func (*AddReactionRequest) ProtoMessage() {}
 
 func (x *AddReactionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[115]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[120]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8635,7 +8999,7 @@ func (x *AddReactionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddReactionRequest.ProtoReflect.Descriptor instead.
 func (*AddReactionRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{115}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{120}
 }
 
 func (x *AddReactionRequest) GetMessageId() string {
@@ -8661,7 +9025,7 @@ type AddReactionResponse struct {
 
 func (x *AddReactionResponse) Reset() {
 	*x = AddReactionResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[116]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[121]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8673,7 +9037,7 @@ func (x *AddReactionResponse) String() string {
 func (*AddReactionResponse) ProtoMessage() {}
 
 func (x *AddReactionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[116]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[121]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8686,7 +9050,7 @@ func (x *AddReactionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddReactionResponse.ProtoReflect.Descriptor instead.
 func (*AddReactionResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{116}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{121}
 }
 
 func (x *AddReactionResponse) GetMessage() *MessageView {
@@ -8706,7 +9070,7 @@ type RemoveReactionRequest struct {
 
 func (x *RemoveReactionRequest) Reset() {
 	*x = RemoveReactionRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[117]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[122]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8718,7 +9082,7 @@ func (x *RemoveReactionRequest) String() string {
 func (*RemoveReactionRequest) ProtoMessage() {}
 
 func (x *RemoveReactionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[117]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[122]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8731,7 +9095,7 @@ func (x *RemoveReactionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveReactionRequest.ProtoReflect.Descriptor instead.
 func (*RemoveReactionRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{117}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{122}
 }
 
 func (x *RemoveReactionRequest) GetMessageId() string {
@@ -8757,7 +9121,7 @@ type RemoveReactionResponse struct {
 
 func (x *RemoveReactionResponse) Reset() {
 	*x = RemoveReactionResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[118]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[123]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8769,7 +9133,7 @@ func (x *RemoveReactionResponse) String() string {
 func (*RemoveReactionResponse) ProtoMessage() {}
 
 func (x *RemoveReactionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[118]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[123]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8782,7 +9146,7 @@ func (x *RemoveReactionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveReactionResponse.ProtoReflect.Descriptor instead.
 func (*RemoveReactionResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{118}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{123}
 }
 
 func (x *RemoveReactionResponse) GetMessage() *MessageView {
@@ -8801,7 +9165,7 @@ type StopTurnRequest struct {
 
 func (x *StopTurnRequest) Reset() {
 	*x = StopTurnRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[119]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[124]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8813,7 +9177,7 @@ func (x *StopTurnRequest) String() string {
 func (*StopTurnRequest) ProtoMessage() {}
 
 func (x *StopTurnRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[119]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[124]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8826,7 +9190,7 @@ func (x *StopTurnRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopTurnRequest.ProtoReflect.Descriptor instead.
 func (*StopTurnRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{119}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{124}
 }
 
 func (x *StopTurnRequest) GetConversationId() string {
@@ -8845,7 +9209,7 @@ type StopTurnResponse struct {
 
 func (x *StopTurnResponse) Reset() {
 	*x = StopTurnResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[120]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[125]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8857,7 +9221,7 @@ func (x *StopTurnResponse) String() string {
 func (*StopTurnResponse) ProtoMessage() {}
 
 func (x *StopTurnResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[120]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[125]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8870,7 +9234,7 @@ func (x *StopTurnResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopTurnResponse.ProtoReflect.Descriptor instead.
 func (*StopTurnResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{120}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{125}
 }
 
 func (x *StopTurnResponse) GetStopped() bool {
@@ -8889,7 +9253,7 @@ type RetryTurnRequest struct {
 
 func (x *RetryTurnRequest) Reset() {
 	*x = RetryTurnRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[121]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[126]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8901,7 +9265,7 @@ func (x *RetryTurnRequest) String() string {
 func (*RetryTurnRequest) ProtoMessage() {}
 
 func (x *RetryTurnRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[121]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[126]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8914,7 +9278,7 @@ func (x *RetryTurnRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetryTurnRequest.ProtoReflect.Descriptor instead.
 func (*RetryTurnRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{121}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{126}
 }
 
 func (x *RetryTurnRequest) GetConversationId() string {
@@ -8932,7 +9296,7 @@ type RetryTurnResponse struct {
 
 func (x *RetryTurnResponse) Reset() {
 	*x = RetryTurnResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[122]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[127]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8944,7 +9308,7 @@ func (x *RetryTurnResponse) String() string {
 func (*RetryTurnResponse) ProtoMessage() {}
 
 func (x *RetryTurnResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[122]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[127]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8957,7 +9321,7 @@ func (x *RetryTurnResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetryTurnResponse.ProtoReflect.Descriptor instead.
 func (*RetryTurnResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{122}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{127}
 }
 
 type WakeWaitRequest struct {
@@ -8969,7 +9333,7 @@ type WakeWaitRequest struct {
 
 func (x *WakeWaitRequest) Reset() {
 	*x = WakeWaitRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[123]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[128]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8981,7 +9345,7 @@ func (x *WakeWaitRequest) String() string {
 func (*WakeWaitRequest) ProtoMessage() {}
 
 func (x *WakeWaitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[123]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[128]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8994,7 +9358,7 @@ func (x *WakeWaitRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WakeWaitRequest.ProtoReflect.Descriptor instead.
 func (*WakeWaitRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{123}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{128}
 }
 
 func (x *WakeWaitRequest) GetConversationId() string {
@@ -9012,7 +9376,7 @@ type WakeWaitResponse struct {
 
 func (x *WakeWaitResponse) Reset() {
 	*x = WakeWaitResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[124]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[129]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9024,7 +9388,7 @@ func (x *WakeWaitResponse) String() string {
 func (*WakeWaitResponse) ProtoMessage() {}
 
 func (x *WakeWaitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[124]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[129]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9037,7 +9401,7 @@ func (x *WakeWaitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WakeWaitResponse.ProtoReflect.Descriptor instead.
 func (*WakeWaitResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{124}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{129}
 }
 
 type CancelWaitRequest struct {
@@ -9049,7 +9413,7 @@ type CancelWaitRequest struct {
 
 func (x *CancelWaitRequest) Reset() {
 	*x = CancelWaitRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[125]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[130]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9061,7 +9425,7 @@ func (x *CancelWaitRequest) String() string {
 func (*CancelWaitRequest) ProtoMessage() {}
 
 func (x *CancelWaitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[125]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[130]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9074,7 +9438,7 @@ func (x *CancelWaitRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelWaitRequest.ProtoReflect.Descriptor instead.
 func (*CancelWaitRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{125}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{130}
 }
 
 func (x *CancelWaitRequest) GetConversationId() string {
@@ -9092,7 +9456,7 @@ type CancelWaitResponse struct {
 
 func (x *CancelWaitResponse) Reset() {
 	*x = CancelWaitResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[126]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[131]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9104,7 +9468,7 @@ func (x *CancelWaitResponse) String() string {
 func (*CancelWaitResponse) ProtoMessage() {}
 
 func (x *CancelWaitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[126]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[131]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9117,7 +9481,7 @@ func (x *CancelWaitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelWaitResponse.ProtoReflect.Descriptor instead.
 func (*CancelWaitResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{126}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{131}
 }
 
 type ListSkillsRequest struct {
@@ -9129,7 +9493,7 @@ type ListSkillsRequest struct {
 
 func (x *ListSkillsRequest) Reset() {
 	*x = ListSkillsRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[127]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[132]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9141,7 +9505,7 @@ func (x *ListSkillsRequest) String() string {
 func (*ListSkillsRequest) ProtoMessage() {}
 
 func (x *ListSkillsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[127]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[132]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9154,7 +9518,7 @@ func (x *ListSkillsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSkillsRequest.ProtoReflect.Descriptor instead.
 func (*ListSkillsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{127}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{132}
 }
 
 func (x *ListSkillsRequest) GetConversationId() string {
@@ -9173,7 +9537,7 @@ type ListSkillsResponse struct {
 
 func (x *ListSkillsResponse) Reset() {
 	*x = ListSkillsResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[128]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[133]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9185,7 +9549,7 @@ func (x *ListSkillsResponse) String() string {
 func (*ListSkillsResponse) ProtoMessage() {}
 
 func (x *ListSkillsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[128]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[133]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9198,7 +9562,7 @@ func (x *ListSkillsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSkillsResponse.ProtoReflect.Descriptor instead.
 func (*ListSkillsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{128}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{133}
 }
 
 func (x *ListSkillsResponse) GetSkills() []*SkillView {
@@ -9219,7 +9583,7 @@ type GetTraceRequest struct {
 
 func (x *GetTraceRequest) Reset() {
 	*x = GetTraceRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[129]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[134]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9231,7 +9595,7 @@ func (x *GetTraceRequest) String() string {
 func (*GetTraceRequest) ProtoMessage() {}
 
 func (x *GetTraceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[129]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[134]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9244,7 +9608,7 @@ func (x *GetTraceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTraceRequest.ProtoReflect.Descriptor instead.
 func (*GetTraceRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{129}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{134}
 }
 
 func (x *GetTraceRequest) GetConversationId() string {
@@ -9278,7 +9642,7 @@ type GetTraceResponse struct {
 
 func (x *GetTraceResponse) Reset() {
 	*x = GetTraceResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[130]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[135]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9290,7 +9654,7 @@ func (x *GetTraceResponse) String() string {
 func (*GetTraceResponse) ProtoMessage() {}
 
 func (x *GetTraceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[130]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[135]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9303,7 +9667,7 @@ func (x *GetTraceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTraceResponse.ProtoReflect.Descriptor instead.
 func (*GetTraceResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{130}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{135}
 }
 
 func (x *GetTraceResponse) GetTurns() []*TraceTurn {
@@ -9330,7 +9694,7 @@ type GetTraceRequestDetailRequest struct {
 
 func (x *GetTraceRequestDetailRequest) Reset() {
 	*x = GetTraceRequestDetailRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[131]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[136]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9342,7 +9706,7 @@ func (x *GetTraceRequestDetailRequest) String() string {
 func (*GetTraceRequestDetailRequest) ProtoMessage() {}
 
 func (x *GetTraceRequestDetailRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[131]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[136]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9355,7 +9719,7 @@ func (x *GetTraceRequestDetailRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTraceRequestDetailRequest.ProtoReflect.Descriptor instead.
 func (*GetTraceRequestDetailRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{131}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{136}
 }
 
 func (x *GetTraceRequestDetailRequest) GetConversationId() string {
@@ -9381,7 +9745,7 @@ type GetTraceRequestDetailResponse struct {
 
 func (x *GetTraceRequestDetailResponse) Reset() {
 	*x = GetTraceRequestDetailResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[132]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[137]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9393,7 +9757,7 @@ func (x *GetTraceRequestDetailResponse) String() string {
 func (*GetTraceRequestDetailResponse) ProtoMessage() {}
 
 func (x *GetTraceRequestDetailResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[132]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[137]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9406,7 +9770,7 @@ func (x *GetTraceRequestDetailResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTraceRequestDetailResponse.ProtoReflect.Descriptor instead.
 func (*GetTraceRequestDetailResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{132}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{137}
 }
 
 func (x *GetTraceRequestDetailResponse) GetRequest() *TraceRequestDetail {
@@ -9426,7 +9790,7 @@ type UndoNoticeRequest struct {
 
 func (x *UndoNoticeRequest) Reset() {
 	*x = UndoNoticeRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[133]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[138]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9438,7 +9802,7 @@ func (x *UndoNoticeRequest) String() string {
 func (*UndoNoticeRequest) ProtoMessage() {}
 
 func (x *UndoNoticeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[133]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[138]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9451,7 +9815,7 @@ func (x *UndoNoticeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UndoNoticeRequest.ProtoReflect.Descriptor instead.
 func (*UndoNoticeRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{133}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{138}
 }
 
 func (x *UndoNoticeRequest) GetProjectId() string {
@@ -9476,7 +9840,7 @@ type UndoNoticeResponse struct {
 
 func (x *UndoNoticeResponse) Reset() {
 	*x = UndoNoticeResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[134]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[139]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9488,7 +9852,7 @@ func (x *UndoNoticeResponse) String() string {
 func (*UndoNoticeResponse) ProtoMessage() {}
 
 func (x *UndoNoticeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[134]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[139]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9501,7 +9865,7 @@ func (x *UndoNoticeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UndoNoticeResponse.ProtoReflect.Descriptor instead.
 func (*UndoNoticeResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{134}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{139}
 }
 
 type ListMemoriesRequest struct {
@@ -9513,7 +9877,7 @@ type ListMemoriesRequest struct {
 
 func (x *ListMemoriesRequest) Reset() {
 	*x = ListMemoriesRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[135]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[140]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9525,7 +9889,7 @@ func (x *ListMemoriesRequest) String() string {
 func (*ListMemoriesRequest) ProtoMessage() {}
 
 func (x *ListMemoriesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[135]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[140]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9538,7 +9902,7 @@ func (x *ListMemoriesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMemoriesRequest.ProtoReflect.Descriptor instead.
 func (*ListMemoriesRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{135}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{140}
 }
 
 func (x *ListMemoriesRequest) GetProjectId() string {
@@ -9557,7 +9921,7 @@ type ListMemoriesResponse struct {
 
 func (x *ListMemoriesResponse) Reset() {
 	*x = ListMemoriesResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[136]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[141]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9569,7 +9933,7 @@ func (x *ListMemoriesResponse) String() string {
 func (*ListMemoriesResponse) ProtoMessage() {}
 
 func (x *ListMemoriesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[136]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[141]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9582,7 +9946,7 @@ func (x *ListMemoriesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMemoriesResponse.ProtoReflect.Descriptor instead.
 func (*ListMemoriesResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{136}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{141}
 }
 
 func (x *ListMemoriesResponse) GetMemories() []*MemoryView {
@@ -9602,7 +9966,7 @@ type CreateMemoryRequest struct {
 
 func (x *CreateMemoryRequest) Reset() {
 	*x = CreateMemoryRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[137]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[142]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9614,7 +9978,7 @@ func (x *CreateMemoryRequest) String() string {
 func (*CreateMemoryRequest) ProtoMessage() {}
 
 func (x *CreateMemoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[137]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[142]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9627,7 +9991,7 @@ func (x *CreateMemoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateMemoryRequest.ProtoReflect.Descriptor instead.
 func (*CreateMemoryRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{137}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{142}
 }
 
 func (x *CreateMemoryRequest) GetProjectId() string {
@@ -9653,7 +10017,7 @@ type CreateMemoryResponse struct {
 
 func (x *CreateMemoryResponse) Reset() {
 	*x = CreateMemoryResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[138]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[143]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9665,7 +10029,7 @@ func (x *CreateMemoryResponse) String() string {
 func (*CreateMemoryResponse) ProtoMessage() {}
 
 func (x *CreateMemoryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[138]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[143]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9678,7 +10042,7 @@ func (x *CreateMemoryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateMemoryResponse.ProtoReflect.Descriptor instead.
 func (*CreateMemoryResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{138}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{143}
 }
 
 func (x *CreateMemoryResponse) GetMemory() *MemoryView {
@@ -9699,7 +10063,7 @@ type UpdateMemoryRequest struct {
 
 func (x *UpdateMemoryRequest) Reset() {
 	*x = UpdateMemoryRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[139]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[144]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9711,7 +10075,7 @@ func (x *UpdateMemoryRequest) String() string {
 func (*UpdateMemoryRequest) ProtoMessage() {}
 
 func (x *UpdateMemoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[139]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[144]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9724,7 +10088,7 @@ func (x *UpdateMemoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMemoryRequest.ProtoReflect.Descriptor instead.
 func (*UpdateMemoryRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{139}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{144}
 }
 
 func (x *UpdateMemoryRequest) GetProjectId() string {
@@ -9757,7 +10121,7 @@ type UpdateMemoryResponse struct {
 
 func (x *UpdateMemoryResponse) Reset() {
 	*x = UpdateMemoryResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[140]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[145]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9769,7 +10133,7 @@ func (x *UpdateMemoryResponse) String() string {
 func (*UpdateMemoryResponse) ProtoMessage() {}
 
 func (x *UpdateMemoryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[140]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[145]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9782,7 +10146,7 @@ func (x *UpdateMemoryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMemoryResponse.ProtoReflect.Descriptor instead.
 func (*UpdateMemoryResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{140}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{145}
 }
 
 func (x *UpdateMemoryResponse) GetMemory() *MemoryView {
@@ -9802,7 +10166,7 @@ type DeleteMemoryRequest struct {
 
 func (x *DeleteMemoryRequest) Reset() {
 	*x = DeleteMemoryRequest{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[141]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[146]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9814,7 +10178,7 @@ func (x *DeleteMemoryRequest) String() string {
 func (*DeleteMemoryRequest) ProtoMessage() {}
 
 func (x *DeleteMemoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[141]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[146]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9827,7 +10191,7 @@ func (x *DeleteMemoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteMemoryRequest.ProtoReflect.Descriptor instead.
 func (*DeleteMemoryRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{141}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{146}
 }
 
 func (x *DeleteMemoryRequest) GetProjectId() string {
@@ -9852,7 +10216,7 @@ type DeleteMemoryResponse struct {
 
 func (x *DeleteMemoryResponse) Reset() {
 	*x = DeleteMemoryResponse{}
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[142]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[147]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9864,7 +10228,7 @@ func (x *DeleteMemoryResponse) String() string {
 func (*DeleteMemoryResponse) ProtoMessage() {}
 
 func (x *DeleteMemoryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_conversations_proto_msgTypes[142]
+	mi := &file_ariadne_v1_conversations_proto_msgTypes[147]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9877,7 +10241,7 @@ func (x *DeleteMemoryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteMemoryResponse.ProtoReflect.Descriptor instead.
 func (*DeleteMemoryResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{142}
+	return file_ariadne_v1_conversations_proto_rawDescGZIP(), []int{147}
 }
 
 var File_ariadne_v1_conversations_proto protoreflect.FileDescriptor
@@ -10270,10 +10634,15 @@ const file_ariadne_v1_conversations_proto_rawDesc = "" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\x05R\aversion\".\n" +
 	"\x18ArtifactFeedbackEditItem\x12\x12\n" +
-	"\x04diff\x18\x01 \x01(\tR\x04diff\"D\n" +
+	"\x04diff\x18\x01 \x01(\tR\x04diff\"\x9f\x01\n" +
 	"\x1cArtifactFeedbackChoiceOption\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
-	"\x05title\x18\x02 \x01(\tR\x05title\"^\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12\x19\n" +
+	"\x05group\x18\x03 \x01(\tH\x00R\x05group\x88\x01\x01\x12$\n" +
+	"\vgroup_title\x18\x04 \x01(\tH\x01R\n" +
+	"groupTitle\x88\x01\x01B\b\n" +
+	"\x06_groupB\x0e\n" +
+	"\f_group_title\"^\n" +
 	"\x1aArtifactFeedbackChoiceItem\x12@\n" +
 	"\x06chosen\x18\x01 \x03(\v2(.ariadne.v1.ArtifactFeedbackChoiceOptionR\x06chosen\"|\n" +
 	"\x1bArtifactFeedbackCommentItem\x12\x1b\n" +
@@ -10287,14 +10656,43 @@ const file_ariadne_v1_conversations_proto_rawDesc = "" +
 	"\x04text\x18\x03 \x01(\tR\x04text\x12\x14\n" +
 	"\x05where\x18\x04 \x01(\tR\x05where\"5\n" +
 	"\x19ArtifactFeedbackBoardItem\x12\x18\n" +
-	"\achanges\x18\x01 \x03(\tR\achanges\"\xdc\x02\n" +
+	"\achanges\x18\x01 \x03(\tR\achanges\"\x83\x01\n" +
+	"\x1bArtifactFeedbackAnswerEntry\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\bquestion\x18\x02 \x01(\tR\bquestion\x12\x16\n" +
+	"\x06values\x18\x03 \x03(\tR\x06values\x12\x17\n" +
+	"\x04note\x18\x04 \x01(\tH\x00R\x04note\x88\x01\x01B\a\n" +
+	"\x05_note\"_\n" +
+	"\x1aArtifactFeedbackAnswerItem\x12A\n" +
+	"\aanswers\x18\x01 \x03(\v2'.ariadne.v1.ArtifactFeedbackAnswerEntryR\aanswers\"\xab\x01\n" +
+	"\x1bArtifactFeedbackTweakChange\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05label\x18\x02 \x01(\tR\x05label\x12\x14\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\x12\x1f\n" +
+	"\bprevious\x18\x04 \x01(\tH\x00R\bprevious\x88\x01\x01\x12\x17\n" +
+	"\x04unit\x18\x05 \x01(\tH\x01R\x04unit\x88\x01\x01B\v\n" +
+	"\t_previousB\a\n" +
+	"\x05_unit\"\xf7\x01\n" +
+	"\x1aArtifactFeedbackTweakEntry\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
+	"\toption_id\x18\x03 \x01(\tH\x00R\boptionId\x88\x01\x01\x12&\n" +
+	"\foption_title\x18\x04 \x01(\tH\x01R\voptionTitle\x88\x01\x01\x12A\n" +
+	"\achanges\x18\x05 \x03(\v2'.ariadne.v1.ArtifactFeedbackTweakChangeR\achangesB\f\n" +
+	"\n" +
+	"_option_idB\x0f\n" +
+	"\r_option_title\"[\n" +
+	"\x19ArtifactFeedbackTweakItem\x12>\n" +
+	"\x06tweaks\x18\x01 \x03(\v2&.ariadne.v1.ArtifactFeedbackTweakEntryR\x06tweaks\"\xdd\x03\n" +
 	"\x14ArtifactFeedbackItem\x12:\n" +
 	"\x04edit\x18\x01 \x01(\v2$.ariadne.v1.ArtifactFeedbackEditItemH\x00R\x04edit\x12@\n" +
 	"\x06choice\x18\x02 \x01(\v2&.ariadne.v1.ArtifactFeedbackChoiceItemH\x00R\x06choice\x12C\n" +
 	"\acomment\x18\x03 \x01(\v2'.ariadne.v1.ArtifactFeedbackCommentItemH\x00R\acomment\x12:\n" +
 	"\x04mark\x18\x04 \x01(\v2$.ariadne.v1.ArtifactFeedbackMarkItemH\x00R\x04mark\x12=\n" +
-	"\x05board\x18\x05 \x01(\v2%.ariadne.v1.ArtifactFeedbackBoardItemH\x00R\x05boardB\x06\n" +
-	"\x04item\"\xdc\x01\n" +
+	"\x05board\x18\x05 \x01(\v2%.ariadne.v1.ArtifactFeedbackBoardItemH\x00R\x05board\x12@\n" +
+	"\x06answer\x18\x06 \x01(\v2&.ariadne.v1.ArtifactFeedbackAnswerItemH\x00R\x06answer\x12=\n" +
+	"\x05tweak\x18\a \x01(\v2%.ariadne.v1.ArtifactFeedbackTweakItemH\x00R\x05tweakB\x06\n" +
+	"\x04item\"\xfa\x01\n" +
 	"\x16ArtifactFeedbackNotice\x12\x1f\n" +
 	"\vartifact_id\x18\x01 \x01(\tR\n" +
 	"artifactId\x12\x14\n" +
@@ -10302,7 +10700,8 @@ const file_ariadne_v1_conversations_proto_rawDesc = "" +
 	"\x05round\x18\x03 \x01(\x05R\x05round\x126\n" +
 	"\x05items\x18\x04 \x03(\v2 .ariadne.v1.ArtifactFeedbackItemR\x05items\x12\x12\n" +
 	"\x04done\x18\x05 \x01(\bR\x04done\x12\x1d\n" +
-	"\asummary\x18\x06 \x01(\tH\x00R\asummary\x88\x01\x01B\n" +
+	"\asummary\x18\x06 \x01(\tH\x00R\asummary\x88\x01\x01\x12\x1c\n" +
+	"\twithdrawn\x18\a \x01(\bR\twithdrawnB\n" +
 	"\n" +
 	"\b_summary\"\x8a\x01\n" +
 	"\x15ArtifactCommentNotice\x12\x1f\n" +
@@ -10763,7 +11162,7 @@ func file_ariadne_v1_conversations_proto_rawDescGZIP() []byte {
 	return file_ariadne_v1_conversations_proto_rawDescData
 }
 
-var file_ariadne_v1_conversations_proto_msgTypes = make([]protoimpl.MessageInfo, 147)
+var file_ariadne_v1_conversations_proto_msgTypes = make([]protoimpl.MessageInfo, 152)
 var file_ariadne_v1_conversations_proto_goTypes = []any{
 	(*ConversationTurn)(nil),              // 0: ariadne.v1.ConversationTurn
 	(*ConversationWait)(nil),              // 1: ariadne.v1.ConversationWait
@@ -10832,97 +11231,102 @@ var file_ariadne_v1_conversations_proto_goTypes = []any{
 	(*ArtifactFeedbackCommentItem)(nil),   // 64: ariadne.v1.ArtifactFeedbackCommentItem
 	(*ArtifactFeedbackMarkItem)(nil),      // 65: ariadne.v1.ArtifactFeedbackMarkItem
 	(*ArtifactFeedbackBoardItem)(nil),     // 66: ariadne.v1.ArtifactFeedbackBoardItem
-	(*ArtifactFeedbackItem)(nil),          // 67: ariadne.v1.ArtifactFeedbackItem
-	(*ArtifactFeedbackNotice)(nil),        // 68: ariadne.v1.ArtifactFeedbackNotice
-	(*ArtifactCommentNotice)(nil),         // 69: ariadne.v1.ArtifactCommentNotice
-	(*MergeConflictNotice)(nil),           // 70: ariadne.v1.MergeConflictNotice
-	(*WorktreeRemovedNotice)(nil),         // 71: ariadne.v1.WorktreeRemovedNotice
-	(*PlanChangedNotice)(nil),             // 72: ariadne.v1.PlanChangedNotice
-	(*ThreadAutoStartedNotice)(nil),       // 73: ariadne.v1.ThreadAutoStartedNotice
-	(*ReviewNotice)(nil),                  // 74: ariadne.v1.ReviewNotice
-	(*TurnFile)(nil),                      // 75: ariadne.v1.TurnFile
-	(*TurnChangesNotice)(nil),             // 76: ariadne.v1.TurnChangesNotice
-	(*NoticeView)(nil),                    // 77: ariadne.v1.NoticeView
-	(*MemoryView)(nil),                    // 78: ariadne.v1.MemoryView
-	(*SkillView)(nil),                     // 79: ariadne.v1.SkillView
-	(*TraceCost)(nil),                     // 80: ariadne.v1.TraceCost
-	(*TraceTokenUsage)(nil),               // 81: ariadne.v1.TraceTokenUsage
-	(*TraceReasoning)(nil),                // 82: ariadne.v1.TraceReasoning
-	(*TraceToolCallResult)(nil),           // 83: ariadne.v1.TraceToolCallResult
-	(*TraceToolCall)(nil),                 // 84: ariadne.v1.TraceToolCall
-	(*TraceRequest)(nil),                  // 85: ariadne.v1.TraceRequest
-	(*TraceAgentError)(nil),               // 86: ariadne.v1.TraceAgentError
-	(*TraceRequestFailure)(nil),           // 87: ariadne.v1.TraceRequestFailure
-	(*TraceRetry)(nil),                    // 88: ariadne.v1.TraceRetry
-	(*TraceFallback)(nil),                 // 89: ariadne.v1.TraceFallback
-	(*TraceCompactionFailed)(nil),         // 90: ariadne.v1.TraceCompactionFailed
-	(*TraceResultsCleared)(nil),           // 91: ariadne.v1.TraceResultsCleared
-	(*TraceInstructions)(nil),             // 92: ariadne.v1.TraceInstructions
-	(*TraceItem)(nil),                     // 93: ariadne.v1.TraceItem
-	(*TraceTurn)(nil),                     // 94: ariadne.v1.TraceTurn
-	(*TraceToolCallRecord)(nil),           // 95: ariadne.v1.TraceToolCallRecord
-	(*TraceReasoningRecord)(nil),          // 96: ariadne.v1.TraceReasoningRecord
-	(*TraceSystemMessage)(nil),            // 97: ariadne.v1.TraceSystemMessage
-	(*TraceUserMessage)(nil),              // 98: ariadne.v1.TraceUserMessage
-	(*TraceAssistantMessage)(nil),         // 99: ariadne.v1.TraceAssistantMessage
-	(*TraceToolMessage)(nil),              // 100: ariadne.v1.TraceToolMessage
-	(*TraceMessage)(nil),                  // 101: ariadne.v1.TraceMessage
-	(*TraceToolDefinition)(nil),           // 102: ariadne.v1.TraceToolDefinition
-	(*TraceRequestCall)(nil),              // 103: ariadne.v1.TraceRequestCall
-	(*TraceRequestDetail)(nil),            // 104: ariadne.v1.TraceRequestDetail
-	(*GetConversationRequest)(nil),        // 105: ariadne.v1.GetConversationRequest
-	(*GetConversationResponse)(nil),       // 106: ariadne.v1.GetConversationResponse
-	(*PostMessageRequest)(nil),            // 107: ariadne.v1.PostMessageRequest
-	(*PostMessageResponse)(nil),           // 108: ariadne.v1.PostMessageResponse
-	(*MarkReadRequest)(nil),               // 109: ariadne.v1.MarkReadRequest
-	(*MarkReadResponse)(nil),              // 110: ariadne.v1.MarkReadResponse
-	(*NoteReturnRequest)(nil),             // 111: ariadne.v1.NoteReturnRequest
-	(*NoteReturnResponse)(nil),            // 112: ariadne.v1.NoteReturnResponse
-	(*AnswerAttentionRequest)(nil),        // 113: ariadne.v1.AnswerAttentionRequest
-	(*AnswerAttentionResponse)(nil),       // 114: ariadne.v1.AnswerAttentionResponse
-	(*AddReactionRequest)(nil),            // 115: ariadne.v1.AddReactionRequest
-	(*AddReactionResponse)(nil),           // 116: ariadne.v1.AddReactionResponse
-	(*RemoveReactionRequest)(nil),         // 117: ariadne.v1.RemoveReactionRequest
-	(*RemoveReactionResponse)(nil),        // 118: ariadne.v1.RemoveReactionResponse
-	(*StopTurnRequest)(nil),               // 119: ariadne.v1.StopTurnRequest
-	(*StopTurnResponse)(nil),              // 120: ariadne.v1.StopTurnResponse
-	(*RetryTurnRequest)(nil),              // 121: ariadne.v1.RetryTurnRequest
-	(*RetryTurnResponse)(nil),             // 122: ariadne.v1.RetryTurnResponse
-	(*WakeWaitRequest)(nil),               // 123: ariadne.v1.WakeWaitRequest
-	(*WakeWaitResponse)(nil),              // 124: ariadne.v1.WakeWaitResponse
-	(*CancelWaitRequest)(nil),             // 125: ariadne.v1.CancelWaitRequest
-	(*CancelWaitResponse)(nil),            // 126: ariadne.v1.CancelWaitResponse
-	(*ListSkillsRequest)(nil),             // 127: ariadne.v1.ListSkillsRequest
-	(*ListSkillsResponse)(nil),            // 128: ariadne.v1.ListSkillsResponse
-	(*GetTraceRequest)(nil),               // 129: ariadne.v1.GetTraceRequest
-	(*GetTraceResponse)(nil),              // 130: ariadne.v1.GetTraceResponse
-	(*GetTraceRequestDetailRequest)(nil),  // 131: ariadne.v1.GetTraceRequestDetailRequest
-	(*GetTraceRequestDetailResponse)(nil), // 132: ariadne.v1.GetTraceRequestDetailResponse
-	(*UndoNoticeRequest)(nil),             // 133: ariadne.v1.UndoNoticeRequest
-	(*UndoNoticeResponse)(nil),            // 134: ariadne.v1.UndoNoticeResponse
-	(*ListMemoriesRequest)(nil),           // 135: ariadne.v1.ListMemoriesRequest
-	(*ListMemoriesResponse)(nil),          // 136: ariadne.v1.ListMemoriesResponse
-	(*CreateMemoryRequest)(nil),           // 137: ariadne.v1.CreateMemoryRequest
-	(*CreateMemoryResponse)(nil),          // 138: ariadne.v1.CreateMemoryResponse
-	(*UpdateMemoryRequest)(nil),           // 139: ariadne.v1.UpdateMemoryRequest
-	(*UpdateMemoryResponse)(nil),          // 140: ariadne.v1.UpdateMemoryResponse
-	(*DeleteMemoryRequest)(nil),           // 141: ariadne.v1.DeleteMemoryRequest
-	(*DeleteMemoryResponse)(nil),          // 142: ariadne.v1.DeleteMemoryResponse
-	nil,                                   // 143: ariadne.v1.FormAnswer.ValuesEntry
-	nil,                                   // 144: ariadne.v1.TableRow.CellsEntry
-	nil,                                   // 145: ariadne.v1.ChartRow.CellsEntry
-	nil,                                   // 146: ariadne.v1.ChartBlock.LabelsEntry
-	(*LocalizedError)(nil),                // 147: ariadne.v1.LocalizedError
-	(*TokenUsageTotals)(nil),              // 148: ariadne.v1.TokenUsageTotals
-	(*LineComment)(nil),                   // 149: ariadne.v1.LineComment
-	(*ThreadChangeTotals)(nil),            // 150: ariadne.v1.ThreadChangeTotals
-	(*structpb.Struct)(nil),               // 151: google.protobuf.Struct
-	(*structpb.Value)(nil),                // 152: google.protobuf.Value
+	(*ArtifactFeedbackAnswerEntry)(nil),   // 67: ariadne.v1.ArtifactFeedbackAnswerEntry
+	(*ArtifactFeedbackAnswerItem)(nil),    // 68: ariadne.v1.ArtifactFeedbackAnswerItem
+	(*ArtifactFeedbackTweakChange)(nil),   // 69: ariadne.v1.ArtifactFeedbackTweakChange
+	(*ArtifactFeedbackTweakEntry)(nil),    // 70: ariadne.v1.ArtifactFeedbackTweakEntry
+	(*ArtifactFeedbackTweakItem)(nil),     // 71: ariadne.v1.ArtifactFeedbackTweakItem
+	(*ArtifactFeedbackItem)(nil),          // 72: ariadne.v1.ArtifactFeedbackItem
+	(*ArtifactFeedbackNotice)(nil),        // 73: ariadne.v1.ArtifactFeedbackNotice
+	(*ArtifactCommentNotice)(nil),         // 74: ariadne.v1.ArtifactCommentNotice
+	(*MergeConflictNotice)(nil),           // 75: ariadne.v1.MergeConflictNotice
+	(*WorktreeRemovedNotice)(nil),         // 76: ariadne.v1.WorktreeRemovedNotice
+	(*PlanChangedNotice)(nil),             // 77: ariadne.v1.PlanChangedNotice
+	(*ThreadAutoStartedNotice)(nil),       // 78: ariadne.v1.ThreadAutoStartedNotice
+	(*ReviewNotice)(nil),                  // 79: ariadne.v1.ReviewNotice
+	(*TurnFile)(nil),                      // 80: ariadne.v1.TurnFile
+	(*TurnChangesNotice)(nil),             // 81: ariadne.v1.TurnChangesNotice
+	(*NoticeView)(nil),                    // 82: ariadne.v1.NoticeView
+	(*MemoryView)(nil),                    // 83: ariadne.v1.MemoryView
+	(*SkillView)(nil),                     // 84: ariadne.v1.SkillView
+	(*TraceCost)(nil),                     // 85: ariadne.v1.TraceCost
+	(*TraceTokenUsage)(nil),               // 86: ariadne.v1.TraceTokenUsage
+	(*TraceReasoning)(nil),                // 87: ariadne.v1.TraceReasoning
+	(*TraceToolCallResult)(nil),           // 88: ariadne.v1.TraceToolCallResult
+	(*TraceToolCall)(nil),                 // 89: ariadne.v1.TraceToolCall
+	(*TraceRequest)(nil),                  // 90: ariadne.v1.TraceRequest
+	(*TraceAgentError)(nil),               // 91: ariadne.v1.TraceAgentError
+	(*TraceRequestFailure)(nil),           // 92: ariadne.v1.TraceRequestFailure
+	(*TraceRetry)(nil),                    // 93: ariadne.v1.TraceRetry
+	(*TraceFallback)(nil),                 // 94: ariadne.v1.TraceFallback
+	(*TraceCompactionFailed)(nil),         // 95: ariadne.v1.TraceCompactionFailed
+	(*TraceResultsCleared)(nil),           // 96: ariadne.v1.TraceResultsCleared
+	(*TraceInstructions)(nil),             // 97: ariadne.v1.TraceInstructions
+	(*TraceItem)(nil),                     // 98: ariadne.v1.TraceItem
+	(*TraceTurn)(nil),                     // 99: ariadne.v1.TraceTurn
+	(*TraceToolCallRecord)(nil),           // 100: ariadne.v1.TraceToolCallRecord
+	(*TraceReasoningRecord)(nil),          // 101: ariadne.v1.TraceReasoningRecord
+	(*TraceSystemMessage)(nil),            // 102: ariadne.v1.TraceSystemMessage
+	(*TraceUserMessage)(nil),              // 103: ariadne.v1.TraceUserMessage
+	(*TraceAssistantMessage)(nil),         // 104: ariadne.v1.TraceAssistantMessage
+	(*TraceToolMessage)(nil),              // 105: ariadne.v1.TraceToolMessage
+	(*TraceMessage)(nil),                  // 106: ariadne.v1.TraceMessage
+	(*TraceToolDefinition)(nil),           // 107: ariadne.v1.TraceToolDefinition
+	(*TraceRequestCall)(nil),              // 108: ariadne.v1.TraceRequestCall
+	(*TraceRequestDetail)(nil),            // 109: ariadne.v1.TraceRequestDetail
+	(*GetConversationRequest)(nil),        // 110: ariadne.v1.GetConversationRequest
+	(*GetConversationResponse)(nil),       // 111: ariadne.v1.GetConversationResponse
+	(*PostMessageRequest)(nil),            // 112: ariadne.v1.PostMessageRequest
+	(*PostMessageResponse)(nil),           // 113: ariadne.v1.PostMessageResponse
+	(*MarkReadRequest)(nil),               // 114: ariadne.v1.MarkReadRequest
+	(*MarkReadResponse)(nil),              // 115: ariadne.v1.MarkReadResponse
+	(*NoteReturnRequest)(nil),             // 116: ariadne.v1.NoteReturnRequest
+	(*NoteReturnResponse)(nil),            // 117: ariadne.v1.NoteReturnResponse
+	(*AnswerAttentionRequest)(nil),        // 118: ariadne.v1.AnswerAttentionRequest
+	(*AnswerAttentionResponse)(nil),       // 119: ariadne.v1.AnswerAttentionResponse
+	(*AddReactionRequest)(nil),            // 120: ariadne.v1.AddReactionRequest
+	(*AddReactionResponse)(nil),           // 121: ariadne.v1.AddReactionResponse
+	(*RemoveReactionRequest)(nil),         // 122: ariadne.v1.RemoveReactionRequest
+	(*RemoveReactionResponse)(nil),        // 123: ariadne.v1.RemoveReactionResponse
+	(*StopTurnRequest)(nil),               // 124: ariadne.v1.StopTurnRequest
+	(*StopTurnResponse)(nil),              // 125: ariadne.v1.StopTurnResponse
+	(*RetryTurnRequest)(nil),              // 126: ariadne.v1.RetryTurnRequest
+	(*RetryTurnResponse)(nil),             // 127: ariadne.v1.RetryTurnResponse
+	(*WakeWaitRequest)(nil),               // 128: ariadne.v1.WakeWaitRequest
+	(*WakeWaitResponse)(nil),              // 129: ariadne.v1.WakeWaitResponse
+	(*CancelWaitRequest)(nil),             // 130: ariadne.v1.CancelWaitRequest
+	(*CancelWaitResponse)(nil),            // 131: ariadne.v1.CancelWaitResponse
+	(*ListSkillsRequest)(nil),             // 132: ariadne.v1.ListSkillsRequest
+	(*ListSkillsResponse)(nil),            // 133: ariadne.v1.ListSkillsResponse
+	(*GetTraceRequest)(nil),               // 134: ariadne.v1.GetTraceRequest
+	(*GetTraceResponse)(nil),              // 135: ariadne.v1.GetTraceResponse
+	(*GetTraceRequestDetailRequest)(nil),  // 136: ariadne.v1.GetTraceRequestDetailRequest
+	(*GetTraceRequestDetailResponse)(nil), // 137: ariadne.v1.GetTraceRequestDetailResponse
+	(*UndoNoticeRequest)(nil),             // 138: ariadne.v1.UndoNoticeRequest
+	(*UndoNoticeResponse)(nil),            // 139: ariadne.v1.UndoNoticeResponse
+	(*ListMemoriesRequest)(nil),           // 140: ariadne.v1.ListMemoriesRequest
+	(*ListMemoriesResponse)(nil),          // 141: ariadne.v1.ListMemoriesResponse
+	(*CreateMemoryRequest)(nil),           // 142: ariadne.v1.CreateMemoryRequest
+	(*CreateMemoryResponse)(nil),          // 143: ariadne.v1.CreateMemoryResponse
+	(*UpdateMemoryRequest)(nil),           // 144: ariadne.v1.UpdateMemoryRequest
+	(*UpdateMemoryResponse)(nil),          // 145: ariadne.v1.UpdateMemoryResponse
+	(*DeleteMemoryRequest)(nil),           // 146: ariadne.v1.DeleteMemoryRequest
+	(*DeleteMemoryResponse)(nil),          // 147: ariadne.v1.DeleteMemoryResponse
+	nil,                                   // 148: ariadne.v1.FormAnswer.ValuesEntry
+	nil,                                   // 149: ariadne.v1.TableRow.CellsEntry
+	nil,                                   // 150: ariadne.v1.ChartRow.CellsEntry
+	nil,                                   // 151: ariadne.v1.ChartBlock.LabelsEntry
+	(*LocalizedError)(nil),                // 152: ariadne.v1.LocalizedError
+	(*TokenUsageTotals)(nil),              // 153: ariadne.v1.TokenUsageTotals
+	(*LineComment)(nil),                   // 154: ariadne.v1.LineComment
+	(*ThreadChangeTotals)(nil),            // 155: ariadne.v1.ThreadChangeTotals
+	(*structpb.Struct)(nil),               // 156: google.protobuf.Struct
+	(*structpb.Value)(nil),                // 157: google.protobuf.Value
 }
 var file_ariadne_v1_conversations_proto_depIdxs = []int32{
 	0,   // 0: ariadne.v1.ConversationView.turn:type_name -> ariadne.v1.ConversationTurn
-	147, // 1: ariadne.v1.ConversationView.last_error:type_name -> ariadne.v1.LocalizedError
-	148, // 2: ariadne.v1.ConversationView.usage:type_name -> ariadne.v1.TokenUsageTotals
+	152, // 1: ariadne.v1.ConversationView.last_error:type_name -> ariadne.v1.LocalizedError
+	153, // 2: ariadne.v1.ConversationView.usage:type_name -> ariadne.v1.TokenUsageTotals
 	1,   // 3: ariadne.v1.ConversationView.wait:type_name -> ariadne.v1.ConversationWait
 	4,   // 4: ariadne.v1.TodoView.items:type_name -> ariadne.v1.TodoItem
 	5,   // 5: ariadne.v1.TodoView.position:type_name -> ariadne.v1.TodoPosition
@@ -10934,15 +11338,15 @@ var file_ariadne_v1_conversations_proto_depIdxs = []int32{
 	8,   // 11: ariadne.v1.AskBlock.choice:type_name -> ariadne.v1.ChoiceBlock
 	9,   // 12: ariadne.v1.AskBlock.confirm:type_name -> ariadne.v1.ConfirmBlock
 	14,  // 13: ariadne.v1.AskBlock.form:type_name -> ariadne.v1.FormBlock
-	143, // 14: ariadne.v1.FormAnswer.values:type_name -> ariadne.v1.FormAnswer.ValuesEntry
+	148, // 14: ariadne.v1.FormAnswer.values:type_name -> ariadne.v1.FormAnswer.ValuesEntry
 	16,  // 15: ariadne.v1.BlockAnswer.choice:type_name -> ariadne.v1.ChoiceAnswer
 	17,  // 16: ariadne.v1.BlockAnswer.confirm:type_name -> ariadne.v1.ConfirmAnswer
 	18,  // 17: ariadne.v1.BlockAnswer.form:type_name -> ariadne.v1.FormAnswer
-	144, // 18: ariadne.v1.TableRow.cells:type_name -> ariadne.v1.TableRow.CellsEntry
+	149, // 18: ariadne.v1.TableRow.cells:type_name -> ariadne.v1.TableRow.CellsEntry
 	20,  // 19: ariadne.v1.TableBlock.columns:type_name -> ariadne.v1.TableColumn
 	22,  // 20: ariadne.v1.TableBlock.rows:type_name -> ariadne.v1.TableRow
-	145, // 21: ariadne.v1.ChartRow.cells:type_name -> ariadne.v1.ChartRow.CellsEntry
-	146, // 22: ariadne.v1.ChartBlock.labels:type_name -> ariadne.v1.ChartBlock.LabelsEntry
+	150, // 21: ariadne.v1.ChartRow.cells:type_name -> ariadne.v1.ChartRow.CellsEntry
+	151, // 22: ariadne.v1.ChartBlock.labels:type_name -> ariadne.v1.ChartBlock.LabelsEntry
 	25,  // 23: ariadne.v1.ChartBlock.rows:type_name -> ariadne.v1.ChartRow
 	27,  // 24: ariadne.v1.StepsBlock.items:type_name -> ariadne.v1.StepItem
 	23,  // 25: ariadne.v1.ShowBlock.table:type_name -> ariadne.v1.TableBlock
@@ -10962,7 +11366,7 @@ var file_ariadne_v1_conversations_proto_depIdxs = []int32{
 	44,  // 39: ariadne.v1.MessageView.ask:type_name -> ariadne.v1.MessageAsk
 	32,  // 40: ariadne.v1.MessageView.attachments:type_name -> ariadne.v1.MessageAttachment
 	38,  // 41: ariadne.v1.MessageView.mentions:type_name -> ariadne.v1.MessageMention
-	149, // 42: ariadne.v1.MessageView.comments:type_name -> ariadne.v1.LineComment
+	154, // 42: ariadne.v1.MessageView.comments:type_name -> ariadne.v1.LineComment
 	40,  // 43: ariadne.v1.MessageView.cites:type_name -> ariadne.v1.CitedMessage
 	41,  // 44: ariadne.v1.MessageView.relayed_to:type_name -> ariadne.v1.MessageRelay
 	42,  // 45: ariadne.v1.MessageView.reply_to:type_name -> ariadne.v1.QuotedMessage
@@ -10970,133 +11374,138 @@ var file_ariadne_v1_conversations_proto_depIdxs = []int32{
 	15,  // 47: ariadne.v1.ApprovalNotice.block:type_name -> ariadne.v1.AskBlock
 	19,  // 48: ariadne.v1.ApprovalNotice.answer:type_name -> ariadne.v1.BlockAnswer
 	62,  // 49: ariadne.v1.ArtifactFeedbackChoiceItem.chosen:type_name -> ariadne.v1.ArtifactFeedbackChoiceOption
-	61,  // 50: ariadne.v1.ArtifactFeedbackItem.edit:type_name -> ariadne.v1.ArtifactFeedbackEditItem
-	63,  // 51: ariadne.v1.ArtifactFeedbackItem.choice:type_name -> ariadne.v1.ArtifactFeedbackChoiceItem
-	64,  // 52: ariadne.v1.ArtifactFeedbackItem.comment:type_name -> ariadne.v1.ArtifactFeedbackCommentItem
-	65,  // 53: ariadne.v1.ArtifactFeedbackItem.mark:type_name -> ariadne.v1.ArtifactFeedbackMarkItem
-	66,  // 54: ariadne.v1.ArtifactFeedbackItem.board:type_name -> ariadne.v1.ArtifactFeedbackBoardItem
-	67,  // 55: ariadne.v1.ArtifactFeedbackNotice.items:type_name -> ariadne.v1.ArtifactFeedbackItem
-	75,  // 56: ariadne.v1.TurnChangesNotice.files:type_name -> ariadne.v1.TurnFile
-	150, // 57: ariadne.v1.TurnChangesNotice.total:type_name -> ariadne.v1.ThreadChangeTotals
-	46,  // 58: ariadne.v1.NoticeView.approval:type_name -> ariadne.v1.ApprovalNotice
-	47,  // 59: ariadne.v1.NoticeView.memory:type_name -> ariadne.v1.MemoryNotice
-	48,  // 60: ariadne.v1.NoticeView.memory_everywhere:type_name -> ariadne.v1.MemoryEverywhereNotice
-	49,  // 61: ariadne.v1.NoticeView.compaction_failed:type_name -> ariadne.v1.CompactionFailedNotice
-	50,  // 62: ariadne.v1.NoticeView.routine_change:type_name -> ariadne.v1.RoutineChangeNotice
-	51,  // 63: ariadne.v1.NoticeView.recap:type_name -> ariadne.v1.RecapNotice
-	52,  // 64: ariadne.v1.NoticeView.model_retry:type_name -> ariadne.v1.ModelRetryNotice
-	53,  // 65: ariadne.v1.NoticeView.model_fallback:type_name -> ariadne.v1.ModelFallbackNotice
-	54,  // 66: ariadne.v1.NoticeView.woken:type_name -> ariadne.v1.WokenNotice
-	55,  // 67: ariadne.v1.NoticeView.routine:type_name -> ariadne.v1.RoutineNotice
-	56,  // 68: ariadne.v1.NoticeView.issue_linked:type_name -> ariadne.v1.IssueLinkedNotice
-	57,  // 69: ariadne.v1.NoticeView.issue_written:type_name -> ariadne.v1.IssueWrittenNotice
-	58,  // 70: ariadne.v1.NoticeView.merged:type_name -> ariadne.v1.MergedNotice
-	59,  // 71: ariadne.v1.NoticeView.autopilot_held:type_name -> ariadne.v1.AutopilotHeldNotice
-	60,  // 72: ariadne.v1.NoticeView.artifact_edited:type_name -> ariadne.v1.ArtifactEditedNotice
-	68,  // 73: ariadne.v1.NoticeView.artifact_feedback:type_name -> ariadne.v1.ArtifactFeedbackNotice
-	69,  // 74: ariadne.v1.NoticeView.artifact_comment:type_name -> ariadne.v1.ArtifactCommentNotice
-	70,  // 75: ariadne.v1.NoticeView.merge_conflict:type_name -> ariadne.v1.MergeConflictNotice
-	71,  // 76: ariadne.v1.NoticeView.worktree_removed:type_name -> ariadne.v1.WorktreeRemovedNotice
-	72,  // 77: ariadne.v1.NoticeView.plan_changed:type_name -> ariadne.v1.PlanChangedNotice
-	73,  // 78: ariadne.v1.NoticeView.thread_auto_started:type_name -> ariadne.v1.ThreadAutoStartedNotice
-	74,  // 79: ariadne.v1.NoticeView.review:type_name -> ariadne.v1.ReviewNotice
-	76,  // 80: ariadne.v1.NoticeView.turn_changes:type_name -> ariadne.v1.TurnChangesNotice
-	80,  // 81: ariadne.v1.TraceTokenUsage.cost:type_name -> ariadne.v1.TraceCost
-	32,  // 82: ariadne.v1.TraceToolCallResult.files:type_name -> ariadne.v1.MessageAttachment
-	83,  // 83: ariadne.v1.TraceToolCall.result:type_name -> ariadne.v1.TraceToolCallResult
-	85,  // 84: ariadne.v1.TraceToolCall.research:type_name -> ariadne.v1.TraceRequest
-	81,  // 85: ariadne.v1.TraceRequest.usage:type_name -> ariadne.v1.TraceTokenUsage
-	82,  // 86: ariadne.v1.TraceRequest.reasoning:type_name -> ariadne.v1.TraceReasoning
-	84,  // 87: ariadne.v1.TraceRequest.tool_calls:type_name -> ariadne.v1.TraceToolCall
-	86,  // 88: ariadne.v1.TraceRequestFailure.agent_error:type_name -> ariadne.v1.TraceAgentError
-	85,  // 89: ariadne.v1.TraceItem.request:type_name -> ariadne.v1.TraceRequest
-	87,  // 90: ariadne.v1.TraceItem.request_failed:type_name -> ariadne.v1.TraceRequestFailure
-	88,  // 91: ariadne.v1.TraceItem.retry:type_name -> ariadne.v1.TraceRetry
-	89,  // 92: ariadne.v1.TraceItem.fallback:type_name -> ariadne.v1.TraceFallback
-	90,  // 93: ariadne.v1.TraceItem.compaction_failed:type_name -> ariadne.v1.TraceCompactionFailed
-	91,  // 94: ariadne.v1.TraceItem.results_cleared:type_name -> ariadne.v1.TraceResultsCleared
-	92,  // 95: ariadne.v1.TraceItem.instructions:type_name -> ariadne.v1.TraceInstructions
-	147, // 96: ariadne.v1.TraceTurn.error:type_name -> ariadne.v1.LocalizedError
-	81,  // 97: ariadne.v1.TraceTurn.usage:type_name -> ariadne.v1.TraceTokenUsage
-	93,  // 98: ariadne.v1.TraceTurn.items:type_name -> ariadne.v1.TraceItem
-	32,  // 99: ariadne.v1.TraceUserMessage.images:type_name -> ariadne.v1.MessageAttachment
-	95,  // 100: ariadne.v1.TraceAssistantMessage.tool_calls:type_name -> ariadne.v1.TraceToolCallRecord
-	96,  // 101: ariadne.v1.TraceAssistantMessage.reasoning:type_name -> ariadne.v1.TraceReasoningRecord
-	32,  // 102: ariadne.v1.TraceToolMessage.images:type_name -> ariadne.v1.MessageAttachment
-	97,  // 103: ariadne.v1.TraceMessage.system:type_name -> ariadne.v1.TraceSystemMessage
-	98,  // 104: ariadne.v1.TraceMessage.user:type_name -> ariadne.v1.TraceUserMessage
-	99,  // 105: ariadne.v1.TraceMessage.assistant:type_name -> ariadne.v1.TraceAssistantMessage
-	100, // 106: ariadne.v1.TraceMessage.tool:type_name -> ariadne.v1.TraceToolMessage
-	151, // 107: ariadne.v1.TraceToolDefinition.parameters:type_name -> google.protobuf.Struct
-	151, // 108: ariadne.v1.TraceRequestCall.settings:type_name -> google.protobuf.Struct
-	101, // 109: ariadne.v1.TraceRequestDetail.messages:type_name -> ariadne.v1.TraceMessage
-	102, // 110: ariadne.v1.TraceRequestDetail.tools:type_name -> ariadne.v1.TraceToolDefinition
-	103, // 111: ariadne.v1.TraceRequestDetail.call:type_name -> ariadne.v1.TraceRequestCall
-	152, // 112: ariadne.v1.TraceRequestDetail.body:type_name -> google.protobuf.Value
-	2,   // 113: ariadne.v1.GetConversationResponse.conversation:type_name -> ariadne.v1.ConversationView
-	45,  // 114: ariadne.v1.GetConversationResponse.messages:type_name -> ariadne.v1.MessageView
-	77,  // 115: ariadne.v1.GetConversationResponse.notices:type_name -> ariadne.v1.NoticeView
-	6,   // 116: ariadne.v1.GetConversationResponse.todo:type_name -> ariadne.v1.TodoView
-	3,   // 117: ariadne.v1.GetConversationResponse.model:type_name -> ariadne.v1.ConversationModelInfo
-	33,  // 118: ariadne.v1.PostMessageRequest.attachments:type_name -> ariadne.v1.AttachmentInput
-	39,  // 119: ariadne.v1.PostMessageRequest.mentions:type_name -> ariadne.v1.MentionInput
-	149, // 120: ariadne.v1.PostMessageRequest.comments:type_name -> ariadne.v1.LineComment
-	45,  // 121: ariadne.v1.PostMessageResponse.message:type_name -> ariadne.v1.MessageView
-	19,  // 122: ariadne.v1.AnswerAttentionRequest.answer:type_name -> ariadne.v1.BlockAnswer
-	45,  // 123: ariadne.v1.AddReactionResponse.message:type_name -> ariadne.v1.MessageView
-	45,  // 124: ariadne.v1.RemoveReactionResponse.message:type_name -> ariadne.v1.MessageView
-	79,  // 125: ariadne.v1.ListSkillsResponse.skills:type_name -> ariadne.v1.SkillView
-	94,  // 126: ariadne.v1.GetTraceResponse.turns:type_name -> ariadne.v1.TraceTurn
-	104, // 127: ariadne.v1.GetTraceRequestDetailResponse.request:type_name -> ariadne.v1.TraceRequestDetail
-	78,  // 128: ariadne.v1.ListMemoriesResponse.memories:type_name -> ariadne.v1.MemoryView
-	78,  // 129: ariadne.v1.CreateMemoryResponse.memory:type_name -> ariadne.v1.MemoryView
-	78,  // 130: ariadne.v1.UpdateMemoryResponse.memory:type_name -> ariadne.v1.MemoryView
-	12,  // 131: ariadne.v1.FormAnswer.ValuesEntry.value:type_name -> ariadne.v1.FormFieldValue
-	21,  // 132: ariadne.v1.TableRow.CellsEntry.value:type_name -> ariadne.v1.TableCellValue
-	24,  // 133: ariadne.v1.ChartRow.CellsEntry.value:type_name -> ariadne.v1.ChartCellValue
-	105, // 134: ariadne.v1.ConversationService.GetConversation:input_type -> ariadne.v1.GetConversationRequest
-	107, // 135: ariadne.v1.ConversationService.PostMessage:input_type -> ariadne.v1.PostMessageRequest
-	109, // 136: ariadne.v1.ConversationService.MarkRead:input_type -> ariadne.v1.MarkReadRequest
-	111, // 137: ariadne.v1.ConversationService.NoteReturn:input_type -> ariadne.v1.NoteReturnRequest
-	113, // 138: ariadne.v1.ConversationService.AnswerAttention:input_type -> ariadne.v1.AnswerAttentionRequest
-	115, // 139: ariadne.v1.ConversationService.AddReaction:input_type -> ariadne.v1.AddReactionRequest
-	117, // 140: ariadne.v1.ConversationService.RemoveReaction:input_type -> ariadne.v1.RemoveReactionRequest
-	119, // 141: ariadne.v1.ConversationService.StopTurn:input_type -> ariadne.v1.StopTurnRequest
-	121, // 142: ariadne.v1.ConversationService.RetryTurn:input_type -> ariadne.v1.RetryTurnRequest
-	123, // 143: ariadne.v1.ConversationService.WakeWait:input_type -> ariadne.v1.WakeWaitRequest
-	125, // 144: ariadne.v1.ConversationService.CancelWait:input_type -> ariadne.v1.CancelWaitRequest
-	127, // 145: ariadne.v1.ConversationService.ListSkills:input_type -> ariadne.v1.ListSkillsRequest
-	129, // 146: ariadne.v1.ConversationService.GetTrace:input_type -> ariadne.v1.GetTraceRequest
-	131, // 147: ariadne.v1.ConversationService.GetTraceRequestDetail:input_type -> ariadne.v1.GetTraceRequestDetailRequest
-	133, // 148: ariadne.v1.ConversationService.UndoNotice:input_type -> ariadne.v1.UndoNoticeRequest
-	135, // 149: ariadne.v1.ConversationService.ListMemories:input_type -> ariadne.v1.ListMemoriesRequest
-	137, // 150: ariadne.v1.ConversationService.CreateMemory:input_type -> ariadne.v1.CreateMemoryRequest
-	139, // 151: ariadne.v1.ConversationService.UpdateMemory:input_type -> ariadne.v1.UpdateMemoryRequest
-	141, // 152: ariadne.v1.ConversationService.DeleteMemory:input_type -> ariadne.v1.DeleteMemoryRequest
-	106, // 153: ariadne.v1.ConversationService.GetConversation:output_type -> ariadne.v1.GetConversationResponse
-	108, // 154: ariadne.v1.ConversationService.PostMessage:output_type -> ariadne.v1.PostMessageResponse
-	110, // 155: ariadne.v1.ConversationService.MarkRead:output_type -> ariadne.v1.MarkReadResponse
-	112, // 156: ariadne.v1.ConversationService.NoteReturn:output_type -> ariadne.v1.NoteReturnResponse
-	114, // 157: ariadne.v1.ConversationService.AnswerAttention:output_type -> ariadne.v1.AnswerAttentionResponse
-	116, // 158: ariadne.v1.ConversationService.AddReaction:output_type -> ariadne.v1.AddReactionResponse
-	118, // 159: ariadne.v1.ConversationService.RemoveReaction:output_type -> ariadne.v1.RemoveReactionResponse
-	120, // 160: ariadne.v1.ConversationService.StopTurn:output_type -> ariadne.v1.StopTurnResponse
-	122, // 161: ariadne.v1.ConversationService.RetryTurn:output_type -> ariadne.v1.RetryTurnResponse
-	124, // 162: ariadne.v1.ConversationService.WakeWait:output_type -> ariadne.v1.WakeWaitResponse
-	126, // 163: ariadne.v1.ConversationService.CancelWait:output_type -> ariadne.v1.CancelWaitResponse
-	128, // 164: ariadne.v1.ConversationService.ListSkills:output_type -> ariadne.v1.ListSkillsResponse
-	130, // 165: ariadne.v1.ConversationService.GetTrace:output_type -> ariadne.v1.GetTraceResponse
-	132, // 166: ariadne.v1.ConversationService.GetTraceRequestDetail:output_type -> ariadne.v1.GetTraceRequestDetailResponse
-	134, // 167: ariadne.v1.ConversationService.UndoNotice:output_type -> ariadne.v1.UndoNoticeResponse
-	136, // 168: ariadne.v1.ConversationService.ListMemories:output_type -> ariadne.v1.ListMemoriesResponse
-	138, // 169: ariadne.v1.ConversationService.CreateMemory:output_type -> ariadne.v1.CreateMemoryResponse
-	140, // 170: ariadne.v1.ConversationService.UpdateMemory:output_type -> ariadne.v1.UpdateMemoryResponse
-	142, // 171: ariadne.v1.ConversationService.DeleteMemory:output_type -> ariadne.v1.DeleteMemoryResponse
-	153, // [153:172] is the sub-list for method output_type
-	134, // [134:153] is the sub-list for method input_type
-	134, // [134:134] is the sub-list for extension type_name
-	134, // [134:134] is the sub-list for extension extendee
-	0,   // [0:134] is the sub-list for field type_name
+	67,  // 50: ariadne.v1.ArtifactFeedbackAnswerItem.answers:type_name -> ariadne.v1.ArtifactFeedbackAnswerEntry
+	69,  // 51: ariadne.v1.ArtifactFeedbackTweakEntry.changes:type_name -> ariadne.v1.ArtifactFeedbackTweakChange
+	70,  // 52: ariadne.v1.ArtifactFeedbackTweakItem.tweaks:type_name -> ariadne.v1.ArtifactFeedbackTweakEntry
+	61,  // 53: ariadne.v1.ArtifactFeedbackItem.edit:type_name -> ariadne.v1.ArtifactFeedbackEditItem
+	63,  // 54: ariadne.v1.ArtifactFeedbackItem.choice:type_name -> ariadne.v1.ArtifactFeedbackChoiceItem
+	64,  // 55: ariadne.v1.ArtifactFeedbackItem.comment:type_name -> ariadne.v1.ArtifactFeedbackCommentItem
+	65,  // 56: ariadne.v1.ArtifactFeedbackItem.mark:type_name -> ariadne.v1.ArtifactFeedbackMarkItem
+	66,  // 57: ariadne.v1.ArtifactFeedbackItem.board:type_name -> ariadne.v1.ArtifactFeedbackBoardItem
+	68,  // 58: ariadne.v1.ArtifactFeedbackItem.answer:type_name -> ariadne.v1.ArtifactFeedbackAnswerItem
+	71,  // 59: ariadne.v1.ArtifactFeedbackItem.tweak:type_name -> ariadne.v1.ArtifactFeedbackTweakItem
+	72,  // 60: ariadne.v1.ArtifactFeedbackNotice.items:type_name -> ariadne.v1.ArtifactFeedbackItem
+	80,  // 61: ariadne.v1.TurnChangesNotice.files:type_name -> ariadne.v1.TurnFile
+	155, // 62: ariadne.v1.TurnChangesNotice.total:type_name -> ariadne.v1.ThreadChangeTotals
+	46,  // 63: ariadne.v1.NoticeView.approval:type_name -> ariadne.v1.ApprovalNotice
+	47,  // 64: ariadne.v1.NoticeView.memory:type_name -> ariadne.v1.MemoryNotice
+	48,  // 65: ariadne.v1.NoticeView.memory_everywhere:type_name -> ariadne.v1.MemoryEverywhereNotice
+	49,  // 66: ariadne.v1.NoticeView.compaction_failed:type_name -> ariadne.v1.CompactionFailedNotice
+	50,  // 67: ariadne.v1.NoticeView.routine_change:type_name -> ariadne.v1.RoutineChangeNotice
+	51,  // 68: ariadne.v1.NoticeView.recap:type_name -> ariadne.v1.RecapNotice
+	52,  // 69: ariadne.v1.NoticeView.model_retry:type_name -> ariadne.v1.ModelRetryNotice
+	53,  // 70: ariadne.v1.NoticeView.model_fallback:type_name -> ariadne.v1.ModelFallbackNotice
+	54,  // 71: ariadne.v1.NoticeView.woken:type_name -> ariadne.v1.WokenNotice
+	55,  // 72: ariadne.v1.NoticeView.routine:type_name -> ariadne.v1.RoutineNotice
+	56,  // 73: ariadne.v1.NoticeView.issue_linked:type_name -> ariadne.v1.IssueLinkedNotice
+	57,  // 74: ariadne.v1.NoticeView.issue_written:type_name -> ariadne.v1.IssueWrittenNotice
+	58,  // 75: ariadne.v1.NoticeView.merged:type_name -> ariadne.v1.MergedNotice
+	59,  // 76: ariadne.v1.NoticeView.autopilot_held:type_name -> ariadne.v1.AutopilotHeldNotice
+	60,  // 77: ariadne.v1.NoticeView.artifact_edited:type_name -> ariadne.v1.ArtifactEditedNotice
+	73,  // 78: ariadne.v1.NoticeView.artifact_feedback:type_name -> ariadne.v1.ArtifactFeedbackNotice
+	74,  // 79: ariadne.v1.NoticeView.artifact_comment:type_name -> ariadne.v1.ArtifactCommentNotice
+	75,  // 80: ariadne.v1.NoticeView.merge_conflict:type_name -> ariadne.v1.MergeConflictNotice
+	76,  // 81: ariadne.v1.NoticeView.worktree_removed:type_name -> ariadne.v1.WorktreeRemovedNotice
+	77,  // 82: ariadne.v1.NoticeView.plan_changed:type_name -> ariadne.v1.PlanChangedNotice
+	78,  // 83: ariadne.v1.NoticeView.thread_auto_started:type_name -> ariadne.v1.ThreadAutoStartedNotice
+	79,  // 84: ariadne.v1.NoticeView.review:type_name -> ariadne.v1.ReviewNotice
+	81,  // 85: ariadne.v1.NoticeView.turn_changes:type_name -> ariadne.v1.TurnChangesNotice
+	85,  // 86: ariadne.v1.TraceTokenUsage.cost:type_name -> ariadne.v1.TraceCost
+	32,  // 87: ariadne.v1.TraceToolCallResult.files:type_name -> ariadne.v1.MessageAttachment
+	88,  // 88: ariadne.v1.TraceToolCall.result:type_name -> ariadne.v1.TraceToolCallResult
+	90,  // 89: ariadne.v1.TraceToolCall.research:type_name -> ariadne.v1.TraceRequest
+	86,  // 90: ariadne.v1.TraceRequest.usage:type_name -> ariadne.v1.TraceTokenUsage
+	87,  // 91: ariadne.v1.TraceRequest.reasoning:type_name -> ariadne.v1.TraceReasoning
+	89,  // 92: ariadne.v1.TraceRequest.tool_calls:type_name -> ariadne.v1.TraceToolCall
+	91,  // 93: ariadne.v1.TraceRequestFailure.agent_error:type_name -> ariadne.v1.TraceAgentError
+	90,  // 94: ariadne.v1.TraceItem.request:type_name -> ariadne.v1.TraceRequest
+	92,  // 95: ariadne.v1.TraceItem.request_failed:type_name -> ariadne.v1.TraceRequestFailure
+	93,  // 96: ariadne.v1.TraceItem.retry:type_name -> ariadne.v1.TraceRetry
+	94,  // 97: ariadne.v1.TraceItem.fallback:type_name -> ariadne.v1.TraceFallback
+	95,  // 98: ariadne.v1.TraceItem.compaction_failed:type_name -> ariadne.v1.TraceCompactionFailed
+	96,  // 99: ariadne.v1.TraceItem.results_cleared:type_name -> ariadne.v1.TraceResultsCleared
+	97,  // 100: ariadne.v1.TraceItem.instructions:type_name -> ariadne.v1.TraceInstructions
+	152, // 101: ariadne.v1.TraceTurn.error:type_name -> ariadne.v1.LocalizedError
+	86,  // 102: ariadne.v1.TraceTurn.usage:type_name -> ariadne.v1.TraceTokenUsage
+	98,  // 103: ariadne.v1.TraceTurn.items:type_name -> ariadne.v1.TraceItem
+	32,  // 104: ariadne.v1.TraceUserMessage.images:type_name -> ariadne.v1.MessageAttachment
+	100, // 105: ariadne.v1.TraceAssistantMessage.tool_calls:type_name -> ariadne.v1.TraceToolCallRecord
+	101, // 106: ariadne.v1.TraceAssistantMessage.reasoning:type_name -> ariadne.v1.TraceReasoningRecord
+	32,  // 107: ariadne.v1.TraceToolMessage.images:type_name -> ariadne.v1.MessageAttachment
+	102, // 108: ariadne.v1.TraceMessage.system:type_name -> ariadne.v1.TraceSystemMessage
+	103, // 109: ariadne.v1.TraceMessage.user:type_name -> ariadne.v1.TraceUserMessage
+	104, // 110: ariadne.v1.TraceMessage.assistant:type_name -> ariadne.v1.TraceAssistantMessage
+	105, // 111: ariadne.v1.TraceMessage.tool:type_name -> ariadne.v1.TraceToolMessage
+	156, // 112: ariadne.v1.TraceToolDefinition.parameters:type_name -> google.protobuf.Struct
+	156, // 113: ariadne.v1.TraceRequestCall.settings:type_name -> google.protobuf.Struct
+	106, // 114: ariadne.v1.TraceRequestDetail.messages:type_name -> ariadne.v1.TraceMessage
+	107, // 115: ariadne.v1.TraceRequestDetail.tools:type_name -> ariadne.v1.TraceToolDefinition
+	108, // 116: ariadne.v1.TraceRequestDetail.call:type_name -> ariadne.v1.TraceRequestCall
+	157, // 117: ariadne.v1.TraceRequestDetail.body:type_name -> google.protobuf.Value
+	2,   // 118: ariadne.v1.GetConversationResponse.conversation:type_name -> ariadne.v1.ConversationView
+	45,  // 119: ariadne.v1.GetConversationResponse.messages:type_name -> ariadne.v1.MessageView
+	82,  // 120: ariadne.v1.GetConversationResponse.notices:type_name -> ariadne.v1.NoticeView
+	6,   // 121: ariadne.v1.GetConversationResponse.todo:type_name -> ariadne.v1.TodoView
+	3,   // 122: ariadne.v1.GetConversationResponse.model:type_name -> ariadne.v1.ConversationModelInfo
+	33,  // 123: ariadne.v1.PostMessageRequest.attachments:type_name -> ariadne.v1.AttachmentInput
+	39,  // 124: ariadne.v1.PostMessageRequest.mentions:type_name -> ariadne.v1.MentionInput
+	154, // 125: ariadne.v1.PostMessageRequest.comments:type_name -> ariadne.v1.LineComment
+	45,  // 126: ariadne.v1.PostMessageResponse.message:type_name -> ariadne.v1.MessageView
+	19,  // 127: ariadne.v1.AnswerAttentionRequest.answer:type_name -> ariadne.v1.BlockAnswer
+	45,  // 128: ariadne.v1.AddReactionResponse.message:type_name -> ariadne.v1.MessageView
+	45,  // 129: ariadne.v1.RemoveReactionResponse.message:type_name -> ariadne.v1.MessageView
+	84,  // 130: ariadne.v1.ListSkillsResponse.skills:type_name -> ariadne.v1.SkillView
+	99,  // 131: ariadne.v1.GetTraceResponse.turns:type_name -> ariadne.v1.TraceTurn
+	109, // 132: ariadne.v1.GetTraceRequestDetailResponse.request:type_name -> ariadne.v1.TraceRequestDetail
+	83,  // 133: ariadne.v1.ListMemoriesResponse.memories:type_name -> ariadne.v1.MemoryView
+	83,  // 134: ariadne.v1.CreateMemoryResponse.memory:type_name -> ariadne.v1.MemoryView
+	83,  // 135: ariadne.v1.UpdateMemoryResponse.memory:type_name -> ariadne.v1.MemoryView
+	12,  // 136: ariadne.v1.FormAnswer.ValuesEntry.value:type_name -> ariadne.v1.FormFieldValue
+	21,  // 137: ariadne.v1.TableRow.CellsEntry.value:type_name -> ariadne.v1.TableCellValue
+	24,  // 138: ariadne.v1.ChartRow.CellsEntry.value:type_name -> ariadne.v1.ChartCellValue
+	110, // 139: ariadne.v1.ConversationService.GetConversation:input_type -> ariadne.v1.GetConversationRequest
+	112, // 140: ariadne.v1.ConversationService.PostMessage:input_type -> ariadne.v1.PostMessageRequest
+	114, // 141: ariadne.v1.ConversationService.MarkRead:input_type -> ariadne.v1.MarkReadRequest
+	116, // 142: ariadne.v1.ConversationService.NoteReturn:input_type -> ariadne.v1.NoteReturnRequest
+	118, // 143: ariadne.v1.ConversationService.AnswerAttention:input_type -> ariadne.v1.AnswerAttentionRequest
+	120, // 144: ariadne.v1.ConversationService.AddReaction:input_type -> ariadne.v1.AddReactionRequest
+	122, // 145: ariadne.v1.ConversationService.RemoveReaction:input_type -> ariadne.v1.RemoveReactionRequest
+	124, // 146: ariadne.v1.ConversationService.StopTurn:input_type -> ariadne.v1.StopTurnRequest
+	126, // 147: ariadne.v1.ConversationService.RetryTurn:input_type -> ariadne.v1.RetryTurnRequest
+	128, // 148: ariadne.v1.ConversationService.WakeWait:input_type -> ariadne.v1.WakeWaitRequest
+	130, // 149: ariadne.v1.ConversationService.CancelWait:input_type -> ariadne.v1.CancelWaitRequest
+	132, // 150: ariadne.v1.ConversationService.ListSkills:input_type -> ariadne.v1.ListSkillsRequest
+	134, // 151: ariadne.v1.ConversationService.GetTrace:input_type -> ariadne.v1.GetTraceRequest
+	136, // 152: ariadne.v1.ConversationService.GetTraceRequestDetail:input_type -> ariadne.v1.GetTraceRequestDetailRequest
+	138, // 153: ariadne.v1.ConversationService.UndoNotice:input_type -> ariadne.v1.UndoNoticeRequest
+	140, // 154: ariadne.v1.ConversationService.ListMemories:input_type -> ariadne.v1.ListMemoriesRequest
+	142, // 155: ariadne.v1.ConversationService.CreateMemory:input_type -> ariadne.v1.CreateMemoryRequest
+	144, // 156: ariadne.v1.ConversationService.UpdateMemory:input_type -> ariadne.v1.UpdateMemoryRequest
+	146, // 157: ariadne.v1.ConversationService.DeleteMemory:input_type -> ariadne.v1.DeleteMemoryRequest
+	111, // 158: ariadne.v1.ConversationService.GetConversation:output_type -> ariadne.v1.GetConversationResponse
+	113, // 159: ariadne.v1.ConversationService.PostMessage:output_type -> ariadne.v1.PostMessageResponse
+	115, // 160: ariadne.v1.ConversationService.MarkRead:output_type -> ariadne.v1.MarkReadResponse
+	117, // 161: ariadne.v1.ConversationService.NoteReturn:output_type -> ariadne.v1.NoteReturnResponse
+	119, // 162: ariadne.v1.ConversationService.AnswerAttention:output_type -> ariadne.v1.AnswerAttentionResponse
+	121, // 163: ariadne.v1.ConversationService.AddReaction:output_type -> ariadne.v1.AddReactionResponse
+	123, // 164: ariadne.v1.ConversationService.RemoveReaction:output_type -> ariadne.v1.RemoveReactionResponse
+	125, // 165: ariadne.v1.ConversationService.StopTurn:output_type -> ariadne.v1.StopTurnResponse
+	127, // 166: ariadne.v1.ConversationService.RetryTurn:output_type -> ariadne.v1.RetryTurnResponse
+	129, // 167: ariadne.v1.ConversationService.WakeWait:output_type -> ariadne.v1.WakeWaitResponse
+	131, // 168: ariadne.v1.ConversationService.CancelWait:output_type -> ariadne.v1.CancelWaitResponse
+	133, // 169: ariadne.v1.ConversationService.ListSkills:output_type -> ariadne.v1.ListSkillsResponse
+	135, // 170: ariadne.v1.ConversationService.GetTrace:output_type -> ariadne.v1.GetTraceResponse
+	137, // 171: ariadne.v1.ConversationService.GetTraceRequestDetail:output_type -> ariadne.v1.GetTraceRequestDetailResponse
+	139, // 172: ariadne.v1.ConversationService.UndoNotice:output_type -> ariadne.v1.UndoNoticeResponse
+	141, // 173: ariadne.v1.ConversationService.ListMemories:output_type -> ariadne.v1.ListMemoriesResponse
+	143, // 174: ariadne.v1.ConversationService.CreateMemory:output_type -> ariadne.v1.CreateMemoryResponse
+	145, // 175: ariadne.v1.ConversationService.UpdateMemory:output_type -> ariadne.v1.UpdateMemoryResponse
+	147, // 176: ariadne.v1.ConversationService.DeleteMemory:output_type -> ariadne.v1.DeleteMemoryResponse
+	158, // [158:177] is the sub-list for method output_type
+	139, // [139:158] is the sub-list for method input_type
+	139, // [139:139] is the sub-list for extension type_name
+	139, // [139:139] is the sub-list for extension extendee
+	0,   // [0:139] is the sub-list for field type_name
 }
 
 func init() { file_ariadne_v1_conversations_proto_init() }
@@ -11178,18 +11587,24 @@ func file_ariadne_v1_conversations_proto_init() {
 	file_ariadne_v1_conversations_proto_msgTypes[47].OneofWrappers = []any{}
 	file_ariadne_v1_conversations_proto_msgTypes[57].OneofWrappers = []any{}
 	file_ariadne_v1_conversations_proto_msgTypes[58].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[67].OneofWrappers = []any{
+	file_ariadne_v1_conversations_proto_msgTypes[62].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[67].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[69].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[70].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[72].OneofWrappers = []any{
 		(*ArtifactFeedbackItem_Edit)(nil),
 		(*ArtifactFeedbackItem_Choice)(nil),
 		(*ArtifactFeedbackItem_Comment)(nil),
 		(*ArtifactFeedbackItem_Mark)(nil),
 		(*ArtifactFeedbackItem_Board)(nil),
+		(*ArtifactFeedbackItem_Answer)(nil),
+		(*ArtifactFeedbackItem_Tweak)(nil),
 	}
-	file_ariadne_v1_conversations_proto_msgTypes[68].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[70].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[73].OneofWrappers = []any{}
 	file_ariadne_v1_conversations_proto_msgTypes[75].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[76].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[77].OneofWrappers = []any{
+	file_ariadne_v1_conversations_proto_msgTypes[80].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[81].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[82].OneofWrappers = []any{
 		(*NoticeView_Approval)(nil),
 		(*NoticeView_Memory)(nil),
 		(*NoticeView_MemoryEverywhere)(nil),
@@ -11214,12 +11629,12 @@ func file_ariadne_v1_conversations_proto_init() {
 		(*NoticeView_Review)(nil),
 		(*NoticeView_TurnChanges)(nil),
 	}
-	file_ariadne_v1_conversations_proto_msgTypes[81].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[84].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[85].OneofWrappers = []any{}
 	file_ariadne_v1_conversations_proto_msgTypes[86].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[87].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[93].OneofWrappers = []any{
+	file_ariadne_v1_conversations_proto_msgTypes[89].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[90].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[91].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[92].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[98].OneofWrappers = []any{
 		(*TraceItem_Request)(nil),
 		(*TraceItem_RequestFailed)(nil),
 		(*TraceItem_Retry)(nil),
@@ -11228,26 +11643,26 @@ func file_ariadne_v1_conversations_proto_init() {
 		(*TraceItem_ResultsCleared)(nil),
 		(*TraceItem_Instructions)(nil),
 	}
-	file_ariadne_v1_conversations_proto_msgTypes[94].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[96].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[100].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[101].OneofWrappers = []any{
+	file_ariadne_v1_conversations_proto_msgTypes[99].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[101].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[105].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[106].OneofWrappers = []any{
 		(*TraceMessage_System)(nil),
 		(*TraceMessage_User)(nil),
 		(*TraceMessage_Assistant)(nil),
 		(*TraceMessage_Tool)(nil),
 	}
-	file_ariadne_v1_conversations_proto_msgTypes[104].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[105].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[106].OneofWrappers = []any{}
-	file_ariadne_v1_conversations_proto_msgTypes[129].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[109].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[110].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[111].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[134].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ariadne_v1_conversations_proto_rawDesc), len(file_ariadne_v1_conversations_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   147,
+			NumMessages:   152,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -54,6 +54,9 @@ const (
 	// ArtifactServiceSendArtifactFeedbackProcedure is the fully-qualified name of the ArtifactService's
 	// SendArtifactFeedback RPC.
 	ArtifactServiceSendArtifactFeedbackProcedure = "/ariadne.v1.ArtifactService/SendArtifactFeedback"
+	// ArtifactServiceWithdrawArtifactFeedbackProcedure is the fully-qualified name of the
+	// ArtifactService's WithdrawArtifactFeedback RPC.
+	ArtifactServiceWithdrawArtifactFeedbackProcedure = "/ariadne.v1.ArtifactService/WithdrawArtifactFeedback"
 	// ArtifactServiceCreateArtifactCommentProcedure is the fully-qualified name of the
 	// ArtifactService's CreateArtifactComment RPC.
 	ArtifactServiceCreateArtifactCommentProcedure = "/ariadne.v1.ArtifactService/CreateArtifactComment"
@@ -86,6 +89,7 @@ type ArtifactServiceClient interface {
 	SaveArtifact(context.Context, *connect.Request[v1.SaveArtifactRequest]) (*connect.Response[v1.SaveArtifactResponse], error)
 	RefreshDashboard(context.Context, *connect.Request[v1.RefreshDashboardRequest]) (*connect.Response[v1.RefreshDashboardResponse], error)
 	SendArtifactFeedback(context.Context, *connect.Request[v1.SendArtifactFeedbackRequest]) (*connect.Response[v1.SendArtifactFeedbackResponse], error)
+	WithdrawArtifactFeedback(context.Context, *connect.Request[v1.WithdrawArtifactFeedbackRequest]) (*connect.Response[v1.WithdrawArtifactFeedbackResponse], error)
 	CreateArtifactComment(context.Context, *connect.Request[v1.CreateArtifactCommentRequest]) (*connect.Response[v1.CreateArtifactCommentResponse], error)
 	ReplyArtifactComment(context.Context, *connect.Request[v1.ReplyArtifactCommentRequest]) (*connect.Response[v1.ReplyArtifactCommentResponse], error)
 	EditArtifactComment(context.Context, *connect.Request[v1.EditArtifactCommentRequest]) (*connect.Response[v1.EditArtifactCommentResponse], error)
@@ -148,6 +152,12 @@ func NewArtifactServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(artifactServiceMethods.ByName("SendArtifactFeedback")),
 			connect.WithClientOptions(opts...),
 		),
+		withdrawArtifactFeedback: connect.NewClient[v1.WithdrawArtifactFeedbackRequest, v1.WithdrawArtifactFeedbackResponse](
+			httpClient,
+			baseURL+ArtifactServiceWithdrawArtifactFeedbackProcedure,
+			connect.WithSchema(artifactServiceMethods.ByName("WithdrawArtifactFeedback")),
+			connect.WithClientOptions(opts...),
+		),
 		createArtifactComment: connect.NewClient[v1.CreateArtifactCommentRequest, v1.CreateArtifactCommentResponse](
 			httpClient,
 			baseURL+ArtifactServiceCreateArtifactCommentProcedure,
@@ -202,6 +212,7 @@ type artifactServiceClient struct {
 	saveArtifact                 *connect.Client[v1.SaveArtifactRequest, v1.SaveArtifactResponse]
 	refreshDashboard             *connect.Client[v1.RefreshDashboardRequest, v1.RefreshDashboardResponse]
 	sendArtifactFeedback         *connect.Client[v1.SendArtifactFeedbackRequest, v1.SendArtifactFeedbackResponse]
+	withdrawArtifactFeedback     *connect.Client[v1.WithdrawArtifactFeedbackRequest, v1.WithdrawArtifactFeedbackResponse]
 	createArtifactComment        *connect.Client[v1.CreateArtifactCommentRequest, v1.CreateArtifactCommentResponse]
 	replyArtifactComment         *connect.Client[v1.ReplyArtifactCommentRequest, v1.ReplyArtifactCommentResponse]
 	editArtifactComment          *connect.Client[v1.EditArtifactCommentRequest, v1.EditArtifactCommentResponse]
@@ -244,6 +255,11 @@ func (c *artifactServiceClient) RefreshDashboard(ctx context.Context, req *conne
 // SendArtifactFeedback calls ariadne.v1.ArtifactService.SendArtifactFeedback.
 func (c *artifactServiceClient) SendArtifactFeedback(ctx context.Context, req *connect.Request[v1.SendArtifactFeedbackRequest]) (*connect.Response[v1.SendArtifactFeedbackResponse], error) {
 	return c.sendArtifactFeedback.CallUnary(ctx, req)
+}
+
+// WithdrawArtifactFeedback calls ariadne.v1.ArtifactService.WithdrawArtifactFeedback.
+func (c *artifactServiceClient) WithdrawArtifactFeedback(ctx context.Context, req *connect.Request[v1.WithdrawArtifactFeedbackRequest]) (*connect.Response[v1.WithdrawArtifactFeedbackResponse], error) {
+	return c.withdrawArtifactFeedback.CallUnary(ctx, req)
 }
 
 // CreateArtifactComment calls ariadne.v1.ArtifactService.CreateArtifactComment.
@@ -290,6 +306,7 @@ type ArtifactServiceHandler interface {
 	SaveArtifact(context.Context, *connect.Request[v1.SaveArtifactRequest]) (*connect.Response[v1.SaveArtifactResponse], error)
 	RefreshDashboard(context.Context, *connect.Request[v1.RefreshDashboardRequest]) (*connect.Response[v1.RefreshDashboardResponse], error)
 	SendArtifactFeedback(context.Context, *connect.Request[v1.SendArtifactFeedbackRequest]) (*connect.Response[v1.SendArtifactFeedbackResponse], error)
+	WithdrawArtifactFeedback(context.Context, *connect.Request[v1.WithdrawArtifactFeedbackRequest]) (*connect.Response[v1.WithdrawArtifactFeedbackResponse], error)
 	CreateArtifactComment(context.Context, *connect.Request[v1.CreateArtifactCommentRequest]) (*connect.Response[v1.CreateArtifactCommentResponse], error)
 	ReplyArtifactComment(context.Context, *connect.Request[v1.ReplyArtifactCommentRequest]) (*connect.Response[v1.ReplyArtifactCommentResponse], error)
 	EditArtifactComment(context.Context, *connect.Request[v1.EditArtifactCommentRequest]) (*connect.Response[v1.EditArtifactCommentResponse], error)
@@ -346,6 +363,12 @@ func NewArtifactServiceHandler(svc ArtifactServiceHandler, opts ...connect.Handl
 		ArtifactServiceSendArtifactFeedbackProcedure,
 		svc.SendArtifactFeedback,
 		connect.WithSchema(artifactServiceMethods.ByName("SendArtifactFeedback")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactServiceWithdrawArtifactFeedbackHandler := connect.NewUnaryHandler(
+		ArtifactServiceWithdrawArtifactFeedbackProcedure,
+		svc.WithdrawArtifactFeedback,
+		connect.WithSchema(artifactServiceMethods.ByName("WithdrawArtifactFeedback")),
 		connect.WithHandlerOptions(opts...),
 	)
 	artifactServiceCreateArtifactCommentHandler := connect.NewUnaryHandler(
@@ -406,6 +429,8 @@ func NewArtifactServiceHandler(svc ArtifactServiceHandler, opts ...connect.Handl
 			artifactServiceRefreshDashboardHandler.ServeHTTP(w, r)
 		case ArtifactServiceSendArtifactFeedbackProcedure:
 			artifactServiceSendArtifactFeedbackHandler.ServeHTTP(w, r)
+		case ArtifactServiceWithdrawArtifactFeedbackProcedure:
+			artifactServiceWithdrawArtifactFeedbackHandler.ServeHTTP(w, r)
 		case ArtifactServiceCreateArtifactCommentProcedure:
 			artifactServiceCreateArtifactCommentHandler.ServeHTTP(w, r)
 		case ArtifactServiceReplyArtifactCommentProcedure:
@@ -455,6 +480,10 @@ func (UnimplementedArtifactServiceHandler) RefreshDashboard(context.Context, *co
 
 func (UnimplementedArtifactServiceHandler) SendArtifactFeedback(context.Context, *connect.Request[v1.SendArtifactFeedbackRequest]) (*connect.Response[v1.SendArtifactFeedbackResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ArtifactService.SendArtifactFeedback is not implemented"))
+}
+
+func (UnimplementedArtifactServiceHandler) WithdrawArtifactFeedback(context.Context, *connect.Request[v1.WithdrawArtifactFeedbackRequest]) (*connect.Response[v1.WithdrawArtifactFeedbackResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ArtifactService.WithdrawArtifactFeedback is not implemented"))
 }
 
 func (UnimplementedArtifactServiceHandler) CreateArtifactComment(context.Context, *connect.Request[v1.CreateArtifactCommentRequest]) (*connect.Response[v1.CreateArtifactCommentResponse], error) {

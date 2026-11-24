@@ -100,3 +100,79 @@ func TestArtifactFeedbackReportsStoredEditsAndCommentsOnce(t *testing.T) {
 		t.Fatalf("unchanged feedback went out again: %+v", second.Msg.GetFeedback())
 	}
 }
+
+func TestWithdrawArtifactFeedbackRPC(t *testing.T) {
+	ctx := t.Context()
+	clock := time.UnixMilli(1900000000000)
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	project, err := repo.CreateProject(ctx, new("Fixture"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := repo.CreateArtifact(ctx, project.ID, core.NewArtifact{Kind: "document", Title: "Draft", Author: project.CoordinatorID, Content: "First"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := New(Options{Repository: repo, Token: "fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	clock = clock.Add(time.Second)
+	if _, err := repo.ReviseArtifact(ctx, a.ID, core.ArtifactRevision{
+		Author: "user", BaseVersion: &a.Version, Content: "Edited", Shared: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(api)
+	defer server.Close()
+	client := ariadnev1connect.NewArtifactServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("fixture")),
+	)
+
+	sent, err := client.SendArtifactFeedback(ctx, connect.NewRequest(&ariadnev1.SendArtifactFeedbackRequest{ArtifactId: a.ID}))
+	if err != nil || sent.Msg.GetFeedback() == nil {
+		t.Fatalf("SendArtifactFeedback failed: %v, fb=%v", err, sent)
+	}
+	round := sent.Msg.GetFeedback().GetRound()
+
+	withdrawRes, err := client.WithdrawArtifactFeedback(ctx, connect.NewRequest(&ariadnev1.WithdrawArtifactFeedbackRequest{
+		ArtifactId: a.ID,
+		Round:      round,
+	}))
+	if err != nil {
+		t.Fatalf("WithdrawArtifactFeedback failed: %v", err)
+	}
+	if !withdrawRes.Msg.GetWithdrawn() {
+		t.Fatal("expected withdrawn=true before turn starts")
+	}
+
+	// Re-send and start a turn -> second withdraw must return withdrawn=false.
+	clock = clock.Add(time.Second)
+	sent2, err := client.SendArtifactFeedback(ctx, connect.NewRequest(&ariadnev1.SendArtifactFeedbackRequest{ArtifactId: a.ID}))
+	if err != nil || sent2.Msg.GetFeedback() == nil {
+		t.Fatalf("second SendArtifactFeedback failed: %v", err)
+	}
+	clock = clock.Add(time.Second)
+	if _, err := repo.StartTurn(ctx, project.CoordinatorID, "test-model"); err != nil {
+		t.Fatal(err)
+	}
+	withdrawRes2, err := client.WithdrawArtifactFeedback(ctx, connect.NewRequest(&ariadnev1.WithdrawArtifactFeedbackRequest{
+		ArtifactId: a.ID,
+		Round:      sent2.Msg.GetFeedback().GetRound(),
+	}))
+	if err != nil {
+		t.Fatalf("second WithdrawArtifactFeedback failed: %v", err)
+	}
+	if withdrawRes2.Msg.GetWithdrawn() {
+		t.Fatal("expected withdrawn=false after turn started")
+	}
+}

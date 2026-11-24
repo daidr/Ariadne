@@ -14,6 +14,7 @@ service ArtifactService {
   rpc SaveArtifact(SaveArtifactRequest) returns (SaveArtifactResponse);
   rpc RefreshDashboard(RefreshDashboardRequest) returns (RefreshDashboardResponse);
   rpc SendArtifactFeedback(SendArtifactFeedbackRequest) returns (SendArtifactFeedbackResponse);
+  rpc WithdrawArtifactFeedback(WithdrawArtifactFeedbackRequest) returns (WithdrawArtifactFeedbackResponse);
 
   rpc CreateArtifactComment(CreateArtifactCommentRequest) returns (CreateArtifactCommentResponse);
   rpc ReplyArtifactComment(ReplyArtifactCommentRequest) returns (ReplyArtifactCommentResponse);
@@ -100,12 +101,28 @@ message ArtifactVersionView {
   int64 created_at = 5 [jstype = JS_NUMBER];
 }
 
+message ArtifactCommentElementRect {
+  double x = 1;
+  double y = 2;
+  double w = 3;
+  double h = 4;
+}
+
+message ArtifactCommentElement {
+  optional string label = 1;
+  optional string role = 2;
+  optional string tag = 3;
+  optional string selector = 4;
+  optional ArtifactCommentElementRect rect = 5;
+}
+
 message ArtifactCommentAnchor {
   oneof target {
     string node = 1;
     string edge = 2;
   }
   optional string block = 3;
+  optional ArtifactCommentElement element = 4;
 }
 
 message ArtifactCommentView {
@@ -234,6 +251,15 @@ message SendArtifactFeedbackRequest {
 
 message SendArtifactFeedbackResponse {
   optional ArtifactFeedbackView feedback = 1;
+}
+
+message WithdrawArtifactFeedbackRequest {
+  string artifact_id = 1;
+  int64 round = 2 [jstype = JS_NUMBER];
+}
+
+message WithdrawArtifactFeedbackResponse {
+  bool withdrawn = 1;
 }
 
 message CreateArtifactCommentRequest {
