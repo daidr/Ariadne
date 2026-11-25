@@ -29,6 +29,7 @@ type PluginProvides struct {
 	Dashboards    []string               `protobuf:"bytes,3,rep,name=dashboards,proto3" json:"dashboards,omitempty"`
 	Searches      []string               `protobuf:"bytes,4,rep,name=searches,proto3" json:"searches,omitempty"`
 	Links         []string               `protobuf:"bytes,5,rep,name=links,proto3" json:"links,omitempty"`
+	Notifiers     []string               `protobuf:"bytes,6,rep,name=notifiers,proto3" json:"notifiers,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -98,12 +99,20 @@ func (x *PluginProvides) GetLinks() []string {
 	return nil
 }
 
+func (x *PluginProvides) GetNotifiers() []string {
+	if x != nil {
+		return x.Notifiers
+	}
+	return nil
+}
+
 type PluginUsage struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ModelProviders []string               `protobuf:"bytes,1,rep,name=model_providers,json=modelProviders,proto3" json:"model_providers,omitempty"`
 	ModelRoles     []string               `protobuf:"bytes,2,rep,name=model_roles,json=modelRoles,proto3" json:"model_roles,omitempty"`
 	Searches       []string               `protobuf:"bytes,3,rep,name=searches,proto3" json:"searches,omitempty"`
 	Projects       []string               `protobuf:"bytes,4,rep,name=projects,proto3" json:"projects,omitempty"`
+	Notifiers      []string               `protobuf:"bytes,5,rep,name=notifiers,proto3" json:"notifiers,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -162,6 +171,13 @@ func (x *PluginUsage) GetSearches() []string {
 func (x *PluginUsage) GetProjects() []string {
 	if x != nil {
 		return x.Projects
+	}
+	return nil
+}
+
+func (x *PluginUsage) GetNotifiers() []string {
+	if x != nil {
+		return x.Notifiers
 	}
 	return nil
 }
@@ -899,7 +915,7 @@ var File_ariadne_v1_plugins_proto protoreflect.FileDescriptor
 const file_ariadne_v1_plugins_proto_rawDesc = "" +
 	"\n" +
 	"\x18ariadne/v1/plugins.proto\x12\n" +
-	"ariadne.v1\x1a\x19ariadne/v1/settings.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x96\x01\n" +
+	"ariadne.v1\x1a\x19ariadne/v1/settings.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xb4\x01\n" +
 	"\x0ePluginProvides\x12\x16\n" +
 	"\x06models\x18\x01 \x03(\tR\x06models\x12\x1a\n" +
 	"\bcontexts\x18\x02 \x03(\tR\bcontexts\x12\x1e\n" +
@@ -907,13 +923,15 @@ const file_ariadne_v1_plugins_proto_rawDesc = "" +
 	"dashboards\x18\x03 \x03(\tR\n" +
 	"dashboards\x12\x1a\n" +
 	"\bsearches\x18\x04 \x03(\tR\bsearches\x12\x14\n" +
-	"\x05links\x18\x05 \x03(\tR\x05links\"\x8f\x01\n" +
+	"\x05links\x18\x05 \x03(\tR\x05links\x12\x1c\n" +
+	"\tnotifiers\x18\x06 \x03(\tR\tnotifiers\"\xad\x01\n" +
 	"\vPluginUsage\x12'\n" +
 	"\x0fmodel_providers\x18\x01 \x03(\tR\x0emodelProviders\x12\x1f\n" +
 	"\vmodel_roles\x18\x02 \x03(\tR\n" +
 	"modelRoles\x12\x1a\n" +
 	"\bsearches\x18\x03 \x03(\tR\bsearches\x12\x1a\n" +
-	"\bprojects\x18\x04 \x03(\tR\bprojects\"\xe9\x02\n" +
+	"\bprojects\x18\x04 \x03(\tR\bprojects\x12\x1c\n" +
+	"\tnotifiers\x18\x05 \x03(\tR\tnotifiers\"\xe9\x02\n" +
 	"\fPluginRecord\x12\x13\n" +
 	"\x02id\x18\x01 \x01(\tH\x00R\x02id\x88\x01\x01\x122\n" +
 	"\x04name\x18\x02 \x01(\v2\x19.ariadne.v1.LocalizedTextH\x01R\x04name\x88\x01\x01\x12\x16\n" +

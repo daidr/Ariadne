@@ -26,6 +26,13 @@ service SettingsService {
   rpc GetMcpSettings(GetMcpSettingsRequest) returns (GetMcpSettingsResponse);
   rpc SaveMcpSettings(SaveMcpSettingsRequest) returns (SaveMcpSettingsResponse);
   rpc CheckMcpServer(CheckMcpServerRequest) returns (CheckMcpServerResponse);
+  rpc GetNotificationSettings(GetNotificationSettingsRequest) returns (GetNotificationSettingsResponse);
+  rpc SaveNotificationSettings(SaveNotificationSettingsRequest) returns (SaveNotificationSettingsResponse);
+  rpc SubscribePush(SubscribePushRequest) returns (SubscribePushResponse);
+  rpc UnsubscribePush(UnsubscribePushRequest) returns (UnsubscribePushResponse);
+  rpc DeletePushSubscription(DeletePushSubscriptionRequest) returns (DeletePushSubscriptionResponse);
+  rpc TestNotification(TestNotificationRequest) returns (TestNotificationResponse);
+  rpc ReportNotificationPresence(ReportNotificationPresenceRequest) returns (ReportNotificationPresenceResponse);
 }
 
 // LocalizedText maps BCP-47 locale tags (e.g. "zh-CN", "en") to display text.
@@ -461,4 +468,137 @@ message CheckMcpServerRequest {
 
 message CheckMcpServerResponse {
   McpServerStatus status = 1;
+}
+
+// --- Notifications ---
+
+message PushSubscriptionView {
+  string id = 1;
+  string endpoint = 2;
+  string label = 3;
+  string user_agent = 4;
+  int64 created_at = 5;
+  optional int64 last_used_at = 6;
+  optional string last_error = 7;
+}
+
+message WebhookView {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+  bool enabled = 4;
+  bool secret_set = 5;
+  repeated string headers = 6;
+}
+
+message WebhookInput {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+  bool enabled = 4;
+  optional string secret = 5;
+  bool clear_secret = 6;
+  repeated SecretPair headers = 7;
+}
+
+message NotifierCapabilities {
+  bool supports_check = 1;
+}
+
+message NotifierServiceView {
+  string kind = 1;
+  LocalizedText title = 2;
+  optional LocalizedText description = 3;
+  SettingsSchema settings = 4;
+  NotifierCapabilities capabilities = 5;
+  bool enabled = 6;
+  google.protobuf.Struct values = 7;
+  repeated string secrets_set = 8;
+  bool ready = 9;
+}
+
+message NotifierServiceInput {
+  bool enabled = 1;
+  google.protobuf.Struct values = 2;
+}
+
+message NotificationSettings {
+  bool enabled = 1;
+  bool web_push_enabled = 2;
+  string vapid_public_key = 3;
+  repeated PushSubscriptionView subscriptions = 4;
+  repeated WebhookView webhooks = 5;
+  repeated NotifierServiceView notifiers = 6;
+}
+
+message GetNotificationSettingsRequest {}
+
+message GetNotificationSettingsResponse {
+  NotificationSettings notifications = 1;
+}
+
+message SaveNotificationSettingsRequest {
+  bool enabled = 1;
+  bool web_push_enabled = 2;
+  repeated WebhookInput webhooks = 3;
+  map<string, NotifierServiceInput> notifiers = 4;
+}
+
+message SaveNotificationSettingsResponse {
+  NotificationSettings notifications = 1;
+}
+
+message SubscribePushRequest {
+  string endpoint = 1;
+  string p256dh = 2;
+  string auth = 3;
+  string label = 4;
+  string user_agent = 5;
+}
+
+message SubscribePushResponse {
+  PushSubscriptionView subscription = 1;
+  repeated PushSubscriptionView subscriptions = 2;
+}
+
+message UnsubscribePushRequest {
+  string endpoint = 1;
+}
+
+message UnsubscribePushResponse {
+  repeated PushSubscriptionView subscriptions = 1;
+}
+
+message DeletePushSubscriptionRequest {
+  string id = 1;
+}
+
+message DeletePushSubscriptionResponse {
+  repeated PushSubscriptionView subscriptions = 1;
+}
+
+message TestNotificationRequest {
+  string channel = 1;
+  optional string target_id = 2;
+  optional WebhookInput webhook_draft = 3;
+  optional NotifierServiceInput notifier_draft = 4;
+}
+
+message TestNotificationResponse {
+  bool ok = 1;
+  optional int32 status = 2;
+  optional LocalizedText message = 3;
+  int32 delivered = 4;
+  int32 failed = 5;
+}
+
+message ReportNotificationPresenceRequest {
+  string client_id = 1;
+  bool focused = 2;
+  optional string project_id = 3;
+  optional string thread_id = 4;
+}
+
+message ReportNotificationPresenceResponse {
+  bool ok = 1;
 }

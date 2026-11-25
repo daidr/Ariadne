@@ -21,6 +21,7 @@ message PluginProvides {
   repeated string dashboards = 3;
   repeated string searches = 4;
   repeated string links = 5;
+  repeated string notifiers = 6;
 }
 
 message PluginUsage {
@@ -28,6 +29,7 @@ message PluginUsage {
   repeated string model_roles = 2;
   repeated string searches = 3;
   repeated string projects = 4;
+  repeated string notifiers = 5;
 }
 
 message PluginRecord {

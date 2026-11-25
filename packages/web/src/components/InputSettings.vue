@@ -6,15 +6,12 @@ import {
   DouInput,
   DouKbd,
   DouSegmentedControl,
-  DouSwitch,
-  DouText,
   DouTextarea,
   useColorMode,
 } from 'dou-ui'
 import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError, DEFAULT_KEYS, type InputSettings, type ShortcutAction } from '../api'
-import { notifications, setNotifications } from '../notify'
 import { t, tm } from '../i18n'
 import { state } from '../store'
 
@@ -152,30 +149,6 @@ defineExpose({ save, dirty })
         <TrashIcon />
       </DouButton>
     </div>
-    <div class="input-row">
-      <span>{{ t('settings.notify') }}</span>
-      <DouSwitch
-        :model-value="notifications.enabled"
-        :disabled="
-          notifications.permission === 'unsupported' || notifications.permission === 'denied'
-        "
-        :aria-label="t('settings.notify')"
-        @update:model-value="(on: boolean) => setNotifications(on)"
-      />
-    </div>
-    <DouText
-      v-if="notifications.permission === 'denied' || notifications.permission === 'unsupported'"
-      tone="warning"
-      size="sm"
-    >
-      {{
-        t(
-          notifications.permission === 'denied'
-            ? 'settings.notifyDenied'
-            : 'settings.notifyUnsupported',
-        )
-      }}
-    </DouText>
     <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
   </div>
 </template>

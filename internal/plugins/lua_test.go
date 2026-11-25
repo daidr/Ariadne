@@ -115,7 +115,7 @@ func TestLuaProviderHTTPStreamAndLifecycle(t *testing.T) {
 		t.Fatal("same script loaded via a different path")
 	}
 	record := host.Records()
-	if len(record) != 1 || !reflect.DeepEqual(record[0].Provides, Provides{[]string{"lua-chat"}, []string{"lua-source"}, []string{"lua-data"}, []string{"lua-search"}, []string{"lua-link"}}) {
+	if len(record) != 1 || !reflect.DeepEqual(record[0].Provides, Provides{[]string{"lua-chat"}, []string{"lua-source"}, []string{"lua-data"}, []string{"lua-search"}, []string{"lua-link"}, []string{}}) {
 		t.Fatal(record)
 	}
 	model, ok := registries.Models.Get("lua-chat")
@@ -532,5 +532,114 @@ return {
 		if err := host.AddPath(t.Context(), store, badFile); err == nil {
 			t.Fatalf("expected invalid Lua plugin to fail compilation: %s", bad)
 		}
+	}
+}
+
+func TestLuaNotifierSendCheckAndNetworkOrigin(t *testing.T) {
+	host, _ := fixture(t)
+	store, err := settings.Open(filepath.Join(t.TempDir(), "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var receivedBody string
+	var receivedAuth string
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		data, _ := io.ReadAll(r.Body)
+		receivedBody = string(data)
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer remote.Close()
+
+	pluginPath := luaFile(t, t.TempDir(), `
+local title = {["zh-CN"] = "自定义推送", en = "Custom Push"}
+return {
+	version = 1,
+	id = "lua-notifier-fixture",
+	name = title,
+	notifiers = {{
+		kind = "custom-push",
+		title = title,
+		description = {["zh-CN"] = "通过 HTTP 发送自定义通知"},
+		settings = {
+			type = "object",
+			properties = {
+				endpoint = {type = "string", title = {["zh-CN"] = "接口地址"}, networkOrigin = true},
+				token = {type = "string", title = {["zh-CN"] = "令牌"}, secret = true},
+			},
+			required = {"endpoint", "token"},
+		},
+		send = function(cfg, payload)
+			local res = ariadne.http({
+				url = cfg.endpoint,
+				method = "POST",
+				headers = {
+					["Content-Type"] = "application/json",
+					["Authorization"] = "Bearer " .. cfg.token,
+				},
+				body = ariadne.json_encode({
+					event = payload.event,
+					title = payload.title,
+					body = payload.body,
+					needsMe = payload.needsMe,
+				}),
+			})
+			assert(res.status == 200, "unexpected status " .. res.status)
+		end,
+		check = function(cfg)
+			local res = ariadne.http({
+				url = cfg.endpoint,
+				method = "POST",
+				headers = { ["Authorization"] = "Bearer " .. cfg.token },
+				body = ariadne.json_encode({ ping = true }),
+			})
+			return { ok = res.status == 200, status = res.status, message = { ["zh-CN"] = "连通正常", en = "Connected" } }
+		end,
+	}},
+}
+`)
+	if err := host.AddPath(t.Context(), store, pluginPath); err != nil {
+		t.Fatalf("AddPath(lua notifier): %v", err)
+	}
+	records := host.Records()
+	if len(records) != 1 || !slices.Equal(records[0].Provides.Notifiers, []string{"custom-push"}) {
+		t.Fatalf("unexpected plugin records: %+v", records)
+	}
+
+	registry := host.Notifiers()
+	if err := registry.Validate("custom-push", map[string]any{"endpoint": "ftp://bad.example.com"}); err == nil {
+		t.Fatal("expected invalid networkOrigin to fail validation")
+	}
+
+	cfg := map[string]any{"endpoint": remote.URL + "/notify", "token": "secret-123"}
+	checkRes, err := registry.Check(t.Context(), "custom-push", cfg)
+	if err != nil || !checkRes.OK || checkRes.Status == nil || *checkRes.Status != 200 || checkRes.Message["zh-CN"] != "连通正常" {
+		t.Fatalf("Check failed: res=%+v err=%v", checkRes, err)
+	}
+	if receivedAuth != "Bearer secret-123" {
+		t.Fatalf("auth header = %q", receivedAuth)
+	}
+
+	err = registry.Send(t.Context(), "custom-push", cfg, sdk.NotificationPayload{
+		Event:   "attention.opened",
+		Title:   "等你回答 · Ariadne",
+		Body:    "确认合并？",
+		NeedsMe: 2,
+	})
+	if err != nil {
+		t.Fatalf("Send failed: %v", err)
+	}
+	if !strings.Contains(receivedBody, "确认合并？") || !strings.Contains(receivedBody, "attention.opened") {
+		t.Fatalf("unexpected received body: %s", receivedBody)
+	}
+
+	// Unloading removes the notifier cleanly.
+	if err := host.RemovePath(t.Context(), store, pluginPath); err != nil {
+		t.Fatalf("RemovePath: %v", err)
+	}
+	if registry.Has("custom-push") {
+		t.Fatal("notifier remained registered after plugin removal")
 	}
 }

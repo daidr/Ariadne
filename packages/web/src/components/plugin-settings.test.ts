@@ -26,6 +26,7 @@ function record(partial: Partial<PluginRecord> & { id: string }): PluginRecord {
       dashboards: [],
       searches: [],
       links: [],
+      notifiers: [],
     },
     usage: {
       modelProviders: [],
@@ -67,6 +68,7 @@ describe('plugin-settings helpers', () => {
         dashboards: [],
         searches: [],
         links: ['github'],
+        notifiers: [],
       },
     })
     const hybrid = record({
@@ -77,10 +79,11 @@ describe('plugin-settings helpers', () => {
         dashboards: ['metrics'],
         searches: ['custom-search'],
         links: [],
+        notifiers: ['custom-push'],
       },
     })
     expect(pluginCapabilities(github)).toEqual(['contexts', 'links'])
-    expect(pluginCapabilities(hybrid)).toEqual(['models', 'searches', 'dashboards'])
+    expect(pluginCapabilities(hybrid)).toEqual(['models', 'searches', 'dashboards', 'notifiers'])
   })
 
   test('formats usage summaries across model providers, roles, search, and projects', () => {
@@ -127,6 +130,7 @@ describe('PluginSettings component', () => {
           dashboards: [],
           searches: [],
           links: [],
+          notifiers: [],
         },
         usage: {
           modelProviders: ['OpenAI'],
@@ -144,6 +148,7 @@ describe('PluginSettings component', () => {
           dashboards: [],
           searches: ['deepseek'],
           links: [],
+          notifiers: [],
         },
         usage: {
           modelProviders: [],
@@ -161,6 +166,7 @@ describe('PluginSettings component', () => {
           dashboards: [],
           searches: [],
           links: ['github'],
+          notifiers: [],
         },
         usage: {
           modelProviders: [],

@@ -5,11 +5,13 @@ import {
   LocalizedErrorSchema,
   ModelProblemSchema,
   ModelSettingsSchema,
+  NotificationSettingsSchema,
   PluginConfigSchema,
   PluginRecordSchema,
   PluginService,
   SearchSettingsSchema,
   SettingsSchemaSchema,
+  TestNotificationResponseSchema,
   UpdateService,
   UpdateStatusSchema,
 } from '@ariadne/proto'
@@ -21,14 +23,17 @@ import {
   fromProtoLinkPreview,
   fromProtoModelProblems,
   fromProtoModelSettings,
+  fromProtoNotificationSettings,
   fromProtoPluginConfig,
   fromProtoPluginRecord,
   fromProtoSearchCheckResult,
   fromProtoSearchSettings,
   fromProtoSettingsSchema,
+  fromProtoTestNotificationResult,
   fromProtoUpdateStatus,
   toJsonObject,
   toProtoSaveModelSettingsRequest,
+  toProtoSaveNotificationSettingsRequest,
   toProtoSearchInput,
 } from './rpc-settings'
 
@@ -371,6 +376,7 @@ describe('Domain 1 ConnectRPC mappers', () => {
         dashboards: [],
         searches: [],
         links: ['github'],
+        notifiers: [],
       },
     })
 
@@ -543,5 +549,92 @@ describe('Domain 1 ConnectRPC mappers', () => {
       expect(apiErr.status).toBe(409)
       expect(apiErr.localized).toEqual({ key: 'updates.error.busy' })
     }
+  })
+
+  it('maps notification settings, save requests, and test responses', () => {
+    const view = fromProtoNotificationSettings(
+      create(NotificationSettingsSchema, {
+        enabled: true,
+        webPushEnabled: true,
+        vapidPublicKey: 'VAPID_PUB',
+        subscriptions: [
+          {
+            id: 'ps_1',
+            endpoint: 'https://push.example/1',
+            label: 'macOS · Chrome',
+            userAgent: 'Chrome',
+            createdAt: 1700000000000n,
+            lastUsedAt: 1700000050000n,
+          },
+        ],
+        webhooks: [
+          {
+            id: 'wh_1',
+            name: 'Alerts',
+            url: 'https://hooks.example/a',
+            enabled: true,
+            secretSet: true,
+            headers: ['X-Token'],
+          },
+        ],
+        notifiers: [
+          {
+            kind: 'lark',
+            title: { values: { 'zh-CN': '飞书' } },
+            settings: { type: 'object' },
+            capabilities: { supportsCheck: true },
+            enabled: true,
+            secretsSet: ['webhookUrl'],
+            ready: true,
+          },
+        ],
+      }),
+    )
+    expect(view.subscriptions[0]).toEqual({
+      id: 'ps_1',
+      endpoint: 'https://push.example/1',
+      label: 'macOS · Chrome',
+      userAgent: 'Chrome',
+      createdAt: 1700000000000,
+      lastUsedAt: 1700000050000,
+      lastError: null,
+    })
+    expect(view.webhooks[0]?.secretSet).toBe(true)
+    expect(view.notifiers[0]?.capabilities?.supportsCheck).toBe(true)
+
+    const req = toProtoSaveNotificationSettingsRequest({
+      enabled: true,
+      webPushEnabled: false,
+      webhooks: [
+        {
+          id: 'wh_1',
+          name: 'Alerts',
+          url: 'https://hooks.example/a',
+          enabled: true,
+          clearSecret: true,
+          headers: [{ name: 'X-Token', value: '' }],
+        },
+      ],
+      notifiers: { lark: { enabled: true, values: { webhookUrl: null } } },
+    })
+    expect(req.webPushEnabled).toBe(false)
+    expect(req.webhooks?.[0]?.clearSecret).toBe(true)
+
+    const testRes = fromProtoTestNotificationResult(
+      create(TestNotificationResponseSchema, {
+        ok: true,
+        status: 200,
+        message: { values: { 'zh-CN': '发送成功' } },
+        delivered: 2,
+        failed: 0,
+      }),
+    )
+    expect(testRes).toEqual({
+      ok: true,
+      status: 200,
+      message: { 'zh-CN': '发送成功' },
+      delivered: 2,
+      failed: 0,
+    })
   })
 })

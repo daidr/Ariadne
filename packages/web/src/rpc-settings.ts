@@ -26,20 +26,31 @@ import type {
   ModelProviderView as ProtoModelProviderView,
   ModelRoles as ProtoModelRoles,
   ModelSettings as ProtoModelSettings,
+  NotificationSettings as ProtoNotificationSettings,
+  NotifierCapabilities as ProtoNotifierCapabilities,
+  NotifierServiceView as ProtoNotifierServiceView,
   PluginConfig as ProtoPluginConfig,
   PluginRecord as ProtoPluginRecord,
+  PushSubscriptionView as ProtoPushSubscriptionView,
   RoleConfig as ProtoRoleConfig,
   SearchCapabilities as ProtoSearchCapabilities,
   SearchSettings as ProtoSearchSettings,
   SettingField as ProtoSettingField,
   SettingsSchema as ProtoSettingsSchema,
   SourceKind as ProtoSourceKind,
+  TestNotificationResponse as ProtoTestNotificationResponse,
   UpdateStatus as ProtoUpdateStatus,
+  WebhookView as ProtoWebhookView,
   WorkLimits as ProtoWorkLimits,
   WorkSettings as ProtoWorkSettings,
 } from '@ariadne/proto'
-import type { JsonObject, JsonValue } from '@bufbuild/protobuf'
+import type { JsonObject, JsonValue, MessageInitShape } from '@bufbuild/protobuf'
 import type { Value } from '@bufbuild/protobuf/wkt'
+import type {
+  NotifierServiceInputSchema,
+  SaveNotificationSettingsRequestSchema,
+  WebhookInputSchema,
+} from '@ariadne/proto'
 import type {
   CommandAction,
   Concurrency,
@@ -62,8 +73,14 @@ import type {
   ModelProviderInput,
   ModelSettings,
   ModelSettingsInput,
+  NotificationSettings,
+  NotificationSettingsInput,
+  NotifierCapabilities,
+  NotifierServiceInput,
+  NotifierServiceView,
   PluginConfig,
   PluginRecord,
+  PushSubscriptionView,
   RoleInput,
   SearchCapabilities,
   SearchCheckResult,
@@ -71,7 +88,10 @@ import type {
   SearchSettingsInput,
   ShortcutAction,
   SourceKind,
+  TestNotificationResult,
   UpdateStatus,
+  WebhookInput,
+  WebhookView,
   WorkSettings,
 } from './api'
 import { ApiError, decodeLocalizedError } from './rpc'
@@ -577,6 +597,7 @@ export function fromProtoPluginRecord(record: ProtoPluginRecord): PluginRecord {
       dashboards: [...(record.provides?.dashboards ?? [])],
       searches: [...(record.provides?.searches ?? [])],
       links: [...(record.provides?.links ?? [])],
+      notifiers: [...(record.provides?.notifiers ?? [])],
     },
     ...(record.usage
       ? {
@@ -700,5 +721,122 @@ export function fromProtoLinkPreview(preview?: ProtoLinkPreview): LinkPreview | 
     deletions: preview.deletions ?? null,
     changedFiles: preview.changedFiles ?? null,
     at: preview.at,
+  }
+}
+
+export function fromProtoPushSubscriptionView(
+  sub: ProtoPushSubscriptionView,
+): PushSubscriptionView {
+  return {
+    id: sub.id,
+    endpoint: sub.endpoint,
+    label: sub.label,
+    userAgent: sub.userAgent,
+    createdAt: Number(sub.createdAt),
+    lastUsedAt: sub.lastUsedAt !== undefined ? Number(sub.lastUsedAt) : null,
+    lastError: sub.lastError ?? null,
+  }
+}
+
+export function fromProtoWebhookView(hook: ProtoWebhookView): WebhookView {
+  return {
+    id: hook.id,
+    name: hook.name,
+    url: hook.url,
+    enabled: hook.enabled,
+    secretSet: hook.secretSet,
+    headers: [...hook.headers],
+  }
+}
+
+export function toProtoWebhookInput(
+  hook: WebhookInput,
+): MessageInitShape<typeof WebhookInputSchema> {
+  return {
+    id: hook.id,
+    name: hook.name,
+    url: hook.url,
+    enabled: hook.enabled,
+    ...(hook.secret !== undefined ? { secret: hook.secret } : {}),
+    clearSecret: !!hook.clearSecret,
+    headers: (hook.headers ?? []).map((pair) => ({ name: pair.name, value: pair.value })),
+  }
+}
+
+function fromProtoNotifierCapabilities(
+  caps?: ProtoNotifierCapabilities,
+): NotifierCapabilities | undefined {
+  if (!caps) return undefined
+  return {
+    supportsCheck: caps.supportsCheck,
+  }
+}
+
+export function fromProtoNotifierServiceView(
+  service: ProtoNotifierServiceView,
+): NotifierServiceView {
+  const capabilities = fromProtoNotifierCapabilities(service.capabilities)
+  return {
+    kind: service.kind,
+    title: fromProtoLocalizedText(service.title),
+    ...(service.description ? { description: fromProtoLocalizedText(service.description) } : {}),
+    settings: fromProtoSettingsSchema(service.settings),
+    ...(capabilities ? { capabilities } : {}),
+    enabled: service.enabled,
+    values: fromJsonObject(service.values),
+    secretsSet: [...service.secretsSet],
+    ready: service.ready,
+  }
+}
+
+export function toProtoNotifierServiceInput(
+  input: NotifierServiceInput,
+): MessageInitShape<typeof NotifierServiceInputSchema> {
+  return {
+    enabled: input.enabled,
+    values: toJsonObject(input.values),
+  }
+}
+
+export function fromProtoNotificationSettings(
+  settings?: ProtoNotificationSettings,
+): NotificationSettings {
+  if (!settings) {
+    throw new ApiError(500, { key: 'error.invalidBody', params: { reason: 'notifications' } })
+  }
+  return {
+    enabled: settings.enabled,
+    webPushEnabled: settings.webPushEnabled,
+    vapidPublicKey: settings.vapidPublicKey,
+    subscriptions: settings.subscriptions.map(fromProtoPushSubscriptionView),
+    webhooks: settings.webhooks.map(fromProtoWebhookView),
+    notifiers: settings.notifiers.map(fromProtoNotifierServiceView),
+  }
+}
+
+export function toProtoSaveNotificationSettingsRequest(
+  input: NotificationSettingsInput,
+): MessageInitShape<typeof SaveNotificationSettingsRequestSchema> {
+  const notifiers: Record<string, MessageInitShape<typeof NotifierServiceInputSchema>> = {}
+  for (const [kind, entry] of Object.entries(input.notifiers)) {
+    notifiers[kind] = toProtoNotifierServiceInput(entry)
+  }
+  return {
+    enabled: input.enabled,
+    webPushEnabled: input.webPushEnabled,
+    webhooks: input.webhooks.map(toProtoWebhookInput),
+    notifiers,
+  }
+}
+
+export function fromProtoTestNotificationResult(
+  result: ProtoTestNotificationResponse,
+): TestNotificationResult {
+  return {
+    ok: result.ok,
+    status: result.status ?? null,
+    ...(result.message ? { message: fromProtoLocalizedText(result.message) } : {}),
+    delivered: result.delivered,
+    failed: result.failed,
   }
 }

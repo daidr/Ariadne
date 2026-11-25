@@ -27,6 +27,7 @@ import (
 	"github.com/daidr/Ariadne/internal/mcp"
 	"github.com/daidr/Ariadne/internal/modelcatalog"
 	"github.com/daidr/Ariadne/internal/models"
+	"github.com/daidr/Ariadne/internal/notifications"
 	"github.com/daidr/Ariadne/internal/plugins"
 	"github.com/daidr/Ariadne/internal/realtime"
 	"github.com/daidr/Ariadne/internal/scheduler"
@@ -70,6 +71,8 @@ type Options struct {
 	Dashboards       *dashboard.Registry
 	SharedDashboard  dashboard.Shared
 	Searches         *searches.Registry
+	Notifiers        *notifications.Registry
+	Notifications    *notifications.Service
 	Rooms            *collab.Rooms
 	Plugins          *plugins.Host
 	ServiceControl   *service.Controller

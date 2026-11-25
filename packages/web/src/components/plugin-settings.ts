@@ -2,7 +2,8 @@ import type { MessageKey } from '@ariadne/i18n'
 import type { PluginRecord, PluginUsage } from '../api'
 import { t } from '../i18n'
 
-export type PluginCapability = 'models' | 'searches' | 'contexts' | 'links' | 'dashboards'
+export type PluginCapability =
+  'models' | 'searches' | 'contexts' | 'links' | 'dashboards' | 'notifiers'
 
 const CAPABILITY_ORDER: PluginCapability[] = [
   'models',
@@ -10,6 +11,7 @@ const CAPABILITY_ORDER: PluginCapability[] = [
   'contexts',
   'links',
   'dashboards',
+  'notifiers',
 ]
 
 const ROLE_KEYS: Record<string, MessageKey> = {

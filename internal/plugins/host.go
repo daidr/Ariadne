@@ -19,6 +19,7 @@ import (
 	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/internal/links"
 	"github.com/daidr/Ariadne/internal/models"
+	"github.com/daidr/Ariadne/internal/notifications"
 	"github.com/daidr/Ariadne/internal/searches"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
@@ -36,10 +37,11 @@ type Provides struct {
 	Dashboards []string `json:"dashboards"`
 	Searches   []string `json:"searches"`
 	Links      []string `json:"links"`
+	Notifiers  []string `json:"notifiers"`
 }
 
 func emptyProvides() Provides {
-	return Provides{[]string{}, []string{}, []string{}, []string{}, []string{}}
+	return Provides{[]string{}, []string{}, []string{}, []string{}, []string{}, []string{}}
 }
 
 type Record struct {
@@ -60,6 +62,7 @@ type Options struct {
 	Dashboards  *dashboard.Registry
 	Searches    *searches.Registry
 	Links       *links.Resolver
+	Notifiers   *notifications.Registry
 	OnError     func(error)
 	Settings    *settings.Store
 }
@@ -97,6 +100,9 @@ func New(options Options) (*Host, error) {
 	}
 	if options.Searches == nil {
 		options.Searches = searches.New()
+	}
+	if options.Notifiers == nil {
+		options.Notifiers = notifications.NewRegistry()
 	}
 	if err := os.MkdirAll(options.DataRoot, 0700); err != nil {
 		return nil, err
@@ -142,6 +148,7 @@ func copyProvides(provides Provides) Provides {
 		Dashboards: copyStrings(provides.Dashboards),
 		Searches:   copyStrings(provides.Searches),
 		Links:      copyStrings(provides.Links),
+		Notifiers:  copyStrings(provides.Notifiers),
 	}
 }
 func providesFromPlugin(provides sdk.PluginProvides) Provides {
@@ -151,6 +158,7 @@ func providesFromPlugin(provides sdk.PluginProvides) Provides {
 		Dashboards: copyStrings(provides.Dashboards),
 		Searches:   copyStrings(provides.Searches),
 		Links:      copyStrings(provides.Links),
+		Notifiers:  copyStrings(provides.Notifiers),
 	}
 }
 func copyRecord(record Record) Record {
@@ -410,6 +418,9 @@ func (host *Host) start(ctx context.Context, plugin sdk.Plugin, schema *sdk.Sett
 	pc.RegisterLink = func(provider sdk.LinkProvider) (func(), error) {
 		return register(state, provider, provider.Kind, &state.provides.Links, host.options.Links.Register)
 	}
+	pc.RegisterNotifier = func(provider sdk.NotifierProvider) (func(), error) {
+		return register(state, provider, provider.Kind, &state.provides.Notifiers, host.options.Notifiers.Register)
+	}
 	startup, cancelStartup := context.WithTimeout(ctx, 30*time.Second)
 	stop := context.AfterFunc(life, cancelStartup)
 	defer stop()
@@ -525,6 +536,11 @@ func (host *Host) Searches() *searches.Registry {
 	host.mu.Lock()
 	defer host.mu.Unlock()
 	return host.options.Searches
+}
+func (host *Host) Notifiers() *notifications.Registry {
+	host.mu.Lock()
+	defer host.mu.Unlock()
+	return host.options.Notifiers
 }
 func (host *Host) SearchProviders() []sdk.SearchProvider {
 	registry := host.Searches()
