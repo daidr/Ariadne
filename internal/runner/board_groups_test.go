@@ -6,7 +6,6 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -16,8 +15,9 @@ import (
 )
 
 func TestWhiteboardDecisionGroupsAndRounds(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "app.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,9 +129,9 @@ func TestWhiteboardDecisionGroupsAndRounds(t *testing.T) {
 }
 
 func TestWhiteboardStandaloneImagesAndBaselineComparison(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	tmp := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(tmp, "app.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

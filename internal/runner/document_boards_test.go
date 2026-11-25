@@ -2,7 +2,6 @@ package runner
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,6 +10,7 @@ import (
 )
 
 func TestModelChangesEmbeddedBoardWithoutReplacingDrawings(t *testing.T) {
+	t.Parallel()
 	base := "# Plan\n\n" + boardFence("dou-whiteboard", `{"height":390,"board":{"version":1,"nodes":[{"id":"ink","type":"ink","x":30,"y":60,"data":{"points":[{"x":0,"y":0}]}},{"id":"todo","type":"sticky","x":160,"y":80,"data":{"text":"Before"}}],"edges":[]}}`)
 	view := documentView(base)
 	if strings.Contains(view, "points") || !strings.Contains(view, `"kind":"drawing"`) || strings.Contains(view, "dou-whiteboard") {
@@ -44,8 +44,9 @@ func TestModelChangesEmbeddedBoardWithoutReplacingDrawings(t *testing.T) {
 }
 
 func TestBoardCommentAndPinCommitTogether(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "app.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +94,7 @@ func TestBoardCommentAndPinCommitTogether(t *testing.T) {
 }
 
 func TestBoardLayoutRanksAndRoutesPastIntermediateItems(t *testing.T) {
+	t.Parallel()
 	board := whiteboard{Version: 1, Nodes: []args{}, Edges: []args{}}
 	err := board.change([]args{{"id": "review"}, {"id": "publish"}, {"id": "draft"}},
 		[]args{{"id": "skip", "from": "draft", "to": "publish"}, {"from": "draft", "to": "review"}, {"from": "review", "to": "publish"}},

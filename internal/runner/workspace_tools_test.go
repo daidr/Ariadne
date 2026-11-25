@@ -19,6 +19,7 @@ import (
 )
 
 func TestCommandExcerptPreservesDiagnosticAfterLargeOutput(t *testing.T) {
+	t.Parallel()
 	result, err := formatCommand(background.Execution{Result: sdk.ExecResult{
 		ExitCode: 1,
 		Stdout:   "build starting\n" + strings.Repeat("verbose output\n", 5000) + "build finished",
@@ -35,12 +36,14 @@ func TestCommandExcerptPreservesDiagnosticAfterLargeOutput(t *testing.T) {
 }
 
 func TestStalledCommandChild(t *testing.T) {
+	t.Parallel()
 	if os.Args[len(os.Args)-1] == "--stalled-workspace-command" {
 		time.Sleep(time.Minute)
 	}
 }
 
 func TestCommandTimeoutPersistsAfterYield(t *testing.T) {
+	t.Parallel()
 	program, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -69,6 +72,7 @@ func TestCommandTimeoutPersistsAfterYield(t *testing.T) {
 }
 
 func TestCommandApprovalBindsToOneExecutionInItsWorkspace(t *testing.T) {
+	t.Parallel()
 	home, folder := t.TempDir(), t.TempDir()
 	const command = "echo approved > result.txt"
 	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(`{"commands":{"rules":[{"pattern":"echo*","action":"ask"}]}}`), 0600); err != nil {
@@ -78,7 +82,7 @@ func TestCommandApprovalBindsToOneExecutionInItsWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(home, "ariadne.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,5 +170,74 @@ func TestCommandApprovalBindsToOneExecutionInItsWorkspace(t *testing.T) {
 	}
 	if _, err := turn.runCommand(t.Context(), args{"command": longCommand, "cwd": "sub"}); err == nil || !strings.Contains(err.Error(), "declined") {
 		t.Fatalf("expected the long command to remain denied, got %v", err)
+	}
+}
+
+func TestRunCommandDescriptionIncludesActiveShell(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		shell process.Shell
+		want  []string
+	}{
+		{process.Shell{Name: "powershell"}, []string{"Run a powershell command", "Windows PowerShell"}},
+		{process.Shell{Name: "pwsh"}, []string{"Run a pwsh command", "PowerShell"}},
+		{process.Shell{Name: "cmd"}, []string{"Run a cmd command", "cmd.exe"}},
+		{process.Shell{Name: "bash"}, []string{"Run a bash command"}},
+		{process.Shell{}, []string{"Run a shell command"}},
+	}
+	for _, tc := range cases {
+		desc := runCommandDescription(tc.shell)
+		for _, part := range tc.want {
+			if !strings.Contains(desc, part) {
+				t.Errorf("shell %q description %q missing %q", tc.shell.Name, desc, part)
+			}
+		}
+	}
+
+	// Verify turn.tools wires the project's configured shell into run_command.
+	home, folder := t.TempDir(), t.TempDir()
+	store, err := settings.Open(filepath.Join(home, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	registry := sources.New()
+	if _, err := registry.Register(local.DirectoryProvider(filepath.Join(home, "local"), nil, true)); err != nil {
+		t.Fatal(err)
+	}
+	work, err := workspaces.New(workspaces.Options{Repository: repo, Sources: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer work.Close(context.Background())
+	project, err := repo.CreateProject(t.Context(), new("Shell fixture"), core.ProjectStart{Source: args{"kind": "local-directory", "settings": args{"path": folder}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err = repo.SetProjectSettings(t.Context(), project.ID, args{"workspace": args{"shell": "pwsh"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "Shell thread"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := &turn{
+		Runner:       &Runner{Repository: repo, Settings: store, Workspaces: work, Sources: registry},
+		conversation: core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"},
+	}
+	var runCmdDesc string
+	for _, entry := range active.tools(t.Context(), project) {
+		if entry.spec.Name == "run_command" {
+			runCmdDesc = entry.spec.Description
+			break
+		}
+	}
+	if !strings.Contains(runCmdDesc, "Run a pwsh command") {
+		t.Fatalf("expected run_command description to include pwsh shell, got %q", runCmdDesc)
 	}
 }

@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,9 +14,10 @@ import (
 )
 
 func TestArtifactFeedbackReportsStoredEditsAndCommentsOnce(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	clock := time.UnixMilli(1900000000000)
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:", Now: func() time.Time { return clock }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,9 +102,10 @@ func TestArtifactFeedbackReportsStoredEditsAndCommentsOnce(t *testing.T) {
 }
 
 func TestWithdrawArtifactFeedbackRPC(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	clock := time.UnixMilli(1900000000000)
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:", Now: func() time.Time { return clock }})
 	if err != nil {
 		t.Fatal(err)
 	}

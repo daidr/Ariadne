@@ -9,6 +9,7 @@ import (
 )
 
 func TestDirectoryProviderFileReferenceAndLifecycle(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeGit(t, root, "notes.txt", "read only")
 	writeGit(t, root, "sibling.txt", "private")

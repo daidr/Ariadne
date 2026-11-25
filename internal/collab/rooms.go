@@ -23,11 +23,14 @@ const (
 	maxRooms         = 16
 	maxPeers         = 16
 	maxAwareness     = 8 // identities owned by one connection
-	maxRoomState     = 12 << 20
 	maxQueuedBytes   = 16 << 20
-	maxPendingBytes  = 512 << 10
 	maxPendingDeltas = 4096
 	saveDelay        = 1500 * time.Millisecond
+)
+
+var (
+	maxRoomState    = 12 << 20
+	maxPendingBytes = 512 << 10
 )
 
 type Rooms struct {
@@ -319,7 +322,7 @@ func (rooms *Rooms) Serve(w http.ResponseWriter, r *http.Request, id string) err
 		return nil
 	}
 	defer socket.CloseNow()
-	socket.SetReadLimit(maxRoomState + 64)
+	socket.SetReadLimit(int64(maxRoomState) + 64)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

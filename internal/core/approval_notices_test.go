@@ -1,13 +1,13 @@
 package core
 
 import (
-	"path/filepath"
 	"testing"
 )
 
 func TestToolApprovalsAppearInConversationPages(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "approval.sqlite")})
+	repo, err := Open(ctx, Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,6 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -21,24 +20,8 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func TestFileStateCheckHelper(t *testing.T) {
-	if !slices.Contains(os.Args, "--file-state-check-helper") {
-		return
-	}
-	data, err := os.ReadFile("check-mode.txt")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "missing check-mode.txt")
-		os.Exit(1)
-	}
-	mode := strings.TrimSpace(string(data))
-	if mode == "pass" {
-		os.Exit(0)
-	}
-	fmt.Fprintln(os.Stdout, mode)
-	os.Exit(1)
-}
-
 func TestFileStateLRUAndNormalization(t *testing.T) {
+	t.Parallel()
 	var state fileState
 
 	// Path normalization across slash styles and relative prefixes.
@@ -160,7 +143,7 @@ func newFileStateFixture(t *testing.T, configJSON string, start *core.ProjectSta
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "ariadne.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,6 +180,7 @@ func newFileStateFixture(t *testing.T, configJSON string, start *core.ProjectSta
 }
 
 func TestFileStateExternalModificationBlocksWrites(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	fx := newFileStateFixture(t, "", nil)
 
@@ -271,6 +255,7 @@ func TestFileStateExternalModificationBlocksWrites(t *testing.T) {
 }
 
 func TestFileStateMultiSourceAndResearchIsolation(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	firstDir, secondDir := t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(firstDir, "README.md"), []byte("same content\n"), 0600); err != nil {
@@ -341,6 +326,7 @@ func TestFileStateMultiSourceAndResearchIsolation(t *testing.T) {
 }
 
 func TestReadFileDeduplicationAndStatefulSession(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	fx := newFileStateFixture(t, "", nil)
 	filePath := filepath.Join(fx.dir, "a.ts")
@@ -383,81 +369,137 @@ func TestReadFileDeduplicationAndStatefulSession(t *testing.T) {
 	}
 }
 
+type checkStubWorkspace struct {
+	sdk.Workspace
+	dir string
+}
+
+func (w *checkStubWorkspace) Exec(_ context.Context, _ string, _ sdk.ExecOptions) (sdk.ExecResult, error) {
+	data, err := os.ReadFile(filepath.Join(w.dir, "check-mode.txt"))
+	if err != nil {
+		return sdk.ExecResult{ExitCode: 1, Stderr: "missing check-mode.txt\n"}, nil
+	}
+	mode := strings.TrimSpace(string(data))
+	if mode == "pass" {
+		return sdk.ExecResult{ExitCode: 0}, nil
+	}
+	return sdk.ExecResult{ExitCode: 1, Stdout: mode + "\n"}, nil
+}
+
 func TestCheckAfterEditFoldsRepeatedFailures(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	program, err := os.Executable()
+	home, dir := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(`{"commands":{"rules":[{"pattern":"*","action":"allow"}]}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := settings.Open(filepath.Join(home, "config.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fx := newFileStateFixture(t, `{"commands":{"rules":[{"pattern":"*","action":"allow"}]}}`, nil)
-
-	shell, err := fx.workspaces.Shell(ctx, fx.project.ID)
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var checkCmd string
-	switch shell.Name {
-	case "pwsh", "powershell", "pwsh.exe", "powershell.exe":
-		checkCmd = "& '" + strings.ReplaceAll(program, "'", "''") + "' '-test.run=^TestFileStateCheckHelper$' -- --file-state-check-helper"
-	case "cmd", "cmd.exe":
-		checkCmd = `"` + program + `" -test.run=^TestFileStateCheckHelper$ -- --file-state-check-helper`
-	default:
-		checkCmd = "'" + strings.ReplaceAll(program, "'", "'\"'\"'") + "' '-test.run=^TestFileStateCheckHelper$' -- --file-state-check-helper"
-	}
+	defer repo.Close()
 
-	if _, err := fx.repo.SetProjectSettings(ctx, fx.project.ID, map[string]any{
-		"workspace": map[string]any{"check": checkCmd},
+	baseProvider := local.DirectoryProvider(filepath.Join(home, "local"), nil, true)
+	wrappedProvider := sdk.ContextProvider{
+		Info: baseProvider.Info,
+		Connect: func(ctx context.Context, cfg map[string]any) (sdk.Capabilities, error) {
+			caps, err := baseProvider.Connect(ctx, cfg)
+			if err != nil {
+				return sdk.Capabilities{}, err
+			}
+			origOpen := caps.Workspace.Open
+			caps.Workspace.Open = func(ctx context.Context, req sdk.WorkspaceRequest) (sdk.Workspace, error) {
+				ws, err := origOpen(ctx, req)
+				if err != nil {
+					return nil, err
+				}
+				return &checkStubWorkspace{Workspace: ws, dir: dir}, nil
+			}
+			return caps, nil
+		},
+	}
+	registry := sources.New()
+	if _, err := registry.Register(wrappedProvider); err != nil {
+		t.Fatal(err)
+	}
+	work, err := workspaces.New(workspaces.Options{Repository: repo, Sources: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer work.Close(context.Background())
+
+	project, err := repo.CreateProject(ctx, new("Check folding fixture"), core.ProjectStart{
+		Source: args{"kind": "local-directory", "settings": args{"path": dir}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Check folding thread"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{Repository: repo, Settings: store, Workspaces: work}
+	conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+	active := &turn{Runner: r, conversation: conv, changes: newTurnChanges(r, conv)}
+
+	if _, err := repo.SetProjectSettings(ctx, project.ID, map[string]any{
+		"workspace": map[string]any{"check": "fake-check"},
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(fx.dir, "a.txt"), []byte("one\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(fx.dir, "check-mode.txt"), []byte("old error elsewhere"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "check-mode.txt"), []byte("old error elsewhere"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	first, err := fx.turn.editFile(ctx, args{"path": "a.txt", "old": "one", "new": "two"})
+	first, err := active.editFile(ctx, args{"path": "a.txt", "old": "one", "new": "two"})
 	if err != nil || !strings.Contains(first, "old error elsewhere") {
 		t.Fatalf("expected full check failure on first edit, got %q, err %v", first, err)
 	}
-	second, err := fx.turn.editFile(ctx, args{"path": "a.txt", "old": "two", "new": "three"})
+	second, err := active.editFile(ctx, args{"path": "a.txt", "old": "two", "new": "three"})
 	if err != nil || !strings.Contains(second, "with the same output as after your previous edit") || strings.Contains(second, "old error elsewhere") {
 		t.Fatalf("expected folded repeated check failure, got %q, err %v", second, err)
 	}
 
 	// forgetReads resets check failure folding.
-	fx.runner.files.forgetReads(fx.thread.ID)
-	third, err := fx.turn.editFile(ctx, args{"path": "a.txt", "old": "three", "new": "four"})
+	r.files.forgetReads(thread.ID)
+	third, err := active.editFile(ctx, args{"path": "a.txt", "old": "three", "new": "four"})
 	if err != nil || !strings.Contains(third, "old error elsewhere") {
 		t.Fatalf("expected full check failure after forgetReads, got %q, err %v", third, err)
 	}
 
 	// Passing check clears stored failure so a subsequent identical failure is printed in full again.
-	if err := os.WriteFile(filepath.Join(fx.dir, "check-mode.txt"), []byte("pass"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "check-mode.txt"), []byte("pass"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	passed, err := fx.turn.editFile(ctx, args{"path": "a.txt", "old": "four", "new": "five"})
+	passed, err := active.editFile(ctx, args{"path": "a.txt", "old": "four", "new": "five"})
 	if err != nil || !strings.Contains(passed, "Workspace check: Passed.") {
 		t.Fatalf("expected passing check, got %q, err %v", passed, err)
 	}
-	if err := os.WriteFile(filepath.Join(fx.dir, "check-mode.txt"), []byte("old error elsewhere"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "check-mode.txt"), []byte("old error elsewhere"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	afterPass, err := fx.turn.editFile(ctx, args{"path": "a.txt", "old": "five", "new": "six"})
+	afterPass, err := active.editFile(ctx, args{"path": "a.txt", "old": "five", "new": "six"})
 	if err != nil || !strings.Contains(afterPass, "old error elsewhere") || strings.Contains(afterPass, "with the same output") {
 		t.Fatalf("expected full check failure after passing check reset, got %q, err %v", afterPass, err)
 	}
 
 	// Stateful session never folds repeated failures.
-	fx.turn.statefulSession = true
-	statefulAgain, err := fx.turn.editFile(ctx, args{"path": "a.txt", "old": "six", "new": "seven"})
+	active.statefulSession = true
+	statefulAgain, err := active.editFile(ctx, args{"path": "a.txt", "old": "six", "new": "seven"})
 	if err != nil || !strings.Contains(statefulAgain, "old error elsewhere") || strings.Contains(statefulAgain, "with the same output") {
 		t.Fatalf("expected full check failure for stateful session, got %q, err %v", statefulAgain, err)
 	}
 }
 
 func TestTurnCompactionAndCancelForgetReads(t *testing.T) {
+	t.Parallel()
 	t.Run("compaction clears read dedup while preserving seen", func(t *testing.T) {
 		ctx := t.Context()
 		fx := newFileStateFixture(t, "", nil)
@@ -492,10 +534,10 @@ func TestTurnCompactionAndCancelForgetReads(t *testing.T) {
 						yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 					}
 				case 2:
-					// Second read in the same context should hit dedup; also add a large todo payload + ContextInput over threshold.
+					// Second read in the same context should hit dedup; also add a large todo payload + ContextInput over threshold (20000 * 0.75 = 15000).
 					if yield(sdk.Part{Type: "tool-call", ID: "read-2", Name: "read_file", Arguments: `{"path":"notes.txt"}`}) {
-						if yield(sdk.Part{Type: "tool-call", ID: "todo-1", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Pad","detail":%q,"status":"doing"}]}`, strings.Repeat("p", 12000))}) {
-							yield(sdk.Part{Type: "usage", Input: new(int64(15000)), Output: new(int64(50)), ContextInput: new(int64(15000))})
+						if yield(sdk.Part{Type: "tool-call", ID: "todo-1", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Pad","detail":%q,"status":"doing"}]}`, strings.Repeat("p", 16000))}) {
+							yield(sdk.Part{Type: "usage", Input: new(int64(16000)), Output: new(int64(50)), ContextInput: new(int64(16000))})
 							yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 						}
 					}
@@ -612,6 +654,7 @@ func TestTurnCompactionAndCancelForgetReads(t *testing.T) {
 }
 
 func TestFileStateConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	var state fileState
 	const workers = 16
 	const iterations = 150
@@ -664,6 +707,7 @@ func (w stubPatchlessWorkspace) RemoveFile(context.Context, string) error {
 }
 
 func TestReadExistingBytesWithoutWorkspaceFilesSupport(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	unsupported := errors.New("the workspace source does not support file patches")
 

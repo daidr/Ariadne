@@ -43,7 +43,42 @@ func encodedRelease(value any) []byte {
 	return body
 }
 
+func TestMain(m *testing.M) {
+	if len(os.Args) == 2 {
+		switch os.Args[1] {
+		case "--version":
+			fmt.Println("1.0.0")
+			os.Exit(0)
+		case "self-check":
+			os.Exit(0)
+		case "serve":
+			fmt.Println("ready")
+			_, _ = io.Copy(os.Stdout, os.Stdin)
+			os.Exit(0)
+		}
+	}
+	os.Exit(m.Run())
+}
+
+func copyInstalledTestBinary(t *testing.T, folder, name string) string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(folder, name+filepath.Ext(targetAsset(runtime.GOOS, runtime.GOARCH)))
+	if err := os.WriteFile(dst, data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return dst
+}
+
 func TestChannelsKeepTheCurrentVersionWhenThereIsNoStableRelease(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.json")
 	store, err := settings.Open(path)
 	if err != nil {
@@ -134,12 +169,13 @@ func main() {
 }
 
 func TestAutomaticUpdateReplacesRunningProgram(t *testing.T) {
+	t.Parallel()
 	platform := targetAsset(runtime.GOOS, runtime.GOARCH)
 	if platform == "" {
 		t.Skip("platform has no published updater asset")
 	}
 	dir := t.TempDir()
-	old := buildUpdateFixture(t, dir, "installed", "1.0.0")
+	old := copyInstalledTestBinary(t, dir, "installed")
 	newer := buildUpdateFixture(t, dir, "release", "1.1.0")
 	payload, err := os.ReadFile(newer)
 	if err != nil {
@@ -224,6 +260,7 @@ func waitForUpdate(t *testing.T, service *Service, match func(View) bool) View {
 }
 
 func TestInstallReportsProgressAndTruncatedDownload(t *testing.T) {
+	t.Parallel()
 	name := targetAsset(runtime.GOOS, runtime.GOARCH)
 	if name == "" {
 		t.Skip("platform has no published updater asset")
@@ -278,6 +315,7 @@ func TestInstallReportsProgressAndTruncatedDownload(t *testing.T) {
 }
 
 func TestHTTPDownloadFailure(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: releaseTransport(func(*http.Request) (*http.Response, error) {
 		return response(http.StatusServiceUnavailable, nil), nil
 	})}
@@ -289,6 +327,7 @@ func TestHTTPDownloadFailure(t *testing.T) {
 }
 
 func TestInvalidDownloadLeavesTheExecutableAlone(t *testing.T) {
+	t.Parallel()
 	executable := filepath.Join(t.TempDir(), "program")
 	const original = "existing program"
 	if err := os.WriteFile(executable, []byte(original), 0700); err != nil {
@@ -314,6 +353,7 @@ func TestInvalidDownloadLeavesTheExecutableAlone(t *testing.T) {
 }
 
 func TestOnChangeEmitsMonotonicFinalStateOnFastFailure(t *testing.T) {
+	t.Parallel()
 	name := targetAsset(runtime.GOOS, runtime.GOARCH)
 	if name == "" {
 		t.Skip("platform has no published updater asset")

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,12 +13,13 @@ import (
 )
 
 func TestProjectExportHTTPRequiresAuthentication(t *testing.T) {
+	t.Parallel()
 	no := false
 	requests := []apiRequest{{Method: "GET", Path: "/api/projects/prj_a/export", Auth: &no}, {Method: "GET", Path: "/api/projects/prj_a/export"}, {Method: "GET", Path: "/api/projects/missing/export"}}
 	hash := sha256.Sum256([]byte{0, 255, 8})
 	sql := fmt.Sprintf(`INSERT INTO files VALUES ('fil_export','prj_a','image/png',3,'%s',x'00ff08',0)`, hex.EncodeToString(hash[:]))
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "export.sqlite"), Now: now})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}

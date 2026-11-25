@@ -14,6 +14,7 @@ import (
 )
 
 func TestRepositoryDeletionAndTurnStartAreSerialized(t *testing.T) {
+	t.Parallel()
 	for attempt := 0; attempt < 20; attempt++ {
 		repo, err := Open(t.Context(), Options{Path: filepath.Join(t.TempDir(), "race.sqlite")})
 		if err != nil {
@@ -49,6 +50,7 @@ func TestRepositoryDeletionAndTurnStartAreSerialized(t *testing.T) {
 }
 
 func TestFailedUpgradeRollsBackSchemaAndVersion(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "upgrade-failure.sqlite")
 	repo, err := Open(t.Context(), Options{Path: path})
 	if err != nil {

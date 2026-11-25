@@ -2,7 +2,6 @@ package runner
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,8 +12,9 @@ import (
 )
 
 func TestThreadMergesItsOwnApprovedPullRequest(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "repo.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,6 +143,7 @@ func TestThreadMergesItsOwnApprovedPullRequest(t *testing.T) {
 }
 
 func TestRelayedPullRequestMergeAndScopedConfirmation(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, request string
 		explicit      bool
@@ -152,7 +153,7 @@ func TestRelayedPullRequestMergeAndScopedConfirmation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
-			repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "repo.sqlite")})
+			repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 			if err != nil {
 				t.Fatal(err)
 			}

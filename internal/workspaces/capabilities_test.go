@@ -24,6 +24,7 @@ func (reader *countedReader) Close() error {
 	return err
 }
 func TestRepositoryAndTrackerProxiesDoNotWriteAfterConfigurationChanges(t *testing.T) {
+	t.Parallel()
 	repo, project, _ := testRepository(t)
 	registry := sources.New()
 	var opened, closed, writes atomic.Int32
@@ -85,6 +86,7 @@ func TestRepositoryAndTrackerProxiesDoNotWriteAfterConfigurationChanges(t *testi
 	}
 }
 func TestGitBundleLeasePinsConnectionAndClosesOnManagerShutdown(t *testing.T) {
+	t.Parallel()
 	repo, project, _ := testRepository(t)
 	registry := sources.New()
 	var opened, closed atomic.Int32
@@ -100,7 +102,7 @@ func TestGitBundleLeasePinsConnectionAndClosesOnManagerShutdown(t *testing.T) {
 		return caps, err
 	}
 	registry.Register(provider)
-	manager, err := New(Options{Repository: repo, Sources: registry, CacheTTL: 20 * time.Millisecond})
+	manager, err := New(Options{Repository: repo, Sources: registry, CacheTTL: 50 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,16 +116,18 @@ func TestGitBundleLeasePinsConnectionAndClosesOnManagerShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stream.Close()
-	time.Sleep(60 * time.Millisecond)
-	if closed.Load() != 0 {
+	closedBefore := closed.Load()
+	time.Sleep(120 * time.Millisecond)
+	if closed.Load() != closedBefore {
 		t.Fatal("idle eviction closed a streaming bundle")
 	}
 	closeManager(t, manager)
-	if body.closed.Load() != 1 || closed.Load() != 1 {
-		t.Fatal("shutdown did not release stream and source", body.closed.Load(), closed.Load())
+	if body.closed.Load() != 1 || closed.Load() != opened.Load() {
+		t.Fatal("shutdown did not release stream and source", body.closed.Load(), closed.Load(), opened.Load())
 	}
 }
 func TestGitReceiveClosesInputOnPreflightFailure(t *testing.T) {
+	t.Parallel()
 	repo, project, _ := testRepository(t)
 	registry := sources.New()
 	var opened, closed atomic.Int32

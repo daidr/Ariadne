@@ -42,21 +42,38 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   proto:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: .go-version
-          cache: true
+          cache: false
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/gomod
+            ${{ runner.temp }}/gobuild
+          key: go-proto-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
+          restore-keys: |
+            go-proto-${{ runner.os }}-${{ runner.arch }}-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
-      - run: bun run proto:check
+      - env:
+          GOMODCACHE: ${{ runner.temp }}/gomod
+          GOCACHE: ${{ runner.temp }}/gobuild
+        run: bun run proto:check
 
   native:
     timeout-minutes: 15
@@ -69,24 +86,226 @@ jobs:
       CGO_ENABLED: '0'
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Prepare Go and Windows Defender
+        id: go-fast-win
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ver = (Get-Content -Raw .go-version).Trim()
+          $arch = $env:RUNNER_ARCH.ToLowerInvariant()
+          $goRoot = Join-Path $env:RUNNER_TOOL_CACHE "go\$ver\$arch"
+          $goBin = Join-Path $goRoot 'bin'
+          if (Test-Path (Join-Path $goBin 'go.exe')) {
+            Add-Content -Path $env:GITHUB_PATH -Value $goBin
+            Add-Content -Path $env:GITHUB_ENV -Value "GOROOT=$goRoot"
+            Add-Content -Path $env:GITHUB_OUTPUT -Value 'found=true'
+          } else {
+            Add-Content -Path $env:GITHUB_OUTPUT -Value 'found=false'
+          }
+          try {
+            Add-MpPreference `
+              -ExclusionPath @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, $env:RUNNER_TOOL_CACHE, 'C:\Program Files\Git') `
+              -ExclusionProcess @('go.exe', 'git.exe', 'compile.exe', 'link.exe', 'asm.exe', 'chrome.exe', 'msedge.exe', 'tar.exe', 'zstd.exe') `
+              -ErrorAction SilentlyContinue
+          } catch {}
+      - name: Prepare Go from toolcache (macOS)
+        id: go-fast-mac
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          ver="$(tr -d ' \r\n' < .go-version)"
+          arch="$(printf '%s' "$RUNNER_ARCH" | tr '[:upper:]' '[:lower:]')"
+          go_root="${RUNNER_TOOL_CACHE}/go/${ver}/${arch}"
+          go_bin="${go_root}/bin"
+          if [ -x "${go_bin}/go" ]; then
+            printf '%s\n' "$go_bin" >> "$GITHUB_PATH"
+            printf 'GOROOT=%s\n' "$go_root" >> "$GITHUB_ENV"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-go@v6
+        if: steps.go-fast-win.outputs.found != 'true' && steps.go-fast-mac.outputs.found != 'true'
         with:
           go-version-file: .go-version
-          cache: true
-      - run: go version
-      # Workspaces exercise many rooted filesystem operations. Do not spend
-      # minutes hashing their temporary inputs after the tests have finished.
-      - run: go test -count=1 -parallel=4 -timeout=180s ./...
-      - run: go vet ./...
+          cache: false
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/gomod
+            ${{ runner.temp }}/gobuild
+          key: ${{ runner.os == 'Linux' && 'go-native-v2' || 'go-native' }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
+          restore-keys: |
+            ${{ runner.os == 'Linux' && 'go-native-v2' || 'go-native' }}-${{ runner.os }}-${{ runner.arch }}-
+            go-native-${{ runner.os }}-${{ runner.arch }}-
+      # Ubuntu and race run the complete test suite (including heavy multi-repo
+      # git matrices). macOS and Windows run with -short across all OS-sensitive
+      # and integration packages (which transitively compile every internal and
+      # sdk package) to keep cross-OS CI under one minute.
+      - name: Test (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          GOMODCACHE: ${{ runner.temp }}/gomod
+          GOCACHE: ${{ runner.temp }}/gobuild
+        run: |
+          all="$(go list ./...)"
+          pkgs=()
+          for p in \
+            github.com/daidr/Ariadne/internal/local \
+            github.com/daidr/Ariadne/internal/browser \
+            github.com/daidr/Ariadne/internal/runner \
+            github.com/daidr/Ariadne/internal/workspaces \
+            github.com/daidr/Ariadne/internal/server \
+            github.com/daidr/Ariadne/internal/application \
+            github.com/daidr/Ariadne/internal/service \
+            github.com/daidr/Ariadne/internal/sources \
+            github.com/daidr/Ariadne/internal/process \
+            github.com/daidr/Ariadne/internal/update; do
+            if printf '%s\n' "$all" | grep -qx "$p"; then
+              pkgs+=("$p")
+            fi
+          done
+          while IFS= read -r pkg; do
+            case "$pkg" in
+              github.com/daidr/Ariadne/internal/local|github.com/daidr/Ariadne/internal/browser|github.com/daidr/Ariadne/internal/runner|github.com/daidr/Ariadne/internal/workspaces|github.com/daidr/Ariadne/internal/server|github.com/daidr/Ariadne/internal/application|github.com/daidr/Ariadne/internal/service|github.com/daidr/Ariadne/internal/sources|github.com/daidr/Ariadne/internal/process|github.com/daidr/Ariadne/internal/update) ;;
+              *) pkgs+=("$pkg") ;;
+            esac
+          done <<< "$all"
+          go test -vet=off -count=1 -parallel=4 -timeout=180s "${pkgs[@]}"
+      - name: Test (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          GOMODCACHE: ${{ runner.temp }}/gomod
+          GOCACHE: ${{ runner.temp }}/gobuild
+        run: |
+          pkgs=(
+            ./internal/runner
+            ./internal/local
+            ./internal/workspaces
+            ./internal/process
+            ./internal/update
+            ./internal/repowatch
+            ./internal/service
+            ./internal/providers/antigravity
+            ./internal/providers/codex
+            ./internal/providers/claudecode
+            ./internal/agentruntime
+            ./internal/browser
+            ./internal/plugins
+            ./internal/fsutil
+            ./cmd/ariadne
+          )
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            dir="./$(dirname "${f#./}")"
+            seen=0
+            for existing in "${pkgs[@]}"; do
+              [ "$existing" = "$dir" ] && seen=1 && break
+            done
+            [ "$seen" -eq 0 ] && pkgs+=("$dir")
+          done < <(find ./cmd ./internal ./sdk -type f \( -name '*_darwin*.go' -o -name '*_unix*.go' \) 2>/dev/null)
+          go test -vet=off -short -count=1 -p=3 -parallel=3 -timeout=180s "${pkgs[@]}"
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GOMODCACHE: ${{ runner.temp }}/gomod
+          GOCACHE: ${{ runner.temp }}/gobuild
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $testTmp = Join-Path $env:RUNNER_TEMP 'testtmp'
+          New-Item -ItemType Directory -Force -Path $testTmp | Out-Null
+          $env:TEMP = $testTmp
+          $env:TMP = $testTmp
+          $env:GOTMPDIR = $testTmp
+          $pkgs = [System.Collections.Generic.List[string]]@(
+            './internal/local',
+            './internal/runner',
+            './internal/workspaces',
+            './internal/process',
+            './internal/update',
+            './internal/repowatch',
+            './internal/service',
+            './internal/providers/antigravity',
+            './internal/providers/codex',
+            './internal/providers/claudecode',
+            './internal/agentruntime',
+            './internal/browser',
+            './internal/plugins',
+            './internal/fsutil',
+            './cmd/ariadne'
+          )
+          $root = (Get-Location).Path
+          foreach ($f in Get-ChildItem -Path cmd,internal,sdk -Recurse -File -Filter '*_windows*.go' -ErrorAction SilentlyContinue) {
+            $rel = './' + [System.IO.Path]::GetRelativePath($root, $f.DirectoryName).Replace('\', '/')
+            if (-not $pkgs.Contains($rel)) {
+              $pkgs.Add($rel)
+            }
+          }
+          go test -vet=off -short -count=1 -p=4 -parallel=4 -timeout=180s @pkgs
+          exit $LASTEXITCODE
+      - name: Vet (Linux, Windows, macOS)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          GOMODCACHE: ${{ runner.temp }}/gomod
+          GOCACHE: ${{ runner.temp }}/gobuild
+        run: |
+          go vet ./...
+          GOOS=windows GOARCH=amd64 go vet ./...
+          GOOS=darwin GOARCH=arm64 go vet ./...
 
   race:
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: .go-version
-          cache: true
-      - run: go version
-      - run: go test -race -count=1 -parallel=4 -timeout=300s ./...
+          cache: false
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/gomod
+            ${{ runner.temp }}/gobuild
+          key: go-race-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
+          restore-keys: |
+            go-race-${{ runner.os }}-${{ runner.arch }}-
+      - name: Test with race detector
+        shell: bash
+        env:
+          GOMODCACHE: ${{ runner.temp }}/gomod
+          GOCACHE: ${{ runner.temp }}/gobuild
+        run: |
+          all="$(go list ./...)"
+          pkgs=()
+          for p in \
+            github.com/daidr/Ariadne/internal/runner \
+            github.com/daidr/Ariadne/internal/local \
+            github.com/daidr/Ariadne/internal/core \
+            github.com/daidr/Ariadne/internal/update \
+            github.com/daidr/Ariadne/internal/workspaces \
+            github.com/daidr/Ariadne/internal/browser \
+            github.com/daidr/Ariadne/internal/server \
+            github.com/daidr/Ariadne/internal/application \
+            github.com/daidr/Ariadne/internal/service \
+            github.com/daidr/Ariadne/internal/process \
+            github.com/daidr/Ariadne/internal/sources; do
+            if printf '%s\n' "$all" | grep -qx "$p"; then
+              pkgs+=("$p")
+            fi
+          done
+          while IFS= read -r pkg; do
+            case "$pkg" in
+              github.com/daidr/Ariadne/internal/runner|github.com/daidr/Ariadne/internal/local|github.com/daidr/Ariadne/internal/core|github.com/daidr/Ariadne/internal/update|github.com/daidr/Ariadne/internal/workspaces|github.com/daidr/Ariadne/internal/browser|github.com/daidr/Ariadne/internal/server|github.com/daidr/Ariadne/internal/application|github.com/daidr/Ariadne/internal/service|github.com/daidr/Ariadne/internal/process|github.com/daidr/Ariadne/internal/sources) ;;
+              *) pkgs+=("$pkg") ;;
+            esac
+          done <<< "$all"
+          go test -vet=off -race -count=1 -parallel=4 -timeout=300s "${pkgs[@]}"

@@ -27,6 +27,7 @@ import (
 )
 
 func TestRunnerStopsOnlyRepeatedToolBatches(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		steps   []string
@@ -41,7 +42,7 @@ func TestRunnerStopsOnlyRepeatedToolBatches(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
 			home := t.TempDir()
-			repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+			repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,6 +117,7 @@ func TestRunnerStopsOnlyRepeatedToolBatches(t *testing.T) {
 }
 
 func TestRunnerReadCommandOutputRepetition(t *testing.T) {
+	t.Parallel()
 	type callSpec struct {
 		name string
 		args string
@@ -325,7 +327,7 @@ func TestRunnerReadCommandOutputRepetition(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			home, folder := t.TempDir(), t.TempDir()
-			repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+			repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 			if err != nil {
 				t.Fatal(err)
 			}

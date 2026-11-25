@@ -17,6 +17,7 @@ import (
 )
 
 func TestCoordinatorKeepsDiscussionRepliesInTheirThread(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name         string
 		relay        bool
@@ -30,7 +31,7 @@ func TestCoordinatorKeepsDiscussionRepliesInTheirThread(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
 			home := t.TempDir()
-			repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+			repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -169,11 +170,12 @@ func TestCoordinatorKeepsDiscussionRepliesInTheirThread(t *testing.T) {
 }
 
 func TestCoordinatorCanNotifyUserAfterProactivelyRoutingUnrelatedThreadMessage(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"create_thread", "existing_thread", "failed_create_stays_quiet"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			home := t.TempDir()
-			repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+			repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 			if err != nil {
 				t.Fatal(err)
 			}

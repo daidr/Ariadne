@@ -158,11 +158,36 @@ func (state *coordinatorLookState) reserve(name string) lookDecision {
 }
 
 type todoHintState struct {
-	workSteps     int
-	sinceTodo     int
-	todoThisTurn  bool
-	hintedMissing bool
-	hintedStale   bool
+	workSteps          int
+	sinceTodo          int
+	todoThisTurn       bool
+	hintedMissing      bool
+	hintedStale        bool
+	sawInferenceSignal bool
+}
+
+func stepHasLiveUsage(usage *core.TokenUsage) bool {
+	if usage == nil {
+		return false
+	}
+	if usage.ContextInput != nil {
+		return *usage.ContextInput > 0
+	}
+	return usage.Input > 0 || usage.Output > 0
+}
+
+func stepLatchesInferenceSignal(answer *modelstep.Result) bool {
+	if answer == nil {
+		return false
+	}
+	return len(answer.Reasoning) > 0 || stepHasLiveUsage(answer.Usage)
+}
+
+func stepHasInferenceSignal(answer *modelstep.Result) bool {
+	if answer == nil {
+		return false
+	}
+	return strings.TrimSpace(answer.Text) != "" || stepLatchesInferenceSignal(answer)
 }
 
 func compactionLoopHint(count int) string {
@@ -616,7 +641,15 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 			turn.changes.record(ctx, turn.id)
 			return turn.Repository.FinishTurn(ctx, conversation.ID, turn.id, "completed", nil)
 		}
-		batch, err := turn.execute(ctx, tools, answer.ToolCalls)
+		countTodoStep := true
+		if turn.statefulSession {
+			if stepLatchesInferenceSignal(answer) {
+				turn.todo.sawInferenceSignal = true
+			} else if turn.todo.sawInferenceSignal && !stepHasInferenceSignal(answer) {
+				countTodoStep = false
+			}
+		}
+		batch, err := turn.executeStep(ctx, tools, answer.ToolCalls, countTodoStep)
 		if err != nil {
 			return err
 		}
@@ -761,6 +794,10 @@ func (turn *turn) runToolCall(ctx context.Context, call sdk.ToolCall, byName map
 }
 
 func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCall) (batchDigest, error) {
+	return turn.executeStep(ctx, tools, calls, true)
+}
+
+func (turn *turn) executeStep(ctx context.Context, tools []tool, calls []sdk.ToolCall, countTodoStep bool) (batchDigest, error) {
 	byName := map[string]tool{}
 	for _, entry := range tools {
 		byName[entry.spec.Name] = entry
@@ -864,14 +901,16 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 					outcome.content = appendHint(outcome.content, turn.pendingCompactionHint)
 					turn.pendingCompactionHint = ""
 				}
-				turn.todo.workSteps++
+				if countTodoStep {
+					turn.todo.workSteps++
+				}
 				if wroteTodo {
 					turn.todo.sinceTodo = 0
 					turn.todo.todoThisTurn = true
-				} else {
+				} else if countTodoStep {
 					turn.todo.sinceTodo++
 				}
-				if todoWatched {
+				if todoWatched && countTodoStep {
 					hint, hintErr := turn.todoHint(ctx, &turn.todo)
 					if hintErr != nil {
 						return batchDigest{}, hintErr

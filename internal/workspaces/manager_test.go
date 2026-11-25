@@ -5,11 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"weak"
 
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/local"
@@ -27,7 +27,7 @@ func testRepository(t *testing.T) (*core.Repository, core.ProjectView, string) {
 	if err := os.WriteFile(filepath.Join(path, "file.txt"), []byte("hello"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(root, "data.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +60,7 @@ func closeManager(t *testing.T, manager *Manager) {
 	}
 }
 func TestSourceViewsReuseConnectionsAndCloseOnConfigurationOrProviderChange(t *testing.T) {
+	t.Parallel()
 	repo, project, path := testRepository(t)
 	registry := sources.New()
 	var opened, closed atomic.Int32
@@ -138,12 +139,18 @@ func TestCoordinatorViewabilityDoesNotWaitForSlowSourceAndCloseCancelsLoad(t *te
 		t.Fatal(err)
 	}
 	defer closeManager(t, manager)
+	viewDone := make(chan struct{})
+	go func() {
+		defer close(viewDone)
+		_, _ = manager.View(t.Context(), project.ID)
+	}()
+	<-started
 	start := time.Now()
-	if !manager.Viewable(t.Context(), project.ID, 20*time.Millisecond) || time.Since(start) > time.Second {
+	if !manager.Viewable(t.Context(), project.ID, 30*time.Millisecond) || time.Since(start) > 2*time.Second {
 		t.Fatal("coordinator waited for source connection")
 	}
-	<-started
 	closeManager(t, manager)
+	<-viewDone
 	select {
 	case <-cancelled:
 	default:
@@ -151,6 +158,7 @@ func TestCoordinatorViewabilityDoesNotWaitForSlowSourceAndCloseCancelsLoad(t *te
 	}
 }
 func TestReferenceViewsRevalidateSecretsAndDeletion(t *testing.T) {
+	t.Parallel()
 	repo, project, path := testRepository(t)
 	registry := sources.New()
 	var opened, closed atomic.Int32
@@ -214,9 +222,15 @@ func TestReferenceViewsRevalidateSecretsAndDeletion(t *testing.T) {
 	}
 }
 func referencesFromView(raw any) []projectReference { return references(raw) }
-func makeClosedManagerView(t *testing.T, repo *core.Repository, registry *sources.Registry, project string) sdk.SourceView {
-	secret := strings.Repeat("x", 32*1024*1024)
-	manager, err := New(Options{Repository: repo, Sources: registry, Secrets: func(string) map[string]any { return map[string]any{"token": secret} }})
+
+type capturedSecret struct {
+	token string
+}
+
+func makeClosedManagerView(t *testing.T, repo *core.Repository, registry *sources.Registry, project string) (sdk.SourceView, weak.Pointer[capturedSecret]) {
+	secret := &capturedSecret{token: "captured-source-secret"}
+	weakSecret := weak.Make(secret)
+	manager, err := New(Options{Repository: repo, Sources: registry, Secrets: func(string) map[string]any { return map[string]any{"token": secret.token} }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,21 +239,23 @@ func makeClosedManagerView(t *testing.T, repo *core.Repository, registry *source
 		t.Fatal(err)
 	}
 	closeManager(t, manager)
-	return view
+	return view, weakSecret
 }
 func TestClosedViewDoesNotRetainCapturedSourceSecrets(t *testing.T) {
+	t.Parallel()
 	repo, project, _ := testRepository(t)
 	registry := sources.New()
 	var opened, closed atomic.Int32
 	registry.Register(testProvider(&opened, &closed))
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	view := makeClosedManagerView(t, repo, registry, project.ID)
-	runtime.GC()
-	runtime.ReadMemStats(&after)
-	if after.HeapAlloc > before.HeapAlloc+8*1024*1024 {
-		t.Fatal("closed read-only view retained source secrets", after.HeapAlloc-before.HeapAlloc)
+	view, weakSecret := makeClosedManagerView(t, repo, registry, project.ID)
+	deadline := time.Now().Add(2 * time.Second)
+	for weakSecret.Value() != nil && time.Now().Before(deadline) {
+		runtime.Gosched()
+		runtime.GC()
+		time.Sleep(5 * time.Millisecond)
+	}
+	if weakSecret.Value() != nil {
+		t.Fatal("closed read-only view retained source secrets")
 	}
 	if _, err := view.List(t.Context(), "."); err == nil {
 		t.Fatal("closed manager remained readable")

@@ -118,15 +118,15 @@ func Start(ctx context.Context, argv []string, options Options) (*Command, error
 	if len(argv) == 0 || argv[0] == "" {
 		return nil, errors.New("command program is required")
 	}
-	command := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	command.Dir = options.Directory
-	command.Env = environment(options)
-	resolved, err := resolveProgram(argv[0], command.Env, options.Directory)
+	env := environment(options)
+	resolved, err := resolveProgram(argv[0], env, options.Directory)
 	if err != nil {
 		return nil, err
 	}
-	command.Path = resolved
-	command.Err = nil
+	command := exec.CommandContext(ctx, resolved, argv[1:]...)
+	command.Args[0] = argv[0]
+	command.Dir = options.Directory
+	command.Env = env
 	if err := prepareInvocation(command); err != nil {
 		return nil, err
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"iter"
 	"net/http/httptest"
-	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -23,7 +22,8 @@ import (
 )
 
 func TestConcurrentProjectDeletionSharesCleanupAndSurvivesDisconnectedWaiter(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "delete.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,8 @@ func TestConcurrentProjectDeletionSharesCleanupAndSurvivesDisconnectedWaiter(t *
 }
 
 func TestProjectDeletionCallsModelProviderForget(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "delete-forget.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -122,7 +122,7 @@ func (store *ObjectStore) input(ctx context.Context, args []string, input io.Rea
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stdout.cancel = cancel
-	command, err := process.Start(ctx, append([]string{"git"}, args...), process.Options{Directory: store.directory, ForThread: true, Env: ServerGitEnv("file"), Stdin: input, Stdout: stdout, Stderr: stderr})
+	command, err := process.Start(ctx, append([]string{gitExecutable(nil)}, args...), process.Options{Directory: store.directory, ForThread: true, Env: ServerGitEnv("file"), Stdin: input, Stdout: stdout, Stderr: stderr})
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func (store *ObjectStore) Bundle(ctx context.Context, tips, exclude []string) (i
 	store.mu.Unlock()
 	stop := context.AfterFunc(ctx, func() { _ = writer.CloseWithError(ctx.Err()); _ = reader.CloseWithError(ctx.Err()) })
 	stderr := &limitedBytes{max: 64 << 10}
-	command, err := process.Start(ctx, []string{"git", "bundle", "create", "-", "--stdin"}, process.Options{Directory: store.directory, ForThread: true, Env: ServerGitEnv("file"), Stdin: strings.NewReader(input.String()), Stdout: writer, Stderr: stderr})
+	command, err := process.Start(ctx, []string{gitExecutable(nil), "bundle", "create", "-", "--stdin"}, process.Options{Directory: store.directory, ForThread: true, Env: ServerGitEnv("file"), Stdin: strings.NewReader(input.String()), Stdout: writer, Stderr: stderr})
 	if err != nil {
 		stop()
 		cancel()

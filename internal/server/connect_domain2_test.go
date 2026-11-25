@@ -36,7 +36,7 @@ func newDomain2TestServer(t *testing.T) (
 		return time.UnixMilli(nowMs)
 	}
 	repo, err := core.Open(t.Context(), core.Options{
-		Path: filepath.Join(home, "ariadne.db"),
+		Path: ":memory:",
 		Now:  now,
 	})
 	if err != nil {
@@ -196,6 +196,7 @@ func newDomain2TestServer(t *testing.T) (
 }
 
 func TestProjectServiceAtomicUpdateAndCRUD(t *testing.T) {
+	t.Parallel()
 	srv, projects, _, _, _, cleanup := newDomain2TestServer(t)
 	defer cleanup()
 
@@ -238,7 +239,7 @@ func TestProjectServiceAtomicUpdateAndCRUD(t *testing.T) {
 		Settings: &ariadnev1.ProjectSettings{
 			Instructions: "Follow Go conventions",
 			Delivery:     &ariadnev1.ProjectDeliverySettings{Mode: "merge", Instructions: ""},
-			Tools: []string{"fetch"},
+			Tools:        []string{"fetch"},
 			Workspace: &ariadnev1.ProjectWorkspaceSettings{
 				Retention: "auto",
 				Auto:      &ariadnev1.ProjectWorkspaceAutoSettings{Setup: true, Check: false},
@@ -333,6 +334,7 @@ func TestProjectServiceAtomicUpdateAndCRUD(t *testing.T) {
 }
 
 func TestArtifactServicePaginationAndSplitComments(t *testing.T) {
+	t.Parallel()
 	_, projects, _, artifacts, _, cleanup := newDomain2TestServer(t)
 	defer cleanup()
 
@@ -504,6 +506,7 @@ func TestArtifactServicePaginationAndSplitComments(t *testing.T) {
 }
 
 func TestPlanServiceAndIssueServiceEndToEnd(t *testing.T) {
+	t.Parallel()
 	_, projects, plans, _, issues, cleanup := newDomain2TestServer(t)
 	defer cleanup()
 
@@ -689,10 +692,11 @@ func TestPlanServiceAndIssueServiceEndToEnd(t *testing.T) {
 }
 
 func TestProjectServiceBrowseSourceSecretIsolation(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	repo, err := core.Open(t.Context(), core.Options{
-		Path: filepath.Join(home, "ariadne.db"),
+		Path: ":memory:",
 		Now:  now,
 	})
 	if err != nil {

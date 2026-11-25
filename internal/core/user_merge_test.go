@@ -1,12 +1,12 @@
 package core
 
 import (
-	"path/filepath"
 	"testing"
 )
 
 func TestUserMergeRecordsMethodAndResultInOneTransaction(t *testing.T) {
-	repo, err := Open(t.Context(), Options{Path: filepath.Join(t.TempDir(), "merge.sqlite")})
+	t.Parallel()
+	repo, err := Open(t.Context(), Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

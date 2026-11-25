@@ -57,6 +57,93 @@ type Workspaces struct {
 	catFile                  *catFileBatch
 }
 
+func resolveRepoCommonDir(directory string) (string, bool) {
+	gitDir := directWorktreeGitDir(directory)
+	if gitDir == "" || !isValidGitDirectory(gitDir) {
+		return "", false
+	}
+	common := gitDir
+	if rawCommon, err := readSmallTextFile(filepath.Join(gitDir, "commondir")); err == nil {
+		line, _, _ := strings.Cut(rawCommon, "\n")
+		target := filepath.FromSlash(strings.TrimSpace(strings.TrimRight(line, "\r")))
+		if target != "" {
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(gitDir, target)
+			}
+			common = filepath.Clean(target)
+		}
+	}
+	resolved, err := filepath.EvalSymlinks(common)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Stat(resolved)
+	if err != nil || !info.IsDir() {
+		return "", false
+	}
+	return resolved, true
+}
+
+func readHeadBranchFast(directory, commonDir string) (branch string, ok bool) {
+	if commonDir != "" {
+		if _, err := os.Stat(filepath.Join(commonDir, "reftable")); !os.IsNotExist(err) {
+			return "", false
+		}
+	}
+	gitDir := directWorktreeGitDir(directory)
+	if gitDir == "" {
+		return "", false
+	}
+	raw, err := readSmallTextFile(filepath.Join(gitDir, "HEAD"))
+	if err != nil {
+		return "", false
+	}
+	line, _, _ := strings.Cut(raw, "\n")
+	line = strings.TrimSpace(strings.TrimRight(line, "\r"))
+	if ref, isSym := strings.CutPrefix(line, "ref:"); isSym {
+		ref = strings.TrimSpace(ref)
+		if short, isHead := strings.CutPrefix(ref, "refs/heads/"); isHead && short != "" {
+			return short, true
+		}
+		return "", false
+	}
+	if isObjectID(line) {
+		return "", true
+	}
+	return "", false
+}
+
+func worktreesDirHasEntries(commonDir string) bool {
+	entries, err := os.ReadDir(filepath.Join(commonDir, "worktrees"))
+	return err == nil && len(entries) > 0
+}
+
+func localBranchDefinitelyMissing(commonDir, branch string) bool {
+	if commonDir == "" || branch == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(commonDir, "reftable")); !os.IsNotExist(err) {
+		return false
+	}
+	if _, err := os.Lstat(filepath.Join(commonDir, "refs", "heads", filepath.FromSlash(branch))); !os.IsNotExist(err) {
+		return false
+	}
+	raw, err := os.ReadFile(filepath.Join(commonDir, "packed-refs"))
+	if os.IsNotExist(err) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	needle := strings.ToLower(" refs/heads/" + branch)
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasSuffix(strings.ToLower(strings.TrimRight(line, "\r")), needle) {
+			return false
+		}
+	}
+	return true
+}
+
 func NewWorkspaces(ctx context.Context, options FactoryOptions) (*Workspaces, error) {
 	source, err := NewWorkspace(options.Path, WorkspaceOptions{ID: "source", HideGit: true})
 	if err != nil {
@@ -64,15 +151,20 @@ func NewWorkspaces(ctx context.Context, options FactoryOptions) (*Workspaces, er
 	}
 	fail := func(err error) (*Workspaces, error) { source.Close(); return nil, err }
 	repository := ""
+	common := ""
 	if options.RepositoryRoot == nil {
-		repository = GitRoot(ctx, source.directory)
+		if fastCommon, ok := resolveRepoCommonDir(source.directory); ok {
+			repository = source.directory
+			common = fastCommon
+		} else {
+			repository = GitRoot(ctx, source.directory)
+		}
 	} else {
 		repository = *options.RepositoryRoot
 	}
 	if err := ctx.Err(); err != nil {
 		return fail(err)
 	}
-	common := ""
 	var git GitRun
 	var roots []string
 	if repository != "" {
@@ -88,13 +180,19 @@ func NewWorkspaces(ctx context.Context, options FactoryOptions) (*Workspaces, er
 			return fail(errors.New("project path is outside the repository"))
 		}
 		git = NewGit(repository, "file")
-		result := git(ctx, []string{"rev-parse", "--path-format=absolute", "--git-common-dir"}, GitOptions{})
-		if result.ExitCode != 0 {
-			return fail(gitFailure(result, "git rev-parse"))
-		}
-		common, err = filepath.EvalSymlinks(strings.TrimSpace(result.Stdout))
-		if err != nil {
-			return fail(err)
+		if common == "" {
+			if fastCommon, ok := resolveRepoCommonDir(repository); ok {
+				common = fastCommon
+			} else {
+				result := git(ctx, []string{"rev-parse", "--path-format=absolute", "--git-common-dir"}, GitOptions{})
+				if result.ExitCode != 0 {
+					return fail(gitFailure(result, "git rev-parse"))
+				}
+				common, err = filepath.EvalSymlinks(strings.TrimSpace(result.Stdout))
+				if err != nil {
+					return fail(err)
+				}
+			}
 		}
 		if options.DataDir == "" {
 			return fail(errors.New("workspaces require a data directory"))
@@ -231,6 +329,13 @@ func (factory *Workspaces) checkedDirectory(threadID string) (string, error) {
 	return "", errors.New("worktree directory is outside its owned root")
 }
 func (factory *Workspaces) verifiedWorktree(ctx context.Context, directory string) error {
+	if fastCommon, ok := resolveRepoCommonDir(directory); ok {
+		actual, errA := os.Stat(fastCommon)
+		expected, errE := os.Stat(factory.common)
+		if errA == nil && errE == nil && os.SameFile(actual, expected) {
+			return nil
+		}
+	}
 	result := factory.git(ctx, []string{"rev-parse", "--path-format=absolute", "--git-common-dir"}, GitOptions{Directory: directory})
 	if result.ExitCode != 0 {
 		return gitFailure(result, "git rev-parse")
@@ -311,6 +416,10 @@ func (factory *Workspaces) Open(ctx context.Context, input OpenRequest) (*Worksp
 			if *input.Base != nil {
 				base = new(**input.Base)
 			}
+		} else if short, ok := readHeadBranchFast(factory.repository, factory.common); ok {
+			if short != "" {
+				base = new(short)
+			}
 		} else {
 			result := factory.git(ctx, []string{"symbolic-ref", "--quiet", "--short", "HEAD"}, GitOptions{})
 			if result.ExitCode == 0 && strings.TrimSpace(result.Stdout) != "" {
@@ -337,11 +446,16 @@ func (factory *Workspaces) Open(ctx context.Context, input OpenRequest) (*Worksp
 			if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
 				return nil, err
 			}
-			pruned := factory.git(ctx, []string{"worktree", "prune"}, GitOptions{})
-			if pruned.ExitCode != 0 {
-				return nil, gitFailure(pruned, "git worktree prune")
+			if worktreesDirHasEntries(factory.common) {
+				pruned := factory.git(ctx, []string{"worktree", "prune"}, GitOptions{})
+				if pruned.ExitCode != 0 {
+					return nil, gitFailure(pruned, "git worktree prune")
+				}
 			}
-			hasBranch := commitSHA(ctx, factory.git, "refs/heads/"+chosen, "") != ""
+			hasBranch := false
+			if !localBranchDefinitelyMissing(factory.common, chosen) {
+				hasBranch = commitSHA(ctx, factory.git, "refs/heads/"+chosen, "") != ""
+			}
 			args := []string{"worktree", "add"}
 			if shared != "" {
 				args = append(args, "--no-checkout")
@@ -474,13 +588,36 @@ func (factory *Workspaces) remove(ctx context.Context, threadID string, options 
 			return false, err
 		}
 	}
-	var externalEmbeddedCommonDirs []string
+	var (
+		externalEmbeddedCommonDirs []string
+		prediscovered              []EmbeddedRepo
+		hasPrediscovered           bool
+	)
 	if options.Discard && info != nil {
-		externalEmbeddedCommonDirs = collectExternalEmbeddedCommonDirs(ctx, dir)
+		if repos, discoverErr := DiscoverEmbeddedRepos(ctx, dir); discoverErr == nil {
+			prediscovered = repos
+			hasPrediscovered = true
+			seen := make(map[string]struct{}, len(repos))
+			for _, repo := range repos {
+				if repo.ObjectStoreInsideWorktree || repo.CommonDir == "" {
+					continue
+				}
+				key := cleanPathKey(repo.CommonDir)
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				externalEmbeddedCommonDirs = append(externalEmbeddedCommonDirs, repo.CommonDir)
+			}
+		} else if ctx.Err() == nil {
+			hasPrediscovered = true
+		}
 	}
-	removed, err := RemoveWorktree(ctx, factory.git, dir, options)
+	removed, err := removeWorktree(ctx, factory.git, dir, options, prediscovered, hasPrediscovered)
 	if err == nil && removed && options.Discard {
-		err = DropSnapshots(ctx, factory.git, threadID)
+		if !snapshotRefsDefinitelyEmpty(factory.common, threadID) {
+			err = DropSnapshots(ctx, factory.git, threadID)
+		}
 		dropSnapshotsInCommonDirs(ctx, externalEmbeddedCommonDirs, threadID)
 	}
 	return removed, err

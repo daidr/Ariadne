@@ -28,8 +28,9 @@ import (
 )
 
 func TestLuaPluginsThroughSettingsAPI(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "app.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,8 +265,9 @@ func TestLuaPluginsThroughSettingsAPI(t *testing.T) {
 }
 
 func TestBuiltinHTTPModelPluginsTogglePreservesSavedConfig(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "app.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,8 +459,9 @@ func TestBuiltinHTTPModelPluginsTogglePreservesSavedConfig(t *testing.T) {
 }
 
 func TestPluginUsageAndDisabledModelSelection(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "app.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,8 +618,9 @@ func TestPluginUsageAndDisabledModelSelection(t *testing.T) {
 }
 
 func TestBuiltinAgentCLIModelPluginsToggleUsageAndValidation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "app.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -166,7 +166,7 @@ func resolveEmbeddedRepoPath(ctx context.Context, worktreeDir, repoPath string) 
 		return EmbeddedRepo{}, errors.New("invalid embedded repository metadata")
 	}
 	repoGit := NewGit(repo.Path, "file")
-	ok, err := verifyEmbeddedGitDir(ctx, repoGit, repo.GitDir)
+	ok, err := verifyEmbeddedGitDir(ctx, repo.Path, repoGit, repo.GitDir)
 	if err != nil {
 		return EmbeddedRepo{}, err
 	}
@@ -211,7 +211,10 @@ func isAncestorSHA(ctx context.Context, git GitRun, ancestor, descendant string)
 	if ancestor == "" || descendant == "" {
 		return false
 	}
-	return git(ctx, []string{"merge-base", "--is-ancestor", ancestor, descendant}, GitOptions{}).ExitCode == 0
+	if ancestor == descendant && isObjectID(ancestor) {
+		return true
+	}
+	return git(ctx, []string{"--no-optional-locks", "merge-base", "--is-ancestor", ancestor, descendant}, GitOptions{}).ExitCode == 0
 }
 
 // resolveEmbeddedFallbackBase finds the default remote/upstream base ref for an
@@ -219,23 +222,30 @@ func isAncestorSHA(ctx context.Context, git GitRun, ancestor, descendant string)
 // upgrade a baseline that tracks an advancing default branch). Only candidates
 // that share history (a valid merge-base) with headSHA are returned.
 func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedRepo, branchRef, headSHA string) (ref, name, sha, mergeBase string) {
-	upstreamRef := resolveUpstreamRef(ctx, git, "")
+	snap := loadEmbeddedRefSnapshot(ctx, git)
+	upstreamRef := snap.resolveHeadUpstream(ctx, git, branchRef)
 	upstreamRemote, upstreamShort, hasRemoteUpstream := remoteNameAndBranch(upstreamRef)
 	branchShort := strings.TrimPrefix(branchRef, "refs/heads/")
 
 	checked := make(map[string]bool)
+	mergeBaseCache := make(map[string]string)
 	tryCandidate := func(candidate string) (string, string, string, string, bool) {
 		if candidate == "" || candidate == branchRef || checked[candidate] {
 			return "", "", "", "", false
 		}
 		checked[candidate] = true
-		resolved := commitSHA(ctx, git, candidate, "")
+		resolved := snap.commitSHA(ctx, git, candidate)
 		if resolved == "" {
 			return "", "", "", "", false
 		}
 		mb := resolved
 		if headSHA != "" && resolved != headSHA {
-			mb = mergeBaseSHA(ctx, git, resolved, headSHA)
+			if cached, ok := mergeBaseCache[resolved]; ok {
+				mb = cached
+			} else {
+				mb = mergeBaseSHA(ctx, git, resolved, headSHA)
+				mergeBaseCache[resolved] = mb
+			}
 			if mb == "" {
 				return "", "", "", "", false
 			}
@@ -267,7 +277,7 @@ func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedR
 			if r, n, s, mb, ok := tryCandidate("refs/remotes/origin/" + configuredBranch); ok {
 				return r, n, s, mb
 			}
-			if onlyRemote := soleRemoteName(ctx, git); onlyRemote != "" {
+			if onlyRemote := snap.soleRemoteName(ctx, git); onlyRemote != "" {
 				if r, n, s, mb, ok := tryCandidate("refs/remotes/" + onlyRemote + "/" + configuredBranch); ok {
 					return r, n, s, mb
 				}
@@ -279,7 +289,7 @@ func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedR
 	}
 
 	// 3. Explicit remote default branch (refs/remotes/<remote>/HEAD).
-	if remoteDefault := resolveRemoteDefaultRef(ctx, git, upstreamRemote); remoteDefault != "" {
+	if remoteDefault := snap.resolveRemoteDefaultRef(ctx, git, upstreamRemote); remoteDefault != "" {
 		if r, n, s, mb, ok := tryCandidate(remoteDefault); ok {
 			return r, n, s, mb
 		}
@@ -293,7 +303,7 @@ func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedR
 	// 4. Host repository HEAD for external object stores (nested linked worktrees).
 	if !repo.ObjectStoreInsideWorktree && !repo.IsSubmodule() {
 		if hostRef := readCommonHeadRef(repo.CommonDir); hostRef != "" {
-			if hostUpstream := resolveUpstreamRef(ctx, git, hostRef); hostUpstream != "" {
+			if hostUpstream := snap.resolveBranchUpstream(ctx, git, hostRef); hostUpstream != "" {
 				if r, n, s, mb, ok := tryCandidate(hostUpstream); ok {
 					return r, n, s, mb
 				}
@@ -327,7 +337,7 @@ func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedR
 			return r, n, s, mb
 		}
 	}
-	if onlyRemote := soleRemoteName(ctx, git); onlyRemote != "" {
+	if onlyRemote := snap.soleRemoteName(ctx, git); onlyRemote != "" {
 		for _, candidate := range []string{"refs/remotes/" + onlyRemote + "/main", "refs/remotes/" + onlyRemote + "/master"} {
 			if r, n, s, mb, ok := tryCandidate(candidate); ok {
 				return r, n, s, mb
@@ -361,7 +371,7 @@ func EmbeddedRepoChanges(ctx context.Context, repo EmbeddedRepo, baseline *sdk.R
 		return nil, nil
 	}
 	repoGit := NewGit(repo.Path, "file")
-	valid, err := verifyEmbeddedGitDir(ctx, repoGit, repo.GitDir)
+	valid, err := verifyEmbeddedGitDir(ctx, repo.Path, repoGit, repo.GitDir)
 	if err != nil || !valid {
 		return nil, err
 	}
@@ -408,7 +418,10 @@ func EmbeddedRepoChanges(ctx context.Context, repo EmbeddedRepo, baseline *sdk.R
 		}
 		if from == "" {
 			baseSHA = recordedSHA
-			mb := mergeBaseSHA(ctx, repoGit, baseSHA, status.headSHA)
+			mb := baseSHA
+			if baseSHA != status.headSHA {
+				mb = mergeBaseSHA(ctx, repoGit, baseSHA, status.headSHA)
+			}
 			if mb != "" {
 				from = mb
 				switch {
@@ -533,7 +546,7 @@ func snapshotEmbeddedRepo(ctx context.Context, repo EmbeddedRepo, threadID strin
 		return sdk.RepoSnapshot{}, false, nil
 	}
 	repoGit := NewGit(repo.Path, "file")
-	valid, err := verifyEmbeddedGitDir(ctx, repoGit, repo.GitDir)
+	valid, err := verifyEmbeddedGitDir(ctx, repo.Path, repoGit, repo.GitDir)
 	if err != nil || !valid {
 		return sdk.RepoSnapshot{}, false, err
 	}
@@ -568,8 +581,11 @@ func snapshotEmbeddedRepo(ctx context.Context, repo EmbeddedRepo, threadID strin
 	}, true, nil
 }
 
-func pinSnapshotObject(ctx context.Context, git GitRun, cwd, threadID, sha string) {
+func pinSnapshotObject(ctx context.Context, git GitRun, cwd, commonDir, threadID, sha string) {
 	if !isObjectID(sha) || sha == EmptyTreeSHA {
+		return
+	}
+	if snapshotRefMatches(commonDir, threadID, sha) {
 		return
 	}
 	ref := SnapshotRefs(threadID) + sha
@@ -591,7 +607,7 @@ func collectExternalEmbeddedCommonDirs(ctx context.Context, worktreeDir string) 
 			continue
 		}
 		repoGit := NewGit(repo.Path, "file")
-		if valid, err := verifyEmbeddedGitDir(ctx, repoGit, repo.GitDir); err != nil || !valid {
+		if valid, err := verifyEmbeddedGitDir(ctx, repo.Path, repoGit, repo.GitDir); err != nil || !valid {
 			continue
 		}
 		key := cleanPathKey(repo.CommonDir)
@@ -606,7 +622,7 @@ func collectExternalEmbeddedCommonDirs(ctx context.Context, worktreeDir string) 
 
 func dropSnapshotsInCommonDirs(ctx context.Context, commonDirs []string, threadID string) {
 	for _, commonDir := range commonDirs {
-		if commonDir == "" {
+		if commonDir == "" || snapshotRefsDefinitelyEmpty(commonDir, threadID) {
 			continue
 		}
 		info, err := os.Stat(commonDir)
@@ -796,8 +812,12 @@ func (factory *Workspaces) RepoDiff(ctx context.Context, threadID, repoPath, fro
 		return nil, err
 	}
 	if len(files) > 0 && threadID != "" {
-		pinSnapshotObject(ctx, repoGit, repo.Path, threadID, from)
-		pinSnapshotObject(ctx, repoGit, repo.Path, threadID, to)
+		commonDir := repo.CommonDir
+		if commonDir == "" {
+			commonDir = commonDirForWorktree(repo.GitDir)
+		}
+		pinSnapshotObject(ctx, repoGit, repo.Path, commonDir, threadID, from)
+		pinSnapshotObject(ctx, repoGit, repo.Path, commonDir, threadID, to)
 	}
 	return files, nil
 }

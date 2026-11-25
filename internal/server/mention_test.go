@@ -20,6 +20,7 @@ import (
 )
 
 func TestMentionFilesAndReferenceStatusRPC(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source")
 	if err := os.MkdirAll(filepath.Join(source, "src"), 0700); err != nil {
@@ -33,7 +34,7 @@ func TestMentionFilesAndReferenceStatusRPC(t *testing.T) {
 	definition := object{"kind": "local-directory", "settings": object{"path": source}}
 	refs := []any{object{"id": "ref_a", "name": "reference", "kind": "local-directory", "settings": object{"path": source}}}
 	sql := `UPDATE projects SET source='` + strings.ReplaceAll(encoded(definition), "'", "''") + `',reference_sources='` + strings.ReplaceAll(encoded(refs), "'", "''") + `' WHERE id='prj_a';`
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "files.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

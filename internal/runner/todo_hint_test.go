@@ -44,6 +44,7 @@ func updateTodoCall(step int, status string) sdk.Part {
 }
 
 func TestThreadTodoMissingHintOnce(t *testing.T) {
+	t.Parallel()
 	results := runThreadToolSteps(t, todoMissingAfter+3, lookMessageCall)
 	var hintedAt []int
 	for i, res := range results {
@@ -63,6 +64,7 @@ func TestThreadTodoMissingHintOnce(t *testing.T) {
 }
 
 func TestThreadTodoWrittenFirstNoMissingHint(t *testing.T) {
+	t.Parallel()
 	results := runThreadToolSteps(t, todoMissingAfter+3, func(step int) sdk.Part {
 		if step == 0 {
 			return updateTodoCall(step, "doing")
@@ -77,6 +79,7 @@ func TestThreadTodoWrittenFirstNoMissingHint(t *testing.T) {
 }
 
 func TestThreadTodoStaleHintAtTenSteps(t *testing.T) {
+	t.Parallel()
 	results := runThreadToolSteps(t, todoStaleAfter+4, func(step int) sdk.Part {
 		if step == 0 {
 			return updateTodoCall(step, "doing")
@@ -102,6 +105,7 @@ func TestThreadTodoStaleHintAtTenSteps(t *testing.T) {
 }
 
 func TestThreadTodoFinishedThisTurnNotStale(t *testing.T) {
+	t.Parallel()
 	results := runThreadToolSteps(t, todoStaleAfter+4, func(step int) sdk.Part {
 		if step == 0 {
 			return updateTodoCall(step, "done")
@@ -118,6 +122,7 @@ func TestThreadTodoFinishedThisTurnNotStale(t *testing.T) {
 }
 
 func TestThreadTodoFinishedEarlierTurnReminded(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "多回合任务"})
 	if err != nil {
@@ -170,6 +175,7 @@ func TestThreadTodoFinishedEarlierTurnReminded(t *testing.T) {
 }
 
 func TestReviewThreadSkipsTodoHints(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	author, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "作者讨论串"})
 	if err != nil {
@@ -225,6 +231,7 @@ func clearTodoCall(step int) sdk.Part {
 }
 
 func TestCoordinatorTodoMissingHintUsesCoordinatorWording(t *testing.T) {
+	t.Parallel()
 	results := runCoordinatorToolSteps(t, todoMissingAfter+3, lookMessageCall)
 	var hintedAt []int
 	for i, res := range results {
@@ -245,6 +252,7 @@ func TestCoordinatorTodoMissingHintUsesCoordinatorWording(t *testing.T) {
 }
 
 func TestCoordinatorTodoStaleHintUsesCoordinatorWording(t *testing.T) {
+	t.Parallel()
 	results := runCoordinatorToolSteps(t, todoStaleAfter+4, func(step int) sdk.Part {
 		if step == 0 {
 			return updateTodoCall(step, "doing")
@@ -274,6 +282,7 @@ func TestCoordinatorTodoStaleHintUsesCoordinatorWording(t *testing.T) {
 }
 
 func TestCoordinatorTodoClearedThisTurnNotReminded(t *testing.T) {
+	t.Parallel()
 	results := runCoordinatorToolSteps(t, todoStaleAfter+4, func(step int) sdk.Part {
 		if step == 0 {
 			return clearTodoCall(step)
@@ -293,6 +302,7 @@ func TestCoordinatorTodoClearedThisTurnNotReminded(t *testing.T) {
 }
 
 func TestCoordinatorTodoFinishedEarlierTurnRemindedToDropDone(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
 
@@ -344,4 +354,171 @@ func TestCoordinatorTodoFinishedEarlierTurnRemindedToDropDone(t *testing.T) {
 		!strings.Contains(results[hintedAt[0]].content, "- [done] 执行步骤") {
 		t.Fatalf("coordinator finished hint should include current todo items: %q", results[hintedAt[0]].content)
 	}
+}
+
+func TestStatefulSerialToolCallbacksCountByInferenceRound(t *testing.T) {
+	t.Parallel()
+	t.Run("serial callbacks inside one inference round do not prematurely trigger stale hint", func(t *testing.T) {
+		repo, store, project := openTestEnv(t)
+		thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "串行回调"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+		// Round 0: update_todo (1 callback with usage/reasoning)
+		// Rounds 1..4: 4 inference rounds, each emitting 4 serial tool callbacks
+		// (only the first callback of each round carries reasoning/usage) = 16 callbacks total,
+		// but only 4 real inference rounds since update_todo (< todoStaleAfter=10).
+		step := 0
+		results := runToolTurn(t, repo, store, conv, nil, func(_ sdk.Request) iter.Seq[sdk.Part] {
+			current := step
+			step++
+			return func(yield func(sdk.Part) bool) {
+				if current == 0 {
+					ctxIn := int64(1000)
+					yield(sdk.Part{Type: "reasoning", Text: "plan"})
+					yield(sdk.Part{Type: "usage", ContextInput: &ctxIn})
+					yield(updateTodoCall(0, "doing"))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					return
+				}
+				if current <= 16 {
+					roundIdx := (current - 1) / 4
+					callInRound := (current - 1) % 4
+					if callInRound == 0 {
+						ctxIn := int64(2000 + roundIdx*1000)
+						yield(sdk.Part{Type: "reasoning", Text: fmt.Sprintf("round %d", roundIdx)})
+						yield(sdk.Part{Type: "usage", ContextInput: &ctxIn})
+					}
+					yield(lookMessageCall(current))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					return
+				}
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		})
+		for i, res := range results {
+			if strings.Contains(res.content, todoStaleHint) || strings.Contains(res.content, todoMissingHint) {
+				t.Fatalf("unexpected todo hint at callback %d (only 4 real inference rounds elapsed): %q", i, res.content)
+			}
+		}
+	})
+
+	t.Run("stale hint fires on the tenth real inference round even with serial callbacks", func(t *testing.T) {
+		repo, store, project := openTestEnv(t)
+		thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "多轮串行回调"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+		// Callback 0: update_todo (round 0)
+		// Callbacks 1..24: 12 real inference rounds, 2 serial calls each.
+		// 10th real round starts at callback 1 + 9*2 = 19.
+		step := 0
+		results := runToolTurn(t, repo, store, conv, nil, func(_ sdk.Request) iter.Seq[sdk.Part] {
+			current := step
+			step++
+			return func(yield func(sdk.Part) bool) {
+				if current == 0 {
+					ctxIn := int64(1000)
+					yield(sdk.Part{Type: "usage", ContextInput: &ctxIn})
+					yield(updateTodoCall(0, "doing"))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					return
+				}
+				if current <= 24 {
+					roundIdx := (current - 1) / 2
+					if (current-1)%2 == 0 {
+						ctxIn := int64(2000 + roundIdx*500)
+						yield(sdk.Part{Type: "usage", ContextInput: &ctxIn})
+					}
+					yield(lookMessageCall(current))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					return
+				}
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		})
+		var hintedAt []int
+		for i, res := range results {
+			if strings.Contains(res.content, todoStaleHint) {
+				hintedAt = append(hintedAt, i)
+			}
+		}
+		wantIndex := 1 + (todoStaleAfter-1)*2
+		if len(hintedAt) != 1 || hintedAt[0] != wantIndex {
+			t.Fatalf("stale hint indices = %v, want [%d]", hintedAt, wantIndex)
+		}
+	})
+
+	t.Run("plain text on first step does not latch inference signal or disable todo hints", func(t *testing.T) {
+		repo, store, project := openTestEnv(t)
+		thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "纯文本不锁存"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+		step := 0
+		results := runToolTurn(t, repo, store, conv, nil, func(_ sdk.Request) iter.Seq[sdk.Part] {
+			current := step
+			step++
+			return func(yield func(sdk.Part) bool) {
+				if current < todoMissingAfter+1 {
+					if current == 0 {
+						yield(sdk.Part{Type: "text", Text: "我先查看当前文件。"})
+					}
+					yield(lookMessageCall(current))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					return
+				}
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		})
+		var hintedAt []int
+		for i, res := range results {
+			if strings.Contains(res.content, todoMissingHint) {
+				hintedAt = append(hintedAt, i)
+			}
+		}
+		if len(hintedAt) != 1 || hintedAt[0] != todoMissingAfter-1 {
+			t.Fatalf("missing hint indices = %v, want [%d]", hintedAt, todoMissingAfter-1)
+		}
+	})
+
+	t.Run("settled pending usage with ContextInput=0 does not latch inference signal", func(t *testing.T) {
+		repo, store, project := openTestEnv(t)
+		thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "历史结算usage不锁存"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+		step := 0
+		results := runToolTurn(t, repo, store, conv, nil, func(_ sdk.Request) iter.Seq[sdk.Part] {
+			current := step
+			step++
+			return func(yield func(sdk.Part) bool) {
+				if current < todoMissingAfter+1 {
+					if current == 0 {
+						zeroCtx := int64(0)
+						in := int64(99000)
+						out := int64(250)
+						yield(sdk.Part{Type: "usage", Input: &in, Output: &out, ContextInput: &zeroCtx})
+					}
+					yield(lookMessageCall(current))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					return
+				}
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		})
+		var hintedAt []int
+		for i, res := range results {
+			if strings.Contains(res.content, todoMissingHint) {
+				hintedAt = append(hintedAt, i)
+			}
+		}
+		if len(hintedAt) != 1 || hintedAt[0] != todoMissingAfter-1 {
+			t.Fatalf("missing hint indices = %v, want [%d]", hintedAt, todoMissingAfter-1)
+		}
+	})
 }

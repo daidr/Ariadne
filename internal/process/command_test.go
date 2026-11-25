@@ -115,6 +115,7 @@ func waitCommand(t *testing.T, command *Command) {
 	}
 }
 func TestNativeArgumentsExitAndCredentialFiltering(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	arguments := []string{"中文 😀", "two words", `quotes"and'backslash\`, "$HOME; & echo wrong", "%PATH%"}
 	command, err := Start(t.Context(), helper(t, append([]string{"echo"}, arguments...)...), Options{Env: map[string]string{"ARIADNE_PROCESS_HELPER": "1"}, ForThread: true, Stdout: &stdout, Stderr: &stderr})
@@ -144,6 +145,7 @@ func TestNativeArgumentsExitAndCredentialFiltering(t *testing.T) {
 }
 
 func TestCommandUsesWorkspacePATH(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	tools := filepath.Join(root, "tools")
 	if err := os.Mkdir(tools, 0700); err != nil {
@@ -166,8 +168,10 @@ func TestCommandUsesWorkspacePATH(t *testing.T) {
 	}
 }
 func TestCancellationKillsDescendantsAndReleasesWorkspace(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"tree", "orphan"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			directory := filepath.Join(root, "workspace")
 			if err := os.Mkdir(directory, 0700); err != nil {

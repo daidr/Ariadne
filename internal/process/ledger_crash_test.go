@@ -35,6 +35,7 @@ func TestLedgerBackendChild(t *testing.T) {
 	os.Exit(0)
 }
 func TestActualBackendExitLeavesNoUnownedProcessesAfterRecovery(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path, pidPath := filepath.Join(root, "processes.json"), filepath.Join(root, "child.pid")
 	program, err := os.Executable()

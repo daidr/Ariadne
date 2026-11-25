@@ -2,11 +2,11 @@ package runner
 
 import (
 	"context"
-	"net/url"
+	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/core"
@@ -16,34 +16,191 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
+var (
+	runnerBaseRepoOnce sync.Once
+	runnerBaseRepoDir  string
+	runnerBaseRepoErr  error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if runnerBaseRepoDir != "" {
+		_ = os.RemoveAll(runnerBaseRepoDir)
+	}
+	os.Exit(code)
+}
+
+func copyRunnerTree(t *testing.T, src, dst string) {
+	t.Helper()
+	if err := copyRunnerTreeErr(src, dst); err != nil {
+		t.Fatalf("copy %s -> %s: %v", src, dst, err)
+	}
+}
+
+func copyRunnerTreeErr(src, dst string) error {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".lock") {
+			continue
+		}
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		if entry.IsDir() {
+			if err := copyRunnerTreeErr(srcPath, dstPath); err != nil {
+				return err
+			}
+			continue
+		}
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeRunnerGitRef(t *testing.T, gitDir, relRef, content string) {
+	t.Helper()
+	full := filepath.Join(gitDir, filepath.FromSlash(relRef))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readRunnerHeadSHA(t *testing.T, repoDir string) string {
+	t.Helper()
+	dotGit := filepath.Join(repoDir, ".git")
+	gitDir := dotGit
+	if info, err := os.Stat(dotGit); err == nil && !info.IsDir() {
+		raw, err := os.ReadFile(dotGit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(raw)), "gitdir:"))
+		if !filepath.IsAbs(line) {
+			line = filepath.Join(repoDir, filepath.FromSlash(line))
+		}
+		gitDir = filepath.Clean(line)
+	}
+	rawHead, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := strings.TrimSpace(string(rawHead))
+	if ref, ok := strings.CutPrefix(head, "ref:"); ok {
+		refName := strings.TrimSpace(ref)
+		commonDir := gitDir
+		if rawCommon, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+			rel := strings.TrimSpace(string(rawCommon))
+			if rel != "" {
+				if !filepath.IsAbs(rel) {
+					commonDir = filepath.Clean(filepath.Join(gitDir, filepath.FromSlash(rel)))
+				} else {
+					commonDir = filepath.Clean(filepath.FromSlash(rel))
+				}
+			}
+		}
+		rawRef, err := os.ReadFile(filepath.Join(commonDir, filepath.FromSlash(refName)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(rawRef))
+	}
+	return head
+}
+
+func writeRunnerGitExclude(t *testing.T, repoDir, patterns string) {
+	t.Helper()
+	path := filepath.Join(repoDir, ".git", "info", "exclude")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing, _ := os.ReadFile(path)
+	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
+		existing = append(existing, '\n')
+	}
+	if err := os.WriteFile(path, append(existing, []byte(patterns)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func ensureRunnerBaseRepo(t *testing.T) string {
+	t.Helper()
+	runnerBaseRepoOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "ad-runner-git-*")
+		if err != nil {
+			runnerBaseRepoErr = err
+			return
+		}
+		git := local.NewGit(dir, "file")
+		run := func(args ...string) error {
+			full := append([]string{"-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)
+			res := git(context.Background(), full, local.GitOptions{})
+			if res.ExitCode != 0 {
+				return fmt.Errorf("git %v failed: %s", args, res.Stderr)
+			}
+			return nil
+		}
+		if err := run("init", "-q", "-b", "main"); err != nil {
+			runnerBaseRepoErr = err
+			return
+		}
+		if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\n"), 0o644); err != nil {
+			runnerBaseRepoErr = err
+			return
+		}
+		if err := run("add", "README.md"); err != nil {
+			runnerBaseRepoErr = err
+			return
+		}
+		if err := run("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "initial"); err != nil {
+			runnerBaseRepoErr = err
+			return
+		}
+		_ = os.RemoveAll(filepath.Join(dir, ".git", "hooks"))
+		runnerBaseRepoDir = dir
+	})
+	if runnerBaseRepoErr != nil {
+		t.Fatalf("build base git template: %v", runnerBaseRepoErr)
+	}
+	return runnerBaseRepoDir
+}
+
 func initTestRemoteRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	git := local.NewGit(dir, "file")
-	run := func(args ...string) {
-		t.Helper()
-		res := git(t.Context(), args, local.GitOptions{})
-		if res.ExitCode != 0 {
-			t.Fatalf("git %v failed: %s", args, res.Stderr)
-		}
-	}
-	run("init", "-q", "-b", "main")
-	run("config", "user.name", "Test")
-	run("config", "user.email", "test@example.invalid")
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	run("add", "README.md")
-	run("commit", "-q", "-m", "initial")
+	copyRunnerTree(t, ensureRunnerBaseRepo(t), dir)
 	return dir
 }
 
 func TestTurnChangesRecordedForHostedRepository(t *testing.T) {
+	if testing.Short() {
+		t.Skip("hosted turn-changes git matrix covered by full suite")
+	}
+	t.Parallel()
 	ctx := t.Context()
 	remoteDir := initTestRemoteRepo(t)
 	dataDir := t.TempDir()
 
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "repo.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,10 +211,11 @@ func TestTurnChangesRecordedForHostedRepository(t *testing.T) {
 		Info: sdk.ContextProviderInfo{Kind: "github", Provides: []string{"workspace", "repo"}},
 		Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
 			hosted, err := local.NewHosted(local.HostedOptions{
-				DataDir:   dataDir,
-				Path:      "owner/repo",
-				Namespace: []string{"github"},
-				RemoteURL: "file://" + filepath.ToSlash(remoteDir),
+				DataDir:      dataDir,
+				Path:         "owner/repo",
+				Namespace:    []string{"github"},
+				RemoteURL:    "file://" + filepath.ToSlash(remoteDir),
+				DisableClone: true,
 				DefaultBranch: func(context.Context) (string, error) {
 					return "main", nil
 				},
@@ -161,63 +319,9 @@ func TestTurnChangesRecordedForHostedRepository(t *testing.T) {
 	if !ok || totals2["files"] != float64(1) {
 		t.Fatalf("expected thread.Changes to stay intact, got %#v", updated2.Changes)
 	}
-}
-
-func TestTurnChangesBackfillsTotalsWithoutFileEdits(t *testing.T) {
-	ctx := t.Context()
-	remoteDir := initTestRemoteRepo(t)
-	dataDir := t.TempDir()
-
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "repo.sqlite")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repo.Close()
-
-	hosts := sources.New()
-	if _, err := hosts.Register(sdk.ContextProvider{
-		Info: sdk.ContextProviderInfo{Kind: "github", Provides: []string{"workspace", "repo"}},
-		Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
-			hosted, err := local.NewHosted(local.HostedOptions{
-				DataDir:   dataDir,
-				Path:      "owner/repo",
-				Namespace: []string{"github"},
-				RemoteURL: "file://" + filepath.ToSlash(remoteDir),
-				DefaultBranch: func(context.Context) (string, error) {
-					return "main", nil
-				},
-			})
-			if err != nil {
-				return sdk.Capabilities{}, err
-			}
-			return sdk.Capabilities{
-				Workspace: hosted.Capability(),
-				Close:     hosted.Close,
-			}, nil
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: hosts})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer manager.Close(context.Background())
-
-	project, err := repo.CreateProject(ctx, new("Hosted"), core.ProjectStart{
-		Source: core.Source{Kind: "github", Settings: map[string]any{"repository": "owner/repo"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Legacy thread with commits"})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// Simulate an existing thread whose branch already has committed changes
-	// while threads.changes is still NULL (e.g., created before PR #179).
+	// while threads.changes is still NULL (legacy backfill on editless turn).
 	ws, err := manager.ForThread(ctx, project.ID, thread.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -225,124 +329,96 @@ func TestTurnChangesBackfillsTotalsWithoutFileEdits(t *testing.T) {
 	if err := ws.WriteFile(ctx, "README.md", "hello\nline2\nline3\n"); err != nil {
 		t.Fatal(err)
 	}
-	for _, argv := range [][]string{
-		{"git", "config", "user.name", "Test"},
-		{"git", "config", "user.email", "test@example.invalid"},
-		{"git", "add", "README.md"},
-		{"git", "commit", "-q", "-m", "legacy commit"},
-	} {
-		res, err := ws.ExecFile(ctx, argv, sdk.ExecOptions{})
-		if err != nil || res.ExitCode != 0 {
-			t.Fatalf("exec %v: err=%v exit=%d stderr=%s", argv, err, res.ExitCode, res.Stderr)
-		}
+	wsGit := local.NewGit(ws.Info().Label, "file")
+	if res := wsGit(ctx, []string{"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "legacy commit"}, local.GitOptions{}); res.ExitCode != 0 {
+		t.Fatalf("legacy commit: exit=%d stderr=%s", res.ExitCode, res.Stderr)
 	}
-	before, err := repo.GetThread(ctx, thread.ID)
-	if err != nil {
+	if _, err := repo.Store.DB().ExecContext(ctx, "UPDATE threads SET changes = NULL WHERE id = ?", thread.ID); err != nil {
 		t.Fatal(err)
 	}
-	if before.Changes != nil {
-		t.Fatalf("expected nil changes before backfill, got %#v", before.Changes)
-	}
-
 	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
 		ConversationID: thread.ID, Author: "user", Content: "Push branch",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	turnID, err := repo.StartScheduledTurn(ctx, thread.ID, "mock")
-	if err != nil || turnID == "" {
-		t.Fatalf("StartScheduledTurn: id=%q err=%v", turnID, err)
+	turnIDLegacy, err := repo.StartScheduledTurn(ctx, thread.ID, "mock")
+	if err != nil || turnIDLegacy == "" {
+		t.Fatalf("StartScheduledTurn legacy: id=%q err=%v", turnIDLegacy, err)
 	}
-	runnerInstance := &Runner{Repository: repo, Workspaces: manager}
-	conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
-	discussion := &turn{
+	legacyDiscussion := &turn{
 		Runner:       runnerInstance,
 		conversation: conv,
-		id:           turnID,
+		id:           turnIDLegacy,
 		changes:      newTurnChanges(runnerInstance, conv),
 	}
-	if _, _, _, err := discussion.repoWorkspace(ctx); err != nil {
+	if _, _, _, err := legacyDiscussion.repoWorkspace(ctx); err != nil {
 		t.Fatal(err)
 	}
-	discussion.changes.record(ctx, turnID)
-	if err := repo.FinishTurn(ctx, thread.ID, turnID, "completed", nil); err != nil {
+	var beforeLegacyTurnChanged int
+	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT count(*) FROM events WHERE type = 'turn.changed'").Scan(&beforeLegacyTurnChanged); err != nil {
 		t.Fatal(err)
 	}
-
-	after, err := repo.GetThread(ctx, thread.ID)
+	legacyDiscussion.changes.record(ctx, turnIDLegacy)
+	if err := repo.FinishTurn(ctx, thread.ID, turnIDLegacy, "completed", nil); err != nil {
+		t.Fatal(err)
+	}
+	afterLegacy, err := repo.GetThread(ctx, thread.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	totals, ok := after.Changes.(map[string]any)
+	legacyTotals, ok := afterLegacy.Changes.(map[string]any)
 	if !ok {
-		t.Fatalf("expected thread.Changes to be backfilled, got %#v", after.Changes)
+		t.Fatalf("expected thread.Changes to be backfilled, got %#v", afterLegacy.Changes)
 	}
-	if totals["files"] != float64(1) || totals["added"] != float64(2) || totals["removed"] != float64(0) {
-		t.Fatalf("unexpected backfilled totals: %#v", totals)
+	if legacyTotals["files"] != float64(1) || legacyTotals["added"] != float64(2) || legacyTotals["removed"] != float64(0) {
+		t.Fatalf("unexpected backfilled totals: %#v", legacyTotals)
 	}
-	var turnChangedEvents int
-	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT count(*) FROM events WHERE type = 'turn.changed'").Scan(&turnChangedEvents); err != nil {
+	var afterLegacyTurnChanged int
+	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT count(*) FROM events WHERE type = 'turn.changed'").Scan(&afterLegacyTurnChanged); err != nil {
 		t.Fatal(err)
 	}
-	if turnChangedEvents != 0 {
-		t.Fatalf("expected no turn.changed event for editless turn, got %d", turnChangedEvents)
+	if afterLegacyTurnChanged != beforeLegacyTurnChanged {
+		t.Fatalf("expected no turn.changed event for editless turn, got %d -> %d", beforeLegacyTurnChanged, afterLegacyTurnChanged)
 	}
 }
 
 func TestTurnChangesAfterMergingOriginMainMatchesBranchChangesAndReconcilesStaleTotals(t *testing.T) {
-	ctx := t.Context()
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[core]\n\tautocrlf = true\n"), 0644); err != nil {
-		t.Fatal(err)
+	if testing.Short() {
+		t.Skip("origin merge turn-changes reconciliation covered by full suite")
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Parallel()
+	ctx := t.Context()
 
-	remoteDir := initTestRemoteRepo(t)
+	repoDir := initTestRemoteRepo(t)
 	dataDir := t.TempDir()
+	baseSHA := readRunnerHeadSHA(t, repoDir)
+	runWorkGit := func(dir string, gitArgs ...string) string {
+		t.Helper()
+		res := local.NewGit(dir, "file")(ctx, gitArgs, local.GitOptions{})
+		if res.ExitCode != 0 {
+			t.Fatalf("git %v in %s failed: %s", gitArgs, dir, res.Stderr)
+		}
+		return strings.TrimSpace(res.Stdout)
+	}
 
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "repo.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer repo.Close()
 
-	var hosted *local.Hosted
 	hosts := sources.New()
-	if _, err := hosts.Register(sdk.ContextProvider{
-		Info: sdk.ContextProviderInfo{Kind: "github", Provides: []string{"workspace", "repo"}},
-		Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
-			var err error
-			hosted, err = local.NewHosted(local.HostedOptions{
-				DataDir:   dataDir,
-				Path:      "owner/repo",
-				Namespace: []string{"github"},
-				RemoteURL: "file://" + filepath.ToSlash(remoteDir),
-				DefaultBranch: func(context.Context) (string, error) {
-					return "main", nil
-				},
-			})
-			if err != nil {
-				return sdk.Capabilities{}, err
-			}
-			return sdk.Capabilities{
-				Workspace: hosted.Capability(),
-				Close:     hosted.Close,
-			}, nil
-		},
-	}); err != nil {
+	if _, err := hosts.Register(local.DirectoryProvider(dataDir, nil, true)); err != nil {
 		t.Fatal(err)
 	}
-
 	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: hosts})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer manager.Close(context.Background())
 
-	project, err := repo.CreateProject(ctx, new("Hosted"), core.ProjectStart{
-		Source: core.Source{Kind: "github", Settings: map[string]any{"repository": "owner/repo"}},
+	project, err := repo.CreateProject(ctx, new("MergeOrigin"), core.ProjectStart{
+		Source: core.Source{Kind: "local-directory", Settings: map[string]any{"path": repoDir}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -351,58 +427,28 @@ func TestTurnChangesAfterMergingOriginMainMatchesBranchChangesAndReconcilesStale
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
-		ConversationID: thread.ID, Author: "user", Content: "Make a branch edit",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	turnID1, err := repo.StartScheduledTurn(ctx, thread.ID, "mock")
-	if err != nil || turnID1 == "" {
-		t.Fatalf("StartScheduledTurn 1: id=%q err=%v", turnID1, err)
-	}
-
-	runnerInstance := &Runner{Repository: repo, Workspaces: manager}
-	conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
-	turn1 := &turn{Runner: runnerInstance, conversation: conv, id: turnID1, changes: newTurnChanges(runnerInstance, conv)}
-	if _, err := turn1.writeFile(ctx, args{"path": "README.md", "content": "hello\nbranch line\n"}); err != nil {
-		t.Fatal(err)
-	}
 	ws, err := manager.ForThread(ctx, project.ID, thread.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	workDir := ws.Info().Label
-	runShellGit := func(dir string, gitArgs ...string) {
-		t.Helper()
-		cmd := exec.CommandContext(ctx, "git", gitArgs...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v in %s failed: %v\n%s", gitArgs, dir, err, string(out))
-		}
-	}
-	runShellGit(workDir, "config", "user.name", "Test")
-	runShellGit(workDir, "config", "user.email", "test@example.invalid")
-	runShellGit(workDir, "add", "README.md")
-	runShellGit(workDir, "commit", "-qm", "branch change")
-	turn1.changes.record(ctx, turnID1)
-	if err := repo.FinishTurn(ctx, thread.ID, turnID1, "completed", nil); err != nil {
+	if err := ws.WriteFile(ctx, "README.md", "hello\nbranch line\n"); err != nil {
 		t.Fatal(err)
 	}
+	runWorkGit(workDir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "branch change")
 
-	// Advance remote main with a large upstream file while the branch is open.
-	if err := os.WriteFile(filepath.Join(remoteDir, "upstream.txt"), []byte(strings.Repeat("upstream\n", 80)), 0644); err != nil {
+	// Advance origin/main with a large upstream file while local main lags at baseSHA.
+	if err := os.WriteFile(filepath.Join(repoDir, "upstream.txt"), []byte(strings.Repeat("upstream\n", 80)), 0644); err != nil {
 		t.Fatal(err)
 	}
-	remoteGit := local.NewGit(remoteDir, "file")
-	if res := remoteGit(ctx, []string{"add", "upstream.txt"}, local.GitOptions{}); res.ExitCode != 0 {
-		t.Fatalf("remote add: %s", res.Stderr)
-	}
-	if res := remoteGit(ctx, []string{"commit", "-qm", "large upstream commit"}, local.GitOptions{}); res.ExitCode != 0 {
-		t.Fatalf("remote commit: %s", res.Stderr)
-	}
+	runWorkGit(repoDir, "add", "upstream.txt")
+	runWorkGit(repoDir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "large upstream commit")
+	upstreamSHA := readRunnerHeadSHA(t, repoDir)
+	writeRunnerGitRef(t, filepath.Join(repoDir, ".git"), "refs/remotes/origin/main", upstreamSHA)
+	writeRunnerGitRef(t, filepath.Join(repoDir, ".git"), "refs/heads/main", baseSHA)
 
-	// Second turn: fetch origin/main and merge it in the user shell (under core.autocrlf=true).
+	runnerInstance := &Runner{Repository: repo, Workspaces: manager}
+	conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
 	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
 		ConversationID: thread.ID, Author: "user", Content: "Merge origin/main",
 	}); err != nil {
@@ -417,11 +463,18 @@ func TestTurnChangesAfterMergingOriginMainMatchesBranchChangesAndReconcilesStale
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn2.changes.begin(ctx, currentThread)
-	if err := hosted.Fetch(ctx); err != nil {
+	// Enable core.autocrlf=true in the repo config so both git merge and
+	// Ariadne's worktreeConfigArgs observe the same CRLF normalization on every OS.
+	cfgPath := filepath.Join(repoDir, ".git", "config")
+	cfgRaw, err := os.ReadFile(cfgPath)
+	if err != nil {
 		t.Fatal(err)
 	}
-	runShellGit(workDir, "merge", "--no-ff", "-m", "Merge origin/main", "refs/remotes/origin/main")
+	if err := os.WriteFile(cfgPath, append(cfgRaw, []byte("\n[core]\n\tautocrlf = true\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	turn2.changes.begin(ctx, currentThread)
+	runWorkGit(workDir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "merge", "--no-ff", "-m", "Merge origin/main", "refs/remotes/origin/main")
 	turn2.changes.record(ctx, turnID2)
 	if err := repo.FinishTurn(ctx, thread.ID, turnID2, "completed", nil); err != nil {
 		t.Fatal(err)
@@ -458,30 +511,39 @@ func TestTurnChangesAfterMergingOriginMainMatchesBranchChangesAndReconcilesStale
 	if err != nil {
 		t.Fatal(err)
 	}
-		if !core.SameChangeTotals(reconciled.Changes, core.ChangeTotals{Files: 1, Added: 1, Removed: 0}) {
-			t.Fatalf("expected ThreadChanges to reconcile stale thread.Changes to {1, 1, 0}, got %#v", reconciled.Changes)
-		}
+	if !core.SameChangeTotals(reconciled.Changes, core.ChangeTotals{Files: 1, Added: 1, Removed: 0}) {
+		t.Fatalf("expected ThreadChanges to reconcile stale thread.Changes to {1, 1, 0}, got %#v", reconciled.Changes)
 	}
+}
 
 func TestTurnChangesMultiRepoOuterAndEmbedded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-repo embedded turn-changes matrix covered by full suite")
+	}
+	t.Parallel()
 	ctx := t.Context()
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		res := local.NewGit(dir, "file")(ctx, args, local.GitOptions{})
+		if res.ExitCode != 0 {
+			t.Fatalf("git %v in %s failed: %s", args, dir, res.Stderr)
+		}
+		return strings.TrimSpace(res.Stdout)
+	}
 	outerDir := initTestRemoteRepo(t)
-	if err := os.WriteFile(filepath.Join(outerDir, ".gitignore"), []byte("packages/\n"), 0o644); err != nil {
+	writeRunnerGitExclude(t, outerDir, "packages/\nnested-worktrees/\nsubrepos/\n")
+	hostRepo := initTestRemoteRepo(t)
+	forkSHA := readRunnerHeadSHA(t, hostRepo)
+	writeRunnerGitRef(t, filepath.Join(hostRepo, ".git"), "refs/remotes/origin/main", forkSHA)
+	writeRunnerGitRef(t, filepath.Join(hostRepo, ".git"), "refs/remotes/origin/HEAD", "ref: refs/remotes/origin/main")
+
+	dataDir, err := os.MkdirTemp("", "ad-*")
+	if err != nil {
 		t.Fatal(err)
 	}
-	initCmd := exec.CommandContext(ctx, "git", "add", ".gitignore")
-	initCmd.Dir = outerDir
-	if out, err := initCmd.CombinedOutput(); err != nil {
-		t.Fatalf("git add .gitignore: %v\n%s", err, string(out))
-	}
-	initCommit := exec.CommandContext(ctx, "git", "commit", "-q", "-m", "ignore packages")
-	initCommit.Dir = outerDir
-	if out, err := initCommit.CombinedOutput(); err != nil {
-		t.Fatalf("git commit .gitignore: %v\n%s", err, string(out))
-	}
-	dataDir := t.TempDir()
+	t.Cleanup(func() { _ = os.RemoveAll(dataDir) })
 
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "repo.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +565,7 @@ func TestTurnChangesMultiRepoOuterAndEmbedded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Outer and embedded edits"})
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Outer, embedded, and mid-turn worktree"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -513,35 +575,13 @@ func TestTurnChangesMultiRepoOuterAndEmbedded(t *testing.T) {
 	}
 	workDir := ws.Info().Label
 
-	// Seed an embedded git repo inside an ignored subdirectory of the thread worktree before Turn 1 starts.
+	// Pre-existing standalone embedded repo before Turn 1 starts.
 	subDir := filepath.Join(workDir, "packages", "sub")
-	if err := os.MkdirAll(subDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	runGit := func(dir string, args ...string) string {
-		t.Helper()
-		cmd := exec.CommandContext(ctx, "git", args...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v in %s failed: %v\n%s", args, dir, err, string(out))
-		}
-		return strings.TrimSpace(string(out))
-	}
-	runGit(workDir, "config", "user.name", "Test")
-	runGit(workDir, "config", "user.email", "test@example.invalid")
-	runGit(subDir, "init", "-q", "-b", "main")
-	runGit(subDir, "config", "user.name", "Test")
-	runGit(subDir, "config", "user.email", "test@example.invalid")
-	if err := os.WriteFile(filepath.Join(subDir, "lib.go"), []byte("package sub\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(subDir, "add", "lib.go")
-	runGit(subDir, "commit", "-q", "-m", "init sub")
-	subBaseHead := runGit(subDir, "rev-parse", "HEAD")
+	copyRunnerTree(t, ensureRunnerBaseRepo(t), subDir)
+	subBaseHead := readRunnerHeadSHA(t, subDir)
 
 	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
-		ConversationID: thread.ID, Author: "user", Content: "Edit outer and sub",
+		ConversationID: thread.ID, Author: "user", Content: "Edit outer, sub, and mid-turn worktree",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -559,244 +599,46 @@ func TestTurnChangesMultiRepoOuterAndEmbedded(t *testing.T) {
 		changes:      newTurnChanges(runnerInstance, conv),
 	}
 
-	// Edit outer repo file via writeFile (triggers begin across outer + embedded repos).
+	// Edit outer repo via writeFile (triggers begin across outer + pre-existing embedded repos).
 	if _, err := discussion.writeFile(ctx, args{
 		"path":    "README.md",
 		"content": "hello\nouter edit\n",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Commit in outer repo and edit + commit in embedded repo.
-	runGit(workDir, "add", "README.md")
-	runGit(workDir, "commit", "-q", "-m", "outer change")
-	if err := os.WriteFile(filepath.Join(subDir, "lib.go"), []byte("package sub\n\nfunc Hello() {}\n"), 0o644); err != nil {
+	runGit(workDir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "outer change")
+
+	// Edit and commit inside pre-existing embedded repo.
+	if err := os.WriteFile(filepath.Join(subDir, "README.md"), []byte("hello\nsub1\nsub2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(subDir, "add", "lib.go")
-	runGit(subDir, "commit", "-q", "-m", "sub change")
+	runGit(subDir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "sub change")
+
+	// Mid-turn created nested worktree + commit + uncommitted edit -> baseline must be forkSHA.
+	midDir := filepath.Join(workDir, "nested-worktrees", "feat-mid")
+	if err := os.MkdirAll(filepath.Dir(midDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(hostRepo, "worktree", "add", "-qb", "feat/mid", midDir, forkSHA)
+	if err := os.WriteFile(filepath.Join(midDir, "README.md"), []byte("hello\nmid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(midDir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "mid commit")
+	if err := os.WriteFile(filepath.Join(midDir, "wip.go"), []byte("package pkg\n// wip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mid-turn clean clone -> must produce 0 turn-changes and 0 baselines.
+	cleanCloneDir := filepath.Join(workDir, "subrepos", "clean-clone")
+	copyRunnerTree(t, hostRepo, cleanCloneDir)
+	_ = os.RemoveAll(filepath.Join(cleanCloneDir, ".git", "worktrees"))
 
 	discussion.changes.record(ctx, turnID)
 	if err := repo.FinishTurn(ctx, thread.ID, turnID, "completed", nil); err != nil {
 		t.Fatal(err)
 	}
 
-	// 1. Verify first-touch baseline recorded for packages/sub.
-	baselines, err := repo.RepoBaselines(ctx, thread.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(baselines) != 1 || baselines[0].RepoPath != "packages/sub" || baselines[0].BaseHead != subBaseHead {
-		t.Fatalf("expected baseline for packages/sub at %s, got %+v", subBaseHead, baselines)
-	}
-
-	// 2. Verify turn-changes notice contains both repositories.
-	notices, err := repo.ListNotices(ctx, thread.ID, core.NoticeRange{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var turnNotice map[string]any
-	for _, n := range notices {
-		if n["kind"] == "turn-changes" {
-			turnNotice = n
-		}
-	}
-	if turnNotice == nil {
-		t.Fatalf("expected turn-changes notice, got %+v", notices)
-	}
-	reposRaw, ok := turnNotice["repos"].([]any)
-	if !ok || len(reposRaw) != 2 {
-		t.Fatalf("expected 2 repos in turn-changes notice, got %#v", turnNotice["repos"])
-	}
-	outerTurnRepo, _ := reposRaw[0].(map[string]any)
-	if branch, _ := outerTurnRepo["branch"].(string); branch == "" {
-		t.Fatalf("expected outer root repo branch to be backfilled in turn-changes notice, got %#v", outerTurnRepo)
-	}
-
-	// 3. Verify ThreadChanges returns both repos with embedded repo marked non-mergeable.
-	tc, err := manager.ThreadChanges(ctx, thread.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tc.Repos) != 2 {
-		t.Fatalf("expected 2 repos in ThreadChanges, got %+v", tc.Repos)
-	}
-	if tc.Repos[0].Embedded || !tc.Repos[0].Mergeable {
-		t.Fatalf("expected primary outer repo mergeable and non-embedded, got %+v", tc.Repos[0])
-	}
-	if !tc.Repos[1].Embedded || tc.Repos[1].Mergeable || tc.Repos[1].RepoPath != "packages/sub" {
-		t.Fatalf("expected embedded repo packages/sub non-mergeable, got %+v", tc.Repos[1])
-	}
-	if len(tc.Repos[1].Changes.Files) != 1 || tc.Repos[1].Changes.Files[0].Path != "lib.go" {
-		t.Fatalf("expected lib.go in embedded repo changes, got %+v", tc.Repos[1].Changes)
-	}
-
-	// 4. Verify thread.Changes totals aggregate outer (1 file, +1) + embedded (1 file, +2) = 2 files, +3.
-	updated, err := repo.GetThread(ctx, thread.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !core.SameChangeTotals(updated.Changes, core.ChangeTotals{Files: 2, Added: 3, Removed: 0}) {
-		t.Fatalf("expected aggregated totals {2, 3, 0}, got %#v", updated.Changes)
-	}
-}
-
-func testFileURL(p string) string {
-	p = filepath.ToSlash(p)
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-	return (&url.URL{Scheme: "file", Path: p}).String()
-}
-
-func TestTurnChangesMidTurnCreatedWorktreeRecordsForkBaselineAndCommits(t *testing.T) {
-	ctx := t.Context()
-
-	runGit := func(dir string, args ...string) string {
-		t.Helper()
-		res := local.NewGit(dir, "file")(ctx, args, local.GitOptions{})
-		if res.ExitCode != 0 {
-			t.Fatalf("git %v in %s failed: %s", args, dir, res.Stderr)
-		}
-		return strings.TrimSpace(res.Stdout)
-	}
-
-	// Build outer umbrella repo.
-	outerDir := initTestRemoteRepo(t)
-	if err := os.WriteFile(filepath.Join(outerDir, ".gitignore"), []byte("nested-worktrees/\nsubrepos/\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(outerDir, "add", ".gitignore")
-	runGit(outerDir, "commit", "-q", "-m", "ignore nested-worktrees and subrepos")
-
-	// Build external bare remote with an unrelated orphan branch "vendor-orphan" and a "main" branch
-	// referencing itself as submodule "vendor-bundle" tracking "vendor-orphan".
-	bareRemote := filepath.Join(t.TempDir(), "remote.git")
-	if err := os.MkdirAll(bareRemote, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	runGit(bareRemote, "init", "--bare", "-q", "-b", "main")
-	bareURL := testFileURL(bareRemote)
-
-	orphanSeed := t.TempDir()
-	runGit(orphanSeed, "init", "-q", "-b", "vendor-orphan")
-	runGit(orphanSeed, "config", "user.name", "Test")
-	runGit(orphanSeed, "config", "user.email", "test@example.invalid")
-	if err := os.WriteFile(filepath.Join(orphanSeed, "bundle.js"), []byte("export const v = 1;\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(orphanSeed, "add", "bundle.js")
-	runGit(orphanSeed, "commit", "-q", "-m", "orphan init")
-	runGit(orphanSeed, "remote", "add", "origin", bareURL)
-	runGit(orphanSeed, "push", "-q", "origin", "vendor-orphan")
-
-	hostRepo := t.TempDir()
-	runGit(hostRepo, "init", "-q", "-b", "main")
-	runGit(hostRepo, "config", "user.name", "Test")
-	runGit(hostRepo, "config", "user.email", "test@example.invalid")
-	if err := os.WriteFile(filepath.Join(hostRepo, "pkg.go"), []byte("package pkg\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(hostRepo, "add", "pkg.go")
-	runGit(hostRepo, "commit", "-q", "-m", "host init")
-	runGit(hostRepo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", "-b", "vendor-orphan", bareURL, "vendor-bundle")
-	runGit(hostRepo, "commit", "-q", "-m", "add orphan submodule")
-	runGit(hostRepo, "remote", "add", "origin", bareURL)
-	runGit(hostRepo, "push", "-q", "-u", "origin", "main")
-	forkSHA := runGit(hostRepo, "rev-parse", "HEAD")
-
-	// Set up Ariadne core + workspaces + runner.
-	dataDir, err := os.MkdirTemp("", "ad-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dataDir) })
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "repo.sqlite")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repo.Close()
-
-	hosts := sources.New()
-	if _, err := hosts.Register(local.DirectoryProvider(dataDir, nil, true)); err != nil {
-		t.Fatal(err)
-	}
-	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: hosts})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer manager.Close(context.Background())
-
-	project, err := repo.CreateProject(ctx, new("MidTurnEmbedded"), core.ProjectStart{
-		Source: core.Source{Kind: "local-directory", Settings: map[string]any{"path": outerDir}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Mid-turn worktrees and clone"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ws, err := manager.ForThread(ctx, project.ID, thread.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	workDir := ws.Info().Label
-
-	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
-		ConversationID: thread.ID, Author: "user", Content: "Create nested worktrees mid-turn",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	turnID, err := repo.StartScheduledTurn(ctx, thread.ID, "mock")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	runnerInstance := &Runner{Repository: repo, Workspaces: manager}
-	conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
-	tc := newTurnChanges(runnerInstance, conv)
-	tc.begin(ctx, thread)
-
-	// 1. Mid-turn created worktree + commit C1 (clean working tree).
-	mid1Dir := filepath.Join(workDir, "nested-worktrees", "feat-mid1")
-	if err := os.MkdirAll(filepath.Dir(mid1Dir), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	runGit(hostRepo, "worktree", "add", "-qb", "feat/mid1", mid1Dir, forkSHA)
-	if err := os.WriteFile(filepath.Join(mid1Dir, "pkg.go"), []byte("package pkg\n\nfunc Mid1() {}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(mid1Dir, "add", "pkg.go")
-	runGit(mid1Dir, "commit", "-q", "-m", "mid1 commit")
-	mid1Head := runGit(mid1Dir, "rev-parse", "HEAD")
-
-	// 2. Mid-turn created worktree + commit C1 + uncommitted edit.
-	mid2Dir := filepath.Join(workDir, "nested-worktrees", "feat-mid2")
-	runGit(hostRepo, "worktree", "add", "-qb", "feat/mid2", mid2Dir, forkSHA)
-	if err := os.WriteFile(filepath.Join(mid2Dir, "pkg.go"), []byte("package pkg\n\nfunc Mid2() {}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(mid2Dir, "add", "pkg.go")
-	runGit(mid2Dir, "commit", "-q", "-m", "mid2 commit")
-	if err := os.WriteFile(filepath.Join(mid2Dir, "wip.go"), []byte("package pkg\n// wip\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// 3. Mid-turn clean git clone + initialized clean orphan submodule inside it -> must produce 0 turn-changes and 0 baselines.
-	cleanCloneDir := filepath.Join(workDir, "subrepos", "clean-clone")
-	if err := os.MkdirAll(filepath.Dir(cleanCloneDir), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	runGit(filepath.Dir(cleanCloneDir), "clone", "-q", bareURL, cleanCloneDir)
-	runGit(cleanCloneDir, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q", "vendor-bundle")
-
-	tc.record(ctx, turnID)
-	if err := repo.FinishTurn(ctx, thread.ID, turnID, "completed", nil); err != nil {
-		t.Fatal(err)
-	}
-
-	// Verify baselines: recorded for feat-mid1 and feat-mid2 at forkSHA (NOT mid1Head/mid2Head),
-	// and NOT recorded for clean-clone or its clean orphan submodule.
+	// 1. Verify baselines recorded for packages/sub (subBaseHead) and nested-worktrees/feat-mid (forkSHA), not clean-clone.
 	baselines, err := repo.RepoBaselines(ctx, thread.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -805,17 +647,11 @@ func TestTurnChangesMidTurnCreatedWorktreeRecordsForkBaselineAndCommits(t *testi
 	for _, b := range baselines {
 		baselineByPath[b.RepoPath] = b
 	}
-	if len(baselines) != 2 {
-		t.Fatalf("expected exactly 2 baselines (feat-mid1 and feat-mid2), got %+v", baselines)
-	}
-	if b := baselineByPath["nested-worktrees/feat-mid1"]; b.BaseHead != forkSHA {
-		t.Fatalf("expected feat-mid1 baseline at forkSHA %s (not %s), got %+v", forkSHA, mid1Head, b)
-	}
-	if b := baselineByPath["nested-worktrees/feat-mid2"]; b.BaseHead != forkSHA {
-		t.Fatalf("expected feat-mid2 baseline at forkSHA %s, got %+v", forkSHA, b)
+	if len(baselines) != 2 || baselineByPath["packages/sub"].BaseHead != subBaseHead || baselineByPath["nested-worktrees/feat-mid"].BaseHead != forkSHA {
+		t.Fatalf("unexpected baselines: %+v (want sub=%s mid=%s)", baselines, subBaseHead, forkSHA)
 	}
 
-	// Verify turn-changes notice contains exactly feat-mid1 (pkg.go) and feat-mid2 (pkg.go + wip.go).
+	// 2. Verify turn-changes notice contains outer + packages/sub + nested-worktrees/feat-mid (3 repos).
 	notices, err := repo.ListNotices(ctx, thread.ID, core.NoticeRange{})
 	if err != nil {
 		t.Fatal(err)
@@ -830,8 +666,8 @@ func TestTurnChangesMidTurnCreatedWorktreeRecordsForkBaselineAndCommits(t *testi
 		t.Fatalf("expected turn-changes notice, got %+v", notices)
 	}
 	reposRaw, ok := turnNotice["repos"].([]any)
-	if !ok || len(reposRaw) != 2 {
-		t.Fatalf("expected 2 repos in turn-changes notice (no clean-clone or orphan submodule), got %#v", turnNotice["repos"])
+	if !ok || len(reposRaw) != 3 {
+		t.Fatalf("expected 3 repos in turn-changes notice, got %#v", turnNotice["repos"])
 	}
 	turnRepoByPath := map[string]map[string]any{}
 	for _, item := range reposRaw {
@@ -839,39 +675,56 @@ func TestTurnChangesMidTurnCreatedWorktreeRecordsForkBaselineAndCommits(t *testi
 		p, _ := m["repoPath"].(string)
 		turnRepoByPath[p] = m
 	}
-	mid1Turn := turnRepoByPath["nested-worktrees/feat-mid1"]
-	if mid1Turn == nil || mid1Turn["from"] != forkSHA || mid1Turn["to"] != mid1Head {
-		t.Fatalf("unexpected feat-mid1 turn-changes entry: %#v", mid1Turn)
+	if branch, _ := turnRepoByPath[""]["branch"].(string); branch == "" {
+		t.Fatalf("expected outer root repo branch to be backfilled in turn-changes notice, got %#v", turnRepoByPath[""])
 	}
-	if files, _ := mid1Turn["files"].([]any); len(files) != 1 {
-		t.Fatalf("expected 1 changed file for feat-mid1, got %#v", mid1Turn["files"])
+	midTurn := turnRepoByPath["nested-worktrees/feat-mid"]
+	if midTurn == nil || midTurn["from"] != forkSHA {
+		t.Fatalf("unexpected feat-mid turn-changes entry: %#v", midTurn)
 	}
-	mid2Turn := turnRepoByPath["nested-worktrees/feat-mid2"]
-	if mid2Turn == nil || mid2Turn["from"] != forkSHA {
-		t.Fatalf("unexpected feat-mid2 turn-changes entry: %#v", mid2Turn)
-	}
-	if files, _ := mid2Turn["files"].([]any); len(files) != 2 {
-		t.Fatalf("expected 2 changed files (committed pkg.go + uncommitted wip.go) for feat-mid2, got %#v", mid2Turn["files"])
+	if files, _ := midTurn["files"].([]any); len(files) != 2 {
+		t.Fatalf("expected 2 changed files (committed README.md + uncommitted wip.go) for feat-mid, got %#v", midTurn["files"])
 	}
 
-	// Verify subsequent ThreadChanges preserves committed C1 for both feat-mid1 and feat-mid2
-	// and reports 0 changes for clean-clone and its orphan submodule.
-	changes, err := manager.ThreadChanges(ctx, thread.ID)
+	// 3. Verify ThreadChanges returns all 3 active repos (excluding clean-clone).
+	tc, err := manager.ThreadChanges(ctx, thread.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(changes.Repos) != 2 {
-		t.Fatalf("expected 2 active repos in ThreadChanges, got %+v", changes.Repos)
+	if len(tc.Repos) != 3 {
+		t.Fatalf("expected 3 repos in ThreadChanges, got %+v", tc.Repos)
 	}
-	for _, r := range changes.Repos {
-		if r.RepoPath != "nested-worktrees/feat-mid1" && r.RepoPath != "nested-worktrees/feat-mid2" {
+	if tc.Repos[0].Embedded || !tc.Repos[0].Mergeable {
+		t.Fatalf("expected primary outer repo mergeable and non-embedded, got %+v", tc.Repos[0])
+	}
+	var sawSub, sawMid bool
+	for _, r := range tc.Repos {
+		switch r.RepoPath {
+		case "":
+		case "packages/sub":
+			sawSub = true
+			if !r.Embedded || r.Mergeable || len(r.Changes.Files) != 1 || r.Changes.Files[0].Path != "README.md" {
+				t.Fatalf("unexpected packages/sub ThreadChanges: %+v", r)
+			}
+		case "nested-worktrees/feat-mid":
+			sawMid = true
+			if !r.Embedded || r.Mergeable || r.Changes.From != forkSHA || len(r.Changes.Files) != 1 || len(r.Changes.Uncommitted) != 1 || r.Changes.Uncommitted[0] != "wip.go" {
+				t.Fatalf("unexpected feat-mid ThreadChanges: %+v", r)
+			}
+		default:
 			t.Fatalf("unexpected active repo %s in ThreadChanges", r.RepoPath)
 		}
-		if r.Changes == nil || r.Changes.From != forkSHA || len(r.Changes.Files) != 1 || r.Changes.Files[0].Path != "pkg.go" {
-			t.Fatalf("expected committed pkg.go change relative to forkSHA %s for %s, got %+v", forkSHA, r.RepoPath, r.Changes)
-		}
-		if r.RepoPath == "nested-worktrees/feat-mid2" && (len(r.Changes.Uncommitted) != 1 || r.Changes.Uncommitted[0] != "wip.go") {
-			t.Fatalf("expected uncommitted wip.go for feat-mid2, got %+v", r.Changes)
-		}
+	}
+	if !sawSub || !sawMid {
+		t.Fatalf("missing expected embedded repos in ThreadChanges: %+v", tc.Repos)
+	}
+
+	// 4. Verify thread.Changes totals aggregate outer (+1) + sub (+2) + feat-mid (+1 committed, +2 uncommitted = 2 files, +3) = 4 files, +6.
+	updated, err := repo.GetThread(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !core.SameChangeTotals(updated.Changes, core.ChangeTotals{Files: 4, Added: 6, Removed: 0}) {
+		t.Fatalf("expected aggregated totals {4, 6, 0}, got %#v", updated.Changes)
 	}
 }

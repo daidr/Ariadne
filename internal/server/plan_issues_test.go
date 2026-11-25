@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,8 +25,9 @@ func planIssueSeed() []eventstore.NewEvent {
 }
 
 func TestPlanIssueValidationConnect(t *testing.T) {
+	t.Parallel()
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "plan.sqlite"), Now: now})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,8 @@ func TestPlanIssueValidationConnect(t *testing.T) {
 }
 
 func TestPlanIssueFetchOnlyAfterAuthenticationAndNodeValidation(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "issues.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

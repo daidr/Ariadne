@@ -1,15 +1,14 @@
 package core
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestRepoBaselinesFirstTouchAndReplayCompatibility(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	dbPath := filepath.Join(t.TempDir(), "data.sqlite")
-	repo, err := Open(ctx, Options{Path: dbPath})
+	repo, err := Open(ctx, Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

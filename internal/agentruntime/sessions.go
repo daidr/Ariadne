@@ -24,6 +24,7 @@ type SessionOptions struct {
 	Context           context.Context
 	Now               func() time.Time
 	Quiet, Idle, Reap time.Duration
+	DisableQuiet      bool
 	MaxIdle           int
 }
 type Sessions struct {
@@ -74,8 +75,8 @@ func NewSessions(kind Kind, options SessionOptions) (*Sessions, error) {
 	if options.Now == nil {
 		options.Now = time.Now
 	}
-	if options.Quiet <= 0 {
-		options.Quiet = 150 * time.Millisecond
+	if !options.DisableQuiet && options.Quiet <= 0 {
+		options.Quiet = 25 * time.Millisecond
 	}
 	if options.Idle <= 0 {
 		options.Idle = 20 * time.Minute
@@ -812,11 +813,20 @@ func (m *Sessions) consume(ctx context.Context, s *session, request sdk.Request,
 		return yield(usage)
 	}
 	for {
-		wait := time.Duration(0)
-		if len(calls) > 0 {
-			wait = m.options.Quiet
+		var (
+			event   Event
+			timeout bool
+			err     error
+		)
+		if len(calls) > 0 && m.options.DisableQuiet {
+			event, timeout, err = s.queue.tryNext(ctx)
+		} else {
+			wait := time.Duration(0)
+			if len(calls) > 0 {
+				wait = m.options.Quiet
+			}
+			event, timeout, err = s.queue.next(ctx, wait)
 		}
-		event, timeout, err := s.queue.next(ctx, wait)
 		if err != nil {
 			if ctx.Err() == nil && s.life.Err() == nil {
 				yield(failure(err, true, false))

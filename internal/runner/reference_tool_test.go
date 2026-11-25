@@ -20,6 +20,7 @@ import (
 )
 
 func TestOutsideWorkspaceReadsSuggestRequestingOnlyNeededAccess(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home, folder, outside := t.TempDir(), t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(`{"locale":"zh-CN"}`), 0600); err != nil {
@@ -29,7 +30,7 @@ func TestOutsideWorkspaceReadsSuggestRequestingOnlyNeededAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "ariadne.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

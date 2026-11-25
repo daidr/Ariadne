@@ -2,14 +2,14 @@ package core
 
 import (
 	"bytes"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestSharedArtifactVersionAndStateCommitTogether(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "artifact.sqlite")})
+	repo, err := Open(ctx, Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,9 +56,10 @@ func TestSharedArtifactVersionAndStateCommitTogether(t *testing.T) {
 }
 
 func TestCompletedModelTurnKeepsFeedbackOpenUntilAddressed(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	clock := time.UnixMilli(1900000000000)
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "artifact.sqlite"), Now: func() time.Time { return clock }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return clock }})
 	if err != nil {
 		t.Fatal(err)
 	}

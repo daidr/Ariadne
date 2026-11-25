@@ -62,6 +62,7 @@ func input(kind, project string) NewEvent {
 }
 
 func TestCommitCallbacksFollowNestedRollbackAndCancellation(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{})
 	called := []string{}
 	mark := func(name string) func() { return func() { called = append(called, name) } }
@@ -96,6 +97,7 @@ func TestCommitCallbacksFollowNestedRollbackAndCancellation(t *testing.T) {
 }
 
 func TestAtomicAppendAndProjectionRollback(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{Projections: []Projection{namesProjection{}}})
 	wake, cancel := store.Watch()
 	defer cancel()
@@ -129,6 +131,7 @@ func TestAtomicAppendAndProjectionRollback(t *testing.T) {
 }
 
 func TestNestedSavepointKeepsOnlySuccessfulEvents(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{Projections: []Projection{namesProjection{}}})
 	err := store.Within(t.Context(), func(tx *Transaction) error {
 		if _, err := tx.Append([]NewEvent{input("before", "p1")}); err != nil {
@@ -156,6 +159,7 @@ func TestNestedSavepointKeepsOnlySuccessfulEvents(t *testing.T) {
 }
 
 func TestReadCursorProjectAndExistingSQLiteFile(t *testing.T) {
+	t.Parallel()
 	name := "含 空格 # 数据.sqlite"
 	if runtime.GOOS != "windows" {
 		name = "含 空格 # ? 数据.sqlite"
@@ -181,6 +185,7 @@ func TestReadCursorProjectAndExistingSQLiteFile(t *testing.T) {
 }
 
 func TestSubscriptionsAreBoundedAndReleased(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{})
 	wake, cancel := store.Watch()
 	for n := range 100 {
@@ -213,6 +218,7 @@ func TestSubscriptionsAreBoundedAndReleased(t *testing.T) {
 }
 
 func TestConcurrentAppendsAndReads(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{Path: filepath.Join(t.TempDir(), "concurrent.sqlite")})
 	var workers sync.WaitGroup
 	errorsOut := make(chan error, 64)
@@ -248,6 +254,7 @@ func TestConcurrentAppendsAndReads(t *testing.T) {
 }
 
 func TestInvalidEventAndCancelledTransactionLeaveNoWrites(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{})
 	for _, invalid := range []NewEvent{{}, {Type: "ok", ProjectID: "p1", Data: []byte("{")}} {
 		if _, err := store.Append(t.Context(), []NewEvent{invalid}); err == nil {
@@ -265,6 +272,7 @@ func TestInvalidEventAndCancelledTransactionLeaveNoWrites(t *testing.T) {
 }
 
 func TestPurgeIsAtomicAndKeepsOnlyTheTombstoneForTheProject(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{Projections: []Projection{namesProjection{}}})
 	if _, err := store.Append(t.Context(), []NewEvent{input("ok", "p1"), input("ok", "p2")}); err != nil {
 		t.Fatal(err)
@@ -295,6 +303,7 @@ func TestPurgeIsAtomicAndKeepsOnlyTheTombstoneForTheProject(t *testing.T) {
 }
 
 func TestRebuildAndBackupPreserveTheLog(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{Projections: []Projection{namesProjection{}}})
 	if _, err := store.Append(t.Context(), []NewEvent{input("ok", "p1"), input("ok", "p2")}); err != nil {
 		t.Fatal(err)
@@ -346,6 +355,7 @@ func TestRebuildAndBackupPreserveTheLog(t *testing.T) {
 }
 
 func TestBackupFailureReleasesItsReservedFile(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{})
 	if err := store.DB().Close(); err != nil {
 		t.Fatal(err)
@@ -360,6 +370,7 @@ func TestBackupFailureReleasesItsReservedFile(t *testing.T) {
 }
 
 func TestWatchProjectIsolatesWakeupsAndCleansUp(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{})
 	allWake, stopAll := store.Watch()
 	defer stopAll()
@@ -453,6 +464,7 @@ func TestWatchProjectIsolatesWakeupsAndCleansUp(t *testing.T) {
 }
 
 func TestRecentRingBufferServesLiveReadsAndHandlesPurgeEviction(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{})
 	if _, err := store.Append(t.Context(), []NewEvent{
 		input("a", "p1"),
@@ -515,6 +527,7 @@ func TestRecentRingBufferServesLiveReadsAndHandlesPurgeEviction(t *testing.T) {
 }
 
 func TestSQLiteConnectionPragmas(t *testing.T) {
+	t.Parallel()
 	check := func(t *testing.T, store *Store, wantWAL bool) {
 		t.Helper()
 		ctx := t.Context()

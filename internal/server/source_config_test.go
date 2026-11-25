@@ -24,6 +24,7 @@ import (
 )
 
 func TestNewSourceDefaultsRespectOverridesAndSavedSources(t *testing.T) {
+	t.Parallel()
 	registry := sources.New()
 	directory := t.TempDir()
 	_, err := registry.Register(sdk.ContextProvider{
@@ -60,6 +61,7 @@ func TestNewSourceDefaultsRespectOverridesAndSavedSources(t *testing.T) {
 }
 
 func TestProjectSourcesAndReferencesConnect(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	file := filepath.Join(root, "notes.txt")
 	if err := os.WriteFile(file, []byte("reference"), 0600); err != nil {
@@ -70,7 +72,7 @@ func TestProjectSourcesAndReferencesConnect(t *testing.T) {
 		{Type: "project.references.set", ProjectID: "prj_a", Data: json.RawMessage(`{"references":[{"id":"ref_seed","name":"seed","kind":"local-directory","settings":{"path":"old"}}]}`)},
 	}
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite"), Now: now})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +151,8 @@ func TestProjectSourcesAndReferencesConnect(t *testing.T) {
 }
 
 func TestSourceSettingsKeepSecretsOutOfProjectAndEventLog(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +234,8 @@ func TestSourceSettingsKeepSecretsOutOfProjectAndEventLog(t *testing.T) {
 }
 
 func TestUnchangedHostedSourceDoesNotAppendEvents(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

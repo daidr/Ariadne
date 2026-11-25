@@ -688,3 +688,39 @@ func TestSessionForgetActiveDoesNotLeakDrainedUsage(t *testing.T) {
 		}
 	}
 }
+
+func TestDisableQuietAndDefaultQuietWindow(t *testing.T) {
+	t.Run("default quiet window is 25ms", func(t *testing.T) {
+		m, err := NewSessions(Kind{Name: "fake", Create: func(ctx DriverContext) (Driver, error) {
+			return &fakeDriver{ctx: ctx}, nil
+		}}, SessionOptions{DataDir: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = m.Close(context.Background()) })
+		if m.options.Quiet != 25*time.Millisecond {
+			t.Fatalf("default Quiet = %v, want 25ms", m.options.Quiet)
+		}
+	})
+
+	t.Run("DisableQuiet flushes tool call immediately without waiting", func(t *testing.T) {
+		m, err := NewSessions(Kind{Name: "fake", Create: func(ctx DriverContext) (Driver, error) {
+			return &fakeDriver{ctx: ctx, onPrompt: func(f *fakeDriver, _ Input) {
+				go func() {
+					_ = f.ctx.Tools.Call(f.life, "read_file", map[string]any{"path": "a.go"})
+				}()
+			}}, nil
+		}}, SessionOptions{DataDir: t.TempDir(), Quiet: 500 * time.Millisecond, DisableQuiet: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = m.Close(context.Background()) })
+		started := time.Now()
+		got := parts(m, sdk.Request{Conversation: "no-quiet", Messages: []sdk.Message{user("go")}})
+		elapsed := time.Since(started)
+		lastPart(t, got, "tool-calls")
+		if elapsed > 200*time.Millisecond {
+			t.Fatalf("DisableQuiet waited %v (expected immediate flush, well under 500ms Quiet)", elapsed)
+		}
+	})
+}

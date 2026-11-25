@@ -1,13 +1,13 @@
 package core
 
 import (
-	"path/filepath"
 	"testing"
 )
 
 func TestWorkStatusDoesNotCreateUserAttention(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "attention.sqlite")})
+	repo, err := Open(ctx, Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,8 +79,9 @@ func TestWorkStatusDoesNotCreateUserAttention(t *testing.T) {
 }
 
 func TestPullRequestDeliveryFollowsTheHost(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "pull.sqlite")})
+	repo, err := Open(ctx, Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

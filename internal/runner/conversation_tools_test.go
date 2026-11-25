@@ -2,7 +2,6 @@ package runner
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +11,9 @@ import (
 )
 
 func TestCoordinatorCannotRenameProject(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "test.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,8 +39,9 @@ func TestCoordinatorCannotRenameProject(t *testing.T) {
 }
 
 func TestCoordinatorCompletesPreviouslyPausedDiscussion(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "test.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +127,9 @@ func TestCoordinatorCompletesPreviouslyPausedDiscussion(t *testing.T) {
 }
 
 func TestCoordinatorLinkThreadNode(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "link-node.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/core"
@@ -13,8 +12,9 @@ import (
 )
 
 func TestMessageAttachmentUploadSupportsZipAndLargerLimit(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

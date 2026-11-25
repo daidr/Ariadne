@@ -2,7 +2,9 @@ package local
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -44,62 +46,88 @@ func (workspace *Workspace) probe(ctx context.Context, key string, argv []string
 	}
 }
 func (workspace *Workspace) Files(ctx context.Context, path string) (sdk.FileListing, error) {
-	if _, err := workspace.Resolve(path); err != nil {
-		return sdk.FileListing{}, err
-	}
-	options := sdk.ExecOptions{Timeout: 60 * time.Second}
-	inGit, err := workspace.probe(ctx, "git", []string{"git", "rev-parse", "--is-inside-work-tree"})
+	resolved, err := workspace.Resolve(path)
 	if err != nil {
 		return sdk.FileListing{}, err
 	}
+	target := path
+	if target == "" {
+		target = "."
+	}
+	cleanedTarget := strings.TrimPrefix(strings.ReplaceAll(strings.TrimSpace(target), "\\", "/"), "./")
+	isRoot := cleanedTarget == "" || cleanedTarget == "."
+	options := sdk.ExecOptions{Timeout: 60 * time.Second}
 	var files []string
 	partial := false
-	if inGit {
-		result, err := workspace.ExecFile(ctx, []string{"git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", path}, options)
+	hasRG, err := workspace.probe(ctx, "rg", []string{"rg", "--version"})
+	if err != nil {
+		return sdk.FileListing{}, err
+	}
+	if hasRG {
+		result, err := workspace.ExecFile(ctx, []string{"rg", "--files", "-0", "--hidden", "--no-require-git", "-g", "!.git", "--", target}, options)
 		if err != nil {
 			return sdk.FileListing{}, err
 		}
-		if result.ExitCode == 0 {
-			files = []string{}
-			seen := map[string]bool{}
-			for _, file := range strings.Split(result.Stdout, "\x00") {
-				if file != "" && !seen[file] {
-					files = append(files, file)
-					seen[file] = true
-				}
+		if result.ExitCode == 2 && strings.Contains(result.Stderr, "no-require-git") {
+			result, err = workspace.ExecFile(ctx, []string{"rg", "--files", "-0", "--hidden", "-g", "!.git", "--", target}, options)
+			if err != nil {
+				return sdk.FileListing{}, err
 			}
+		}
+		if result.ExitCode == 0 || result.ExitCode == 1 {
+			files = parseNullFileList(result.Stdout)
 			partial = strings.Contains(result.Stdout, " characters cut …]")
 		}
 	}
 	if files == nil {
-		hasRG, err := workspace.probe(ctx, "rg", []string{"rg", "--version"})
+		inGit, err := workspace.probe(ctx, "git", []string{gitExecutable(nil), "rev-parse", "--is-inside-work-tree"})
 		if err != nil {
 			return sdk.FileListing{}, err
 		}
-		if hasRG {
-			result, err := workspace.ExecFile(ctx, []string{"rg", "--files", "--", path}, options)
-			if err != nil {
-				return sdk.FileListing{}, err
-			}
-			if result.ExitCode == 0 || result.ExitCode == 1 {
-				files = []string{}
-				for _, line := range strings.Split(result.Stdout, "\n") {
-					line = strings.TrimSpace(line)
-					if line != "" {
-						files = append(files, line)
-					}
+		if inGit {
+			ignoredTarget := false
+			if !isRoot {
+				check, err := workspace.ExecFile(ctx, []string{gitExecutable(nil), "check-ignore", "-q", "--", target}, options)
+				if err != nil {
+					return sdk.FileListing{}, err
 				}
-				partial = strings.Contains(result.Stdout, " characters cut …]")
+				ignoredTarget = check.ExitCode == 0
+			}
+			if !ignoredTarget {
+				result, err := workspace.ExecFile(ctx, []string{gitExecutable(nil), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", target}, options)
+				if err != nil {
+					return sdk.FileListing{}, err
+				}
+				if result.ExitCode == 0 {
+					files = parseNullFileList(result.Stdout)
+					partial = strings.Contains(result.Stdout, " characters cut …]")
+				}
 			}
 		}
 	}
 	if files == nil {
+		if _, statErr := os.Stat(resolved); errors.Is(statErr, os.ErrNotExist) {
+			return sdk.FileListing{Files: []string{}}, nil
+		}
 		return sdk.Walk(ctx, workspace, path)
 	}
 	for index, file := range files {
 		files[index] = strings.TrimPrefix(strings.ReplaceAll(file, "\\", "/"), "./")
 	}
 	return sdk.FileListing{Files: files, Partial: partial}, nil
+}
+
+func parseNullFileList(stdout string) []string {
+	files := []string{}
+	seen := map[string]bool{}
+	for _, file := range strings.Split(stdout, "\x00") {
+		if file == "" || strings.Contains(file, " characters cut …]") || seen[file] {
+			continue
+		}
+		files = append(files, file)
+		seen[file] = true
+	}
+	return files
 }
 func (workspace *Workspace) Search(ctx context.Context, pattern, path string, options sdk.SearchOptions) (sdk.FileSearchResult, error) {
 	if _, err := workspace.Resolve(path); err != nil {
@@ -116,7 +144,7 @@ func (workspace *Workspace) Search(ctx context.Context, pattern, path string, op
 	if err != nil {
 		return sdk.FileSearchResult{}, err
 	}
-	inGit, err := workspace.probe(ctx, "git", []string{"git", "rev-parse", "--is-inside-work-tree"})
+	inGit, err := workspace.probe(ctx, "git", []string{gitExecutable(nil), "rev-parse", "--is-inside-work-tree"})
 	if err != nil {
 		return sdk.FileSearchResult{}, err
 	}
@@ -137,7 +165,7 @@ func (workspace *Workspace) Search(ctx context.Context, pattern, path string, op
 		argv = append(argv, caseless...)
 		argv = append(argv, "--max-count", "50", "-e", pattern, "--", path)
 	} else if inGit {
-		argv = []string{"git", "grep", "-n", "-I", "-E"}
+		argv = []string{gitExecutable(nil), "grep", "-n", "-I", "-E"}
 		argv = append(argv, caseless...)
 		argv = append(argv, "--untracked", "--no-color", "-e", pattern, "--")
 		under := path

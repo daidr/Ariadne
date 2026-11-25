@@ -28,7 +28,8 @@ func (writer *mutateDuringExport) Write(data []byte) (int, error) {
 	return writer.Buffer.Write(data)
 }
 func TestExportRemainsConsistentWhileProjectChanges(t *testing.T) {
-	repo, err := Open(t.Context(), Options{Path: filepath.Join(t.TempDir(), "snapshot.sqlite")})
+	t.Parallel()
+	repo, err := Open(t.Context(), Options{Path: filepath.Join(t.TempDir(), "export.sqlite")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,8 @@ func (writer *interruptedExport) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 func TestInterruptedExportReleasesSnapshotAndDoesNotChangeData(t *testing.T) {
-	repo, err := Open(t.Context(), Options{Path: filepath.Join(t.TempDir(), "export.sqlite")})
+	t.Parallel()
+	repo, err := Open(t.Context(), Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

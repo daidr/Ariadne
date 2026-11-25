@@ -1,15 +1,15 @@
 package core
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestDocumentInlineAskFeedbackAndAutoPause(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	clock := time.UnixMilli(1921000000000)
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return clock }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,9 +80,10 @@ func TestDocumentInlineAskFeedbackAndAutoPause(t *testing.T) {
 }
 
 func TestDocumentInlineAskTagAndShorthandNormalization(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	clock := time.UnixMilli(1922000000000)
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return clock }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,6 +161,7 @@ func TestDocumentInlineAskTagAndShorthandNormalization(t *testing.T) {
 }
 
 func TestFallbackAskIDDeterministicUTF8FNV1a(t *testing.T) {
+	t.Parallel()
 	// Cross-checked against frontend fallbackAskId in ask-ref-blocks.test.ts.
 	cases := []struct {
 		question string

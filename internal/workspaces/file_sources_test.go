@@ -3,7 +3,6 @@ package workspaces
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -13,31 +12,40 @@ import (
 )
 
 func TestFileSourcesUseSeparateGitWorktreesAndPinTheDefault(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is required")
+	if testing.Short() {
+		t.Skip("multi-repo git worktree routing covered by full suite")
 	}
+	t.Parallel()
 	ctx := t.Context()
 	first, second, managed := t.TempDir(), t.TempDir(), t.TempDir()
 	git := func(dir string, args ...string) {
 		t.Helper()
-		command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
-		if output, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, output)
+		res := local.NewGit(dir, "file")(ctx, args, local.GitOptions{})
+		if res.ExitCode != 0 {
+			t.Fatalf("git %v: %s", args, res.Stderr)
 		}
 	}
 	makeRepo := func(dir, branch, contents string) {
 		t.Helper()
-		git(dir, "init", "--initial-branch="+branch)
-		if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte(contents), 0600); err != nil {
+		sha := initTemplateRepo(t, dir)
+		if err := os.Remove(filepath.Join(dir, ".git", "refs", "heads", "main")); err != nil {
 			t.Fatal(err)
 		}
-		git(dir, "add", "file.txt")
-		git(dir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "initial")
+		if err := os.WriteFile(filepath.Join(dir, ".git", "refs", "heads", branch), []byte(sha+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("ref: refs/heads/"+branch+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+		git(dir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "initial")
 	}
 	makeRepo(first, "first-base", "first")
 	makeRepo(second, "second-base", "second")
 
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "app.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,15 +88,15 @@ func TestFileSourcesUseSeparateGitWorktreesAndPinTheDefault(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, err := view.ReadFile(ctx, "file.txt"); got != workspace.want || err != nil {
+		if got, err := view.ReadFile(ctx, "README.md"); got != workspace.want || err != nil {
 			t.Fatalf("%s read %q: %v", workspace.source, got, err)
 		}
-		if err := view.WriteFile(ctx, "file.txt", "edited "+workspace.want); err != nil {
+		if err := view.WriteFile(ctx, "README.md", "edited "+workspace.want); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for folder, want := range map[string]string{first: "first", second: "second"} {
-		if got, err := os.ReadFile(filepath.Join(folder, "file.txt")); string(got) != want || err != nil {
+		if got, err := os.ReadFile(filepath.Join(folder, "README.md")); string(got) != want || err != nil {
 			t.Fatalf("original checkout %s changed: %q, %v", folder, got, err)
 		}
 	}
@@ -104,7 +112,7 @@ func TestFileSourcesUseSeparateGitWorktreesAndPinTheDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := old.ReadFile(ctx, "file.txt"); got != "edited first" || err != nil {
+	if got, err := old.ReadFile(ctx, "README.md"); got != "edited first" || err != nil {
 		t.Fatalf("existing thread opened a different repository: %q, %v", got, err)
 	}
 	next := newThread(t, repo, project.ID)
@@ -112,7 +120,7 @@ func TestFileSourcesUseSeparateGitWorktreesAndPinTheDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := current.ReadFile(ctx, "file.txt"); got != "second" || err != nil {
+	if got, err := current.ReadFile(ctx, "README.md"); got != "second" || err != nil {
 		t.Fatalf("new thread did not use the new primary: %q, %v", got, err)
 	}
 	if result, err := manager.ThreadChanges(ctx, thread.ID); err != nil || result.Changes == nil || result.Changes.Base != "first-base" {
@@ -126,7 +134,9 @@ func TestFileSourcesUseSeparateGitWorktreesAndPinTheDefault(t *testing.T) {
 	if status, err := manager.RemoveOrphanedWorktree(ctx, project.ID, thread.ID, "src_second"); err != nil || status != "orphan-changed" {
 		t.Fatalf("registered checkout accepted orphan cleanup: %s, %v", status, err)
 	}
-	git(extraPath, "restore", "--", "file.txt")
+	if err := os.WriteFile(filepath.Join(extraPath, "README.md"), []byte("second"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if status, err := manager.RemoveSourceWorktree(ctx, project.ID, thread.ID, "src_second", "user"); err != nil || status != "removed" {
 		t.Fatalf("remove secondary worktree: %s, %v", status, err)
 	}
@@ -171,10 +181,13 @@ func TestFileSourcesUseSeparateGitWorktreesAndPinTheDefault(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(unowned, "leftover.txt")); err != nil {
 		t.Fatal("unrecorded directory was changed", err)
 	}
-	git(second, "show-ref", "--verify", "refs/heads/"+local.BranchFor(thread.ID))
+	if _, err := os.Stat(filepath.Join(second, ".git", "refs", "heads", filepath.FromSlash(local.BranchFor(thread.ID)))); err != nil {
+		t.Fatalf("expected branch ref to remain after orphan cleanup: %v", err)
+	}
 }
 
 func TestOrphanMatchesRecordedLabelNormalizesSymlink(t *testing.T) {
+	t.Parallel()
 	realRoot := t.TempDir()
 	worktree := filepath.Join(realRoot, "thr_orphan")
 	if err := os.MkdirAll(worktree, 0755); err != nil {

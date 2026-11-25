@@ -27,69 +27,53 @@ func newFactory(t *testing.T, options FactoryOptions) *Workspaces {
 	})
 	return factory
 }
-func TestWorktreesListsRegisteredPathsWithoutSizingThem(t *testing.T) {
+func TestWorktreesListLongPathsAndOrphanCleanup(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
 	root, git := initGit(t)
+	writeGitExclude(t, root, "node_modules/\n")
 	writeGit(t, root, "worktree/payload.txt", "tracked project files")
-	gitCommit(t, git, "Track a directory named worktree")
+	gitCommitOnly(t, git, "Track a directory named worktree")
 	factory := newFactory(t, FactoryOptions{Path: filepath.Join(root, "worktree"), DataDir: t.TempDir(), DisableClone: true})
-	path := filepath.Join(factory.roots[0], "thr_a")
-	gitOK(t, git, "worktree", "add", "-b", BranchFor("thr_a"), path)
+
+	// 1. Registered worktree with long Windows dependency path: list without/with sizing, then remove cleanly.
+	pathA := filepath.Join(factory.roots[0], "thr_a")
+	gitOK(t, git, "worktree", "add", "-qb", BranchFor("thr_a"), pathA)
+	longDep := filepath.Join("node_modules", strings.Repeat("a", 75), strings.Repeat("b", 75), strings.Repeat("c", 75), "file.txt")
+	writeGit(t, pathA, longDep, "dependency")
 	ordinary := filepath.Join(factory.roots[0], "worktree")
 	writeGit(t, ordinary, "payload.txt", "normal directory in the managed root")
 
-	worktrees, err := factory.Worktrees(t.Context(), false)
-	if err != nil || len(worktrees) != 1 || worktrees[0].Path != path || worktrees[0].Bytes != nil {
+	worktrees, err := factory.Worktrees(ctx, false)
+	if err != nil || len(worktrees) != 1 || worktrees[0].Path != pathA || worktrees[0].Bytes != nil {
 		t.Fatalf("unexpected worktree list: %+v, %v", worktrees, err)
 	}
-	measured, err := factory.Worktrees(t.Context(), true)
+	measured, err := factory.Worktrees(ctx, true)
 	if err != nil || len(measured) != 1 || measured[0].Bytes == nil || *measured[0].Bytes < 4 {
 		t.Fatalf("unexpected measured worktrees: %+v, %v", measured, err)
 	}
-	if removed, err := factory.Remove(t.Context(), "thr_a", RemoveOptions{}); err != nil || !removed {
+	if removed, err := factory.Remove(ctx, "thr_a", RemoveOptions{Spare: true}); err != nil || !removed {
 		t.Fatalf("cannot remove a registered worktree without discussion data: %t, %v", removed, err)
+	}
+	if _, err := os.Stat(pathA); !os.IsNotExist(err) {
+		t.Fatal("worktree is still on disk", err)
+	}
+	if sha := readRefSHA(t, filepath.Join(root, ".git"), "refs/heads/"+BranchFor("thr_a")); sha == "" {
+		t.Fatal("thr_a branch lost")
 	}
 	for _, dir := range []string{filepath.Join(root, "worktree"), ordinary} {
 		if _, err := os.Stat(filepath.Join(dir, "payload.txt")); err != nil {
 			t.Fatal(err)
 		}
 	}
-}
 
-func TestWorktreeRemovalSupportsLongPathsOnWindows(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Git for Windows path handling")
-	}
-	root, git := initGit(t)
-	writeGit(t, root, ".gitignore", "node_modules/\n")
-	gitCommit(t, git, "ignore dependencies")
-	factory := newFactory(t, FactoryOptions{Path: root, DataDir: t.TempDir(), DisableClone: true})
-	dir := filepath.Join(factory.roots[0], "thr_long")
-	gitOK(t, git, "worktree", "add", "-b", BranchFor("thr_long"), dir)
-	dependency := filepath.Join("node_modules", strings.Repeat("a", 75), strings.Repeat("b", 75), strings.Repeat("c", 75), "file.txt")
-	writeGit(t, dir, dependency, "dependency")
-	removed, err := factory.Remove(t.Context(), "thr_long", RemoveOptions{Spare: true})
-	if err != nil || !removed {
-		t.Fatalf("long-path worktree was not removed: %t, %v", removed, err)
-	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatal("worktree is still on disk", err)
-	}
-	gitOK(t, git, "show-ref", "--verify", "refs/heads/"+BranchFor("thr_long"))
-}
-
-func TestExplicitCleanupOfOrphanedWorktree(t *testing.T) {
-	ctx := t.Context()
-	root, git := initGit(t)
-	writeGit(t, root, "app/file.txt", "tracked")
-	gitCommit(t, git, "add nested source")
-	factory := newFactory(t, FactoryOptions{Path: filepath.Join(root, "app"), DataDir: t.TempDir(), DisableClone: true})
+	// 2. Explicit orphan worktree cleanup guards registration, recorded label, long paths, and symlinks.
 	const thread = "thr_orphan"
 	path := filepath.Join(factory.roots[0], thread)
-	label := filepath.Join(path, "app")
+	label := filepath.Join(path, "worktree")
 	branch := BranchFor(thread)
-	gitOK(t, git, "worktree", "add", "-b", branch, path)
-	longFile := filepath.Join("node_modules", strings.Repeat("a", 75), strings.Repeat("b", 75), strings.Repeat("c", 75), "file.txt")
-	writeGit(t, path, longFile, "left behind")
+	gitOK(t, git, "worktree", "add", "-qb", branch, path)
+	writeGit(t, path, longDep, "left behind")
 	outside := t.TempDir()
 	writeGit(t, outside, "sentinel.txt", "keep")
 	if err := os.Symlink(outside, filepath.Join(path, "outside")); err != nil && runtime.GOOS != "windows" {
@@ -104,7 +88,7 @@ func TestExplicitCleanupOfOrphanedWorktree(t *testing.T) {
 		t.Fatalf("registered checkout removal: %t, %v", removed, err)
 	}
 	gitOK(t, git, "worktree", "prune", "--expire", "now")
-	worktrees, err := factory.Worktrees(ctx, false)
+	worktrees, err = factory.Worktrees(ctx, false)
 	if err != nil || len(worktrees) != 1 || worktrees[0].Path != path || !worktrees[0].Orphaned {
 		t.Fatalf("orphan list: %+v, %v", worktrees, err)
 	}
@@ -114,7 +98,7 @@ func TestExplicitCleanupOfOrphanedWorktree(t *testing.T) {
 	if removed, err := factory.RemoveOrphaned(ctx, thread, path); err != nil || removed {
 		t.Fatalf("removed without matching the recorded source: %t, %v", removed, err)
 	}
-	if _, err := os.Stat(filepath.Join(path, longFile)); err != nil {
+	if _, err := os.Stat(filepath.Join(path, longDep)); err != nil {
 		t.Fatal(err)
 	}
 	if removed, err := factory.RemoveOrphaned(ctx, thread, label); err != nil || !removed {
@@ -126,10 +110,13 @@ func TestExplicitCleanupOfOrphanedWorktree(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(outside, "sentinel.txt")); err != nil {
 		t.Fatal("cleanup followed an external link", err)
 	}
-	gitOK(t, git, "show-ref", "--verify", "refs/heads/"+branch)
+	if sha := readRefSHA(t, filepath.Join(root, ".git"), "refs/heads/"+branch); sha == "" {
+		t.Fatal("orphan branch lost")
+	}
 }
 
 func TestPlainWorkspacesShareFilesAndReleaseClosedHandles(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	empty := ""
 	factory := newFactory(t, FactoryOptions{Path: root, RepositoryRoot: &empty})
@@ -168,8 +155,9 @@ func TestPlainWorkspacesShareFilesAndReleaseClosedHandles(t *testing.T) {
 func TestRepositoryWorkspacesPreserveBaseAndSubdirectory(t *testing.T) {
 	t.Parallel()
 	root, git := initGit(t)
+	writeGitExclude(t, root, ".env\n")
 	writeGit(t, root, "src/code.txt", "committed\n")
-	gitCommit(t, git, "source")
+	gitCommitOnly(t, git, "source")
 	writeGit(t, root, "src/code.txt", "user dirty\n")
 	factory := newFactory(t, FactoryOptions{Path: filepath.Join(root, "src"), DataDir: t.TempDir(), DisableClone: true})
 	if !factory.Isolated() {
@@ -211,6 +199,13 @@ func TestRepositoryWorkspacesPreserveBaseAndSubdirectory(t *testing.T) {
 	removed, err := factory.Remove(t.Context(), info.ID, RemoveOptions{Spare: true})
 	if err != nil || removed {
 		t.Fatal("uncommitted work removed", removed, err)
+	}
+	// Even once tracked changes are reverted, ignored local data (.env) must block Spare removal.
+	writeGit(t, resumed.directory, "code.txt", "committed\n")
+	writeGit(t, resumed.directory, ".env", "private")
+	removed, err = factory.Remove(t.Context(), info.ID, RemoveOptions{Spare: true})
+	if err != nil || removed {
+		t.Fatal("discarded ignored local data", removed, err)
 	}
 	removed, err = factory.Remove(t.Context(), info.ID, RemoveOptions{Discard: true})
 	if err != nil || !removed {
@@ -325,15 +320,15 @@ func fakeClone(ctx context.Context, from, to string) bool {
 	data, err := os.ReadFile(from)
 	return err == nil && os.WriteFile(to, data, info.Mode().Perm()) == nil
 }
-func TestClonedCheckoutUsesCommittedFilesAndSeedsDependencies(t *testing.T) {
+func TestClonedCheckoutSeedsDependenciesAndCleansFailedClone(t *testing.T) {
 	t.Parallel()
-	root, git := initGit(t)
-	writeGit(t, root, ".gitignore", "node_modules/\nvendor/\n.env\n")
-	gitCommit(t, git, "ignore")
+	root, _ := initGit(t)
+	writeGitExclude(t, root, "node_modules/\nvendor/\n.env\n")
 	writeGit(t, root, "file.txt", "dirty source\n")
 	writeGit(t, root, "node_modules/dependency/index.js", "dependency")
 	writeGit(t, root, "vendor/module/mod.go", "vendor")
 	writeGit(t, root, ".env", "secret")
+
 	factory := newFactory(t, FactoryOptions{Path: root, DataDir: t.TempDir(), Clone: fakeClone})
 	workspace, err := factory.Open(t.Context(), OpenRequest{ThreadID: "cloned_thread"})
 	if err != nil {
@@ -357,14 +352,9 @@ func TestClonedCheckoutUsesCommittedFilesAndSeedsDependencies(t *testing.T) {
 	if removed, err := factory.Remove(t.Context(), "cloned_thread", RemoveOptions{Spare: true}); err != nil || !removed {
 		t.Fatal("dependency directories prevented cleanup", removed, err)
 	}
-}
-func TestFailedDependencyCloneIsRemoved(t *testing.T) {
-	t.Parallel()
-	root, git := initGit(t)
-	writeGit(t, root, ".gitignore", "node_modules/\n")
-	gitCommit(t, git, "ignore")
-	writeGit(t, root, "node_modules/package/index.js", "dependency")
-	clone := func(ctx context.Context, from, to string) bool {
+
+	// Partial dependency clone failure removes the half-copied node_modules directory.
+	failClone := func(ctx context.Context, from, to string) bool {
 		if filepath.Base(from) == "node_modules" {
 			_ = os.MkdirAll(to, 0755)
 			_ = os.WriteFile(filepath.Join(to, "partial"), []byte("partial"), 0600)
@@ -372,33 +362,13 @@ func TestFailedDependencyCloneIsRemoved(t *testing.T) {
 		}
 		return fakeClone(ctx, from, to)
 	}
-	factory := newFactory(t, FactoryOptions{Path: root, DataDir: t.TempDir(), Clone: clone})
-	workspace, err := factory.Open(t.Context(), OpenRequest{ThreadID: "failed_seed"})
+	failFactory := newFactory(t, FactoryOptions{Path: root, DataDir: t.TempDir(), Clone: failClone})
+	failedWS, err := failFactory.Open(t.Context(), OpenRequest{ThreadID: "failed_seed"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(workspace.directory, "node_modules")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(failedWS.directory, "node_modules")); !os.IsNotExist(err) {
 		t.Fatal("partial dependency clone retained", err)
-	}
-}
-func TestWorktreePathCannotAliasAnotherThread(t *testing.T) {
-	t.Parallel()
-	root, _ := initGit(t)
-	factory := newFactory(t, FactoryOptions{Path: root, DataDir: t.TempDir(), DisableClone: true})
-	workspace, err := factory.Open(t.Context(), OpenRequest{ThreadID: "kept"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	alias := filepath.Join(filepath.Dir(workspace.directory), "alias")
-	if err := os.Symlink(workspace.directory, alias); err != nil {
-		t.Skip("symlink privileges unavailable")
-	}
-	defer os.Remove(alias)
-	if _, err := factory.Remove(t.Context(), "alias", RemoveOptions{Discard: true}); err == nil {
-		t.Fatal("alias deleted another thread")
-	}
-	if _, err := os.Stat(workspace.directory); err != nil {
-		t.Fatal("owned thread removed", err)
 	}
 }
 func TestCloneUnavailableDoesNotLeaveProbeDirectories(t *testing.T) {
@@ -426,6 +396,7 @@ func TestCloneUnavailableDoesNotLeaveProbeDirectories(t *testing.T) {
 	}
 }
 func TestParseDiffPreservesTabsAndBinaryCounts(t *testing.T) {
+	t.Parallel()
 	files := ParseDiff("R100\x00old\tname\x00new\tname\x00M\x00binary\x00", "1\t2\t\x00old\tname\x00new\tname\x00-\t-\tbinary\x00")
 	if len(files) != 2 || files[0].Path != "new\tname" || files[0].PreviousPath == nil || *files[0].PreviousPath != "old\tname" || files[0].Added == nil || *files[0].Added != 1 || files[1].Added != nil {
 		t.Fatal(files)
@@ -436,6 +407,7 @@ func TestParseDiffPreservesTabsAndBinaryCounts(t *testing.T) {
 }
 
 func TestCanceledCloneProbeWaiterAndFactoryClose(t *testing.T) {
+	t.Parallel()
 	root, _ := initGit(t)
 	started := make(chan struct{})
 	var once sync.Once
@@ -478,15 +450,16 @@ func TestCanceledCloneProbeWaiterAndFactoryClose(t *testing.T) {
 }
 
 func TestWorktreesAndOrphanCleanupNormalizeSymlinkedDataDir(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	root, git := initGit(t)
-	writeGit(t, root, "app/file.txt", "tracked")
-	gitCommit(t, git, "add nested source")
 	realData := t.TempDir()
 	aliasData := filepath.Join(t.TempDir(), "data-link")
 	if err := os.Symlink(realData, aliasData); err != nil {
 		t.Skip("symlink privileges unavailable")
 	}
+	root, git := initGit(t)
+	writeGit(t, root, "app/file.txt", "tracked")
+	gitCommitOnly(t, git, "add nested source")
 	factory := newFactory(t, FactoryOptions{Path: filepath.Join(root, "app"), DataDir: aliasData, DisableClone: true})
 	key := filepath.Base(factory.roots[0])
 	aliasRoot := filepath.Join(aliasData, "worktrees", key)
@@ -496,12 +469,25 @@ func TestWorktreesAndOrphanCleanupNormalizeSymlinkedDataDir(t *testing.T) {
 	// a historical checkout created before path canonicalization.
 	normalAlias := filepath.Join(aliasRoot, "thr_normal")
 	normalCanonical := filepath.Join(canonicalRoot, "thr_normal")
-	gitOK(t, git, "worktree", "add", "-b", BranchFor("thr_normal"), normalAlias)
+	gitOK(t, git, "worktree", "add", "-qb", BranchFor("thr_normal"), normalAlias)
+
+	// A symlink alias inside the worktree root must never delete another thread.
+	aliasThread := filepath.Join(canonicalRoot, "alias")
+	if err := os.Symlink(normalCanonical, aliasThread); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(aliasThread)
+	if _, err := factory.Remove(ctx, "alias", RemoveOptions{Discard: true}); err == nil {
+		t.Fatal("alias deleted another thread")
+	}
+	if _, err := os.Stat(normalCanonical); err != nil {
+		t.Fatal("owned thread removed", err)
+	}
 
 	// Create an orphaned worktree and prune its Git registration.
 	orphanAlias := filepath.Join(aliasRoot, "thr_orphan")
 	orphanCanonical := filepath.Join(canonicalRoot, "thr_orphan")
-	gitOK(t, git, "worktree", "add", "-b", BranchFor("thr_orphan"), orphanAlias)
+	gitOK(t, git, "worktree", "add", "-qb", BranchFor("thr_orphan"), orphanAlias)
 	if err := os.Remove(filepath.Join(orphanCanonical, ".git")); err != nil {
 		t.Fatal(err)
 	}

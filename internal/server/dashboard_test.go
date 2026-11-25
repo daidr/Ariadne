@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +18,7 @@ import (
 )
 
 func TestDashboardRefreshConnect(t *testing.T) {
+	t.Parallel()
 	content := func(source any) string {
 		value := object{"version": 1, "dashboard": object{"version": 1, "widgets": []any{}}, "data": object{"keep": []any{1}}}
 		if source != nil {
@@ -26,9 +26,8 @@ func TestDashboardRefreshConnect(t *testing.T) {
 		}
 		return encoded(value)
 	}
-	dir := t.TempDir()
 	now := func() time.Time { return time.UnixMilli(1800000000000) }
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "dashboard.sqlite"), Now: now})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}

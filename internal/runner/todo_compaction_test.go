@@ -19,9 +19,10 @@ import (
 )
 
 func TestCoordinatorCompactionInjectsActiveTodoIntoContextAndNextTurn(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "coord-todo.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,13 +72,13 @@ func TestCoordinatorCompactionInjectsActiveTodoIntoContextAndNextTurn(t *testing
 					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 				}
 			case 2, 3, 4:
-				// Post ~5.5k tokens per step so total crosses threshold (20_000 * 0.72 = 14_400)
+				// Post ~5.5k tokens per step so total crosses threshold (20_000 * 0.75 = 15_000)
 				// after step 4 and the compaction cut lands past todo-init.
 				if yield(sdk.Part{
 					Type:      "tool-call",
 					ID:        fmt.Sprintf("msg-%d", requests),
 					Name:      "send_message",
-					Arguments: fmt.Sprintf(`{"text":%q}`, strings.Repeat(fmt.Sprintf("update-%d-", requests), 1500)),
+					Arguments: fmt.Sprintf(`{"text":%q}`, strings.Repeat(fmt.Sprintf("update-%d-", requests), 2000)),
 				}) {
 					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 				}
@@ -193,11 +194,12 @@ func TestCoordinatorCompactionInjectsActiveTodoIntoContextAndNextTurn(t *testing
 }
 
 func TestThreadCompactionInjectsTodoAndOmitsWhenEmpty(t *testing.T) {
+	t.Parallel()
 	runCase := func(t *testing.T, clearBeforeCompact bool) []sdk.Message {
 		t.Helper()
 		ctx := t.Context()
 		home := t.TempDir()
-		repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "thread-todo.sqlite")})
+		repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -252,7 +254,7 @@ func TestThreadCompactionInjectsTodoAndOmitsWhenEmpty(t *testing.T) {
 						Type:      "tool-call",
 						ID:        fmt.Sprintf("msg-%d", requests),
 						Name:      "send_message",
-						Arguments: fmt.Sprintf(`{"text":%q}`, strings.Repeat(fmt.Sprintf("log-%d-", requests), 2400)),
+						Arguments: fmt.Sprintf(`{"text":%q}`, strings.Repeat(fmt.Sprintf("log-%d-", requests), 3000)),
 					}) {
 						yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 					}
@@ -311,6 +313,7 @@ func TestThreadCompactionInjectsTodoAndOmitsWhenEmpty(t *testing.T) {
 }
 
 func TestCompactionStateSkipsWhenSucceededTodoRemainsAfterCut(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	repo, _, project := openTestEnv(t)
 	if _, err := repo.UpdateTodo(ctx, project.ID, project.CoordinatorID, []core.TodoItem{

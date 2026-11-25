@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -23,8 +22,9 @@ func createReviewerThread(t *testing.T, repo *core.Repository, authorID, title s
 }
 
 func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "prompts.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,8 +142,9 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 }
 
 func TestToolSchemasDocumentPlanSequencingAndReviewEnums(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "schemas.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

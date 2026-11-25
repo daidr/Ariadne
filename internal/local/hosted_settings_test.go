@@ -9,6 +9,7 @@ import (
 )
 
 func TestHostedStorageUsesOneRootAndProtectsExistingClone(t *testing.T) {
+	t.Parallel()
 	defaults := filepath.Join(t.TempDir(), "github")
 	chosen := t.TempDir()
 	expectedChosen, err := fsutil.CanonicalPath(chosen)
@@ -43,6 +44,7 @@ func TestHostedStorageUsesOneRootAndProtectsExistingClone(t *testing.T) {
 }
 
 func TestHostedStorageCanonicalizesSymlinkAliases(t *testing.T) {
+	t.Parallel()
 	defaults := filepath.Join(t.TempDir(), "github")
 	realStorage := t.TempDir()
 	expectedStorage, err := fsutil.CanonicalPath(realStorage)

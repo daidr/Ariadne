@@ -26,14 +26,17 @@ func objects(t *testing.T, directory string) *ObjectStore {
 	return store
 }
 func TestGitObjectsStreamRoundTripIncrementalAndAtomicRefs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("git bundle stream round-trip covered by full suite")
+	}
 	t.Parallel()
 	root, git := initGit(t)
 	source := objects(t, root)
 	targetDir := t.TempDir()
+	copyTree(t, ensureBareTemplate(t), targetDir)
 	targetGit := NewGit(targetDir, "file")
-	gitOK(t, targetGit, "init", "--bare", "-q")
 	target := objects(t, targetDir)
-	base := gitOK(t, git, "rev-parse", "HEAD")
+	base := readHeadSHA(t, root)
 	refs, err := source.Refs(t.Context(), []string{"refs/heads/"})
 	if err != nil || refs["refs/heads/main"] != base {
 		t.Fatal(refs, err)
@@ -52,7 +55,8 @@ func TestGitObjectsStreamRoundTripIncrementalAndAtomicRefs(t *testing.T) {
 		t.Fatal(text)
 	}
 	writeGit(t, root, "file.txt", "incremental\n")
-	head := gitCommit(t, git, "incremental")
+	gitCommitTracked(t, git, "incremental")
+	head := readHeadSHA(t, root)
 	bundle, err = source.Bundle(t.Context(), []string{"refs/heads/main"}, []string{base})
 	if err != nil {
 		t.Fatal(err)
@@ -71,11 +75,11 @@ func TestGitObjectsStreamRoundTripIncrementalAndAtomicRefs(t *testing.T) {
 	if err != nil || len(refs) != 0 {
 		t.Fatal("failed transaction changed refs", refs, err)
 	}
-	gitOK(t, targetGit, "symbolic-ref", "refs/remotes/origin/alias", "refs/remotes/origin/main")
+	writeGitRef(t, targetDir, "refs/remotes/origin/alias", "ref: refs/remotes/origin/main")
 	if err := target.Receive(t.Context(), nil, map[string]*string{"refs/remotes/origin/alias": nil}); err != nil {
 		t.Fatal(err)
 	}
-	if got := gitOK(t, targetGit, "rev-parse", "refs/remotes/origin/main"); got != head {
+	if got := readRefSHA(t, targetDir, "refs/remotes/origin/main"); got != head {
 		t.Fatal("symbolic deletion removed target branch", got)
 	}
 	if err := target.Receive(t.Context(), nil, map[string]*string{"refs/remotes/origin/main": nil}); err != nil {
@@ -127,8 +131,7 @@ func TestGitObjectStoreCloseEndsUnreadBundleAndBlockedReceive(t *testing.T) {
 		t.Fatal("closed store started bundle")
 	}
 	directory := t.TempDir()
-	git := NewGit(directory, "file")
-	gitOK(t, git, "init", "--bare", "-q")
+	copyTree(t, ensureBareTemplate(t), directory)
 	target := objects(t, directory)
 	reader, writer := io.Pipe()
 	defer writer.Close()
@@ -158,6 +161,7 @@ func TestGitObjectStoreCloseEndsUnreadBundleAndBlockedReceive(t *testing.T) {
 	}
 }
 func TestGitObjectValidationRejectsInjectedRefsAndRevisions(t *testing.T) {
+	t.Parallel()
 	root, _ := initGit(t)
 	store := objects(t, root)
 	for _, ref := range []string{"--all", "refs/heads/a\nupdate refs/heads/main dead", "refs/heads/../main", "refs/heads/.hidden", "refs/heads/a.lock", "refs/heads/a@{1}", "refs/heads/a\\b"} {

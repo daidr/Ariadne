@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +17,7 @@ import (
 )
 
 func TestArtifactCollaborationAuthenticatesSynchronizesAndPersists(t *testing.T) {
+	t.Parallel()
 	t.Run("whiteboard", func(t *testing.T) {
 		testArtifactCollaboration(t, "whiteboard", `{"version":1,"nodes":[{"id":"note","type":"sticky","x":0,"y":5,"data":{"text":"initial"}}],"edges":[]}`, `"x":42`, func(d *crdt.Doc) error {
 			node, ok := d.GetMap("nodes").Get("note").(*crdt.YMap)
@@ -42,7 +42,7 @@ func TestArtifactCollaborationAuthenticatesSynchronizesAndPersists(t *testing.T)
 func testArtifactCollaboration(t *testing.T, artifactKind, initial, want string, edit func(*crdt.Doc) error) {
 	ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
 	defer cancel()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "shared.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

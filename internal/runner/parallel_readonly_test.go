@@ -23,6 +23,7 @@ import (
 )
 
 func TestCallGroups(t *testing.T) {
+	t.Parallel()
 	byName := map[string]tool{
 		"read":  {spec: sdk.Tool{Name: "read"}, readOnly: true},
 		"write": {spec: sdk.Tool{Name: "write"}},
@@ -73,6 +74,7 @@ func TestCallGroups(t *testing.T) {
 }
 
 func TestBuiltinToolReadOnlyAnnotations(t *testing.T) {
+	t.Parallel()
 	fix := newFileStateFixture(t, "", nil)
 	ctx := t.Context()
 
@@ -174,6 +176,7 @@ func TestBuiltinToolReadOnlyAnnotations(t *testing.T) {
 }
 
 func TestParallelReadOnlyExecutionAndModelOrder(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
 
@@ -282,6 +285,7 @@ func TestParallelReadOnlyExecutionAndModelOrder(t *testing.T) {
 }
 
 func TestParallelBatchDigestDeterministicRegardlessOfCompletionOrder(t *testing.T) {
+	t.Parallel()
 	runWithOrder := func(firstFinishesFirst bool) batchDigest {
 		repo, store, project := openTestEnv(t)
 		ctx := t.Context()
@@ -336,6 +340,7 @@ func TestParallelBatchDigestDeterministicRegardlessOfCompletionOrder(t *testing.
 }
 
 func TestParallelCoordinatorLooksQuotaAndHintDeterministic(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
 
@@ -406,6 +411,7 @@ func TestParallelCoordinatorLooksQuotaAndHintDeterministic(t *testing.T) {
 }
 
 func TestParallelCoordinatorResearchWeightPreDeduction(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
 
@@ -468,6 +474,7 @@ func TestParallelCoordinatorResearchWeightPreDeduction(t *testing.T) {
 }
 
 func TestParallelReadFilesAndFileStateRaceSafety(t *testing.T) {
+	t.Parallel()
 	fix := newFileStateFixture(t, "", nil)
 	ctx := t.Context()
 
@@ -566,6 +573,7 @@ func TestParallelReadFilesAndFileStateRaceSafety(t *testing.T) {
 }
 
 func TestParallelReadOnlyGroupCancellation(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	baseCtx := t.Context()
 	conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}

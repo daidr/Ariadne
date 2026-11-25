@@ -16,6 +16,7 @@ import (
 )
 
 func TestModelSelectionMemoryUndoAndReferenceStatus(t *testing.T) {
+	t.Parallel()
 	config := object{"instructions": "keep line", "models": object{"providers": []any{object{"id": "p", "kind": "fixture", "settings": object{}}}, "models": []any{object{"id": "m", "provider": "p", "model": "fixture"}}, "roles": object{}}}
 	sql := `INSERT INTO conversations(id,project_id,role) VALUES('thr_a','prj_a','thread');
  INSERT INTO threads(id,project_id,title,created_at,updated_at) VALUES('thr_a','prj_a','work',0,0);
@@ -26,7 +27,7 @@ func TestModelSelectionMemoryUndoAndReferenceStatus(t *testing.T) {
  ('notice_removed','prj_a','coo_a','memory-everywhere','{"action":"removed","text":"restore line"}',0);`
 	dir := t.TempDir()
 	now := func() time.Time { return time.UnixMilli(1800000000000) }
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "config.sqlite"), Now: now})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}

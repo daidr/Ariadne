@@ -39,8 +39,9 @@ func buildTestZip(t *testing.T, entries map[string][]byte) []byte {
 }
 
 func TestReadAttachmentInspectsZipTextAndBinary(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "attachments.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,9 +146,10 @@ func TestReadAttachmentInspectsZipTextAndBinary(t *testing.T) {
 }
 
 func TestSaveAttachmentWritesExactBinaryToWorkspace(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home, dir := t.TempDir(), t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "ariadne.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,8 +220,9 @@ func TestSaveAttachmentWritesExactBinaryToWorkspace(t *testing.T) {
 }
 
 func TestBinaryAttachmentReachesCoordinatorAndRelayedThread(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "binary-relay.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,6 +15,7 @@ func compareContent(t *testing.T, got, want string) {
 }
 
 func TestMalformedStateAndSyncFrame(t *testing.T) {
+	t.Parallel()
 	if doc, err := Load("unknown", nil); err == nil {
 		doc.Destroy()
 		t.Fatal("accepted unknown artifact kind")

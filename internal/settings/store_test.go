@@ -751,3 +751,14 @@ func mustResolveCoordinator(t *testing.T, store *Store, triage bool, tokens floa
 	}
 	return got
 }
+
+func TestDefaultCompactShare(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := object(store.Current()["limits"])
+	if got, _ := number(limits["compactShare"]); got != 0.75 {
+		t.Fatalf("default compactShare = %v, want 0.75", got)
+	}
+}

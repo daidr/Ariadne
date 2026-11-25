@@ -32,6 +32,7 @@ func mustStruct(t *testing.T, values map[string]any) *structpb.Struct {
 }
 
 func TestModelSettingsConnectAndRealProviderCheck(t *testing.T) {
+	t.Parallel()
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer private" {
 			t.Error("wrong model check request", r.URL.Path, r.Header)
@@ -50,7 +51,7 @@ func TestModelSettingsConnectAndRealProviderCheck(t *testing.T) {
 	defer service.Close()
 
 	directory := t.TempDir()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(directory, "data.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +162,7 @@ func TestSaveModelSettingsProbeTimeout(t *testing.T) {
 	defer close(release)
 
 	directory := t.TempDir()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(directory, "data.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

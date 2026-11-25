@@ -29,6 +29,7 @@ func shortPath83(t *testing.T, path string) string {
 }
 
 func TestWindowsShortPathsNormalizeWorktreesAndHostedStorage(t *testing.T) {
+	t.Parallel()
 	base := filepath.Join(t.TempDir(), "runneradmin long storage directory")
 	if err := os.MkdirAll(base, 0755); err != nil {
 		t.Fatal(err)
@@ -45,7 +46,7 @@ func TestWindowsShortPathsNormalizeWorktreesAndHostedStorage(t *testing.T) {
 	ctx := t.Context()
 	root, git := initGit(t)
 	writeGit(t, root, "app/file.txt", "tracked")
-	gitCommit(t, git, "add nested source")
+	gitCommitOnly(t, git, "add nested source")
 
 	shortData := filepath.Join(shortBase, "data")
 	factory := newFactory(t, FactoryOptions{Path: filepath.Join(root, "app"), DataDir: shortData, DisableClone: true})
@@ -59,11 +60,9 @@ func TestWindowsShortPathsNormalizeWorktreesAndHostedStorage(t *testing.T) {
 
 	orphanShort := filepath.Join(shortRoot, "thr_orphan")
 	orphanCanonical := filepath.Join(canonicalRoot, "thr_orphan")
-	gitOK(t, git, "worktree", "add", "-b", BranchFor("thr_orphan"), orphanShort)
-	if err := os.Remove(filepath.Join(orphanCanonical, ".git")); err != nil {
+	if err := os.MkdirAll(filepath.Join(orphanCanonical, "app"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitOK(t, git, "worktree", "prune", "--expire", "now")
 
 	worktrees, err := factory.Worktrees(ctx, false)
 	if err != nil {
@@ -93,8 +92,7 @@ func TestWindowsShortPathsNormalizeWorktreesAndHostedStorage(t *testing.T) {
 	if err != nil || data != filepath.Join(hostedCanonical, "ariadne", "github") {
 		t.Fatalf("hosted data dir from 8.3 path: %q, %v", data, err)
 	}
-	remote, _ := initGit(t)
-	host := newHostedTest(t, remote, data, nil)
+	host := newHostedTest(t, root, data, nil)
 	workspace, err := host.Open(ctx, sdk.WorkspaceRequest{ThreadID: "thr_hosted"})
 	if err != nil {
 		t.Fatal(err)

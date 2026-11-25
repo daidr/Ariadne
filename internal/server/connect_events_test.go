@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +24,8 @@ import (
 )
 
 func TestEventServiceStreamEventsLiveAndUpdateStatus(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "events.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,8 @@ func TestEventServiceStreamEventsLiveAndUpdateStatus(t *testing.T) {
 }
 
 func TestThreadServiceStreamCommandOutput(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "cmdstream.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,6 +306,7 @@ func (w *deadlineRecorderResponseWriter) SetWriteDeadline(deadline time.Time) er
 }
 
 func TestStreamWriteGuardPreservesDeadlineOnErrorAndSlowClose(t *testing.T) {
+	t.Parallel()
 	rw := &deadlineRecorderResponseWriter{ResponseRecorder: *httptest.NewRecorder()}
 	guard := &streamWriteGuard{rc: http.NewResponseController(rw)}
 
@@ -337,7 +339,8 @@ func TestStreamWriteGuardPreservesDeadlineOnErrorAndSlowClose(t *testing.T) {
 }
 
 func TestEventServiceStreamEventsIncrementalDrafts(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "drafts.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

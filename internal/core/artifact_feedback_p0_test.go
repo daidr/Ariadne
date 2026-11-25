@@ -2,7 +2,6 @@ package core
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -51,9 +50,10 @@ func feedbackItemsOf(t *testing.T, fb object) []object {
 }
 
 func TestArtifactFeedbackCommentFingerprints(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	clock := time.UnixMilli(1900000000000)
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return clock }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,9 +156,10 @@ func TestArtifactFeedbackCommentFingerprints(t *testing.T) {
 }
 
 func TestArtifactFeedbackWithdrawBeforeAndAfterConsumption(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	clock := time.UnixMilli(1900000000000)
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return clock }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,9 +235,10 @@ func TestArtifactFeedbackWithdrawBeforeAndAfterConsumption(t *testing.T) {
 }
 
 func TestArtifactFeedbackDecisionGroupsAndChoice(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	clock := time.UnixMilli(1900000000000)
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return clock }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,9 +333,10 @@ func TestArtifactFeedbackDecisionGroupsAndChoice(t *testing.T) {
 }
 
 func TestArtifactFeedbackWithdrawBlockedByInFlightStepSawSeqAndFinishRejected(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	clock := time.UnixMilli(1900000000000)
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return clock }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,9 +442,10 @@ func TestArtifactFeedbackWithdrawBlockedByInFlightStepSawSeqAndFinishRejected(t 
 }
 
 func TestArtifactFeedbackWithdrawPreservesNonTranscriptWakeAndSkipsNonWakingEntries(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	clock := time.UnixMilli(1900000000000)
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return clock }})
 	if err != nil {
 		t.Fatal(err)
 	}

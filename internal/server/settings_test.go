@@ -21,6 +21,7 @@ import (
 )
 
 func TestSettingsConnectRPC(t *testing.T) {
+	t.Parallel()
 	searchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer draft-secret" {
 			t.Error("missing search auth")
@@ -31,7 +32,7 @@ func TestSettingsConnectRPC(t *testing.T) {
 	defer searchServer.Close()
 
 	directory := t.TempDir()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(directory, "data.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

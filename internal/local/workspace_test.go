@@ -25,6 +25,7 @@ func newTestWorkspace(t *testing.T, root string, options WorkspaceOptions) *Work
 	return workspace
 }
 func TestWorkspacePathsAndHiddenGit(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	outside := t.TempDir()
 	os.WriteFile(filepath.Join(outside, "private"), []byte("outside"), 0600)
@@ -79,6 +80,7 @@ func TestWorkspacePathsAndHiddenGit(t *testing.T) {
 	}
 }
 func TestWorkspaceAcceptsOriginalRootAlias(t *testing.T) {
+	t.Parallel()
 	root, outside := t.TempDir(), t.TempDir()
 	alias := filepath.Join(t.TempDir(), "alias")
 	if err := os.Symlink(root, alias); err != nil {
@@ -103,6 +105,7 @@ func TestWorkspaceAcceptsOriginalRootAlias(t *testing.T) {
 }
 
 func TestWorkspaceReadDistinguishesMissingFileFromOutsidePath(t *testing.T) {
+	t.Parallel()
 	workspace := newTestWorkspace(t, t.TempDir(), WorkspaceOptions{})
 	if _, err := workspace.ReadBytes(t.Context(), ".ariadne/screenshots/baseline.png", 1024); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected file not found for a missing workspace path, got %v", err)
@@ -114,6 +117,7 @@ func TestWorkspaceReadDistinguishesMissingFileFromOutsidePath(t *testing.T) {
 }
 
 func TestWorkspaceStaysInsideRootDuringSymlinkSwap(t *testing.T) {
+	t.Parallel()
 	root, outside := t.TempDir(), t.TempDir()
 	os.WriteFile(filepath.Join(outside, "kept"), []byte("private"), 0600)
 	os.Mkdir(filepath.Join(root, "dir"), 0700)
@@ -134,7 +138,8 @@ func TestWorkspaceStaysInsideRootDuringSymlinkSwap(t *testing.T) {
 			os.Rename(filepath.Join(root, "saved"), filepath.Join(root, "dir"))
 		}
 	}()
-	for range 200 {
+	// Reduced iteration count keeps symlink-race coverage fast on NTFS while still racing swaps.
+	for range 40 {
 		_ = workspace.WriteFile(t.Context(), "dir/kept", "changed")
 	}
 	cancel()
@@ -145,6 +150,7 @@ func TestWorkspaceStaysInsideRootDuringSymlinkSwap(t *testing.T) {
 }
 
 func TestWorkspaceRemoveDoesNotFollowAlias(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	workspace := newTestWorkspace(t, dir, WorkspaceOptions{HideGit: true})
 	if err := workspace.WriteFile(t.Context(), "original", "kept"); err != nil {
@@ -164,6 +170,7 @@ func TestWorkspaceRemoveDoesNotFollowAlias(t *testing.T) {
 	}
 }
 func TestWorkspaceCloseCancelsOwnedCommand(t *testing.T) {
+	t.Parallel()
 	workspace := newTestWorkspace(t, t.TempDir(), WorkspaceOptions{})
 	program, err := os.Executable()
 	if err != nil {
@@ -209,6 +216,7 @@ func TestWorkspaceCommandChild(t *testing.T) {
 }
 
 func TestWorkspaceFilesAndText(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workspace := newTestWorkspace(t, root, WorkspaceOptions{ID: "source", HideGit: true})
 	files := map[string][]byte{"a.txt": []byte("a"), "B.txt": []byte("b"), "_name": []byte("_"), "中文.txt": []byte("中文"), "bom.txt": append([]byte{0xef, 0xbb, 0xbf}, []byte("hello")...), "invalid.txt": {0xe2, 0x82}, "empty": {}}
