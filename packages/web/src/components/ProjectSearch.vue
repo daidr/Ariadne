@@ -65,6 +65,7 @@ function runSearch(value: string, immediate = false) {
   clearTimeout(timer)
   const text = value.trim()
   if (!text) {
+    asked += 1
     result.value = null
     searchError.value = false
     loading.value = false

@@ -5,7 +5,7 @@ import { DouConfigProvider } from 'dou-ui'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
 import { api } from '../api'
-import { douLocale, locale } from '../i18n'
+import { douLocale, locale, t } from '../i18n'
 import { state } from '../store'
 import AttentionBar from './AttentionBar.vue'
 import WorkspaceHeader from './WorkspaceHeader.vue'
@@ -301,6 +301,109 @@ describe('Cross-project AttentionBar', () => {
     gammaLink!.click()
     await flushPromises()
     expect(state.currentId).toBe('prj_gamma')
+    expect(state.attentionOpen).toBe(false)
+  })
+
+  test('shows loading and error states on reopen after previously loading an empty queue', async () => {
+    let rejectPending!: (reason?: unknown) => void
+    const listSpy = vi
+      .spyOn(api, 'listAllNeedsMe')
+      .mockResolvedValueOnce({ items: [], threads: {} })
+      .mockImplementationOnce(
+        () =>
+          new Promise<AllNeedsMeResult>((_resolve, reject) => {
+            rejectPending = reject
+          }),
+      )
+
+    state.projects = [makeProjectSummary('prj_alpha', 'Alpha', 0)]
+    const wrapper = mountWithProvider(AttentionBar)
+    const trigger = wrapper.find<HTMLButtonElement>('button.attention-trigger')
+
+    // First open when queue is empty caches { items: [], threads: {} }.
+    await trigger.trigger('click')
+    await flushPromises()
+    await nextTick()
+    expect(state.allNeedsMe).toEqual({ items: [], threads: {} })
+    expect(document.body.textContent).toContain(t('attention.empty'))
+
+    // Close popover, then another project gains a waiting item.
+    state.attentionOpen = false
+    await nextTick()
+    state.projects = [
+      makeProjectSummary('prj_alpha', 'Alpha', 0),
+      makeProjectSummary('prj_beta', 'Beta', 1),
+    ]
+
+    // Reopen: should show loading spinner rather than the empty state while pending.
+    await trigger.trigger('click')
+    await nextTick()
+    expect(listSpy).toHaveBeenCalledTimes(2)
+    expect(document.body.textContent).not.toContain(t('attention.empty'))
+    expect(document.querySelector('.attention-status')).not.toBeNull()
+
+    // On failure: should show error + retry button rather than the empty state.
+    rejectPending(new Error('network down'))
+    await flushPromises()
+    await nextTick()
+    expect(document.body.textContent).toContain(t('attention.error'))
+    expect(document.body.textContent).toContain(t('conversation.retry'))
+    expect(document.body.textContent).not.toContain(t('attention.empty'))
+  })
+
+  test('exits trace and narrow project list when jumping to current project header or report artifact', async () => {
+    vi.spyOn(api, 'getArtifact').mockResolvedValue({
+      artifact: {
+        id: 'art_alpha',
+        projectId: 'prj_alpha',
+        kind: 'document',
+        title: 'Alpha 设计方案',
+        content: '# 设计',
+        version: 1,
+        updatedAt: 1,
+        createdAt: 1,
+      },
+      comments: [],
+      feedback: [],
+    } as unknown as Awaited<ReturnType<typeof api.getArtifact>>)
+
+    state.main = { kind: 'trace', conversationId: 'crd_prj_alpha' }
+    state.workspaceLevel = 'projects'
+
+    const wrapper = mountWithProvider(AttentionBar)
+    const trigger = wrapper.find<HTMLButtonElement>('button.attention-trigger')
+    await trigger.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    // Clicking current project header should return to coordinator conversation.
+    const alphaSection = document.querySelector<HTMLElement>(
+      '[data-attention-project-id="prj_alpha"]',
+    )!
+    const alphaHeaderLink = alphaSection.querySelector<HTMLElement>('.attention-group-name')!
+    alphaHeaderLink.click()
+    await flushPromises()
+    expect(state.currentId).toBe('prj_alpha')
+    expect(state.main.kind).toBe('conversation')
+    expect(state.workspaceLevel).toBe('coordinator')
+    expect(state.attentionOpen).toBe(false)
+
+    // Reopen while in trace view and click current project's report artifact: must exit trace.
+    state.main = { kind: 'trace', conversationId: 'crd_prj_alpha' }
+    await trigger.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const reopenedAlpha = document.querySelector<HTMLElement>(
+      '[data-attention-project-id="prj_alpha"]',
+    )!
+    const artifactLink = [...reopenedAlpha.querySelectorAll<HTMLElement>('a, button')].find((el) =>
+      el.textContent?.includes('Alpha 设计方案'),
+    )
+    expect(artifactLink).toBeDefined()
+    artifactLink!.click()
+    await flushPromises()
+    expect(state.main.kind).toBe('conversation')
     expect(state.attentionOpen).toBe(false)
   })
 })

@@ -973,6 +973,7 @@ export async function openProjectMessage(
   messageId: string,
 ) {
   if (!(await ensureProjectOpen(projectId))) return
+  if (state.main.kind === 'trace') openMain({ kind: 'conversation' })
   await openMessage(conversationId, messageId)
 }
 

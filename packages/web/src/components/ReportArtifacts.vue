@@ -12,13 +12,14 @@ const openView = useOpenView()
 const props = defineProps<{ artifacts: ThreadArtifact[]; projectId?: string }>()
 const emit = defineEmits<{ open: [artifactId: string] }>()
 
-function isOtherProject() {
-  return Boolean(props.projectId && props.projectId !== state.currentId)
+function canDragInCurrentProject() {
+  if (!props.projectId) return true
+  return props.projectId === state.currentId && !state.starting && !!state.detail
 }
 
 function open(artifactId: string) {
   emit('open', artifactId)
-  if (props.projectId && isOtherProject()) {
+  if (props.projectId) {
     void openProjectArtifact(props.projectId, artifactId)
     return
   }
@@ -26,7 +27,7 @@ function open(artifactId: string) {
 }
 
 function onPointerDown(event: PointerEvent, artifactId: string) {
-  if (isOtherProject()) return
+  if (!canDragInCurrentProject()) return
   dragArtifact(event, artifactId)
 }
 </script>

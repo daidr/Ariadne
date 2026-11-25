@@ -885,23 +885,23 @@ func (reader Reader) listProjects(ctx context.Context, filterIDsJSON, query stri
 				needsByProject[pid]++
 			}
 		}
-			result = make([]ProjectView, 0, len(rows))
-			for _, row := range rows {
-				pid := row.text("id")
-				usageRow := usageByProject[pid]
-				if usageRow == nil {
-					usageRow = record{}
-				}
-				view, err := toProjectWithUsage(row, needsByProject[pid], usageRow)
-				if err != nil {
-					return err
-				}
-				result = append(result, view)
+		result = make([]ProjectView, 0, len(rows))
+		for _, row := range rows {
+			pid := row.text("id")
+			usageRow := usageByProject[pid]
+			if usageRow == nil {
+				usageRow = record{}
 			}
-			return nil
-		})
-		return
-	}
+			view, err := toProjectWithUsage(row, needsByProject[pid], usageRow)
+			if err != nil {
+				return err
+			}
+			result = append(result, view)
+		}
+		return nil
+	})
+	return
+}
 
 const needsMeThreadSummaryColumns = `t.project_id, t.id, t.title, t.started, t.last_report, t.last_headline, t.last_artifacts,
  t.reported_at, t.reported_head, t.merged, t.pull_request, t.check_failures,

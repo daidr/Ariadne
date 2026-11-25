@@ -244,4 +244,104 @@ describe('Cross-project ⌘K ProjectSearch', () => {
 
     expect(api.search).toHaveBeenCalledWith('', '部署', undefined)
   })
+
+  test('exits trace view when jumping to a current-project thread message', async () => {
+    vi.spyOn(api, 'search').mockResolvedValue({
+      terms: ['部署'],
+      threads: [],
+      artifacts: [],
+      messages: [
+        {
+          kind: 'message',
+          id: 'msg_alpha_thr',
+          conversationId: 'thr_alpha',
+          where: 'Alpha 部署流水线',
+          snippet: '当前项目讨论串里的部署消息',
+          at: 2500,
+          projectId: 'prj_alpha',
+          projectName: 'Alpha',
+        },
+      ],
+    })
+    vi.spyOn(api, 'getConversation').mockResolvedValue({
+      conversation: { id: 'thr_alpha', projectId: 'prj_alpha', role: 'thread' },
+      messages: [
+        { id: 'msg_alpha_thr', conversationId: 'thr_alpha', content: '当前项目讨论串里的部署消息' },
+      ],
+      notices: [],
+      todo: null,
+      model: null,
+      more: false,
+      lastSeq: 1,
+    } as unknown as Awaited<ReturnType<typeof api.getConversation>>)
+
+    state.detail = {
+      ...makeProjectDetail('prj_alpha', 'Alpha'),
+      threads: [
+        {
+          id: 'thr_alpha',
+          projectId: 'prj_alpha',
+          title: 'Alpha 部署流水线',
+          stage: 'review',
+        } as unknown as ProjectResponse['threads'][number],
+      ],
+    }
+    state.main = { kind: 'trace', conversationId: 'crd_prj_alpha' }
+    mountSearch()
+    state.searchOpen = true
+    await nextTick()
+
+    const input = document.querySelector<HTMLInputElement>('input')!
+    input.value = '部署'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(250)
+    await flushPromises()
+    await nextTick()
+
+    const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+    const msgOption = options.find((el) => el.textContent?.includes('当前项目讨论串里的部署消息'))
+    expect(msgOption).toBeDefined()
+    msgOption!.click()
+    await flushPromises()
+
+    expect(state.currentId).toBe('prj_alpha')
+    expect(state.main.kind).toBe('conversation')
+    expect(state.focus?.conversationId).toBe('thr_alpha')
+    expect(state.focus?.messageId).toBe('msg_alpha_thr')
+  })
+
+  test('ignores stale in-flight search responses after clearing query', async () => {
+    let resolvePending!: (value: SearchResult) => void
+    vi.spyOn(api, 'search').mockImplementationOnce(
+      () =>
+        new Promise<SearchResult>((resolve) => {
+          resolvePending = resolve
+        }),
+    )
+
+    mountSearch()
+    state.searchOpen = true
+    await nextTick()
+
+    const input = document.querySelector<HTMLInputElement>('input')!
+    input.value = '部署'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(250)
+    expect(api.search).toHaveBeenCalledTimes(1)
+
+    // User clears input while the request is still in-flight.
+    input.value = ''
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+
+    // Stale response arrives later and must be ignored.
+    resolvePending(sampleResult)
+    await flushPromises()
+    await nextTick()
+
+    expect(document.body.textContent).not.toContain('Beta 部署回滚')
+    expect(document.body.textContent).not.toContain('Beta 部署手册')
+  })
 })

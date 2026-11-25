@@ -7,7 +7,6 @@ import type { AttentionView, NeedsMeThreadSummary } from '@ariadne/core'
 import { threadLine } from '../stage'
 import {
   endAside,
-  openProject,
   openProjectConversation,
   openProjectThread,
   refreshAllNeedsMe,
@@ -177,11 +176,11 @@ const showProjectHeaders = computed(
 )
 
 const isInitialLoading = computed(
-  () => state.allNeedsMe === null && state.allNeedsMeLoading && totalCount.value > 0,
+  () => !groups.value.length && state.allNeedsMeLoading && totalCount.value > 0,
 )
 
 const isInitialError = computed(
-  () => state.allNeedsMe === null && state.allNeedsMeError && !state.allNeedsMeLoading,
+  () => !groups.value.length && state.allNeedsMeError && !state.allNeedsMeLoading,
 )
 
 function closePopover() {
@@ -190,9 +189,7 @@ function closePopover() {
 
 function jumpProject(projectId: string) {
   closePopover()
-  if (projectId !== state.currentId || state.starting || !state.detail) {
-    void openProject(projectId)
-  }
+  void openProjectConversation(projectId)
 }
 
 function jumpThread(
