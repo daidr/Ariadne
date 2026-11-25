@@ -814,10 +814,11 @@ func parseEmbeddedInspectStatus(output string) (branchRef, headSHA string, dirty
 				}
 			} else if head, ok := strings.CutPrefix(rec, "# branch.head "); ok {
 				head = strings.TrimSpace(head)
-				switch head {
-				case "", "(detached)":
+				switch {
+				case head == "", head == "(detached)":
 					branchRef = ""
-				case "(NULL)":
+				case strings.EqualFold(head, "(null)"), strings.EqualFold(head, "(unknown)"), strings.HasPrefix(head, "refs/"):
+					branchRef = ""
 					needSymbolicFallback = true
 				default:
 					branchRef = "refs/heads/" + head
