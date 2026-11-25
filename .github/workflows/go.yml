@@ -52,6 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: .go-version
@@ -84,6 +86,18 @@ jobs:
       CGO_ENABLED: '0'
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Exclude workspace and build paths from Windows Defender
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          try {
+            Add-MpPreference `
+              -ExclusionPath @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, 'C:\hostedtoolcache', 'C:\Program Files\Git') `
+              -ExclusionProcess @('go.exe', 'git.exe', 'compile.exe', 'link.exe', 'asm.exe', 'chrome.exe', 'msedge.exe') `
+              -ErrorAction SilentlyContinue
+          } catch {}
       - uses: actions/setup-go@v6
         with:
           go-version-file: .go-version
@@ -143,15 +157,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $priority = @(
             'github.com/daidr/Ariadne/internal/local',
-            'github.com/daidr/Ariadne/internal/browser',
             'github.com/daidr/Ariadne/internal/runner',
             'github.com/daidr/Ariadne/internal/workspaces',
+            'github.com/daidr/Ariadne/internal/browser',
+            'github.com/daidr/Ariadne/internal/plugins',
             'github.com/daidr/Ariadne/internal/sources',
+            'github.com/daidr/Ariadne/internal/fsutil',
+            'github.com/daidr/Ariadne/internal/agentruntime',
+            'github.com/daidr/Ariadne/internal/repowatch',
+            'github.com/daidr/Ariadne/internal/core',
             'github.com/daidr/Ariadne/internal/process',
             'github.com/daidr/Ariadne/internal/update'
           ) | Where-Object { $_ -in $all }
           $pkgs = $priority + ($all | Where-Object { $_ -notin $priority })
-          go test -vet=off -count=1 -p=6 -parallel=4 -timeout=180s @pkgs
+          go test -vet=off -count=1 -p=4 -parallel=4 -timeout=180s @pkgs
           exit $LASTEXITCODE
       - if: matrix.os == 'ubuntu-latest'
         env:
@@ -164,6 +183,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: .go-version

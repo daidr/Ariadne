@@ -361,6 +361,7 @@ func browserFlags(goos string) []browserFlag {
 func execOptions(executable, goos string) []chromedp.ExecAllocatorOption {
 	opts := slices.Clone(chromedp.DefaultExecAllocatorOptions[:])
 	opts = append(opts, chromedp.ExecPath(executable))
+	opts = append(opts, platformExecOptions()...)
 	for _, flag := range browserFlags(goos) {
 		opts = append(opts, chromedp.Flag(flag.name, flag.value))
 	}

@@ -105,11 +105,13 @@ func New(options Options) (*Manager, error) {
 	manager.discarding = map[string]bool{}
 	manager.workspaces = leases.New[*workspaceConnection](leases.Options{Idle: 32, TTL: options.CacheTTL})
 	manager.mentions = leases.New[*mentionList](leases.Options{Idle: 16, TTL: 30 * time.Second, LoadTimeout: 20 * time.Second, Now: options.Now})
+	state := options.State
+	repo := options.Repository
 	manager.Background = background.New(background.Options{OnChange: func(thread string) {
-		if options.State == nil {
+		if state == nil {
 			return
 		}
-		conversation, err := options.Repository.GetConversation(context.Background(), thread)
+		conversation, err := repo.GetConversation(context.Background(), thread)
 		if err != nil {
 			return
 		}
@@ -119,7 +121,7 @@ func New(options Options) (*Manager, error) {
 			ConversationID: thread,
 			Commands:       commands,
 		}
-		options.State.Set(realtime.Update{
+		state.Set(realtime.Update{
 			Kind:           "background",
 			ProjectID:      conversation.ProjectID,
 			ConversationID: thread,
