@@ -7,6 +7,7 @@ import (
 )
 
 func TestUnwrapWindowsGitForArch(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeDummy := func(parts ...string) string {
 		t.Helper()
@@ -49,6 +50,7 @@ func TestUnwrapWindowsGitForArch(t *testing.T) {
 }
 
 func TestGitExecutableRespectsPathOverride(t *testing.T) {
+	t.Parallel()
 	if got := gitExecutable(map[string]string{"PATH": "/custom/bin"}); got != "git" {
 		t.Fatalf("PATH override = %q, want git", got)
 	}
@@ -58,6 +60,7 @@ func TestGitExecutableRespectsPathOverride(t *testing.T) {
 }
 
 func TestParseEmbeddedInspectStatus(t *testing.T) {
+	t.Parallel()
 	const sha = "0123456789abcdef0123456789abcdef01234567"
 
 	cases := []struct {

@@ -118,6 +118,7 @@ func readLog(t *testing.T, path string) []map[string]any {
 }
 
 func TestACPToolPermissionBoundary(t *testing.T) {
+	t.Parallel()
 	tools := []sdk.Tool{{Name: "read"}}
 	cases := []struct {
 		raw     string
@@ -176,6 +177,7 @@ func TestACPToolPermissionBoundary(t *testing.T) {
 }
 
 func TestACPModelsAndThoughts(t *testing.T) {
+	t.Parallel()
 	models := ParseModels(json.RawMessage(`{"currentModelId":"big","availableModels":[{"modelId":"default"},{"modelId":"big","name":"Big Model"},{"modelId":"small","name":"small"},{"modelId":" "}]}`))
 	want := []sdk.ListedModel{{ID: "default", Title: "Big Model", Resolves: "big"}, {ID: "big", Title: "Big Model"}, {ID: "small"}}
 	if !reflect.DeepEqual(models, want) {
@@ -200,6 +202,7 @@ func TestACPModelsAndThoughts(t *testing.T) {
 }
 
 func TestACPRequiresCommandAndBridge(t *testing.T) {
+	t.Parallel()
 	driver, err := Kind(nil, nil).Create(agentruntime.DriverContext{Settings: map[string]any{}})
 	if err != nil {
 		t.Fatal(err)
@@ -223,8 +226,10 @@ func acpChildCommand(t *testing.T, scenario string) (string, string) {
 }
 
 func TestACPDoesNotInterceptWarningChunks(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"other-agent", "other-agent-quota"} {
 		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
 			command, _ := acpChildCommand(t, scenario)
 			m := newTestSessions(t, Kind(nil, nil), agentruntime.SessionOptions{})
 			parts := collectParts(t, m, map[string]any{"command": command}, sdk.Request{Conversation: "plain", Messages: []sdk.Message{user("hello")}})
@@ -237,6 +242,7 @@ func TestACPDoesNotInterceptWarningChunks(t *testing.T) {
 }
 
 func TestACPFailureIncludesRPCDiagnostics(t *testing.T) {
+	t.Parallel()
 	command, _ := acpChildCommand(t, "rpc-error")
 	m := newTestSessions(t, Kind(nil, nil), agentruntime.SessionOptions{})
 	parts := collectParts(t, m, map[string]any{"command": command}, sdk.Request{Conversation: "diagnostics", Messages: []sdk.Message{user("hello")}})
@@ -250,6 +256,7 @@ func TestACPFailureIncludesRPCDiagnostics(t *testing.T) {
 }
 
 func TestACPMidTurnUsageBeforeFirstMessage(t *testing.T) {
+	t.Parallel()
 	command, _ := acpChildCommand(t, "midturn-usage")
 	bridge := newTestBridge(t)
 	m := newTestSessions(t, Kind(bridge, nil), agentruntime.SessionOptions{})
@@ -296,6 +303,7 @@ func TestACPMidTurnUsageBeforeFirstMessage(t *testing.T) {
 }
 
 func TestACPHistoryBudgetMinimumFloor(t *testing.T) {
+	t.Parallel()
 	d := &acpDriver{}
 	hugeSystem := strings.Repeat("S", agentruntime.DefaultHistoryReplayBytes+8192)
 	if got := d.HistoryBudget(hugeSystem); got != agentruntime.MinHistoryReplayBytes {
@@ -316,6 +324,7 @@ func TestACPHistoryBudgetMinimumFloor(t *testing.T) {
 }
 
 func TestACPStatelessSummaryStaysWithinSinglePromptBudget(t *testing.T) {
+	t.Parallel()
 	command, log := acpChildCommand(t, "rejected")
 	m := newTestSessions(t, Kind(nil, nil), agentruntime.SessionOptions{DataDir: t.TempDir()})
 	settings := map[string]any{"command": command}
@@ -362,6 +371,7 @@ func TestACPStatelessSummaryStaysWithinSinglePromptBudget(t *testing.T) {
 }
 
 func TestACPRebuildAfterCancelDrainsSettledTurnUsage(t *testing.T) {
+	t.Parallel()
 	command, _ := acpChildCommand(t, "cancel-usage")
 	bridge := newTestBridge(t)
 	m := newTestSessions(t, Kind(bridge, nil), agentruntime.SessionOptions{})
@@ -406,8 +416,10 @@ func TestACPRebuildAfterCancelDrainsSettledTurnUsage(t *testing.T) {
 }
 
 func TestACPModernProtocolAndRestart(t *testing.T) {
+	t.Parallel()
 	for _, restore := range []string{"session/resume", "session/load", "rejected"} {
 		t.Run(restore, func(t *testing.T) {
+			t.Parallel()
 			command, log := acpChildCommand(t, restore)
 			models, err := ListModels(t.Context(), Settings{Command: command}, t.TempDir())
 			if err != nil {
@@ -474,6 +486,7 @@ func TestACPModernProtocolAndRestart(t *testing.T) {
 }
 
 func TestACPRejectedRestoreBoundsReplayAndKeepsLatestUserAndImages(t *testing.T) {
+	t.Parallel()
 	command, log := acpChildCommand(t, "rejected-replay")
 	opts := agentruntime.SessionOptions{DataDir: t.TempDir()}
 	settings := map[string]any{"command": command}

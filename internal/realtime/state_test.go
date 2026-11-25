@@ -10,6 +10,7 @@ import (
 )
 
 func TestLiveAndDraftSnapshots(t *testing.T) {
+	t.Parallel()
 	type action struct {
 		Op     string `json:"op"`
 		Handle string `json:"handle,omitempty"`
@@ -22,9 +23,9 @@ func TestLiveAndDraftSnapshots(t *testing.T) {
 	state := NewState(hub)
 	defer state.Close()
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
-	live := NewLive(state, LiveOptions{Now: now})
+	live := NewLive(state, LiveOptions{Now: now, Interval: 10 * time.Millisecond})
 	defer live.Close()
-	drafts := NewDrafts(state, LiveOptions{Now: now})
+	drafts := NewDrafts(state, LiveOptions{Now: now, Interval: 10 * time.Millisecond})
 	defer drafts.Close()
 	liveHandles := map[string]LiveHandle{}
 	draftHandles := map[string]DraftHandle{}
@@ -58,7 +59,7 @@ func TestLiveAndDraftSnapshots(t *testing.T) {
 		case "draft.drop":
 			drafts.Drop("c")
 		case "wait":
-			time.Sleep(320 * time.Millisecond)
+			time.Sleep(35 * time.Millisecond)
 		}
 		draftValues := []DraftUpdate{}
 		for update := range state.Snapshots("") {

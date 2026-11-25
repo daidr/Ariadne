@@ -16,18 +16,10 @@ import (
 
 func initGit(t *testing.T) (string, GitRun) {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git unavailable")
-	}
+	tpl := ensureBaseGitTemplate(t)
 	root := t.TempDir()
-	git := NewGit(root, "file")
-	gitOK(t, git, "init", "-b", "main")
-	gitOK(t, git, "config", "user.name", "Ariadne Test")
-	gitOK(t, git, "config", "user.email", "test@example.invalid")
-	writeGit(t, root, "file.txt", "base\n")
-	writeGit(t, root, "untouched.txt", "kept\n")
-	gitCommit(t, git, "base")
-	return root, git
+	copyTree(t, tpl, root)
+	return root, NewGit(root, "file")
 }
 func gitOK(t *testing.T, git GitRun, args ...string) string {
 	t.Helper()
@@ -49,20 +41,31 @@ func writeGit(t *testing.T, root, path, value string) {
 func gitCommit(t *testing.T, git GitRun, message string) string {
 	t.Helper()
 	gitOK(t, git, "add", "--all")
-	gitOK(t, git, "commit", "-qm", message)
+	gitOK(t, git, "-c", "user.name=Ariadne Test", "-c", "user.email=test@example.invalid", "commit", "-qm", message)
 	return gitOK(t, git, "rev-parse", "HEAD")
+}
+func gitCommitOnly(t *testing.T, git GitRun, message string) {
+	t.Helper()
+	gitOK(t, git, "add", "--all")
+	gitOK(t, git, "-c", "user.name=Ariadne Test", "-c", "user.email=test@example.invalid", "commit", "-qm", message)
+}
+func gitCommitTracked(t *testing.T, git GitRun, message string) {
+	t.Helper()
+	gitOK(t, git, "-c", "user.name=Ariadne Test", "-c", "user.email=test@example.invalid", "commit", "-qam", message)
 }
 func TestBranchChangesVersionsAndSnapshots(t *testing.T) {
 	t.Parallel()
 	root, git := initGit(t)
-	base := gitOK(t, git, "rev-parse", "HEAD")
-	gitOK(t, git, "checkout", "-qb", "ariadne/test")
+	base := readHeadSHA(t, root)
+	writeGitRef(t, filepath.Join(root, ".git"), "refs/heads/ariadne/test", base)
+	writeGitRef(t, filepath.Join(root, ".git"), "HEAD", "ref: refs/heads/ariadne/test")
 	gitOK(t, git, "mv", "file.txt", "renamed.txt")
 	writeGit(t, root, "renamed.txt", "base\nnew\n")
 	writeGit(t, root, "new 文件.txt", "new\n")
 	writeGit(t, root, "binary.dat", "one\x00two")
 	writeGit(t, root, "unicode-binary.dat", strings.Repeat("中", 3000)+"\x00end")
-	head := gitCommit(t, git, "changes")
+	gitCommitOnly(t, git, "changes")
+	head := readHeadSHA(t, root)
 	writeGit(t, root, "uncommitted.txt", "not in branch\n")
 	input := BranchInput{Branch: "ariadne/test", Base: "main", BaseRef: "refs/heads/main", Worktree: root}
 	changes, err := BranchChanges(t.Context(), git, input)
@@ -85,7 +88,7 @@ func TestBranchChangesVersionsAndSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot == before || gitOK(t, git, "write-tree") != before || gitOK(t, git, "rev-parse", "HEAD") != head {
+	if snapshot == before || gitOK(t, git, "write-tree") != before || readHeadSHA(t, root) != head {
 		t.Fatal("snapshot altered real index or branch")
 	}
 	content := gitOK(t, git, "show", snapshot+":uncommitted.txt")
@@ -101,62 +104,81 @@ func TestBranchChangesVersionsAndSnapshots(t *testing.T) {
 	if refs := gitOK(t, git, "for-each-ref", "--format=%(refname)", SnapshotRefs("thread_test")); refs != "" {
 		t.Fatal(refs)
 	}
-	if gitOK(t, git, "rev-parse", "HEAD") != head {
+	if readHeadSHA(t, root) != head {
 		t.Fatal("branch removed with snapshots")
 	}
 }
 func TestMergeAndUndoKeepOtherDirtyFiles(t *testing.T) {
 	t.Parallel()
+	root, git := initGit(t)
+	gitDir := filepath.Join(root, ".git")
+	base := readHeadSHA(t, root)
+	writeGitRef(t, gitDir, "refs/heads/ariadne/change", base)
+	writeGitRef(t, gitDir, "HEAD", "ref: refs/heads/ariadne/change")
+	writeGit(t, root, "file.txt", "changed\n")
+	gitCommitTracked(t, git, "change")
+	head := readHeadSHA(t, root)
+	gitOK(t, git, "checkout", "-q", "main")
+	writeGit(t, root, "untouched.txt", "user change\n")
+
 	for _, method := range []string{"merge", "squash"} {
-		t.Run(method, func(t *testing.T) {
-			root, git := initGit(t)
-			base := gitOK(t, git, "rev-parse", "HEAD")
-			gitOK(t, git, "checkout", "-qb", "ariadne/change")
-			writeGit(t, root, "file.txt", "changed\n")
-			head := gitCommit(t, git, "change")
-			gitOK(t, git, "checkout", "-q", "main")
-			writeGit(t, root, "untouched.txt", "user change\n")
-			out, err := MergeBranch(t.Context(), git, LocalIdentity(root), MergeInput{Branch: "ariadne/change", Base: "main", Method: method, Message: "integrate"})
-			if err != nil || out.Kind != "merged" || out.Head != head {
-				t.Fatal(out, err)
+		out, err := MergeBranch(t.Context(), git, LocalIdentity(root), MergeInput{Branch: "ariadne/change", Base: "main", Method: method, Message: "integrate"})
+		if err != nil || out.Kind != "merged" || out.Head != head {
+			t.Fatalf("%s: %+v, %v", method, out, err)
+		}
+		if data, _ := os.ReadFile(filepath.Join(root, "file.txt")); string(data) != "changed\n" {
+			t.Fatalf("%s: %q", method, string(data))
+		}
+		parents := strings.Fields(gitOK(t, git, "rev-list", "--parents", "-n", "1", out.SHA))
+		if method == "merge" && len(parents) != 3 || method == "squash" && len(parents) != 2 {
+			t.Fatalf("%s: %v", method, parents)
+		}
+		if method == "squash" {
+			// Verify UndoMerge refuses when another branch or remote ref points at the merge commit.
+			input := UndoMergeInput{Branch: "ariadne/change", Base: "main", SHA: out.SHA}
+			for _, entry := range []struct{ ref, reason string }{{"refs/heads/other", "undo-branched"}, {"refs/remotes/origin/main", "undo-pushed"}} {
+				writeGitRef(t, gitDir, entry.ref, out.SHA)
+				err := UndoMerge(t.Context(), git, input)
+				var refused *sdk.MergeRefused
+				if !errors.As(err, &refused) || refused.Reason != entry.reason {
+					t.Fatal(err)
+				}
+				if readHeadSHA(t, root) != out.SHA {
+					t.Fatal("refused undo changed base")
+				}
+				removeGitRef(t, gitDir, entry.ref)
 			}
-			if data, _ := os.ReadFile(filepath.Join(root, "file.txt")); string(data) != "changed\n" {
-				t.Fatal(string(data))
-			}
-			parents := strings.Fields(gitOK(t, git, "rev-list", "--parents", "-n", "1", out.SHA))
-			if method == "merge" && len(parents) != 3 || method == "squash" && len(parents) != 2 {
-				t.Fatal(parents)
-			}
-			if err := UndoMerge(t.Context(), git, UndoMergeInput{Branch: "ariadne/change", Base: "main", SHA: out.SHA}); err != nil {
-				t.Fatal(err)
-			}
-			if gitOK(t, git, "rev-parse", "HEAD") != base {
-				t.Fatal("base not restored")
-			}
-			if data, _ := os.ReadFile(filepath.Join(root, "untouched.txt")); string(data) != "user change\n" {
-				t.Fatal("dirty file lost", string(data))
-			}
-			if data, _ := os.ReadFile(filepath.Join(root, "file.txt")); string(data) != "base\n" {
-				t.Fatal("base files not restored", string(data))
-			}
-		})
+		}
+		if err := UndoMerge(t.Context(), git, UndoMergeInput{Branch: "ariadne/change", Base: "main", SHA: out.SHA}); err != nil {
+			t.Fatalf("%s undo: %v", method, err)
+		}
+		if readHeadSHA(t, root) != base {
+			t.Fatalf("%s: base not restored", method)
+		}
+		if data, _ := os.ReadFile(filepath.Join(root, "untouched.txt")); string(data) != "user change\n" {
+			t.Fatalf("%s: dirty file lost: %q", method, string(data))
+		}
+		if data, _ := os.ReadFile(filepath.Join(root, "file.txt")); string(data) != "base\n" {
+			t.Fatalf("%s: base files not restored: %q", method, string(data))
+		}
 	}
 }
 func TestMergeRefusalsAndConflictsLeaveBase(t *testing.T) {
 	t.Parallel()
 	root, git := initGit(t)
-	gitOK(t, git, "checkout", "-qb", "ariadne/change")
+	base := readHeadSHA(t, root)
+	writeGitRef(t, filepath.Join(root, ".git"), "refs/heads/ariadne/change", base)
+	writeGitRef(t, filepath.Join(root, ".git"), "HEAD", "ref: refs/heads/ariadne/change")
 	writeGit(t, root, "file.txt", "branch\n")
-	gitCommit(t, git, "branch")
+	gitCommitTracked(t, git, "branch")
 	gitOK(t, git, "checkout", "-q", "main")
-	base := gitOK(t, git, "rev-parse", "HEAD")
 	request := MergeInput{Branch: "ariadne/change", Base: "main", Method: "merge", Message: "merge"}
 	stale := request
 	stale.ExpectedHead = base
 	if out, err := MergeBranch(t.Context(), git, LocalIdentity(root), stale); err != nil || out.Kind != "moved" {
 		t.Fatal("merge must leave unreviewed HEAD untouched", out, err)
 	}
-	if gitOK(t, git, "rev-parse", "HEAD") != base {
+	if readHeadSHA(t, root) != base {
 		t.Fatal("unreviewed merge moved base")
 	}
 	writeGit(t, root, "file.txt", "dirty\n")
@@ -165,42 +187,18 @@ func TestMergeRefusalsAndConflictsLeaveBase(t *testing.T) {
 	if !errors.As(err, &refused) || refused.Reason != "checkout" {
 		t.Fatal(err)
 	}
-	if gitOK(t, git, "rev-parse", "HEAD") != base {
+	if readHeadSHA(t, root) != base {
 		t.Fatal("refused merge moved base")
 	}
 	writeGit(t, root, "file.txt", "main\n")
-	base = gitCommit(t, git, "main")
+	gitCommitTracked(t, git, "main")
+	base = readHeadSHA(t, root)
 	out, err := MergeBranch(t.Context(), git, LocalIdentity(root), request)
 	if err != nil || out.Kind != "conflict" || !reflect.DeepEqual(out.Files, []string{"file.txt"}) {
 		t.Fatal(out, err)
 	}
-	if gitOK(t, git, "rev-parse", "HEAD") != base {
+	if readHeadSHA(t, root) != base {
 		t.Fatal("conflict moved base")
-	}
-}
-func TestUndoRefusesOtherBranchesAndRemoteRefs(t *testing.T) {
-	t.Parallel()
-	root, git := initGit(t)
-	gitOK(t, git, "checkout", "-qb", "ariadne/change")
-	writeGit(t, root, "file.txt", "changed\n")
-	gitCommit(t, git, "change")
-	gitOK(t, git, "checkout", "-q", "main")
-	out, err := MergeBranch(t.Context(), git, LocalIdentity(root), MergeInput{Branch: "ariadne/change", Base: "main", Method: "squash", Message: "merge"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	input := UndoMergeInput{Branch: "ariadne/change", Base: "main", SHA: out.SHA}
-	for _, entry := range []struct{ ref, reason string }{{"refs/heads/other", "undo-branched"}, {"refs/remotes/origin/main", "undo-pushed"}} {
-		gitOK(t, git, "update-ref", entry.ref, out.SHA)
-		err := UndoMerge(t.Context(), git, input)
-		var refused *sdk.MergeRefused
-		if !errors.As(err, &refused) || refused.Reason != entry.reason {
-			t.Fatal(err)
-		}
-		if gitOK(t, git, "rev-parse", "HEAD") != out.SHA {
-			t.Fatal("refused undo changed base")
-		}
-		gitOK(t, git, "update-ref", "-d", entry.ref)
 	}
 }
 func TestWorktreeRemovalRetainsBranchesAndLocalData(t *testing.T) {
@@ -242,8 +240,10 @@ func TestWorktreeRemovalRetainsBranchesAndLocalData(t *testing.T) {
 func TestCatFileBatchReadVersions(t *testing.T) {
 	t.Parallel()
 	root, git := initGit(t)
-	base := gitOK(t, git, "rev-parse", "HEAD")
-	gitOK(t, git, "checkout", "-qb", "ariadne/batch")
+	base := readHeadSHA(t, root)
+	gitDir := filepath.Join(root, ".git")
+	writeGitRef(t, gitDir, "refs/heads/ariadne/batch", base)
+	writeGitRef(t, gitDir, "HEAD", "ref: refs/heads/ariadne/batch")
 	gitOK(t, git, "mv", "file.txt", "renamed name.txt")
 	writeGit(t, root, "renamed name.txt", "base\nupdated\n")
 	writeGit(t, root, "new 文件.txt", "hello world\n")
@@ -252,7 +252,8 @@ func TestCatFileBatchReadVersions(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, "untouched.txt")); err != nil {
 		t.Fatal(err)
 	}
-	head := gitCommit(t, git, "batch changes")
+	gitCommitOnly(t, git, "batch changes")
+	head := readHeadSHA(t, root)
 
 	batch := newCatFileBatch(root)
 	defer batch.Close()
@@ -293,7 +294,8 @@ func TestCatFileBatchReadVersions(t *testing.T) {
 
 	// Verify reuse of the same running process sees newly committed blobs.
 	writeGit(t, root, "after-start.txt", "fresh commit\n")
-	head2 := gitCommit(t, git, "second commit")
+	gitCommitOnly(t, git, "second commit")
+	head2 := readHeadSHA(t, root)
 	second, err := batch.ReadVersions(t.Context(), git, []VersionInput{
 		{From: head, Head: head2, Path: "after-start.txt"},
 	})
@@ -305,27 +307,30 @@ func TestCatFileBatchReadVersions(t *testing.T) {
 func TestCatFileBatchLarge64FileBatchDoesNotDeadlock(t *testing.T) {
 	t.Parallel()
 	root, git := initGit(t)
+	const uniqueFiles = 16
 	const count = 64
 	beforeBody := strings.Repeat("before-line-0123456789abcdef\n", 300) // > 8 KiB per blob
 	afterBody := strings.Repeat("after-line-fedcba9876543210\n", 300)
-	paths := make([]string, count)
-	for i := range count {
+	paths := make([]string, uniqueFiles)
+	for i := range uniqueFiles {
 		rel := "dir/nested/deep/path/for/pipe/pressure/file_" + string(rune('a'+i/26)) + string(rune('a'+i%26)) + ".txt"
 		paths[i] = rel
 		writeGit(t, root, rel, beforeBody+rel+"\n")
 	}
-	base := gitCommit(t, git, "base 64 files")
+	gitCommitOnly(t, git, "base files")
+	base := readHeadSHA(t, root)
 	for _, rel := range paths {
 		writeGit(t, root, rel, afterBody+rel+"\n")
 	}
-	head := gitCommit(t, git, "updated 64 files")
+	gitCommitOnly(t, git, "updated files")
+	head := readHeadSHA(t, root)
 
 	batch := newCatFileBatch(root)
 	defer batch.Close()
 
 	inputs := make([]VersionInput, count)
-	for i, rel := range paths {
-		inputs[i] = VersionInput{From: base, Head: head, Path: rel}
+	for i := range count {
+		inputs[i] = VersionInput{From: base, Head: head, Path: paths[i%uniqueFiles]}
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
@@ -336,7 +341,8 @@ func TestCatFileBatchLarge64FileBatchDoesNotDeadlock(t *testing.T) {
 	if len(results) != count {
 		t.Fatalf("len(results) = %d, want %d", len(results), count)
 	}
-	for i, rel := range paths {
+	for i := range count {
+		rel := paths[i%uniqueFiles]
 		if results[i].Before == nil || *results[i].Before != beforeBody+rel+"\n" {
 			t.Fatalf("file %d before mismatch", i)
 		}
@@ -401,21 +407,21 @@ func BenchmarkFileVersions40Files(b *testing.B) {
 			}
 		}
 	})
-		b.Run("CatFileBatch", func(b *testing.B) {
-			batch := newCatFileBatch(root)
-			defer batch.Close()
-			// Warm up the persistent reader once before timing steady-state batches.
-			if _, err := batch.ReadVersions(b.Context(), git, inputs[:1]); err != nil {
+	b.Run("CatFileBatch", func(b *testing.B) {
+		batch := newCatFileBatch(root)
+		defer batch.Close()
+		// Warm up the persistent reader once before timing steady-state batches.
+		if _, err := batch.ReadVersions(b.Context(), git, inputs[:1]); err != nil {
+			b.Fatal(err)
+		}
+		b.ResetTimer()
+		for b.Loop() {
+			if _, err := batch.ReadVersions(b.Context(), git, inputs); err != nil {
 				b.Fatal(err)
 			}
-			b.ResetTimer()
-			for b.Loop() {
-				if _, err := batch.ReadVersions(b.Context(), git, inputs); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
-	}
+		}
+	})
+}
 
 func TestWorktreeSnapshotNormalizesCRLFWithGlobalAutocrlf(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -428,11 +434,13 @@ func TestWorktreeSnapshotNormalizesCRLFWithGlobalAutocrlf(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 
 	root, git := initGit(t)
 	lines := strings.Repeat("line\n", 40)
 	writeGit(t, root, "large.txt", lines)
-	head := gitCommit(t, git, "add lf file")
+	gitCommitOnly(t, git, "add lf file")
+	head := readHeadSHA(t, root)
 	headTree := gitOK(t, git, "rev-parse", head+"^{tree}")
 
 	// Simulate a shell git merge/checkout under core.autocrlf=true writing CRLF
@@ -440,7 +448,7 @@ func TestWorktreeSnapshotNormalizesCRLFWithGlobalAutocrlf(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, "large.txt")); err != nil {
 		t.Fatal(err)
 	}
-	checkout := exec.CommandContext(t.Context(), "git", "checkout", "--", "large.txt")
+	checkout := exec.CommandContext(t.Context(), gitExecutable(nil), "checkout", "--", "large.txt")
 	checkout.Dir = root
 	if out, err := checkout.CombinedOutput(); err != nil {
 		t.Fatalf("git checkout -- large.txt: %v\n%s", err, string(out))
@@ -493,24 +501,27 @@ func TestWorktreeSnapshotNormalizesCRLFWithGlobalAutocrlf(t *testing.T) {
 func TestBranchChangesPrefersNewerOriginBaseWhenLocalBaseLags(t *testing.T) {
 	t.Parallel()
 	root, git := initGit(t)
-	oldMain := gitOK(t, git, "rev-parse", "HEAD")
+	gitDir := filepath.Join(root, ".git")
+	oldMain := readHeadSHA(t, root)
 
 	// Simulate origin/main advancing ahead of stale local main with a large commit.
-	gitOK(t, git, "checkout", "-qb", "upstream-tmp")
+	writeGitRef(t, gitDir, "refs/heads/upstream-tmp", oldMain)
+	writeGitRef(t, gitDir, "HEAD", "ref: refs/heads/upstream-tmp")
 	writeGit(t, root, "upstream.txt", strings.Repeat("upstream line\n", 100))
-	newOriginMain := gitCommit(t, git, "large upstream commit")
-	gitOK(t, git, "update-ref", "refs/remotes/origin/main", newOriginMain)
+	gitCommitOnly(t, git, "large upstream commit")
+	newOriginMain := readHeadSHA(t, root)
+	writeGitRef(t, gitDir, "refs/remotes/origin/main", newOriginMain)
 
 	// Create feature branch from oldMain, make its own change, and merge origin/main
 	// while local refs/heads/main remains behind at oldMain.
 	gitOK(t, git, "checkout", "-qb", "ariadne/feature", oldMain)
-	gitOK(t, git, "branch", "-D", "upstream-tmp")
+	removeGitRef(t, gitDir, "refs/heads/upstream-tmp")
 	writeGit(t, root, "feature.txt", "feat 1\nfeat 2\n")
-	gitCommit(t, git, "feature work")
+	gitCommitOnly(t, git, "feature work")
 	gitOK(t, git, "merge", "--no-ff", "-m", "Merge origin/main", "refs/remotes/origin/main")
-	head := gitOK(t, git, "rev-parse", "HEAD")
+	head := readHeadSHA(t, root)
 
-	if got := gitOK(t, git, "rev-parse", "refs/heads/main"); got != oldMain {
+	if got := readRefSHA(t, gitDir, "refs/heads/main"); got != oldMain {
 		t.Fatalf("expected local main to remain behind at %s, got %s", oldMain, got)
 	}
 
@@ -536,9 +547,8 @@ func TestBranchChangesPrefersNewerOriginBaseWhenLocalBaseLags(t *testing.T) {
 	}
 
 	// If local main diverges with unpushed commits, local main must be preserved.
-	gitOK(t, git, "checkout", "-q", "main")
-	writeGit(t, root, "local-only.txt", "unpushed\n")
-	localAhead := gitCommit(t, git, "local unpushed commit")
+	localAhead := gitOK(t, git, "commit-tree", oldMain+"^{tree}", "-p", oldMain, "-m", "local unpushed commit")
+	writeGitRef(t, gitDir, "refs/heads/main", localAhead)
 	if got := resolveBaseSHA(t.Context(), git, "refs/heads/main", "refs/remotes/origin/main"); got != localAhead {
 		t.Fatalf("expected diverged local main %s to be preserved, got %s", localAhead, got)
 	}

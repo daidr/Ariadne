@@ -33,6 +33,9 @@ func CanClone(ctx context.Context, clone Cloner, gitDir, targetDir string) bool 
 	return err == nil && closed == nil && clone(ctx, source, target)
 }
 func worktreeGitDir(git GitRun, ctx context.Context, directory string) (string, error) {
+	if direct := directWorktreeGitDir(directory); direct != "" && isValidGitDirectory(direct) {
+		return direct, nil
+	}
 	result := git(ctx, []string{"rev-parse", "--absolute-git-dir"}, GitOptions{Directory: directory})
 	if result.ExitCode != 0 {
 		return "", gitFailure(result, "git rev-parse")

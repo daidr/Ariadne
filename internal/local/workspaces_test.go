@@ -28,9 +28,10 @@ func newFactory(t *testing.T, options FactoryOptions) *Workspaces {
 	return factory
 }
 func TestWorktreesListsRegisteredPathsWithoutSizingThem(t *testing.T) {
+	t.Parallel()
 	root, git := initGit(t)
 	writeGit(t, root, "worktree/payload.txt", "tracked project files")
-	gitCommit(t, git, "Track a directory named worktree")
+	gitCommitOnly(t, git, "Track a directory named worktree")
 	factory := newFactory(t, FactoryOptions{Path: filepath.Join(root, "worktree"), DataDir: t.TempDir(), DisableClone: true})
 	path := filepath.Join(factory.roots[0], "thr_a")
 	gitOK(t, git, "worktree", "add", "-b", BranchFor("thr_a"), path)
@@ -56,12 +57,12 @@ func TestWorktreesListsRegisteredPathsWithoutSizingThem(t *testing.T) {
 }
 
 func TestWorktreeRemovalSupportsLongPathsOnWindows(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "windows" {
 		t.Skip("Git for Windows path handling")
 	}
 	root, git := initGit(t)
-	writeGit(t, root, ".gitignore", "node_modules/\n")
-	gitCommit(t, git, "ignore dependencies")
+	writeGitExclude(t, root, "node_modules/\n")
 	factory := newFactory(t, FactoryOptions{Path: root, DataDir: t.TempDir(), DisableClone: true})
 	dir := filepath.Join(factory.roots[0], "thr_long")
 	gitOK(t, git, "worktree", "add", "-b", BranchFor("thr_long"), dir)
@@ -78,10 +79,11 @@ func TestWorktreeRemovalSupportsLongPathsOnWindows(t *testing.T) {
 }
 
 func TestExplicitCleanupOfOrphanedWorktree(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	root, git := initGit(t)
 	writeGit(t, root, "app/file.txt", "tracked")
-	gitCommit(t, git, "add nested source")
+	gitCommitOnly(t, git, "add nested source")
 	factory := newFactory(t, FactoryOptions{Path: filepath.Join(root, "app"), DataDir: t.TempDir(), DisableClone: true})
 	const thread = "thr_orphan"
 	path := filepath.Join(factory.roots[0], thread)
@@ -130,6 +132,7 @@ func TestExplicitCleanupOfOrphanedWorktree(t *testing.T) {
 }
 
 func TestPlainWorkspacesShareFilesAndReleaseClosedHandles(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	empty := ""
 	factory := newFactory(t, FactoryOptions{Path: root, RepositoryRoot: &empty})
@@ -169,7 +172,7 @@ func TestRepositoryWorkspacesPreserveBaseAndSubdirectory(t *testing.T) {
 	t.Parallel()
 	root, git := initGit(t)
 	writeGit(t, root, "src/code.txt", "committed\n")
-	gitCommit(t, git, "source")
+	gitCommitOnly(t, git, "source")
 	writeGit(t, root, "src/code.txt", "user dirty\n")
 	factory := newFactory(t, FactoryOptions{Path: filepath.Join(root, "src"), DataDir: t.TempDir(), DisableClone: true})
 	if !factory.Isolated() {
@@ -327,9 +330,8 @@ func fakeClone(ctx context.Context, from, to string) bool {
 }
 func TestClonedCheckoutUsesCommittedFilesAndSeedsDependencies(t *testing.T) {
 	t.Parallel()
-	root, git := initGit(t)
-	writeGit(t, root, ".gitignore", "node_modules/\nvendor/\n.env\n")
-	gitCommit(t, git, "ignore")
+	root, _ := initGit(t)
+	writeGitExclude(t, root, "node_modules/\nvendor/\n.env\n")
 	writeGit(t, root, "file.txt", "dirty source\n")
 	writeGit(t, root, "node_modules/dependency/index.js", "dependency")
 	writeGit(t, root, "vendor/module/mod.go", "vendor")
@@ -360,9 +362,8 @@ func TestClonedCheckoutUsesCommittedFilesAndSeedsDependencies(t *testing.T) {
 }
 func TestFailedDependencyCloneIsRemoved(t *testing.T) {
 	t.Parallel()
-	root, git := initGit(t)
-	writeGit(t, root, ".gitignore", "node_modules/\n")
-	gitCommit(t, git, "ignore")
+	root, _ := initGit(t)
+	writeGitExclude(t, root, "node_modules/\n")
 	writeGit(t, root, "node_modules/package/index.js", "dependency")
 	clone := func(ctx context.Context, from, to string) bool {
 		if filepath.Base(from) == "node_modules" {
@@ -426,6 +427,7 @@ func TestCloneUnavailableDoesNotLeaveProbeDirectories(t *testing.T) {
 	}
 }
 func TestParseDiffPreservesTabsAndBinaryCounts(t *testing.T) {
+	t.Parallel()
 	files := ParseDiff("R100\x00old\tname\x00new\tname\x00M\x00binary\x00", "1\t2\t\x00old\tname\x00new\tname\x00-\t-\tbinary\x00")
 	if len(files) != 2 || files[0].Path != "new\tname" || files[0].PreviousPath == nil || *files[0].PreviousPath != "old\tname" || files[0].Added == nil || *files[0].Added != 1 || files[1].Added != nil {
 		t.Fatal(files)
@@ -436,6 +438,7 @@ func TestParseDiffPreservesTabsAndBinaryCounts(t *testing.T) {
 }
 
 func TestCanceledCloneProbeWaiterAndFactoryClose(t *testing.T) {
+	t.Parallel()
 	root, _ := initGit(t)
 	started := make(chan struct{})
 	var once sync.Once
@@ -478,10 +481,11 @@ func TestCanceledCloneProbeWaiterAndFactoryClose(t *testing.T) {
 }
 
 func TestWorktreesAndOrphanCleanupNormalizeSymlinkedDataDir(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	root, git := initGit(t)
 	writeGit(t, root, "app/file.txt", "tracked")
-	gitCommit(t, git, "add nested source")
+	gitCommitOnly(t, git, "add nested source")
 	realData := t.TempDir()
 	aliasData := filepath.Join(t.TempDir(), "data-link")
 	if err := os.Symlink(realData, aliasData); err != nil {

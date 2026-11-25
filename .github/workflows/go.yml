@@ -50,29 +50,23 @@ jobs:
   proto:
     timeout-minutes: 10
     runs-on: ubuntu-latest
+    env:
+      GOMODCACHE: ${{ runner.temp }}/gomod
+      GOCACHE: ${{ runner.temp }}/gobuild
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version-file: .go-version
           cache: false
-      - id: go-env
-        shell: bash
-        run: |
-          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v5
-        with:
-          path: ${{ steps.go-env.outputs.mod }}
-          key: gomod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            gomod-${{ runner.os }}-${{ runner.arch }}-
       - uses: actions/cache@v5
         with:
-          path: ${{ steps.go-env.outputs.build }}
-          key: gobuild-proto-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
+          path: |
+            ${{ runner.temp }}/gomod
+            ${{ runner.temp }}/gobuild
+          key: go-proto-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
           restore-keys: |
-            gobuild-proto-${{ runner.os }}-${{ runner.arch }}-
+            go-proto-${{ runner.os }}-${{ runner.arch }}-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -88,60 +82,106 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       CGO_ENABLED: '0'
+      GOMODCACHE: ${{ runner.temp }}/gomod
+      GOCACHE: ${{ runner.temp }}/gobuild
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version-file: .go-version
           cache: false
-      - id: go-env
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/gomod
+            ${{ runner.temp }}/gobuild
+          key: go-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
+          restore-keys: |
+            go-native-${{ runner.os }}-${{ runner.arch }}-
+      # Start the heaviest test packages first so they run alongside fast packages
+      # instead of leaving a long serial tail at the end of the run.
+      - name: Test (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
-          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v5
-        with:
-          path: ${{ steps.go-env.outputs.mod }}
-          key: gomod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            gomod-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache@v5
-        with:
-          path: ${{ steps.go-env.outputs.build }}
-          key: gobuild-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
-          restore-keys: |
-            gobuild-native-${{ runner.os }}-${{ runner.arch }}-
-      - run: go version
-      # Workspaces exercise many rooted filesystem operations. Do not spend
-      # minutes hashing their temporary inputs after the tests have finished.
-      - run: go test -count=1 -parallel=4 -timeout=180s ./...
-      - run: go vet ./...
+          all="$(go list ./...)"
+          pkgs=()
+          for p in \
+            github.com/daidr/Ariadne/internal/local \
+            github.com/daidr/Ariadne/internal/browser \
+            github.com/daidr/Ariadne/internal/runner \
+            github.com/daidr/Ariadne/internal/workspaces \
+            github.com/daidr/Ariadne/internal/sources; do
+            if printf '%s\n' "$all" | grep -qx "$p"; then
+              pkgs+=("$p")
+            fi
+          done
+          while IFS= read -r pkg; do
+            case "$pkg" in
+              github.com/daidr/Ariadne/internal/local|github.com/daidr/Ariadne/internal/browser|github.com/daidr/Ariadne/internal/runner|github.com/daidr/Ariadne/internal/workspaces|github.com/daidr/Ariadne/internal/sources) ;;
+              *) pkgs+=("$pkg") ;;
+            esac
+          done <<< "$all"
+          go test -count=1 -parallel=4 -timeout=180s "${pkgs[@]}"
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $all = @(go list ./...)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $priority = @(
+            'github.com/daidr/Ariadne/internal/local',
+            'github.com/daidr/Ariadne/internal/browser',
+            'github.com/daidr/Ariadne/internal/runner',
+            'github.com/daidr/Ariadne/internal/workspaces',
+            'github.com/daidr/Ariadne/internal/sources'
+          ) | Where-Object { $_ -in $all }
+          $pkgs = $priority + ($all | Where-Object { $_ -notin $priority })
+          go test -count=1 -parallel=4 -timeout=180s @pkgs
+          exit $LASTEXITCODE
+      - if: matrix.os == 'ubuntu-latest'
+        run: go vet ./...
 
   race:
     timeout-minutes: 15
     runs-on: ubuntu-latest
+    env:
+      GOMODCACHE: ${{ runner.temp }}/gomod
+      GOCACHE: ${{ runner.temp }}/gobuild
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version-file: .go-version
           cache: false
-      - id: go-env
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/gomod
+            ${{ runner.temp }}/gobuild
+          key: go-race-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
+          restore-keys: |
+            go-race-${{ runner.os }}-${{ runner.arch }}-
+      - name: Test with race detector
         shell: bash
         run: |
-          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v5
-        with:
-          path: ${{ steps.go-env.outputs.mod }}
-          key: gomod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            gomod-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache@v5
-        with:
-          path: ${{ steps.go-env.outputs.build }}
-          key: gobuild-race-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
-          restore-keys: |
-            gobuild-race-${{ runner.os }}-${{ runner.arch }}-
-      - run: go version
-      - run: go test -race -count=1 -parallel=4 -timeout=300s ./...
+          all="$(go list ./...)"
+          pkgs=()
+          for p in \
+            github.com/daidr/Ariadne/internal/local \
+            github.com/daidr/Ariadne/internal/browser \
+            github.com/daidr/Ariadne/internal/runner \
+            github.com/daidr/Ariadne/internal/workspaces \
+            github.com/daidr/Ariadne/internal/sources; do
+            if printf '%s\n' "$all" | grep -qx "$p"; then
+              pkgs+=("$p")
+            fi
+          done
+          while IFS= read -r pkg; do
+            case "$pkg" in
+              github.com/daidr/Ariadne/internal/local|github.com/daidr/Ariadne/internal/browser|github.com/daidr/Ariadne/internal/runner|github.com/daidr/Ariadne/internal/workspaces|github.com/daidr/Ariadne/internal/sources) ;;
+              *) pkgs+=("$pkg") ;;
+            esac
+          done <<< "$all"
+          go test -race -count=1 -parallel=4 -timeout=300s "${pkgs[@]}"

@@ -19,9 +19,10 @@ import (
 )
 
 func TestCoordinatorCompactionInjectsActiveTodoIntoContextAndNextTurn(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "coord-todo.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,11 +194,12 @@ func TestCoordinatorCompactionInjectsActiveTodoIntoContextAndNextTurn(t *testing
 }
 
 func TestThreadCompactionInjectsTodoAndOmitsWhenEmpty(t *testing.T) {
+	t.Parallel()
 	runCase := func(t *testing.T, clearBeforeCompact bool) []sdk.Message {
 		t.Helper()
 		ctx := t.Context()
 		home := t.TempDir()
-		repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "thread-todo.sqlite")})
+		repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -311,6 +313,7 @@ func TestThreadCompactionInjectsTodoAndOmitsWhenEmpty(t *testing.T) {
 }
 
 func TestCompactionStateSkipsWhenSucceededTodoRemainsAfterCut(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	repo, _, project := openTestEnv(t)
 	if _, err := repo.UpdateTodo(ctx, project.ID, project.CoordinatorID, []core.TodoItem{

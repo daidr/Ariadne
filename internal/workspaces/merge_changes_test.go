@@ -3,8 +3,6 @@ package workspaces
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/core"
@@ -16,26 +14,11 @@ import (
 func initHostedChangesRepo(t *testing.T) (*core.Repository, *Manager, core.ProjectView, *sdk.PullRequestInfo) {
 	t.Helper()
 	ctx := t.Context()
-	remoteDir := t.TempDir()
-	git := local.NewGit(remoteDir, "file")
-	run := func(args ...string) {
-		t.Helper()
-		res := git(ctx, args, local.GitOptions{})
-		if res.ExitCode != 0 {
-			t.Fatalf("git %v failed: %s", args, res.Stderr)
-		}
-	}
-	run("init", "-q", "-b", "main")
-	run("config", "user.name", "Test")
-	run("config", "user.email", "test@example.invalid")
-	if err := os.WriteFile(filepath.Join(remoteDir, "README.md"), []byte("hello\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	run("add", "README.md")
-	run("commit", "-q", "-m", "initial")
+	repoDir := t.TempDir()
+	initTemplateRepo(t, repoDir)
 
 	dataDir := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "repo.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,21 +35,17 @@ func initHostedChangesRepo(t *testing.T) (*core.Repository, *Manager, core.Proje
 	registry := sources.New()
 	if _, err := registry.Register(sdk.ContextProvider{
 		Info: sdk.ContextProviderInfo{Kind: "github", Provides: []string{"workspace", "repo"}},
-		Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
-			hosted, err := local.NewHosted(local.HostedOptions{
-				DataDir:   dataDir,
-				Path:      "owner/repo",
-				Namespace: []string{"github"},
-				RemoteURL: "file://" + filepath.ToSlash(remoteDir),
-				DefaultBranch: func(context.Context) (string, error) {
-					return "main", nil
-				},
+		Connect: func(connectCtx context.Context, _ map[string]any) (sdk.Capabilities, error) {
+			factory, err := local.NewWorkspaces(connectCtx, local.FactoryOptions{
+				Path:         repoDir,
+				DataDir:      dataDir,
+				DisableClone: true,
 			})
 			if err != nil {
 				return sdk.Capabilities{}, err
 			}
 			return sdk.Capabilities{
-				Workspace: hosted.Capability(),
+				Workspace: factory.Capability(),
 				Repo: &sdk.RepoCapability{
 					Remote: "owner/repo",
 					DefaultBranch: func(context.Context) (string, error) {
@@ -83,7 +62,7 @@ func initHostedChangesRepo(t *testing.T) (*core.Repository, *Manager, core.Proje
 						return []sdk.CheckInfo{}, nil
 					},
 				},
-				Close: hosted.Close,
+				Close: factory.Close,
 			}, nil
 		},
 	}); err != nil {
@@ -111,20 +90,20 @@ func commitInWorkspace(t *testing.T, ws sdk.Workspace, file, content, message st
 	if err := ws.WriteFile(ctx, file, content); err != nil {
 		t.Fatal(err)
 	}
+	git := local.NewGit(ws.Info().Label, "file")
 	for _, argv := range [][]string{
-		{"git", "config", "user.name", "Test"},
-		{"git", "config", "user.email", "test@example.invalid"},
-		{"git", "add", file},
-		{"git", "commit", "-q", "-m", message},
+		{"add", file},
+		{"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", message},
 	} {
-		res, err := ws.ExecFile(ctx, argv, sdk.ExecOptions{})
-		if err != nil || res.ExitCode != 0 {
-			t.Fatalf("exec %v: err=%v exit=%d stderr=%s", argv, err, res.ExitCode, res.Stderr)
+		res := git(ctx, argv, local.GitOptions{})
+		if res.ExitCode != 0 {
+			t.Fatalf("git %v: exit=%d stderr=%s", argv, res.ExitCode, res.Stderr)
 		}
 	}
 }
 
 func TestThreadChangesAndSyncPullRequestBackfillTotals(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	repo, manager, project, prInfo := initHostedChangesRepo(t)
 
@@ -224,8 +203,24 @@ func TestThreadChangesAndSyncPullRequestBackfillTotals(t *testing.T) {
 }
 
 func TestSyncBranchChangesSkipsZeroFallbackWhenUncommittedSnapshotFails(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, manager, project, _ := initHostedChangesRepo(t)
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { repo.Close() })
+	manager, err := New(Options{Repository: repo, Sources: sources.New()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeManager(t, manager) })
+	project, err := repo.CreateProject(ctx, new("Hosted"), core.ProjectStart{
+		Source: core.Source{Kind: "github", Settings: map[string]any{"repository": "owner/repo"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Uncommitted only"})
 	if err != nil {
 		t.Fatal(err)
@@ -291,6 +286,7 @@ func TestSyncBranchChangesSkipsZeroFallbackWhenUncommittedSnapshotFails(t *testi
 }
 
 func TestThreadChangesSinceFastPathSelfHealsStaleTotalsWhenOuterEmpty(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	repo, manager, project, _ := initHostedChangesRepo(t)
 	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Self-heal stale totals"})

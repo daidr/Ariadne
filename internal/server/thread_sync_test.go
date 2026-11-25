@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -12,9 +11,10 @@ import (
 )
 
 func TestThreadSyncChangedSeqIncrementalAndInvalidCursors(t *testing.T) {
+	t.Parallel()
 	now := time.UnixMilli(1_800_000_000_000)
 	repo, err := core.Open(t.Context(), core.Options{
-		Path: filepath.Join(t.TempDir(), "sync.sqlite"),
+		Path: ":memory:",
 		Now:  func() time.Time { return now },
 	})
 	if err != nil {

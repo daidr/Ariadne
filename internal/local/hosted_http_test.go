@@ -38,7 +38,7 @@ func gitHTTPBackend(t *testing.T, repository string) http.Handler {
 		}
 		stdout := &limitedBytes{max: 8 << 20, cancel: cancel}
 		stderr := &limitedBytes{max: 64 << 10}
-		command, err := process.Start(ctx, []string{"git", "http-backend"}, process.Options{Directory: filepath.Dir(repository), Env: env, ReplaceEnv: true, ForThread: true, Stdin: r.Body, Stdout: stdout, Stderr: stderr})
+		command, err := process.Start(ctx, []string{gitExecutable(nil), "http-backend"}, process.Options{Directory: filepath.Dir(repository), Env: env, ReplaceEnv: true, ForThread: true, Stdin: r.Body, Stdout: stdout, Stderr: stderr})
 		if err == nil {
 			err = command.Wait()
 		}
@@ -74,7 +74,8 @@ func gitHTTPBackend(t *testing.T, repository string) http.Handler {
 	})
 }
 func TestHostedGitHTTPFetchPushAndRedirectCredentialBoundary(t *testing.T) {
-	remote, remoteGit := initGit(t)
+	t.Parallel()
+	remote, _ := initGit(t)
 	server := httptest.NewServer(gitHTTPBackend(t, remote))
 	defer server.Close()
 	options := HostedOptions{DataDir: t.TempDir(), Path: "owner/repository", RemoteURL: server.URL + "/" + filepath.Base(remote), User: "server", Token: func(context.Context) (*string, error) { return new("private-test-token"), nil }, DefaultBranch: func(context.Context) (string, error) { return "main", nil }, DisableClone: true}
@@ -91,14 +92,13 @@ func TestHostedGitHTTPFetchPushAndRedirectCredentialBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	git := NewGit(workspace.Info().Label, "file")
-	gitOK(t, git, "config", "user.name", "Test")
-	gitOK(t, git, "config", "user.email", "test@example.invalid")
-	head := gitCommit(t, git, "http branch")
+	gitCommitTracked(t, git, "http branch")
+	head := readHeadSHA(t, workspace.Info().Label)
 	branch := *workspace.Info().Branch
 	if sha, err := host.Push(t.Context(), branch); err != nil || sha != head {
 		t.Fatal(sha, err)
 	}
-	if got := gitOK(t, remoteGit, "rev-parse", "refs/heads/"+branch); got != head {
+	if got := readRefSHA(t, filepath.Join(remote, ".git"), "refs/heads/"+branch); got != head {
 		t.Fatal(got)
 	}
 	var leaked atomic.Int32
@@ -124,6 +124,7 @@ func TestHostedGitHTTPFetchPushAndRedirectCredentialBoundary(t *testing.T) {
 }
 
 func TestHostedGitErrorsDoNotExposeCredentials(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(403)

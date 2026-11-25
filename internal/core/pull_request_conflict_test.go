@@ -1,13 +1,13 @@
 package core
 
 import (
-	"path/filepath"
 	"testing"
 )
 
 func TestPullRequestConflictInThreadAndPlanViews(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "ariadne.sqlite")})
+	repo, err := Open(ctx, Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

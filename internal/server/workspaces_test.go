@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -28,8 +27,9 @@ func workspaceHTTPSeed() []eventstore.NewEvent {
 }
 
 func TestPullRequestChecksReadTrackedCommit(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,8 +81,9 @@ func TestPullRequestChecksReadTrackedCommit(t *testing.T) {
 }
 
 func TestChangesProbeAndMergeExpectedHead(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,8 +159,9 @@ func TestChangesProbeAndMergeExpectedHead(t *testing.T) {
 }
 
 func TestWorkspaceRPC(t *testing.T) {
+	t.Parallel()
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite"), Now: now})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,8 +260,9 @@ func TestWorkspaceRPC(t *testing.T) {
 }
 
 func TestWorkspaceBatchFilesRPC(t *testing.T) {
+	t.Parallel()
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite"), Now: now})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,8 +336,9 @@ func TestWorkspaceBatchFilesRPC(t *testing.T) {
 }
 
 func TestWorkspaceMultiRepoRPC(t *testing.T) {
+	t.Parallel()
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite"), Now: now})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}

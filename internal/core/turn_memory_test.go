@@ -2,14 +2,14 @@ package core
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/eventstore"
 )
 
 func TestFinishTurnOnlyReadsCallMetadataAndClosesEarlierDanglingCalls(t *testing.T) {
-	repo, err := Open(t.Context(), Options{Path: filepath.Join(t.TempDir(), "finish.sqlite")})
+	t.Parallel()
+	repo, err := Open(t.Context(), Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,8 @@ func TestFinishTurnOnlyReadsCallMetadataAndClosesEarlierDanglingCalls(t *testing
 	}
 }
 func TestCompactionPreservesFractionalModelPosition(t *testing.T) {
-	repo, err := Open(t.Context(), Options{Path: filepath.Join(t.TempDir(), "half-step.sqlite")})
+	t.Parallel()
+	repo, err := Open(t.Context(), Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +98,8 @@ func TestCompactionPreservesFractionalModelPosition(t *testing.T) {
 }
 
 func TestTurnStepUpdatesContextTokensWithoutZeroOverwrite(t *testing.T) {
-	repo, err := Open(t.Context(), Options{Path: filepath.Join(t.TempDir(), "context.sqlite")})
+	t.Parallel()
+	repo, err := Open(t.Context(), Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

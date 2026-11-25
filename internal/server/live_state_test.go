@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,7 +17,8 @@ import (
 )
 
 func TestEventStreamReconnectIncludesCurrentLiveBackgroundAndDraftState(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

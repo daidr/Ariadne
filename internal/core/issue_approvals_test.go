@@ -6,6 +6,7 @@ import (
 )
 
 func TestActiveIssueWritesAreReleasedAndRestartIsUncertain(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "issues.sqlite")
 	repo, err := Open(ctx, Options{Path: path})

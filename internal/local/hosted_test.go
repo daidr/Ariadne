@@ -81,31 +81,53 @@ func TestHostedCloneBranchWorkAndSafePush(t *testing.T) {
 	if err != nil || strings.Contains(string(config), "server-test-token") {
 		t.Fatal("credential written into git config", err)
 	}
-	if err := workspace.WriteFile(t.Context(), "file.txt", "thread work\n"); err != nil {
+	branches := host.Capability().Branches
+	if branches.Snapshot == nil || branches.Diff == nil {
+		t.Fatal("hosted branches missing snapshot or diff")
+	}
+	if err := workspace.WriteFile(t.Context(), "file.txt", "base\nthread work\n"); err != nil {
 		t.Fatal(err)
 	}
+	afterSnap, err := branches.Snapshot(t.Context(), "hosted_thread")
+	if err != nil || afterSnap == nil || *afterSnap == "" {
+		t.Fatalf("after snapshot: %v, err=%v", afterSnap, err)
+	}
+	diffFiles, err := branches.Diff(t.Context(), "refs/remotes/origin/main", *afterSnap)
+	if err != nil || len(diffFiles) != 1 || diffFiles[0].Path != "file.txt" || diffFiles[0].Added == nil || *diffFiles[0].Added != 1 {
+		t.Fatalf("unexpected diff: %+v, err=%v", diffFiles, err)
+	}
 	git := NewGit(info.Label, "file")
-	gitOK(t, git, "config", "user.name", "Test")
-	gitOK(t, git, "config", "user.email", "test@example.invalid")
-	head := gitCommit(t, git, "thread work")
-	gitOK(t, git, "config", "remote.origin.url", "file:///must-not-be-used")
+	gitCommitTracked(t, git, "thread work")
+	head := readHeadSHA(t, info.Label)
+	appendGitConfig(t, host.bare, "\n[remote \"origin\"]\n\turl = file:///must-not-be-used\n")
+	// Verify Push reports the exact commit it sends even if another commit arrives while fetching the token.
+	branchRef := "refs/heads/" + *info.Branch
+	next := gitOK(t, host.owner.git, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit-tree", head+"^{tree}", "-p", head, "-m", "arrived while pushing")
+	origToken := host.options.Token
+	host.options.Token = func(ctx context.Context) (*string, error) {
+		writeGitRef(t, host.bare, branchRef, next)
+		return origToken(ctx)
+	}
 	sha, err := host.Push(t.Context(), *info.Branch)
+	host.options.Token = origToken
 	if err != nil || sha != head {
 		t.Fatal(sha, err)
 	}
-	if actual := gitOK(t, remoteGit, "rev-parse", "refs/heads/"+*info.Branch); actual != head {
+	if actual := readRefSHA(t, filepath.Join(remote, ".git"), branchRef); actual != head {
 		t.Fatal(actual)
 	}
-	if result, err := workspace.ExecFile(t.Context(), []string{"git", "push", "origin", *info.Branch}, sdk.ExecOptions{Timeout: 10 * time.Second}); err != nil || result.ExitCode == 0 {
+	if localHead := readRefSHA(t, host.bare, branchRef); localHead != next {
+		t.Fatal("concurrent local work lost", localHead, next)
+	}
+	if result, err := workspace.ExecFile(t.Context(), []string{gitExecutable(nil), "push", "origin", *info.Branch}, sdk.ExecOptions{Timeout: 10 * time.Second}); err != nil || result.ExitCode == 0 {
 		t.Fatal("workspace bypassed hosted push tool", result, err)
 	}
-	tree := gitOK(t, remoteGit, "rev-parse", head+"^{tree}")
-	moved := gitOK(t, remoteGit, "commit-tree", tree, "-p", head, "-m", "remote work")
-	gitOK(t, remoteGit, "update-ref", "refs/heads/"+*info.Branch, moved)
+	moved := gitOK(t, remoteGit, "commit-tree", head+"^{tree}", "-p", head, "-m", "remote work")
+	writeGitRef(t, filepath.Join(remote, ".git"), branchRef, moved)
 	if _, err := host.Push(t.Context(), *info.Branch); err == nil || !strings.Contains(err.Error(), "Never force-push") {
 		t.Fatal(err)
 	}
-	if actual := gitOK(t, remoteGit, "rev-parse", "refs/heads/"+*info.Branch); actual != moved {
+	if actual := readRefSHA(t, filepath.Join(remote, ".git"), branchRef); actual != moved {
 		t.Fatal("remote history overwritten")
 	}
 	if err := host.Close(); err != nil {
@@ -200,6 +222,7 @@ func TestHostedSharedCloneConcurrentProjectsAndClonedCheckout(t *testing.T) {
 	}
 }
 func TestHostedGitEnvBindsCredentialsToURLAndDisablesHelpers(t *testing.T) {
+	t.Parallel()
 	remote := "https://git.example.test/owner/repository.git"
 	env, err := HostedGitEnv(remote, &GitCredential{User: "server", Token: "private-token"})
 	if err != nil {
@@ -216,61 +239,5 @@ func TestHostedGitEnvBindsCredentialsToURLAndDisablesHelpers(t *testing.T) {
 	}
 	if _, err := HostedGitEnv("https://user:password@git.example.test/repo", nil); err == nil {
 		t.Fatal("credentials in remote URL accepted")
-	}
-}
-
-func TestHostedPushReportsTheCommitItActuallySends(t *testing.T) {
-	remote, remoteGit := initGit(t)
-	host := newHostedTest(t, remote, t.TempDir(), nil)
-	workspace, err := host.Open(t.Context(), sdk.WorkspaceRequest{ThreadID: "push_race"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	branch := *workspace.Info().Branch
-	ref := "refs/heads/" + branch
-	head := gitOK(t, host.owner.git, "rev-parse", ref)
-	tree := gitOK(t, host.owner.git, "rev-parse", head+"^{tree}")
-	next := gitOK(t, host.owner.git, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit-tree", tree, "-p", head, "-m", "arrived while pushing")
-	host.options.Token = func(context.Context) (*string, error) {
-		gitOK(t, host.owner.git, "update-ref", ref, next)
-		return nil, nil
-	}
-	pushed, err := host.Push(t.Context(), branch)
-	if err != nil || pushed != head {
-		t.Fatal(pushed, err)
-	}
-	if remoteHead := gitOK(t, remoteGit, "rev-parse", ref); remoteHead != pushed {
-		t.Fatal("reported a different commit than pushed", remoteHead, pushed)
-	}
-	if localHead := gitOK(t, host.owner.git, "rev-parse", ref); localHead != next {
-		t.Fatal("concurrent local work lost", localHead, next)
-	}
-}
-
-func TestHostedSnapshotAndDiff(t *testing.T) {
-	remote, _ := initGit(t)
-	host := newHostedTest(t, remote, t.TempDir(), nil)
-	workspace, err := host.Open(t.Context(), sdk.WorkspaceRequest{ThreadID: "snap_thread"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	branches := host.Capability().Branches
-	if branches.Snapshot == nil || branches.Diff == nil {
-		t.Fatal("hosted branches missing snapshot or diff")
-	}
-	before, err := branches.Snapshot(t.Context(), "snap_thread")
-	if err != nil || before == nil || *before == "" {
-		t.Fatalf("before snapshot: %v, err=%v", before, err)
-	}
-	if err := workspace.WriteFile(t.Context(), "file.txt", "base\nupdated\n"); err != nil {
-		t.Fatal(err)
-	}
-	after, err := branches.Snapshot(t.Context(), "snap_thread")
-	if err != nil || after == nil || *after == "" || *after == *before {
-		t.Fatalf("after snapshot: %v, err=%v", after, err)
-	}
-	diffFiles, err := branches.Diff(t.Context(), *before, *after)
-	if err != nil || len(diffFiles) != 1 || diffFiles[0].Path != "file.txt" || diffFiles[0].Added == nil || *diffFiles[0].Added != 1 {
-		t.Fatalf("unexpected diff: %+v, err=%v", diffFiles, err)
 	}
 }

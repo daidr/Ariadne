@@ -11,6 +11,7 @@ import (
 )
 
 func TestReadOnlySourcesAndSearch(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workspace := newTestWorkspace(t, root, WorkspaceOptions{HideGit: true})
 	for path, value := range map[string]string{
@@ -63,6 +64,7 @@ func TestReadOnlySourcesAndSearch(t *testing.T) {
 	}
 }
 func TestSearchCapsAndExpensivePattern(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	workspace := newTestWorkspace(t, root, WorkspaceOptions{HideGit: true})
 	for i := range 8 {
@@ -102,6 +104,7 @@ func TestSearchCapsAndExpensivePattern(t *testing.T) {
 	}
 }
 func TestWorkspaceNativeSearchAndFiles(t *testing.T) {
+	t.Parallel()
 	root, _ := initGit(t)
 	writeGit(t, root, "src/code.ts", "hello native\n")
 	writeGit(t, root, ".github/test.yml", "hello hidden\n")

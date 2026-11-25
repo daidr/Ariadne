@@ -24,6 +24,7 @@ import (
 )
 
 func TestModelListingCatalogAndFoundSetupConnect(t *testing.T) {
+	t.Parallel()
 	catalogJSON := `{"openai":{"models":{"big":{"cost":{"input":1,"output":2},"limit":{"context":128000,"output":4096},"modalities":{"input":["text","image"]},"tool_call":true,"reasoning":false,"release_date":"2026-11-01"},"old":{"tool_call":true,"release_date":"2025-01-01"},"embedding":{"tool_call":false,"release_date":"2026-11-02"}}}}`
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/catalog" {
@@ -51,7 +52,7 @@ func TestModelListingCatalogAndFoundSetupConnect(t *testing.T) {
 	home := t.TempDir()
 	env := map[string]string{"OPENAI_API_KEY": "private", "OPENAI_BASE_URL": service.URL + "/v1"}
 	directory := t.TempDir()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(directory, "data.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

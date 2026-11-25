@@ -10,6 +10,7 @@ import (
 )
 
 func TestLargeToolOutputStoredOnceAndReadAfterMigration(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "tool-output.db")
 	repo, err := Open(ctx, Options{Path: path})

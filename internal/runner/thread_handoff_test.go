@@ -2,7 +2,6 @@ package runner
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,8 +10,9 @@ import (
 )
 
 func TestCoordinatorUsesReturnedThreadIDsForMessagesAndCards(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "handoff.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,8 +88,9 @@ func TestCoordinatorUsesReturnedThreadIDsForMessagesAndCards(t *testing.T) {
 }
 
 func TestCoordinatorCanRecoverFromInvalidThreadReferences(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "relay.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

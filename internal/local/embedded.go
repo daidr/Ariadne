@@ -447,6 +447,77 @@ func readSubmoduleGitlink(ctx context.Context, superprojectDir, subRelPath strin
 	return readSubmoduleIndexGitlink(ctx, superprojectDir, subRelPath)
 }
 
+func parseSimpleGitmodules(raw []byte, subRelPath string) (branch string, handled bool) {
+	text := string(raw)
+	// Fall back to `git config` for any escaped characters, line continuations, or comments/quotes in values.
+	if strings.ContainsRune(text, '\\') {
+		return "", false
+	}
+	branches := make(map[string]string)
+	var matchedNames []string
+	currentSub := ""
+	inSub := false
+	for _, rawLine := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(strings.TrimRight(rawLine, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			inSub = false
+			currentSub = ""
+			if !strings.HasSuffix(line, "]") {
+				return "", false
+			}
+			inner := strings.TrimSpace(line[1 : len(line)-1])
+			lower := strings.ToLower(inner)
+			if strings.HasPrefix(lower, "include") {
+				return "", false
+			}
+			if !strings.HasPrefix(lower, "submodule") {
+				continue
+			}
+			rest := strings.TrimSpace(inner[len("submodule"):])
+			if len(rest) >= 2 && rest[0] == '"' && rest[len(rest)-1] == '"' {
+				name := rest[1 : len(rest)-1]
+				if strings.ContainsRune(name, '"') || name == "" {
+					return "", false
+				}
+				currentSub = name
+				inSub = true
+				continue
+			}
+			return "", false
+		}
+		if !inSub {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(k))
+		val := strings.TrimSpace(v)
+		if strings.ContainsAny(val, "\"#;") {
+			return "", false
+		}
+		switch key {
+		case "path":
+			cleaned := path.Clean(filepath.ToSlash(val))
+			if cleaned == subRelPath {
+				matchedNames = append(matchedNames, currentSub)
+			}
+		case "branch":
+			branches[currentSub] = val
+		}
+	}
+	for i := len(matchedNames) - 1; i >= 0; i-- {
+		if b := branches[matchedNames[i]]; b != "" {
+			return b, true
+		}
+	}
+	return "", true
+}
+
 func readSubmoduleConfiguredBranch(ctx context.Context, superprojectDir, subRelPath string) string {
 	if superprojectDir == "" || subRelPath == "" {
 		return ""
@@ -457,49 +528,59 @@ func readSubmoduleConfiguredBranch(ctx context.Context, superprojectDir, subRelP
 		return ""
 	}
 	parentGit := NewGit(superprojectDir, "file")
-	res := parentGit(ctx, []string{"config", "--no-includes", "--file", gitmodulesPath, "--null", "--get-regexp", `^submodule\..*\.(path|branch)$`}, GitOptions{Directory: superprojectDir, Whole: true})
-	if res.ExitCode != 0 {
-		return ""
-	}
-	branches := make(map[string]string)
-	var matchedNames []string
-	for _, entry := range strings.Split(res.Stdout, "\x00") {
-		if entry == "" {
-			continue
-		}
-		key, val, ok := strings.Cut(entry, "\n")
-		if !ok {
-			continue
-		}
-		rest, ok := strings.CutPrefix(key, "submodule.")
-		if !ok {
-			continue
-		}
-		if name, ok := strings.CutSuffix(rest, ".path"); ok && name != "" {
-			cleaned := path.Clean(filepath.ToSlash(strings.TrimSpace(val)))
-			if cleaned == subRelPath {
-				matchedNames = append(matchedNames, name)
-			}
-		} else if name, ok := strings.CutSuffix(rest, ".branch"); ok && name != "" {
-			branches[name] = strings.TrimSpace(val)
-		}
-	}
 	branch := ""
-	for i := len(matchedNames) - 1; i >= 0; i-- {
-		if b := branches[matchedNames[i]]; b != "" {
-			branch = b
-			break
+	handled := false
+	if raw, err := os.ReadFile(gitmodulesPath); err == nil {
+		branch, handled = parseSimpleGitmodules(raw, subRelPath)
+	}
+	if !handled {
+		res := parentGit(ctx, []string{"config", "--no-includes", "--file", gitmodulesPath, "--null", "--get-regexp", `^submodule\..*\.(path|branch)$`}, GitOptions{Directory: superprojectDir, Whole: true})
+		if res.ExitCode != 0 {
+			return ""
+		}
+		branches := make(map[string]string)
+		var matchedNames []string
+		for _, entry := range strings.Split(res.Stdout, "\x00") {
+			if entry == "" {
+				continue
+			}
+			key, val, ok := strings.Cut(entry, "\n")
+			if !ok {
+				continue
+			}
+			rest, ok := strings.CutPrefix(key, "submodule.")
+			if !ok {
+				continue
+			}
+			if name, ok := strings.CutSuffix(rest, ".path"); ok && name != "" {
+				cleaned := path.Clean(filepath.ToSlash(strings.TrimSpace(val)))
+				if cleaned == subRelPath {
+					matchedNames = append(matchedNames, name)
+				}
+			} else if name, ok := strings.CutSuffix(rest, ".branch"); ok && name != "" {
+				branches[name] = strings.TrimSpace(val)
+			}
+		}
+		for i := len(matchedNames) - 1; i >= 0; i-- {
+			if b := branches[matchedNames[i]]; b != "" {
+				branch = b
+				break
+			}
 		}
 	}
 	if branch == "" {
 		return ""
 	}
 	if branch == "." {
-		sym := parentGit(ctx, []string{"symbolic-ref", "-q", "--short", "HEAD"}, GitOptions{Directory: superprojectDir})
-		if sym.ExitCode != 0 {
-			return ""
+		if short, ok := readHeadBranchFast(superprojectDir, ""); ok {
+			branch = short
+		} else {
+			sym := parentGit(ctx, []string{"symbolic-ref", "-q", "--short", "HEAD"}, GitOptions{Directory: superprojectDir})
+			if sym.ExitCode != 0 {
+				return ""
+			}
+			branch = strings.TrimSpace(sym.Stdout)
 		}
-		branch = strings.TrimSpace(sym.Stdout)
 	}
 	branch = strings.TrimPrefix(branch, "refs/heads/")
 	if branch == "" || strings.HasPrefix(branch, "-") || strings.ContainsAny(branch, " \t\r\n") {
@@ -528,7 +609,7 @@ func inspectEmbeddedGitFile(ctx context.Context, worktreeRoot, repoDir, relPath 
 	if commonDir, ok := linkedWorktreeCommonDir(gitDir); ok {
 		repo.Kind = EmbeddedWorktree
 		repo.CommonDir = commonDir
-		repo.RegisteredWorktreePath = lookupRegisteredWorktreePath(ctx, commonDir, repoDir)
+		repo.RegisteredWorktreePath = lookupRegisteredWorktreePath(ctx, commonDir, gitDir, repoDir)
 	}
 	repo.ObjectStoreInsideWorktree = isPathWithin(repo.CommonDir, worktreeRoot)
 	return repo
@@ -569,10 +650,28 @@ func linkedWorktreeCommonDir(gitDir string) (string, bool) {
 	return commonDir, true
 }
 
-func lookupRegisteredWorktreePath(ctx context.Context, commonDir, repoDir string) string {
+func lookupRegisteredWorktreePath(ctx context.Context, commonDir, gitDir, repoDir string) string {
 	repoInfo, err := os.Lstat(repoDir)
 	if err != nil || !repoInfo.IsDir() {
 		return ""
+	}
+	if gitDir != "" {
+		if rawBack, err := readSmallTextFile(filepath.Join(gitDir, "gitdir")); err == nil {
+			line, _, _ := strings.Cut(rawBack, "\n")
+			backPath := filepath.FromSlash(strings.TrimSpace(strings.TrimRight(line, "\r")))
+			if backPath != "" {
+				if !filepath.IsAbs(backPath) {
+					backPath = filepath.Join(gitDir, backPath)
+				}
+				backPath = filepath.Clean(backPath)
+				if filepath.Base(backPath) == ".git" {
+					candidate := filepath.Dir(backPath)
+					if info, err := os.Lstat(candidate); err == nil && info.IsDir() && os.SameFile(repoInfo, info) {
+						return filepath.ToSlash(candidate)
+					}
+				}
+			}
+		}
 	}
 	hostGit := NewGit(commonDir, "file")
 	list := hostGit(ctx, []string{"--git-dir", commonDir, "worktree", "list", "--porcelain", "-z"}, GitOptions{Directory: commonDir, Whole: true})
@@ -631,10 +730,75 @@ func isPathWithinAny(target string, roots []string) bool {
 	return false
 }
 
-func verifyEmbeddedGitDir(ctx context.Context, repoGit GitRun, expectedGitDir string) (bool, error) {
+func isValidGitDirectory(gitDir string) bool {
+	rawHead, err := readSmallTextFile(filepath.Join(gitDir, "HEAD"))
+	if err != nil {
+		return false
+	}
+	headLine, _, _ := strings.Cut(rawHead, "\n")
+	headLine = strings.TrimSpace(strings.TrimRight(headLine, "\r"))
+	if refTarget, ok := strings.CutPrefix(headLine, "ref:"); ok {
+		if strings.TrimSpace(refTarget) == "" {
+			return false
+		}
+	} else if !isObjectID(headLine) {
+		return false
+	}
+	commonDir := gitDir
+	if rawCommon, err := readSmallTextFile(filepath.Join(gitDir, "commondir")); err == nil {
+		line, _, _ := strings.Cut(rawCommon, "\n")
+		target := filepath.FromSlash(strings.TrimSpace(strings.TrimRight(line, "\r")))
+		if target != "" {
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(gitDir, target)
+			}
+			commonDir = filepath.Clean(target)
+		}
+	}
+	objectsInfo, err := os.Stat(filepath.Join(commonDir, "objects"))
+	if err != nil || !objectsInfo.IsDir() {
+		return false
+	}
+	if refsInfo, err := os.Stat(filepath.Join(commonDir, "refs")); err == nil && refsInfo.IsDir() {
+		return true
+	}
+	if reftableInfo, err := os.Stat(filepath.Join(commonDir, "reftable")); err == nil && reftableInfo.IsDir() {
+		return true
+	}
+	return false
+}
+
+func verifyEmbeddedGitDir(ctx context.Context, repoPath string, repoGit GitRun, expectedGitDir string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	expectedInfo, err := os.Stat(expectedGitDir)
 	if err != nil || !expectedInfo.IsDir() {
 		return false, nil
+	}
+	dotGit := filepath.Join(repoPath, ".git")
+	dotInfo, err := os.Lstat(dotGit)
+	if err != nil {
+		return false, nil
+	}
+	if dotInfo.Mode()&os.ModeSymlink == 0 {
+		actualPath := ""
+		if dotInfo.IsDir() {
+			actualPath = dotGit
+		} else if dotInfo.Mode().IsRegular() {
+			target, ok := resolveGitFileTarget(repoPath, dotGit)
+			if !ok {
+				return false, nil
+			}
+			actualPath = target
+		} else {
+			return false, nil
+		}
+		actualInfo, err := os.Stat(actualPath)
+		if err != nil || !actualInfo.IsDir() || !os.SameFile(expectedInfo, actualInfo) {
+			return false, nil
+		}
+		return isValidGitDirectory(actualPath), nil
 	}
 	res := repoGit(ctx, []string{"rev-parse", "--path-format=absolute", "--git-dir"}, GitOptions{})
 	if err := ctx.Err(); err != nil {
@@ -652,6 +816,75 @@ func verifyEmbeddedGitDir(ctx context.Context, repoGit GitRun, expectedGitDir st
 		return false, nil
 	}
 	return os.SameFile(expectedInfo, actualInfo), nil
+}
+
+func repoHasNoLocalBranches(commonDir string) bool {
+	if commonDir == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(commonDir, "reftable")); !os.IsNotExist(err) {
+		return false
+	}
+	headsDir := filepath.Join(commonDir, "refs", "heads")
+	hasFile := false
+	err := filepath.WalkDir(headsDir, func(_ string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		if !d.IsDir() {
+			hasFile = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil || hasFile {
+		return false
+	}
+	raw, err := os.ReadFile(filepath.Join(commonDir, "packed-refs"))
+	if os.IsNotExist(err) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, " refs/heads/") {
+			return false
+		}
+	}
+	return true
+}
+
+func embeddedHasStash(ctx context.Context, repoGit GitRun, repo EmbeddedRepo) bool {
+	commonDir := repo.CommonDir
+	if commonDir == "" {
+		commonDir = repo.GitDir
+	}
+	if commonDir != "" {
+		if _, err := os.Stat(filepath.Join(commonDir, "reftable")); os.IsNotExist(err) {
+			if _, err := os.Lstat(filepath.Join(commonDir, "refs", "stash")); err == nil {
+				return true
+			} else if !os.IsNotExist(err) {
+				return repoGit(ctx, []string{"rev-parse", "--verify", "--quiet", "refs/stash"}, GitOptions{}).ExitCode == 0
+			}
+			raw, err := os.ReadFile(filepath.Join(commonDir, "packed-refs"))
+			if os.IsNotExist(err) {
+				return false
+			}
+			if err == nil {
+				for _, line := range strings.Split(string(raw), "\n") {
+					if strings.HasSuffix(strings.TrimRight(line, "\r"), " refs/stash") {
+						return true
+					}
+				}
+				return false
+			}
+		}
+	}
+	return repoGit(ctx, []string{"rev-parse", "--verify", "--quiet", "refs/stash"}, GitOptions{}).ExitCode == 0
 }
 
 // InspectEmbeddedRepo evaluates whether an embedded repository has uncommitted
@@ -672,7 +905,7 @@ func InspectEmbeddedRepo(ctx context.Context, repo EmbeddedRepo) (EmbeddedRepoSt
 		return failClosed(), nil
 	}
 	repoGit := NewGit(repo.Path, "file")
-	validGitDir, err := verifyEmbeddedGitDir(ctx, repoGit, repo.GitDir)
+	validGitDir, err := verifyEmbeddedGitDir(ctx, repo.Path, repoGit, repo.GitDir)
 	if err != nil {
 		return EmbeddedRepoStatus{}, err
 	}
@@ -746,28 +979,83 @@ func InspectEmbeddedRepo(ctx context.Context, repo EmbeddedRepo) (EmbeddedRepoSt
 
 	var refSnap embeddedRefSnapshot
 	if repo.ObjectStoreInsideWorktree {
-		revArgs := []string{"--no-optional-locks", "rev-list"}
-		if headSHA != "" && !alignedDetachedSubmodule {
-			revArgs = append(revArgs, "HEAD")
+		includeHead := headSHA != "" && !alignedDetachedSubmodule
+		commonDir := repo.CommonDir
+		if commonDir == "" {
+			commonDir = repo.GitDir
 		}
-		revArgs = append(revArgs, "--branches", "--not", "--remotes", "--max-count=1")
-		unpushed := repoGit(ctx, revArgs, GitOptions{})
-		if err := ctx.Err(); err != nil {
-			return EmbeddedRepoStatus{}, err
-		}
-		if unpushed.ExitCode != 0 || strings.TrimSpace(unpushed.Stdout) != "" {
-			status.Unpushed = true
+		if !includeHead && repoHasNoLocalBranches(commonDir) {
+			if embeddedHasStash(ctx, repoGit, repo) {
+				status.Unpushed = true
+			}
 		} else {
 			refSnap = loadEmbeddedRefSnapshot(ctx, repoGit)
 			if err := ctx.Err(); err != nil {
 				return EmbeddedRepoStatus{}, err
 			}
+			resolvedUnpushed := false
 			if refSnap.loaded {
 				if refSnap.hasStash {
 					status.Unpushed = true
+					resolvedUnpushed = true
+				} else {
+					remoteSHAs := make(map[string]struct{})
+					for name, info := range refSnap.refs {
+						if !strings.HasPrefix(name, "refs/remotes/") || info.commitSHA == "" {
+							continue
+						}
+						if strings.HasSuffix(name, "/HEAD") && info.symref != "" {
+							continue
+						}
+						remoteSHAs[info.commitSHA] = struct{}{}
+					}
+					hasAnyLocal := includeHead
+					allMatched := true
+					ambiguous := false
+					if includeHead {
+						if _, ok := remoteSHAs[headSHA]; !ok {
+							allMatched = false
+						}
+					}
+					for name, info := range refSnap.refs {
+						if !strings.HasPrefix(name, "refs/heads/") {
+							continue
+						}
+						if info.commitSHA == "" {
+							ambiguous = true
+							break
+						}
+						hasAnyLocal = true
+						if _, ok := remoteSHAs[info.commitSHA]; !ok {
+							allMatched = false
+						}
+					}
+					if !ambiguous {
+						switch {
+						case !hasAnyLocal || allMatched:
+							resolvedUnpushed = true
+						case len(remoteSHAs) == 0:
+							status.Unpushed = true
+							resolvedUnpushed = true
+						}
+					}
 				}
-			} else if repoGit(ctx, []string{"rev-parse", "--verify", "--quiet", "refs/stash"}, GitOptions{}).ExitCode == 0 {
-				status.Unpushed = true
+			}
+			if !resolvedUnpushed {
+				revArgs := []string{"--no-optional-locks", "rev-list"}
+				if includeHead {
+					revArgs = append(revArgs, "HEAD")
+				}
+				revArgs = append(revArgs, "--branches", "--not", "--remotes", "--max-count=1")
+				unpushed := repoGit(ctx, revArgs, GitOptions{})
+				if err := ctx.Err(); err != nil {
+					return EmbeddedRepoStatus{}, err
+				}
+				if unpushed.ExitCode != 0 || strings.TrimSpace(unpushed.Stdout) != "" {
+					status.Unpushed = true
+				} else if (!refSnap.loaded && embeddedHasStash(ctx, repoGit, repo)) || refSnap.hasStash {
+					status.Unpushed = true
+				}
 			}
 		}
 		if err := ctx.Err(); err != nil {
@@ -1342,6 +1630,11 @@ func embeddedReposLanded(ctx context.Context, directory string) (bool, error) {
 	repos, err := DiscoverEmbeddedRepos(ctx, directory)
 	if err != nil {
 		return false, err
+	}
+	for _, repo := range repos {
+		if hasBlockingGitMarkers(repo.GitDir, repo.Kind == EmbeddedWorktree) {
+			return false, nil
+		}
 	}
 	for _, repo := range repos {
 		status, err := InspectEmbeddedRepo(ctx, repo)

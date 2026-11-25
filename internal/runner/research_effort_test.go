@@ -17,9 +17,10 @@ import (
 )
 
 func TestResearchAndThreadEffort(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "effort.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,11 +157,12 @@ func TestResearchAndThreadEffort(t *testing.T) {
 }
 
 func TestResearchRoleLimitsAndDescription(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T, role string, stream func(req sdk.Request) iter.Seq[sdk.Part], available []tool) (tool, *[]sdk.Request) {
 		t.Helper()
 		ctx := t.Context()
 		home := t.TempDir()
-		repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "research.sqlite")})
+		repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 		if err != nil {
 			t.Fatal(err)
 		}

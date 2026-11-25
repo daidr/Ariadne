@@ -204,13 +204,16 @@ func (tc *turnChanges) record(ctx context.Context, turnID string) {
 	}
 
 	var (
-		turnRepos        []core.TurnRepoChanges
-		touchedBaselines []core.RepoBaseline
-		afterBySource    = make(map[string]map[string]sdk.RepoSnapshot, len(sources))
-		primaryOnly      = len(sources) == 1 && sources[0].Primary
-		existingLoaded   bool
-		existingBySource map[string]map[string]sdk.RepoBaseline
-		embeddedBySource = make(map[string]map[string]sdk.RepoChanges)
+		turnRepos             []core.TurnRepoChanges
+		touchedBaselines      []core.RepoBaseline
+		afterBySource         = make(map[string]map[string]sdk.RepoSnapshot, len(sources))
+		repoSnapshotsUsed     = make(map[string]bool, len(sources))
+		primaryOnly           = len(sources) == 1 && sources[0].Primary
+		existingLoaded        bool
+		existingBySource      map[string]map[string]sdk.RepoBaseline
+		embeddedBySource      = make(map[string]map[string]sdk.RepoChanges)
+		embeddedItemsBySource = make(map[string][]sdk.RepoChanges)
+		embeddedNeedsRefresh  = make(map[string]bool)
 	)
 	loadEmbeddedChanges := func(src workspaces.ThreadSource) map[string]sdk.RepoChanges {
 		if cached, ok := embeddedBySource[src.ID]; ok {
@@ -249,6 +252,7 @@ func (tc *turnChanges) record(ctx context.Context, turnID string) {
 			byPath[item.RepoPath] = item
 		}
 		embeddedBySource[src.ID] = byPath
+		embeddedItemsBySource[src.ID] = items
 		return byPath
 	}
 
@@ -263,6 +267,9 @@ func (tc *turnChanges) record(ctx context.Context, turnID string) {
 		afterSnaps, supported := snapshotSourceRepos(recordCtx, src.Branches, tc.threadID)
 		if !supported || len(afterSnaps) == 0 {
 			continue
+		}
+		if src.Branches != nil && src.Branches.RepoSnapshots != nil && src.Branches.RepoDiff != nil {
+			repoSnapshotsUsed[src.ID] = true
 		}
 		afterMap := make(map[string]sdk.RepoSnapshot, len(afterSnaps))
 		for _, snap := range afterSnaps {
@@ -339,6 +346,7 @@ func (tc *turnChanges) record(ctx context.Context, turnID string) {
 					continue
 				}
 				if afterSnap.Head != "" {
+					embeddedNeedsRefresh[src.ID] = true
 					touchedBaselines = append(touchedBaselines, core.RepoBaseline{
 						SourceID:   src.ID,
 						RepoPath:   afterSnap.RepoPath,
@@ -366,6 +374,7 @@ func (tc *turnChanges) record(ctx context.Context, turnID string) {
 				continue
 			}
 			if afterSnap.RepoPath != "" && beforeSnap.Head != "" {
+				embeddedNeedsRefresh[src.ID] = true
 				touchedBaselines = append(touchedBaselines, core.RepoBaseline{
 					SourceID:   src.ID,
 					RepoPath:   afterSnap.RepoPath,
@@ -409,7 +418,7 @@ func (tc *turnChanges) record(ctx context.Context, turnID string) {
 		_ = tc.repository.RecordRepoBaselines(recordCtx, tc.threadID, touchedBaselines)
 	}
 
-	branch := tc.branchTotals(recordCtx, thread, sources, afterBySource)
+	branch := tc.branchTotals(recordCtx, thread, sources, afterBySource, repoSnapshotsUsed, embeddedItemsBySource, embeddedNeedsRefresh)
 	if len(turnRepos) == 0 {
 		if branch != nil {
 			if (thread.Changes != nil || branch.Files > 0) && !core.SameChangeTotals(thread.Changes, *branch) {
@@ -427,7 +436,7 @@ func (tc *turnChanges) record(ctx context.Context, turnID string) {
 	_ = tc.repository.RecordTurnRepoChanges(recordCtx, tc.threadID, turnID, "", "", nil, turnRepos, branch)
 }
 
-func (tc *turnChanges) branchTotals(ctx context.Context, thread core.ThreadView, sources []workspaces.ThreadSource, afterBySource map[string]map[string]sdk.RepoSnapshot) *core.ChangeTotals {
+func (tc *turnChanges) branchTotals(ctx context.Context, thread core.ThreadView, sources []workspaces.ThreadSource, afterBySource map[string]map[string]sdk.RepoSnapshot, repoSnapshotsUsed map[string]bool, cachedEmbedded map[string][]sdk.RepoChanges, embeddedNeedsRefresh map[string]bool) *core.ChangeTotals {
 	storedBaselines, err := tc.repository.RepoBaselines(ctx, thread.ID)
 	if err != nil {
 		storedBaselines = nil
@@ -483,9 +492,19 @@ func (tc *turnChanges) branchTotals(ctx context.Context, thread core.ThreadView,
 			}
 		}
 		if src.Branches.EmbeddedChanges != nil && (src.Workspace == nil || !src.Workspace.Removed) {
-			embedded, err := src.Branches.EmbeddedChanges(ctx, thread.ID, baselinesBySource[src.ID])
-			if err != nil {
-				continue
+			var (
+				embedded []sdk.RepoChanges
+				err      error
+			)
+			if repoSnapshotsUsed[src.ID] && len(snapMap) == 1 && snapMap[""].Tree != "" {
+				embedded = nil
+			} else if items, ok := cachedEmbedded[src.ID]; ok && !embeddedNeedsRefresh[src.ID] {
+				embedded = items
+			} else {
+				embedded, err = src.Branches.EmbeddedChanges(ctx, thread.ID, baselinesBySource[src.ID])
+				if err != nil {
+					continue
+				}
 			}
 			for _, item := range embedded {
 				if item.Changes == nil || item.Changes.From == "" {

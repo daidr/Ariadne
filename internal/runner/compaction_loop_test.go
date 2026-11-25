@@ -17,9 +17,10 @@ import (
 )
 
 func TestCrossCompactionLoopHintsThenStops(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,9 +121,10 @@ func TestCrossCompactionLoopHintsThenStops(t *testing.T) {
 }
 
 func TestCrossCompactionProgressResetsCounter(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

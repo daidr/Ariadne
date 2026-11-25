@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -58,12 +57,13 @@ func requestTraceSeed() []eventstore.NewEvent {
 }
 
 func TestTraceRequestBodiesWithoutCallingModels(t *testing.T) {
+	t.Parallel()
 	seed := requestTraceSeed()
 	imageHash := sha256.Sum256([]byte{0, 255, 8})
 	textHash := sha256.Sum256([]byte{239, 187, 191, 104, 101, 108, 108, 111})
 	sql := fmt.Sprintf(`INSERT INTO files VALUES ('fil_image','prj_a','image/png',3,'%s',x'00ff08',0); INSERT INTO files VALUES ('fil_text','prj_a','text/plain',8,'%s',x'efbbbf68656c6c6f',0)`, hex.EncodeToString(imageHash[:]), hex.EncodeToString(textHash[:]))
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "requests.sqlite"), Now: now})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}

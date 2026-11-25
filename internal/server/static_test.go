@@ -20,7 +20,7 @@ import (
 
 func newStaticTestAPI(t *testing.T, web fstest.MapFS) *API {
 	t.Helper()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "static.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,6 +48,7 @@ func gunzipBytes(t *testing.T, compressed []byte) []byte {
 }
 
 func TestStaticCompressionNegotiationAndHeaders(t *testing.T) {
+	t.Parallel()
 	jsBody := []byte(strings.Repeat("console.log('ariadne static compression test');\n", 64))
 	brFakePayload := []byte("fake-brotli-stream-shorter-than-raw")
 	gzPrePayload := func() []byte {
@@ -203,6 +204,7 @@ func TestStaticCompressionNegotiationAndHeaders(t *testing.T) {
 }
 
 func TestStaticETagNotModifiedAndStaleSidecar(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(1800000000, 0)
 	htmlBody := []byte(strings.Repeat("<!doctype html><title>Ariadne</title>", 32))
 	jsBody := []byte(strings.Repeat("export const v = 1;\n", 64))
@@ -270,6 +272,7 @@ func TestStaticETagNotModifiedAndStaleSidecar(t *testing.T) {
 }
 
 func TestStaticCacheInvalidatesWhenDiskFileChanges(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	indexPath := filepath.Join(dir, "index.html")
 	v1 := []byte(strings.Repeat("<!doctype html><div>v1</div>", 20))
@@ -277,7 +280,7 @@ func TestStaticCacheInvalidatesWhenDiskFileChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "disk.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,13 +323,14 @@ func TestStaticCacheInvalidatesWhenDiskFileChanges(t *testing.T) {
 }
 
 func TestBuiltFrontendInitialPayloadCompressionAnd304(t *testing.T) {
+	t.Parallel()
 	distDir := filepath.Join("..", "..", "packages", "web", "dist")
 	indexHTML, err := os.ReadFile(filepath.Join(distDir, "index.html"))
 	if err != nil {
 		t.Skipf("built frontend dist not present (%v); skipping real-bundle measurement", err)
 	}
 
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "dist.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

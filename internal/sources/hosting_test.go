@@ -30,23 +30,46 @@ func objectStore(t *testing.T, root string) *local.ObjectStore {
 	t.Cleanup(func() { store.Close() })
 	return store
 }
+func writeLooseRef(t *testing.T, gitDir, ref, content string) {
+	t.Helper()
+	path := filepath.Join(gitDir, filepath.FromSlash(ref))
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readLooseRef(t *testing.T, gitDir, ref string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(gitDir, filepath.FromSlash(ref)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(raw))
+}
+
 func TestHostingMovesCommitsBetweenIndependentRepositories(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
 	}
 	hostRoot := t.TempDir()
+	hostGitDir := filepath.Join(hostRoot, ".git")
 	hostGit := local.NewGit(hostRoot, "file")
 	gitOK(t, hostGit, "init", "-qb", "main")
-	gitOK(t, hostGit, "config", "user.name", "Test")
-	gitOK(t, hostGit, "config", "user.email", "test@example.invalid")
 	if err := os.WriteFile(filepath.Join(hostRoot, "file.txt"), []byte("host\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	gitOK(t, hostGit, "add", "--all")
-	gitOK(t, hostGit, "commit", "-qm", "host")
-	head := gitOK(t, hostGit, "rev-parse", "HEAD")
-	gitOK(t, hostGit, "update-ref", "refs/remotes/origin/main", head)
-	gitOK(t, hostGit, "update-ref", "refs/remotes/origin/obsolete", head)
+	gitOK(t, hostGit, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "host")
+	head := readLooseRef(t, hostGitDir, "refs/heads/main")
+	writeLooseRef(t, hostGitDir, "refs/remotes/origin/main", head)
+	writeLooseRef(t, hostGitDir, "refs/remotes/origin/obsolete", head)
 	hostObjects := objectStore(t, hostRoot)
 	checkoutRoot := t.TempDir()
 	checkoutGit := local.NewGit(checkoutRoot, "file")
@@ -86,8 +109,10 @@ func TestHostingMovesCommitsBetweenIndependentRepositories(t *testing.T) {
 	if fetched.Load() != 1 || opened.Ref != nil {
 		t.Fatal("resume fetched or changed ref", opened, fetched.Load())
 	}
-	gitOK(t, checkoutGit, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
-	gitOK(t, hostGit, "update-ref", "-d", "refs/remotes/origin/obsolete")
+	writeLooseRef(t, checkoutRoot, "refs/remotes/origin/HEAD", "ref: refs/remotes/origin/main")
+	if err := os.Remove(filepath.Join(hostGitDir, "refs", "remotes", "origin", "obsolete")); err != nil {
+		t.Fatal(err)
+	}
 	if err := combined.Repo.Fetch(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -100,15 +125,15 @@ func TestHostingMovesCommitsBetweenIndependentRepositories(t *testing.T) {
 	}
 	tree := gitOK(t, checkoutGit, "rev-parse", head+"^{tree}")
 	threadSHA := gitOK(t, checkoutGit, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit-tree", tree, "-p", head, "-m", "thread")
-	gitOK(t, checkoutGit, "update-ref", "refs/heads/ariadne/thread", threadSHA)
+	writeLooseRef(t, checkoutRoot, "refs/heads/ariadne/thread", threadSHA)
 	sha, err := combined.Repo.Push(t.Context(), "ariadne/thread")
 	if err != nil || sha != threadSHA || pushed.Load() != 1 {
 		t.Fatal(sha, err, pushed.Load())
 	}
-	if actual := gitOK(t, hostGit, "rev-parse", "refs/heads/ariadne/thread"); actual != threadSHA {
+	if actual := readLooseRef(t, hostGitDir, "refs/heads/ariadne/thread"); actual != threadSHA {
 		t.Fatal(actual)
 	}
-	if actual := gitOK(t, checkoutGit, "rev-parse", "refs/remotes/origin/ariadne/thread"); actual != threadSHA {
+	if actual := readLooseRef(t, checkoutRoot, "refs/remotes/origin/ariadne/thread"); actual != threadSHA {
 		t.Fatal(actual)
 	}
 	if err := combined.Close(); err != nil {
@@ -119,6 +144,7 @@ func TestHostingMovesCommitsBetweenIndependentRepositories(t *testing.T) {
 	}
 }
 func TestRepositoryURLNormalization(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		address string
 		want    string

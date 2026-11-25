@@ -15,11 +15,12 @@ import (
 )
 
 func TestConversationSkillsRPC(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "review.md"), []byte("# Review changes"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "skills.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

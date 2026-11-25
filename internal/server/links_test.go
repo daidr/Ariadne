@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http/httptest"
 	"net/url"
-	"path/filepath"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -17,11 +16,12 @@ import (
 )
 
 func TestLinkRPCAuthenticatesBeforeCallbacks(t *testing.T) {
+	t.Parallel()
 	over := make([]string, 201)
 	for i := range over {
 		over[i] = "https://x.test/pull/1"
 	}
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,6 +14,7 @@ import (
 )
 
 func TestTruncatedCommandOutputPersistedAndReadableViaControlledSource(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
 	threadA := &turn{
@@ -133,6 +134,7 @@ func TestTruncatedCommandOutputPersistedAndReadableViaControlledSource(t *testin
 }
 
 func TestPruneToolOutputDirRemovesExpiredFilesAndEmptyDirs(t *testing.T) {
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), toolOutputDirName)
 	oldDir := filepath.Join(root, "thr_old")
 	mixedDir := filepath.Join(root, "thr_mixed")
@@ -178,6 +180,7 @@ func TestPruneToolOutputDirRemovesExpiredFilesAndEmptyDirs(t *testing.T) {
 }
 
 func TestCommandOutputMultibyteUTF16Consistency(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 
 	t.Run("multibyte output within UTF-16 limit is not persisted or marked truncated", func(t *testing.T) {

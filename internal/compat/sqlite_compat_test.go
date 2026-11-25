@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,21 +17,62 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+var (
+	legacySchemaOnce  sync.Once
+	legacySchemaBytes []byte
+	legacySchemaErr   error
+)
+
+func loadLegacySchemaBytes(t *testing.T) []byte {
+	t.Helper()
+	legacySchemaOnce.Do(func() {
+		ddl, err := os.ReadFile(filepath.Join("testdata", "schema.sql"))
+		if err != nil {
+			legacySchemaErr = err
+			return
+		}
+		tmpDir, err := os.MkdirTemp("", "ariadne-legacy-schema-*")
+		if err != nil {
+			legacySchemaErr = err
+			return
+		}
+		defer os.RemoveAll(tmpDir)
+		tmpPath := filepath.Join(tmpDir, "template.sqlite")
+		db, err := sql.Open("sqlite", tmpPath)
+		if err != nil {
+			legacySchemaErr = err
+			return
+		}
+		db.SetMaxOpenConns(1)
+		if _, err := db.Exec("PRAGMA journal_mode = MEMORY; PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; BEGIN;\n" + string(ddl) + "\nCOMMIT;"); err != nil {
+			_ = db.Close()
+			legacySchemaErr = err
+			return
+		}
+		if err := db.Close(); err != nil {
+			legacySchemaErr = err
+			return
+		}
+		legacySchemaBytes, legacySchemaErr = os.ReadFile(tmpPath)
+	})
+	if legacySchemaErr != nil {
+		t.Fatalf("build legacy schema template: %v", legacySchemaErr)
+	}
+	return legacySchemaBytes
+}
+
 func initLegacySchemaDB(t *testing.T, path string, userVersion int) *sql.DB {
 	t.Helper()
-	ddl, err := os.ReadFile(filepath.Join("testdata", "schema.sql"))
-	if err != nil {
+	if err := os.WriteFile(path, loadLegacySchemaBytes(t), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.ExecContext(t.Context(), string(ddl)); err != nil {
-		t.Fatalf("load legacy schema.sql: %v", err)
-	}
-	if _, err := db.ExecContext(t.Context(), "PRAGMA user_version = "+jsonNumber(userVersion)); err != nil {
+	if _, err := db.ExecContext(t.Context(), "PRAGMA journal_mode = MEMORY; PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA user_version = "+jsonNumber(userVersion)); err != nil {
 		t.Fatal(err)
 	}
 	return db
@@ -42,6 +84,7 @@ func jsonNumber(v int) string {
 }
 
 func TestLegacyV67StaticSQLiteUpgradesAndPreservesData(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "旧数据-v67.sqlite")
 	db := initLegacySchemaDB(t, path, 67)
@@ -225,6 +268,7 @@ func TestLegacyV67StaticSQLiteUpgradesAndPreservesData(t *testing.T) {
 }
 
 func TestLegacyPreV67StaticSQLiteReplaysAndRepairsStaleProjections(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "旧数据-v66.sqlite")
 	db := initLegacySchemaDB(t, path, 66)
@@ -298,6 +342,7 @@ func TestLegacyPreV67StaticSQLiteReplaysAndRepairsStaleProjections(t *testing.T)
 }
 
 func TestLegacyV71UpgradeBackfillsTranscriptWokeAndSupportsWrites(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "legacy-v71.sqlite")
 	db := initLegacySchemaDB(t, path, 71)

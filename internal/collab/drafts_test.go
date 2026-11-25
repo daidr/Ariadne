@@ -2,7 +2,6 @@ package collab
 
 import (
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 )
 
 func TestDocumentDraftReplacementTracksCursorAndRollsBack(t *testing.T) {
+	t.Parallel()
 	t.Run("general", func(t *testing.T) { checkDocumentDraft(t, false) })
 	t.Run("single paragraph", func(t *testing.T) { checkDocumentDraft(t, true) })
 }
@@ -20,7 +20,7 @@ func TestDocumentDraftReplacementTracksCursorAndRollsBack(t *testing.T) {
 func checkDocumentDraft(t *testing.T, paragraph bool) {
 	t.Helper()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "test.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

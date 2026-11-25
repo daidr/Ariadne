@@ -15,6 +15,7 @@ import (
 )
 
 func TestQueryPlansAvoidEventsScanAndUseProjectIndexes(t *testing.T) {
+	t.Parallel()
 	repo, err := Open(t.Context(), Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
@@ -91,6 +92,7 @@ func TestQueryPlansAvoidEventsScanAndUseProjectIndexes(t *testing.T) {
 }
 
 func TestSchemaV68MigrationBackfillsWorkspaceSourceIDAndChangedSeq(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v68.sqlite")
 	repo, err := Open(t.Context(), Options{Path: path})
 	if err != nil {
@@ -159,6 +161,7 @@ func TestSchemaV68MigrationBackfillsWorkspaceSourceIDAndChangedSeq(t *testing.T)
 }
 
 func TestListProjectsBatchAggregationAndOpenAttentions(t *testing.T) {
+	t.Parallel()
 	now := int64(1800000000000)
 	repo, err := Open(t.Context(), Options{Path: ":memory:", Now: func() time.Time { return time.UnixMilli(now) }})
 	if err != nil {
@@ -238,6 +241,7 @@ func TestListProjectsBatchAggregationAndOpenAttentions(t *testing.T) {
 }
 
 func TestGetProjectDetailSinceTracksChangedSeqAndSameHourArchive(t *testing.T) {
+	t.Parallel()
 	const hourMs = int64(time.Hour / time.Millisecond)
 	const dayMs = int64(24 * time.Hour / time.Millisecond)
 	now := (1800000000000 / hourMs) * hourMs // Exact start of an hour.
@@ -310,6 +314,7 @@ func TestGetProjectDetailSinceTracksChangedSeqAndSameHourArchive(t *testing.T) {
 }
 
 func TestGetProjectDetailSinceCrossHourIncrementalArchive(t *testing.T) {
+	t.Parallel()
 	const hourMs = int64(time.Hour / time.Millisecond)
 	const dayMs = int64(24 * time.Hour / time.Millisecond)
 	const weekMs = int64(7 * 24 * time.Hour / time.Millisecond)
@@ -470,8 +475,8 @@ func TestGetProjectDetailSinceCrossHourIncrementalArchive(t *testing.T) {
 }
 
 func TestSearchOnDemandMetadataLookupAndSQLitePragmas(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "search-perf.sqlite")
-	repo, err := Open(t.Context(), Options{Path: path})
+	t.Parallel()
+	repo, err := Open(t.Context(), Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

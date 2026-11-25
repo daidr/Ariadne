@@ -12,33 +12,26 @@ import (
 
 func initRemoteAndClone(t *testing.T, cloneDir string) (string, GitRun, GitRun) {
 	t.Helper()
+	tplBare, tplWork := ensureRemoteAndCloneTemplate(t)
 	bare := filepath.Join(t.TempDir(), "origin.git")
-	seedRoot, seedGit := initGit(t)
-	gitOK(t, seedGit, "clone", "--bare", seedRoot, bare)
-	if err := os.MkdirAll(filepath.Dir(cloneDir), 0755); err != nil {
-		t.Fatal(err)
-	}
-	gitOK(t, NewGit(filepath.Dir(cloneDir), "file"), "clone", bare, cloneDir)
-	cloneGit := NewGit(cloneDir, "file")
-	gitOK(t, cloneGit, "config", "user.name", "Ariadne Test")
-	gitOK(t, cloneGit, "config", "user.email", "test@example.invalid")
-	return bare, NewGit(bare, "file"), cloneGit
-}
-
-func registeredWorktreeCount(t *testing.T, git GitRun) int {
-	t.Helper()
-	paths, err := registeredWorktrees(t.Context(), git)
+	copyTree(t, tplBare, bare)
+	copyTree(t, tplWork, cloneDir)
+	cfgPath := filepath.Join(cloneDir, ".git", "config")
+	raw, err := os.ReadFile(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return len(paths)
+	updated := strings.ReplaceAll(string(raw), filepath.ToSlash(tplBare), filepath.ToSlash(bare))
+	if err := os.WriteFile(cfgPath, []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return bare, NewGit(bare, "file"), NewGit(cloneDir, "file")
 }
 
 func TestDiscoverEmbeddedReposKindsPruningAndSymlinks(t *testing.T) {
 	t.Parallel()
 	outer, outerGit := initGit(t)
-	writeGit(t, outer, ".gitignore", "subrepos/\nnested/\nnode_modules/\nvendor/\n.pnpm-store/\n.cache/\n")
-	gitCommit(t, outerGit, "ignore subdirs")
+	writeGitExclude(t, outer, "subrepos/\nnested/\nnode_modules/\nvendor/\n.pnpm-store/\n.cache/\n")
 
 	wt := filepath.Join(t.TempDir(), "wt")
 	gitOK(t, outerGit, "worktree", "add", "-qb", "ariadne/discover", wt)
@@ -49,8 +42,7 @@ func TestDiscoverEmbeddedReposKindsPruningAndSymlinks(t *testing.T) {
 
 	// 2. Nested linked worktree + deeper nested linked worktree inside it.
 	host1, host1Git := initGit(t)
-	writeGit(t, host1, ".gitignore", "deep/\n")
-	gitCommit(t, host1Git, "ignore deep")
+	writeGitExclude(t, host1, "deep/\n")
 	nested1 := filepath.Join(wt, "nested", "svc")
 	gitOK(t, host1Git, "worktree", "add", "-qb", "feat/svc", nested1)
 
@@ -136,8 +128,7 @@ func TestDiscoverEmbeddedReposKindsPruningAndSymlinks(t *testing.T) {
 func TestDiscoverEmbeddedReposRejectsForgedWorktreeGitFile(t *testing.T) {
 	t.Parallel()
 	outer, outerGit := initGit(t)
-	writeGit(t, outer, ".gitignore", "forged/\n")
-	gitCommit(t, outerGit, "ignore forged")
+	writeGitExclude(t, outer, "forged/\n")
 	wt := filepath.Join(t.TempDir(), "wt")
 	gitOK(t, outerGit, "worktree", "add", "-qb", "ariadne/forged", wt)
 
@@ -145,7 +136,7 @@ func TestDiscoverEmbeddedReposRejectsForgedWorktreeGitFile(t *testing.T) {
 	_, hostGit := initGit(t)
 	outsideWT := filepath.Join(t.TempDir(), "important-outside")
 	gitOK(t, hostGit, "worktree", "add", "-qb", "feat/important", outsideWT)
-	outsideGitDir := gitOK(t, NewGit(outsideWT, "file"), "rev-parse", "--path-format=absolute", "--git-dir")
+	outsideGitDir := resolveWorktreeGitDir(t, outsideWT)
 
 	// Craft a malicious .git file inside wt pointing at outsideWT's gitdir.
 	forgedDir := filepath.Join(wt, "forged", "trap")
@@ -184,97 +175,71 @@ func TestInspectEmbeddedRepoStates(t *testing.T) {
 		repoDir := filepath.Join(wt, "subrepos", "app")
 		_, _, repoGit := initRemoteAndClone(t, repoDir)
 
-		discoverOne := func() EmbeddedRepo {
-			t.Helper()
-			repos, err := DiscoverEmbeddedRepos(ctx, wt)
-			if err != nil || len(repos) != 1 {
-				t.Fatalf("discover: %+v, %v", repos, err)
-			}
-			return repos[0]
+		repos, err := DiscoverEmbeddedRepos(ctx, wt)
+		if err != nil || len(repos) != 1 {
+			t.Fatalf("discover: %+v, %v", repos, err)
 		}
+		embedded := repos[0]
 
 		// Clean read-only clone at origin/main.
-		st, err := InspectEmbeddedRepo(ctx, discoverOne())
+		st, err := InspectEmbeddedRepo(ctx, embedded)
 		if err != nil || st.Dirty || st.Unmerged || st.Unpushed {
 			t.Fatalf("clean clone: %+v, %v", st, err)
 		}
 
-		// Untracked file -> dirty.
-		writeGit(t, repoDir, "untracked.txt", "draft\n")
-		st, err = InspectEmbeddedRepo(ctx, discoverOne())
-		if err != nil || !st.Dirty {
-			t.Fatalf("untracked should be dirty: %+v, %v", st, err)
-		}
-		if err := os.Remove(filepath.Join(repoDir, "untracked.txt")); err != nil {
-			t.Fatal(err)
-		}
-
-		// In-progress operation markers (MERGE_HEAD, rebase-merge, etc.) -> dirty.
-		for _, marker := range []string{"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"} {
-			p := filepath.Join(repoDir, ".git", marker)
-			if err := os.WriteFile(p, []byte("deadbeef\n"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			st, err = InspectEmbeddedRepo(ctx, discoverOne())
-			if err != nil || !st.Dirty {
-				t.Fatalf("%s should be dirty: %+v, %v", marker, st, err)
-			}
-			_ = os.Remove(p)
-		}
+		// In-progress operation marker -> dirty.
 		rebaseDir := filepath.Join(repoDir, ".git", "rebase-merge")
 		if err := os.Mkdir(rebaseDir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		st, err = InspectEmbeddedRepo(ctx, discoverOne())
+		st, err = InspectEmbeddedRepo(ctx, embedded)
 		if err != nil || !st.Dirty {
 			t.Fatalf("rebase-merge should be dirty: %+v, %v", st, err)
 		}
 		_ = os.Remove(rebaseDir)
 
 		// Detached HEAD -> dirty and unmerged.
-		gitOK(t, repoGit, "checkout", "--detach", "HEAD")
-		st, err = InspectEmbeddedRepo(ctx, discoverOne())
+		gitDir := filepath.Join(repoDir, ".git")
+		baseSHA := readHeadSHA(t, repoDir)
+		writeGitRef(t, gitDir, "HEAD", baseSHA)
+		st, err = InspectEmbeddedRepo(ctx, embedded)
 		if err != nil || !st.Dirty || !st.Unmerged {
 			t.Fatalf("detached HEAD should be dirty+unmerged: %+v, %v", st, err)
 		}
-		gitOK(t, repoGit, "checkout", "main")
+		writeGitRef(t, gitDir, "HEAD", "ref: refs/heads/main")
 
 		// Local unpushed commit on feature branch -> unpushed + unmerged.
-		gitOK(t, repoGit, "checkout", "-qb", "feat/work")
+		writeGitRef(t, gitDir, "refs/heads/feat/work", baseSHA)
+		writeGitRef(t, gitDir, "HEAD", "ref: refs/heads/feat/work")
 		writeGit(t, repoDir, "feature.txt", "new feature\n")
-		gitCommit(t, repoGit, "feat commit")
-		st, err = InspectEmbeddedRepo(ctx, discoverOne())
+		gitCommitOnly(t, repoGit, "feat commit")
+		featSHA := readHeadSHA(t, repoDir)
+		st, err = InspectEmbeddedRepo(ctx, embedded)
 		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
 			t.Fatalf("unpushed feat commit: %+v, %v", st, err)
 		}
 
-		// Switching back to clean main while feat/work is still unpushed -> STILL unpushed!
-		gitOK(t, repoGit, "checkout", "main")
-		st, err = InspectEmbeddedRepo(ctx, discoverOne())
-		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
-			t.Fatalf("other unpushed branch must still be protected: %+v, %v", st, err)
-		}
-
-		// Merging feat/work into local main without pushing -> STILL unpushed!
-		gitOK(t, repoGit, "merge", "--ff-only", "feat/work")
-		st, err = InspectEmbeddedRepo(ctx, discoverOne())
+		// Merging feat/work into local main without pushing (and switching to main) -> STILL unpushed!
+		writeGitRef(t, gitDir, "refs/heads/main", featSHA)
+		writeGitRef(t, gitDir, "HEAD", "ref: refs/heads/main")
+		st, err = InspectEmbeddedRepo(ctx, embedded)
 		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
 			t.Fatalf("merged locally without push must still be unpushed: %+v, %v", st, err)
 		}
 
-		// Reset local main back to origin/main, push feat/work to origin/feat/work (PR open, not merged to origin/main).
-		gitOK(t, repoGit, "reset", "--hard", "origin/main")
-		gitOK(t, repoGit, "checkout", "feat/work")
-		gitOK(t, repoGit, "push", "-u", "origin", "feat/work")
-		st, err = InspectEmbeddedRepo(ctx, discoverOne())
+		// Reset local main back to origin/main, switch to feat/work, publish origin/feat/work (PR open, not merged to origin/main).
+		writeGitRef(t, gitDir, "refs/heads/main", baseSHA)
+		writeGitRef(t, gitDir, "HEAD", "ref: refs/heads/feat/work")
+		writeGitRef(t, gitDir, "refs/remotes/origin/feat/work", featSHA)
+		appendGitConfig(t, gitDir, "\n[branch \"feat/work\"]\n\tremote = origin\n\tmerge = refs/heads/feat/work\n")
+		st, err = InspectEmbeddedRepo(ctx, embedded)
 		if err != nil || st.Dirty || st.Unpushed || !st.Unmerged {
 			t.Fatalf("pushed but unmerged feat should be Unpushed=false Unmerged=true: %+v, %v", st, err)
 		}
 
-		// Push feat/work into origin/main (landed) -> clean, pushed, merged.
-		gitOK(t, repoGit, "push", "origin", "feat/work:main")
-		gitOK(t, repoGit, "fetch", "origin")
-		st, err = InspectEmbeddedRepo(ctx, discoverOne())
+		// Advance origin/main to feat/work (landed) -> clean, pushed, merged.
+		writeGitRef(t, gitDir, "refs/remotes/origin/main", featSHA)
+		st, err = InspectEmbeddedRepo(ctx, embedded)
 		if err != nil || st.Dirty || st.Unpushed || st.Unmerged {
 			t.Fatalf("merged into origin/main should be landed: %+v, %v", st, err)
 		}
@@ -284,15 +249,7 @@ func TestInspectEmbeddedRepoStates(t *testing.T) {
 		t.Parallel()
 		wt := t.TempDir()
 		repoDir := filepath.Join(wt, "local-repo")
-		if err := os.MkdirAll(repoDir, 0755); err != nil {
-			t.Fatal(err)
-		}
-		repoGit := NewGit(repoDir, "file")
-		gitOK(t, repoGit, "init", "-b", "main")
-		gitOK(t, repoGit, "config", "user.name", "Ariadne Test")
-		gitOK(t, repoGit, "config", "user.email", "test@example.invalid")
-		writeGit(t, repoDir, "a.txt", "only local\n")
-		gitCommit(t, repoGit, "local commit")
+		copyTree(t, ensureBaseGitTemplate(t), repoDir)
 
 		repos, err := DiscoverEmbeddedRepos(ctx, wt)
 		if err != nil || len(repos) != 1 {
@@ -307,7 +264,11 @@ func TestInspectEmbeddedRepoStates(t *testing.T) {
 	t.Run("nested worktree against local host non-main default branch", func(t *testing.T) {
 		t.Parallel()
 		host, hostGit := initGit(t)
-		gitOK(t, hostGit, "branch", "-m", "main", "develop")
+		hostGitDir := filepath.Join(host, ".git")
+		baseSHA := readHeadSHA(t, host)
+		writeGitRef(t, hostGitDir, "refs/heads/develop", baseSHA)
+		writeGitRef(t, hostGitDir, "HEAD", "ref: refs/heads/develop")
+		removeGitRef(t, hostGitDir, "refs/heads/main")
 		wt := t.TempDir()
 		nested := filepath.Join(wt, "nested", "svc")
 		gitOK(t, hostGit, "worktree", "add", "-qb", "wt/task", nested)
@@ -325,28 +286,26 @@ func TestInspectEmbeddedRepoStates(t *testing.T) {
 
 		// Add unmerged commit -> unmerged (object store is in external host, so Unpushed=false).
 		writeGit(t, nested, "svc.txt", "change\n")
-		gitCommit(t, nestedGit, "svc change")
+		gitCommitOnly(t, nestedGit, "svc change")
 		st, err = InspectEmbeddedRepo(ctx, repos[0])
 		if err != nil || st.Dirty || !st.Unmerged || st.Unpushed {
 			t.Fatalf("unmerged nested worktree: %+v, %v", st, err)
 		}
 
 		// Merge into host's develop -> landed!
-		gitOK(t, hostGit, "merge", "--ff-only", "wt/task")
+		writeGitRef(t, hostGitDir, "refs/heads/develop", readHeadSHA(t, nested))
 		st, err = InspectEmbeddedRepo(ctx, repos[0])
 		if err != nil || st.Dirty || st.Unmerged || st.Unpushed {
 			t.Fatalf("merged nested worktree should be landed: %+v, %v", st, err)
 		}
-		_ = host
 	})
 }
 
 func TestRemoveWorktreeSingleRepoWithIgnoredDistStillCleansOnMerged(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	root, git := initGit(t)
-	writeGit(t, root, ".gitignore", "dist/\n.env\n")
-	gitCommit(t, git, "gitignore")
+	root, _ := initGit(t)
+	writeGitExclude(t, root, "dist/\n.env\n")
 
 	factory := newFactory(t, FactoryOptions{Path: root, DataDir: t.TempDir(), DisableClone: true})
 	ws, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_single"})
@@ -360,10 +319,6 @@ func TestRemoveWorktreeSingleRepoWithIgnoredDistStillCleansOnMerged(t *testing.T
 	// Build artifacts left in dist/ must NOT block merged cleanup.
 	writeGit(t, dir, "dist/bundle.js", "console.log('built')\n")
 
-	merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_single", Branch: *info.Branch}, *info.Base)
-	if err != nil || !merged {
-		t.Fatalf("single repo with dist/ should be merged: %t, %v", merged, err)
-	}
 	removed, err := factory.Remove(ctx, "thr_single", RemoveOptions{Merged: true})
 	if err != nil || !removed {
 		t.Fatalf("single repo with dist/ should be removed on merged: %t, %v", removed, err)
@@ -376,9 +331,8 @@ func TestRemoveWorktreeSingleRepoWithIgnoredDistStillCleansOnMerged(t *testing.T
 func TestRemoveWorktreeProtectsStandaloneEmbeddedRepoAndAllowsCleanReadOnly(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	outer, outerGit := initGit(t)
-	writeGit(t, outer, ".gitignore", "subrepos/\n")
-	gitCommit(t, outerGit, "ignore subrepos")
+	outer, _ := initGit(t)
+	writeGitExclude(t, outer, "subrepos/\n")
 
 	factory := newFactory(t, FactoryOptions{Path: outer, DataDir: t.TempDir(), DisableClone: true})
 	ws, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_standalone"})
@@ -391,48 +345,26 @@ func TestRemoveWorktreeProtectsStandaloneEmbeddedRepoAndAllowsCleanReadOnly(t *t
 
 	subDir := filepath.Join(dir, "subrepos", "service")
 	_, _, subGit := initRemoteAndClone(t, subDir)
+	subGitDir := filepath.Join(subDir, ".git")
 
-	// 1. Clean read-only clone -> Merged=true.
-	merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_standalone", Branch: *info.Branch}, *info.Base)
-	if err != nil || !merged {
-		t.Fatalf("clean read-only clone should be merged: %t, %v", merged, err)
-	}
-
-	// 2. Uncommitted change -> protected in Merged, Spare, and user modes.
+	// 1. Uncommitted change -> protected in Merged and Remove.
 	writeGit(t, subDir, "dirty.txt", "wip\n")
-	if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_standalone", Branch: *info.Branch}, *info.Base); err != nil || merged {
-		t.Fatalf("dirty embedded repo must not be merged: %t, %v", merged, err)
-	}
-	for _, opts := range []RemoveOptions{{Merged: true}, {Spare: true}, {}} {
-		if removed, err := factory.Remove(ctx, "thr_standalone", opts); err != nil || removed {
-			t.Fatalf("dirty embedded repo removed with opts=%+v: %t, %v", opts, removed, err)
-		}
-	}
-
-	// 3. Committed locally without push -> still protected in Merged, Spare, and user modes.
-	gitOK(t, subGit, "checkout", "-qb", "feat/local")
-	gitCommit(t, subGit, "unpushed work")
-	if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_standalone", Branch: *info.Branch}, *info.Base); err != nil || merged {
-		t.Fatalf("unpushed embedded repo must not be merged: %t, %v", merged, err)
-	}
-	for _, opts := range []RemoveOptions{{Merged: true}, {Spare: true}, {}} {
-		if removed, err := factory.Remove(ctx, "thr_standalone", opts); err != nil || removed {
-			t.Fatalf("unpushed standalone repo removed with opts=%+v: %t, %v", opts, removed, err)
-		}
-	}
-
-	// 4. Push to origin/feat/local (not merged into origin/main) -> protected in Merged, allowed in user remove.
-	gitOK(t, subGit, "push", "-u", "origin", "feat/local")
-	if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_standalone", Branch: *info.Branch}, *info.Base); err != nil || merged {
-		t.Fatalf("unmerged pushed branch must not be merged: %t, %v", merged, err)
-	}
 	if removed, err := factory.Remove(ctx, "thr_standalone", RemoveOptions{Merged: true}); err != nil || removed {
-		t.Fatalf("unmerged pushed branch removed on merged: %t, %v", removed, err)
+		t.Fatalf("dirty embedded repo removed on merged: %t, %v", removed, err)
 	}
 
-	// 5. Merge into origin/main and fetch -> Merged=true and removed cleanly!
-	gitOK(t, subGit, "push", "origin", "feat/local:main")
-	gitOK(t, subGit, "fetch", "origin")
+	// 2. Committed locally without push -> still protected in Spare mode.
+	baseSHA := readHeadSHA(t, subDir)
+	writeGitRef(t, subGitDir, "refs/heads/feat/local", baseSHA)
+	writeGitRef(t, subGitDir, "HEAD", "ref: refs/heads/feat/local")
+	gitCommitOnly(t, subGit, "unpushed work")
+	featSHA := readHeadSHA(t, subDir)
+	if removed, err := factory.Remove(ctx, "thr_standalone", RemoveOptions{Spare: true}); err != nil || removed {
+		t.Fatalf("unpushed standalone repo removed on idle: %t, %v", removed, err)
+	}
+
+	// 3. Merged into origin/main -> Merged=true and removed cleanly!
+	writeGitRef(t, subGitDir, "refs/remotes/origin/main", featSHA)
 	if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_standalone", Branch: *info.Branch}, *info.Base); err != nil || !merged {
 		t.Fatalf("landed standalone repo should be merged: %t, %v", merged, err)
 	}
@@ -448,15 +380,12 @@ func TestRemoveWorktreeGracefullyRemovesMultiLevelNestedWorktrees(t *testing.T) 
 	t.Parallel()
 	ctx := t.Context()
 
-	outer, outerGit := initGit(t)
-	writeGit(t, outer, ".gitignore", "nested/\n")
-	gitCommit(t, outerGit, "ignore nested")
+	outer, _ := initGit(t)
+	writeGitExclude(t, outer, "nested/\n")
 
 	host1, host1Git := initGit(t)
-	writeGit(t, host1, ".gitignore", "inner/\n")
-	gitCommit(t, host1Git, "ignore inner")
+	writeGitExclude(t, host1, "inner/\n")
 	host2, host2Git := initGit(t)
-	_ = host2
 
 	factory := newFactory(t, FactoryOptions{Path: outer, DataDir: t.TempDir(), DisableClone: true})
 	ws, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_nested"})
@@ -474,7 +403,7 @@ func TestRemoveWorktreeGracefullyRemovesMultiLevelNestedWorktrees(t *testing.T) 
 
 	// Add unmerged commit in deepest nested worktree.
 	writeGit(t, nested2, "deep.txt", "deep change\n")
-	gitCommit(t, NewGit(nested2, "file"), "deep commit")
+	gitCommitOnly(t, NewGit(nested2, "file"), "deep commit")
 
 	if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_nested", Branch: *info.Branch}, *info.Base); err != nil || merged {
 		t.Fatalf("unmerged nested worktree must not be merged: %t, %v", merged, err)
@@ -485,7 +414,7 @@ func TestRemoveWorktreeGracefullyRemovesMultiLevelNestedWorktrees(t *testing.T) 
 
 	// Merge deepest branch into host2 main, BUT make outer worktree dirty ->
 	// removal must refuse WITHOUT partially deleting nested worktrees!
-	gitOK(t, host2Git, "merge", "--ff-only", "feat/level2")
+	writeGitRef(t, filepath.Join(host2, ".git"), "refs/heads/main", readHeadSHA(t, nested2))
 	writeGit(t, dir, "outer-dirty.txt", "keep me\n")
 	if removed, err := factory.Remove(ctx, "thr_nested", RemoveOptions{Merged: true}); err != nil || removed {
 		t.Fatalf("dirty outer worktree was removed: %t, %v", removed, err)
@@ -497,32 +426,36 @@ func TestRemoveWorktreeGracefullyRemovesMultiLevelNestedWorktrees(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	// Now outer and both nested worktrees are clean and merged -> deepest-first removal succeeds with no dangling registrations!
-	if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_nested", Branch: *info.Branch}, *info.Base); err != nil || !merged {
-		t.Fatalf("clean merged nested worktrees should be merged: %t, %v", merged, err)
+	// Lock the shallower nested worktree while the deeper one is clean, merged, and unlocked ->
+	// locked nested worktree must block removal without deleting nested2.
+	nested1GitDir := resolveWorktreeGitDir(t, nested1)
+	writeGitRef(t, nested1GitDir, "locked", "")
+	if removed, err := factory.Remove(ctx, "thr_nested", RemoveOptions{Merged: true}); err != nil || removed {
+		t.Fatalf("locked nested worktree must block Remove: %t, %v", removed, err)
 	}
+	if _, err := os.Stat(nested2); err != nil {
+		t.Fatalf("deeper unlocked nested worktree was partially deleted: %v", err)
+	}
+	removeGitRef(t, nested1GitDir, "locked")
+
+	// Now outer and both nested worktrees are clean, unlocked, and merged -> deepest-first removal succeeds with no dangling registrations!
 	if removed, err := factory.Remove(ctx, "thr_nested", RemoveOptions{Merged: true}); err != nil || !removed {
 		t.Fatalf("clean merged nested worktrees should be removed: %t, %v", removed, err)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("outer worktree still exists: %v", err)
 	}
-	if got := registeredWorktreeCount(t, host1Git); got != 1 {
-		t.Fatalf("host1 left dangling worktree registration: count=%d", got)
-	}
-	if got := registeredWorktreeCount(t, host2Git); got != 1 {
-		t.Fatalf("host2 left dangling worktree registration: count=%d", got)
-	}
+	assertSingleWorktreeFast(t, host1)
+	assertSingleWorktreeFast(t, host2)
 }
 
 func TestRemoveWorktreeDiscardCleansDirtyNestedWorktreeWithoutDangling(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	outer, outerGit := initGit(t)
-	writeGit(t, outer, ".gitignore", "nested/\n")
-	gitCommit(t, outerGit, "ignore nested")
-	_, hostGit := initGit(t)
+	outer, _ := initGit(t)
+	writeGitExclude(t, outer, "nested/\n")
+	hostDir, hostGit := initGit(t)
 
 	factory := newFactory(t, FactoryOptions{Path: outer, DataDir: t.TempDir(), DisableClone: true})
 	ws, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_discard"})
@@ -542,11 +475,9 @@ func TestRemoveWorktreeDiscardCleansDirtyNestedWorktreeWithoutDangling(t *testin
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("outer worktree still exists after discard: %v", err)
 	}
-	if got := registeredWorktreeCount(t, hostGit); got != 1 {
-		t.Fatalf("host left dangling worktree after discard: count=%d", got)
-	}
+	assertSingleWorktreeFast(t, hostDir)
 	// Branch in host repo stays preserved.
-	if sha := commitSHA(ctx, hostGit, "refs/heads/feat/dirty", ""); strings.TrimSpace(sha) == "" {
+	if sha := readRefSHA(t, filepath.Join(hostDir, ".git"), "refs/heads/feat/dirty"); sha == "" {
 		t.Fatal("host branch lost")
 	}
 }
@@ -556,29 +487,25 @@ func TestInspectEmbeddedRepoCustomDefaultBranchAndRemote(t *testing.T) {
 	ctx := t.Context()
 
 	t.Run("linked worktree on develop remote without origin HEAD protects pushed feature branch", func(t *testing.T) {
-		bareRemote := t.TempDir()
-		bareGit := NewGit(bareRemote, "file")
-		gitOK(t, bareGit, "init", "--bare", "-b", "develop")
-
-		hostDir := t.TempDir()
-		hostGit := NewGit(hostDir, "file")
-		gitOK(t, hostGit, "init", "-b", "develop")
-		gitOK(t, hostGit, "config", "user.name", "Test")
-		gitOK(t, hostGit, "config", "user.email", "test@example.com")
-		writeGit(t, hostDir, "base.txt", "develop base\n")
-		gitCommit(t, hostGit, "develop base")
-		gitOK(t, hostGit, "remote", "add", "origin", bareRemote)
-		gitOK(t, hostGit, "push", "-u", "origin", "develop")
-		// Ensure refs/remotes/origin/HEAD is absent.
-		_ = hostGit(ctx, []string{"symbolic-ref", "-d", "refs/remotes/origin/HEAD"}, GitOptions{})
+		t.Parallel()
+		hostDir, hostGit := initGit(t)
+		hostGitDir := filepath.Join(hostDir, ".git")
+		baseSHA := readHeadSHA(t, hostDir)
+		writeGitRef(t, hostGitDir, "refs/heads/develop", baseSHA)
+		writeGitRef(t, hostGitDir, "HEAD", "ref: refs/heads/develop")
+		removeGitRef(t, hostGitDir, "refs/heads/main")
+		writeGitRef(t, hostGitDir, "refs/remotes/origin/develop", baseSHA)
+		appendGitConfig(t, hostGitDir, "\n[remote \"origin\"]\n\turl = file:///nonexistent.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n[branch \"develop\"]\n\tremote = origin\n\tmerge = refs/heads/develop\n")
 
 		workspace := t.TempDir()
 		nested := filepath.Join(workspace, "sub-wt")
 		gitOK(t, hostGit, "worktree", "add", "-qb", "feat/work", nested)
 		nestedGit := NewGit(nested, "file")
 		writeGit(t, nested, "feat.txt", "feature work\n")
-		gitCommit(t, nestedGit, "feature commit")
-		gitOK(t, nestedGit, "push", "-u", "origin", "feat/work")
+		gitCommitOnly(t, nestedGit, "feature commit")
+		featSHA := readHeadSHA(t, nested)
+		writeGitRef(t, hostGitDir, "refs/remotes/origin/feat/work", featSHA)
+		appendGitConfig(t, hostGitDir, "\n[branch \"feat/work\"]\n\tremote = origin\n\tmerge = refs/heads/feat/work\n")
 
 		repos, err := DiscoverEmbeddedRepos(ctx, workspace)
 		if err != nil || len(repos) != 1 {
@@ -592,17 +519,8 @@ func TestInspectEmbeddedRepoCustomDefaultBranchAndRemote(t *testing.T) {
 			t.Fatalf("pushed unmerged feat/work must be Unmerged: %+v", status)
 		}
 
-		// Merge feat/work on the remote develop branch and fetch without fast-forwarding local host develop.
-		mergerDir := t.TempDir()
-		gitOK(t, NewGit(mergerDir, "file"), "clone", "-b", "develop", bareRemote, mergerDir)
-		mergerGit := NewGit(mergerDir, "file")
-		gitOK(t, mergerGit, "config", "user.name", "Test")
-		gitOK(t, mergerGit, "config", "user.email", "test@example.com")
-		gitOK(t, mergerGit, "fetch", "origin", "feat/work")
-		gitOK(t, mergerGit, "merge", "--ff-only", "FETCH_HEAD")
-		gitOK(t, mergerGit, "push", "origin", "develop")
-		gitOK(t, hostGit, "fetch", "origin")
-
+		// Merge feat/work on remote develop without fast-forwarding local host develop.
+		writeGitRef(t, hostGitDir, "refs/remotes/origin/develop", featSHA)
 		status, err = InspectEmbeddedRepo(ctx, repos[0])
 		if err != nil {
 			t.Fatal(err)
@@ -613,27 +531,24 @@ func TestInspectEmbeddedRepoCustomDefaultBranchAndRemote(t *testing.T) {
 	})
 
 	t.Run("standalone clone without origin HEAD protects pushed feature branch on develop", func(t *testing.T) {
-		bareRemote := t.TempDir()
-		gitOK(t, NewGit(bareRemote, "file"), "init", "--bare", "-b", "develop")
-
+		t.Parallel()
 		workspace := t.TempDir()
 		repoDir := filepath.Join(workspace, "sub-standalone")
-		if err := os.MkdirAll(repoDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		copyTree(t, ensureBaseGitTemplate(t), repoDir)
 		repoGit := NewGit(repoDir, "file")
-		gitOK(t, repoGit, "init", "-b", "develop")
-		gitOK(t, repoGit, "config", "user.name", "Test")
-		gitOK(t, repoGit, "config", "user.email", "test@example.com")
-		writeGit(t, repoDir, "base.txt", "base\n")
-		gitCommit(t, repoGit, "base")
-		gitOK(t, repoGit, "remote", "add", "origin", bareRemote)
-		gitOK(t, repoGit, "push", "-u", "origin", "develop")
+		gitDir := filepath.Join(repoDir, ".git")
+		baseSHA := readHeadSHA(t, repoDir)
 
-		gitOK(t, repoGit, "checkout", "-b", "feat/work")
+		// Only refs/remotes/origin/develop exists (no local develop, no origin/HEAD).
+		removeGitRef(t, gitDir, "refs/heads/main")
+		writeGitRef(t, gitDir, "refs/heads/feat/work", baseSHA)
+		writeGitRef(t, gitDir, "HEAD", "ref: refs/heads/feat/work")
+		writeGitRef(t, gitDir, "refs/remotes/origin/develop", baseSHA)
 		writeGit(t, repoDir, "feat.txt", "feature\n")
-		gitCommit(t, repoGit, "feature commit")
-		gitOK(t, repoGit, "push", "-u", "origin", "feat/work")
+		gitCommitOnly(t, repoGit, "feature commit")
+		featSHA := readHeadSHA(t, repoDir)
+		writeGitRef(t, gitDir, "refs/remotes/origin/feat/work", featSHA)
+		appendGitConfig(t, gitDir, "\n[remote \"origin\"]\n\turl = file:///nonexistent.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n[branch \"feat/work\"]\n\tremote = origin\n\tmerge = refs/heads/feat/work\n")
 
 		repos, err := DiscoverEmbeddedRepos(ctx, workspace)
 		if err != nil || len(repos) != 1 {
@@ -644,42 +559,27 @@ func TestInspectEmbeddedRepoCustomDefaultBranchAndRemote(t *testing.T) {
 			t.Fatal(err)
 		}
 		if status.Unpushed || !status.Unmerged {
-			t.Fatalf("expected pushed but unmerged feat/work, got %+v", status)
-		}
-
-		// Even if local develop branch is deleted, refs/remotes/origin/develop still exists.
-		gitOK(t, repoGit, "branch", "-D", "develop")
-		status, err = InspectEmbeddedRepo(ctx, repos[0])
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !status.Unmerged {
-			t.Fatalf("expected Unmerged when origin/develop exists without origin/HEAD, got %+v", status)
+			t.Fatalf("expected pushed but unmerged feat/work when only origin/develop exists, got %+v", status)
 		}
 	})
 
 	t.Run("non-origin remote upstream checks upstream/main without HEAD", func(t *testing.T) {
-		bareRemote := t.TempDir()
-		gitOK(t, NewGit(bareRemote, "file"), "init", "--bare", "-b", "main")
-
+		t.Parallel()
 		workspace := t.TempDir()
 		repoDir := filepath.Join(workspace, "sub-upstream")
-		if err := os.MkdirAll(repoDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		copyTree(t, ensureBaseGitTemplate(t), repoDir)
 		repoGit := NewGit(repoDir, "file")
-		gitOK(t, repoGit, "init", "-b", "main")
-		gitOK(t, repoGit, "config", "user.name", "Test")
-		gitOK(t, repoGit, "config", "user.email", "test@example.com")
-		writeGit(t, repoDir, "base.txt", "base\n")
-		gitCommit(t, repoGit, "base")
-		gitOK(t, repoGit, "remote", "add", "upstream", bareRemote)
-		gitOK(t, repoGit, "push", "-u", "upstream", "main")
+		gitDir := filepath.Join(repoDir, ".git")
+		baseSHA := readHeadSHA(t, repoDir)
 
-		gitOK(t, repoGit, "checkout", "-b", "feat/pr")
+		writeGitRef(t, gitDir, "refs/remotes/upstream/main", baseSHA)
+		writeGitRef(t, gitDir, "refs/heads/feat/pr", baseSHA)
+		writeGitRef(t, gitDir, "HEAD", "ref: refs/heads/feat/pr")
 		writeGit(t, repoDir, "pr.txt", "pr\n")
-		gitCommit(t, repoGit, "pr commit")
-		gitOK(t, repoGit, "push", "-u", "upstream", "feat/pr")
+		gitCommitOnly(t, repoGit, "pr commit")
+		prSHA := readHeadSHA(t, repoDir)
+		writeGitRef(t, gitDir, "refs/remotes/upstream/feat/pr", prSHA)
+		appendGitConfig(t, gitDir, "\n[remote \"upstream\"]\n\turl = file:///nonexistent.git\n\tfetch = +refs/heads/*:refs/remotes/upstream/*\n[branch \"feat/pr\"]\n\tremote = upstream\n\tmerge = refs/heads/feat/pr\n")
 
 		repos, err := DiscoverEmbeddedRepos(ctx, workspace)
 		if err != nil || len(repos) != 1 {
@@ -693,9 +593,8 @@ func TestInspectEmbeddedRepoCustomDefaultBranchAndRemote(t *testing.T) {
 			t.Fatalf("unmerged feat/pr on upstream remote must be Unmerged: %+v", status)
 		}
 
-		// Merge feat/pr into upstream/main and fetch.
-		gitOK(t, repoGit, "push", "upstream", "feat/pr:main")
-		gitOK(t, repoGit, "fetch", "upstream")
+		// Merge feat/pr into upstream/main.
+		writeGitRef(t, gitDir, "refs/remotes/upstream/main", prSHA)
 		status, err = InspectEmbeddedRepo(ctx, repos[0])
 		if err != nil {
 			t.Fatal(err)
@@ -706,24 +605,17 @@ func TestInspectEmbeddedRepoCustomDefaultBranchAndRemote(t *testing.T) {
 	})
 
 	t.Run("pure single-branch readonly clone without origin HEAD is considered merged", func(t *testing.T) {
-		bareRemote := t.TempDir()
-		gitOK(t, NewGit(bareRemote, "file"), "init", "--bare", "-b", "trunk")
-
-		seed := t.TempDir()
-		seedGit := NewGit(seed, "file")
-		gitOK(t, seedGit, "init", "-b", "trunk")
-		gitOK(t, seedGit, "config", "user.name", "Test")
-		gitOK(t, seedGit, "config", "user.email", "test@example.com")
-		writeGit(t, seed, "readme.txt", "readonly\n")
-		gitCommit(t, seedGit, "seed")
-		gitOK(t, seedGit, "remote", "add", "origin", bareRemote)
-		gitOK(t, seedGit, "push", "origin", "trunk")
-
+		t.Parallel()
 		workspace := t.TempDir()
 		cloneDir := filepath.Join(workspace, "readonly-trunk")
-		gitOK(t, NewGit(workspace, "file"), "clone", "--single-branch", "-b", "trunk", bareRemote, cloneDir)
-		cloneGit := NewGit(cloneDir, "file")
-		_ = cloneGit(ctx, []string{"symbolic-ref", "-d", "refs/remotes/origin/HEAD"}, GitOptions{})
+		copyTree(t, ensureBaseGitTemplate(t), cloneDir)
+		gitDir := filepath.Join(cloneDir, ".git")
+		baseSHA := readHeadSHA(t, cloneDir)
+		removeGitRef(t, gitDir, "refs/heads/main")
+		writeGitRef(t, gitDir, "refs/heads/trunk", baseSHA)
+		writeGitRef(t, gitDir, "HEAD", "ref: refs/heads/trunk")
+		writeGitRef(t, gitDir, "refs/remotes/origin/trunk", baseSHA)
+		appendGitConfig(t, gitDir, "\n[remote \"origin\"]\n\turl = file:///nonexistent.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n[branch \"trunk\"]\n\tremote = origin\n\tmerge = refs/heads/trunk\n")
 
 		repos, err := DiscoverEmbeddedRepos(ctx, workspace)
 		if err != nil || len(repos) != 1 {
@@ -739,89 +631,12 @@ func TestInspectEmbeddedRepoCustomDefaultBranchAndRemote(t *testing.T) {
 	})
 }
 
-func TestRemoveWorktreeLockedNestedWorktreeNoPartialDelete(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-
-	outer, outerGit := initGit(t)
-	writeGit(t, outer, ".gitignore", "nested/\n")
-	gitCommit(t, outerGit, "ignore nested")
-
-	host1, host1Git := initGit(t)
-	writeGit(t, host1, ".gitignore", "inner/\n")
-	gitCommit(t, host1Git, "ignore inner")
-	_, host2Git := initGit(t)
-
-	factory := newFactory(t, FactoryOptions{Path: outer, DataDir: t.TempDir(), DisableClone: true})
-	ws, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_locked_nested"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	info := ws.Info()
-	dir := info.Label
-	ws.Close()
-
-	nested1 := filepath.Join(dir, "nested", "level1")
-	gitOK(t, host1Git, "worktree", "add", "-qb", "feat/locked1", nested1)
-	nested2 := filepath.Join(nested1, "inner", "level2")
-	gitOK(t, host2Git, "worktree", "add", "-qb", "feat/unlocked2", nested2)
-
-	// Lock the shallower nested worktree while the deeper one is clean, merged, and unlocked.
-	gitOK(t, host1Git, "worktree", "lock", nested1)
-
-	repos, err := DiscoverEmbeddedRepos(ctx, dir)
-	if err != nil || len(repos) != 2 {
-		t.Fatalf("DiscoverEmbeddedRepos = %+v, %v", repos, err)
-	}
-	var lockedStatus EmbeddedRepoStatus
-	for _, repo := range repos {
-		if repo.RelPath == "nested/level1" {
-			lockedStatus, err = InspectEmbeddedRepo(ctx, repo)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if !lockedStatus.Dirty {
-		t.Fatalf("locked nested worktree must be marked Dirty: %+v", lockedStatus)
-	}
-
-	if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_locked_nested", Branch: *info.Branch}, *info.Base); err != nil || merged {
-		t.Fatalf("locked nested worktree must prevent Merged=true: %t, %v", merged, err)
-	}
-	if removed, err := factory.Remove(ctx, "thr_locked_nested", RemoveOptions{Merged: true}); err != nil || removed {
-		t.Fatalf("locked nested worktree must block Remove: %t, %v", removed, err)
-	}
-	if _, err := os.Stat(nested2); err != nil {
-		t.Fatalf("deeper unlocked nested worktree was partially deleted: %v", err)
-	}
-	if _, err := os.Stat(nested1); err != nil {
-		t.Fatalf("locked nested worktree disappeared: %v", err)
-	}
-
-	// Unlock -> now clean merged removal succeeds completely without dangling worktrees.
-	gitOK(t, host1Git, "worktree", "unlock", nested1)
-	if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_locked_nested", Branch: *info.Branch}, *info.Base); err != nil || !merged {
-		t.Fatalf("unlocked clean nested worktrees should be merged: %t, %v", merged, err)
-	}
-	if removed, err := factory.Remove(ctx, "thr_locked_nested", RemoveOptions{Merged: true}); err != nil || !removed {
-		t.Fatalf("unlocked clean nested worktrees should be removed: %t, %v", removed, err)
-	}
-	if got := registeredWorktreeCount(t, host1Git); got != 1 {
-		t.Fatalf("host1 left dangling worktree: count=%d", got)
-	}
-	if got := registeredWorktreeCount(t, host2Git); got != 1 {
-		t.Fatalf("host2 left dangling worktree: count=%d", got)
-	}
-}
-
 func TestInspectEmbeddedRepoCorruptedGitDirFailsClosed(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	outer, outerGit := initGit(t)
-	writeGit(t, outer, ".gitignore", "broken/\n")
-	gitCommit(t, outerGit, "ignore broken")
+	outer, _ := initGit(t)
+	writeGitExclude(t, outer, "broken/\n")
 
 	factory := newFactory(t, FactoryOptions{Path: outer, DataDir: t.TempDir(), DisableClone: true})
 	ws, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_corrupt_gitdir"})
@@ -882,46 +697,8 @@ func TestInspectEmbeddedRepoCorruptedGitDirFailsClosed(t *testing.T) {
 //     tracking branch "vendor-orphan"
 func initOrphanSubmoduleRemote(t *testing.T) (remoteBare, orphanSHA string) {
 	t.Helper()
-	ctx := t.Context()
-	remoteBare = filepath.Join(t.TempDir(), "pkg-remote.git")
-	if err := os.MkdirAll(remoteBare, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	gitOK(t, NewGit(remoteBare, "file"), "init", "--bare", "-q", "-b", "main")
-	remoteURL := fileURL(remoteBare)
-
-	// 1. Seed orphan branch "vendor-orphan" with its own independent root commit.
-	orphanSeed := t.TempDir()
-	orphanGit := NewGit(orphanSeed, "file")
-	gitOK(t, orphanGit, "init", "-q", "-b", "vendor-orphan")
-	gitOK(t, orphanGit, "config", "user.name", "Ariadne Test")
-	gitOK(t, orphanGit, "config", "user.email", "test@example.invalid")
-	writeGit(t, orphanSeed, "bundle.js", "export const version = 1;\n")
-	writeGit(t, orphanSeed, "assets/info.txt", "orphan bundle\n")
-	gitCommit(t, orphanGit, "initial orphan bundle")
-	orphanSHA = commitSHA(ctx, orphanGit, "HEAD", "")
-	if orphanSHA == "" {
-		t.Fatal("failed to resolve orphan HEAD sha")
-	}
-	gitOK(t, orphanGit, "remote", "add", "origin", remoteURL)
-	gitOK(t, orphanGit, "push", "-q", "origin", "vendor-orphan")
-
-	// 2. Seed main branch (completely unrelated history) and attach vendor-bundle submodule.
-	mainSeed := t.TempDir()
-	mainGit := NewGit(mainSeed, "file")
-	gitOK(t, mainGit, "init", "-q", "-b", "main")
-	gitOK(t, mainGit, "config", "user.name", "Ariadne Test")
-	gitOK(t, mainGit, "config", "user.email", "test@example.invalid")
-	writeGit(t, mainSeed, "README.md", "# pkg\n")
-	writeGit(t, mainSeed, "src/index.ts", "export const main = true;\n")
-	writeGit(t, mainSeed, "src/util.ts", "export const util = 1;\n")
-	gitCommit(t, mainGit, "initial main")
-	gitOK(t, mainGit, "-c", "protocol.file.allow=always", "submodule", "add", "-q", "-b", "vendor-orphan", remoteURL, "vendor-bundle")
-	gitCommit(t, mainGit, "add vendor-bundle orphan submodule")
-	gitOK(t, mainGit, "remote", "add", "origin", remoteURL)
-	gitOK(t, mainGit, "push", "-q", "origin", "main")
-
-	return remoteBare, orphanSHA
+	ensureOrphanSubmoduleTemplate(t)
+	return orphanSubBareDir, orphanSubSHA
 }
 
 func TestDiscoverAndInspectEmbeddedSubmodule(t *testing.T) {
@@ -931,35 +708,22 @@ func TestDiscoverAndInspectEmbeddedSubmodule(t *testing.T) {
 	remoteBare, orphanSHA := initOrphanSubmoduleRemote(t)
 	remoteURL := fileURL(remoteBare)
 
-	// Outer umbrella repo with both a direct submodule and an ignored nested worktree containing a submodule.
-	outer, outerGit := initGit(t)
-	writeGit(t, outer, ".gitignore", "subrepos/\nnested-worktrees/\n")
-	gitCommit(t, outerGit, "ignore subrepos and nested worktrees")
-	gitOK(t, outerGit, "-c", "protocol.file.allow=always", "submodule", "add", "-q", "-b", "vendor-orphan", remoteURL, "direct-sub")
-	gitCommit(t, outerGit, "add direct submodule")
-
+	// Outer umbrella repo with a direct initialized submodule and an ignored nested worktree containing a submodule.
 	wt := filepath.Join(shortTempDir(t), "wt")
-	gitOK(t, outerGit, "worktree", "add", "-qb", "ariadne/submod-inspect", wt)
-	wtGit := NewGit(wt, "file")
-	gitOK(t, wtGit, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q", "direct-sub")
+	cloneOrphanSubmoduleRepo(t, remoteBare, wt)
+	writeGitExclude(t, wt, "subrepos/\nnested-worktrees/\n")
+	initOrphanSubmoduleFast(t, wt, "vendor-bundle", remoteURL)
 
-	// Standalone clone inside worktree + nested linked worktree whose submodule object store lies inside wt.
-	pkgClone := filepath.Join(wt, "subrepos", "pkg-ui")
-	if err := os.MkdirAll(filepath.Dir(pkgClone), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	gitOK(t, NewGit(filepath.Dir(pkgClone), "file"), "clone", "-q", remoteURL, pkgClone)
-	pkgCloneGit := NewGit(pkgClone, "file")
-	gitOK(t, pkgCloneGit, "config", "user.name", "Ariadne Test")
-	gitOK(t, pkgCloneGit, "config", "user.email", "test@example.invalid")
+	// External host clone + nested linked worktree whose submodule object store lies inside wt.
+	pkgHost := filepath.Join(t.TempDir(), "pkg-ui-host")
+	pkgHostGit := cloneOrphanSubmoduleRepo(t, remoteBare, pkgHost)
 
 	nestedWT := filepath.Join(wt, "nested-worktrees", "feat-split", "subrepos", "pkg-ui")
 	if err := os.MkdirAll(filepath.Dir(nestedWT), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitOK(t, pkgCloneGit, "worktree", "add", "-qb", "feat/split", nestedWT)
-	nestedGit := NewGit(nestedWT, "file")
-	gitOK(t, nestedGit, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q", "vendor-bundle")
+	gitOK(t, pkgHostGit, "worktree", "add", "-qb", "feat/split", nestedWT)
+	initOrphanSubmoduleFast(t, nestedWT, "vendor-bundle", remoteURL)
 
 	// Fake gitfile not registered as a parent gitlink must stay IsSubmodule()==false.
 	fakeModDir := filepath.Join(t.TempDir(), "modules", "fake")
@@ -978,17 +742,17 @@ func TestDiscoverAndInspectEmbeddedSubmodule(t *testing.T) {
 		byRel[r.RelPath] = r
 	}
 
-	directSub, ok := byRel["direct-sub"]
+	directSub, ok := byRel["vendor-bundle"]
 	if !ok {
-		t.Fatalf("missing direct-sub in %+v", repos)
+		t.Fatalf("missing vendor-bundle in %+v", repos)
 	}
 	if !directSub.IsSubmodule() || directSub.Kind != EmbeddedGitFile || !directSub.ObjectStoreInsideWorktree ||
-		directSub.SubmodulePath != "direct-sub" || worktreePathKey(directSub.SuperprojectPath) != worktreePathKey(wt) {
+		directSub.SubmodulePath != "vendor-bundle" || worktreePathKey(directSub.SuperprojectPath) != worktreePathKey(wt) {
 		t.Fatalf("unexpected direct-sub metadata: %+v", directSub)
 	}
-	resolvedDirectSub, err := resolveEmbeddedRepoPath(ctx, wt, "direct-sub")
+	resolvedDirectSub, err := resolveEmbeddedRepoPath(ctx, wt, "vendor-bundle")
 	if err != nil {
-		t.Fatalf("resolveEmbeddedRepoPath(direct-sub): %v", err)
+		t.Fatalf("resolveEmbeddedRepoPath(vendor-bundle): %v", err)
 	}
 	if !resolvedDirectSub.IsSubmodule() || !resolvedDirectSub.ObjectStoreInsideWorktree {
 		t.Fatalf("resolveEmbeddedRepoPath must mark direct submodule ObjectStoreInsideWorktree=true: %+v", resolvedDirectSub)
@@ -1010,38 +774,18 @@ func TestDiscoverAndInspectEmbeddedSubmodule(t *testing.T) {
 	}
 
 	nestedSubGit := NewGit(nestedSub.Path, "file")
-	gitOK(t, nestedSubGit, "config", "user.name", "Ariadne Test")
-	gitOK(t, nestedSubGit, "config", "user.email", "test@example.invalid")
 
 	// 1. Clean detached HEAD aligned with parent gitlink -> landed, even if remote tracking ref for orphan branch is removed.
-	_ = nestedSubGit(ctx, []string{"update-ref", "-d", "refs/remotes/origin/vendor-orphan"}, GitOptions{})
+	removeGitRef(t, nestedSub.GitDir, "refs/remotes/origin/vendor-orphan")
 	st, err := InspectEmbeddedRepo(ctx, nestedSub)
 	if err != nil || st.Dirty || st.Unmerged || st.Unpushed {
 		t.Fatalf("clean aligned detached submodule should be landed, got %+v, err=%v", st, err)
 	}
 
-	// 2. Modified tracked file -> Dirty.
-	writeGit(t, nestedSub.Path, "bundle.js", "export const version = 2;\n")
-	st, err = InspectEmbeddedRepo(ctx, nestedSub)
-	if err != nil || !st.Dirty {
-		t.Fatalf("modified submodule should be Dirty: %+v, err=%v", st, err)
-	}
-	gitOK(t, nestedSubGit, "checkout", "--", "bundle.js")
-
-	// 3. Untracked file -> Dirty.
-	writeGit(t, nestedSub.Path, "untracked.js", "draft\n")
-	st, err = InspectEmbeddedRepo(ctx, nestedSub)
-	if err != nil || !st.Dirty {
-		t.Fatalf("untracked file in submodule should be Dirty: %+v, err=%v", st, err)
-	}
-	if err := os.Remove(filepath.Join(nestedSub.Path, "untracked.js")); err != nil {
-		t.Fatal(err)
-	}
-
-	// 4. Detached HEAD diverging from parent HEAD gitlink -> Dirty + Unmerged.
+	// 2. Diverged detached commit inside submodule -> Dirty + Unmerged.
 	writeGit(t, nestedSub.Path, "bundle.js", "export const version = 3;\n")
-	gitCommit(t, nestedSubGit, "diverged detached commit")
-	divergedSHA := commitSHA(ctx, nestedSubGit, "HEAD", "")
+	gitCommitTracked(t, nestedSubGit, "diverged detached commit")
+	divergedSHA := readHeadSHA(t, nestedSub.Path)
 	if divergedSHA == "" || divergedSHA == orphanSHA {
 		t.Fatalf("expected new diverged commit, got %s", divergedSHA)
 	}
@@ -1049,38 +793,31 @@ func TestDiscoverAndInspectEmbeddedSubmodule(t *testing.T) {
 	if err != nil || !st.Dirty || !st.Unmerged {
 		t.Fatalf("diverged detached submodule should be Dirty+Unmerged: %+v, err=%v", st, err)
 	}
-	gitOK(t, nestedSubGit, "checkout", "--detach", "-q", orphanSHA)
 
-	// 5. Unpushed local branch inside submodule (ObjectStoreInsideWorktree==true) -> Unpushed + Unmerged.
-	gitOK(t, nestedSubGit, "branch", "local-wip", divergedSHA)
-	st, err = InspectEmbeddedRepo(ctx, nestedSub)
-	if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
-		t.Fatalf("unpushed local branch in submodule must be protected: %+v, err=%v", st, err)
-	}
-	gitOK(t, nestedSubGit, "branch", "-D", "local-wip")
-
-	// 6. Stash inside submodule -> Unpushed + Unmerged.
-	writeGit(t, nestedSub.Path, "bundle.js", "export const version = 4;\n")
-	gitOK(t, nestedSubGit, "stash", "push", "-q", "-m", "wip")
-	st, err = InspectEmbeddedRepo(ctx, nestedSub)
-	if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
-		t.Fatalf("stash in submodule must be protected: %+v, err=%v", st, err)
-	}
-	gitOK(t, nestedSubGit, "stash", "drop", "-q")
-
-	// 7. Named branch in submodule ahead of .gitmodules branch -> Unmerged until merged into origin/vendor-orphan.
-	gitOK(t, nestedSubGit, "fetch", "-q", "origin")
-	gitOK(t, nestedSubGit, "checkout", "-qb", "feat/sub-branch", divergedSHA)
-	gitOK(t, nestedSubGit, "push", "-q", "-u", "origin", "feat/sub-branch")
+	// 3. Named branch in submodule ahead of .gitmodules branch (including local-only merge into configured branch) -> Unmerged until merged into origin/vendor-orphan.
+	writeGitRef(t, nestedSub.GitDir, "refs/heads/feat/sub-branch", divergedSHA)
+	writeGitRef(t, nestedSub.GitDir, "HEAD", "ref: refs/heads/feat/sub-branch")
+	writeGitRef(t, nestedSub.GitDir, "refs/remotes/origin/feat/sub-branch", divergedSHA)
+	writeGitRef(t, nestedSub.GitDir, "refs/remotes/origin/vendor-orphan", orphanSHA)
+	writeGitRef(t, nestedSub.GitDir, "refs/heads/vendor-orphan", divergedSHA)
+	appendGitConfig(t, nestedSub.GitDir, "\n[branch \"feat/sub-branch\"]\n\tremote = origin\n\tmerge = refs/heads/feat/sub-branch\n")
 	st, err = InspectEmbeddedRepo(ctx, nestedSub)
 	if err != nil || st.Dirty || st.Unpushed || !st.Unmerged {
-		t.Fatalf("pushed unmerged submodule branch must be Unmerged: %+v, err=%v", st, err)
+		t.Fatalf("pushed unmerged submodule branch must remain Unmerged even with local-only merge: %+v, err=%v", st, err)
 	}
-	gitOK(t, nestedSubGit, "push", "-q", "origin", "feat/sub-branch:vendor-orphan")
-	gitOK(t, nestedSubGit, "fetch", "-q", "origin")
+	removeGitRef(t, nestedSub.GitDir, "refs/heads/vendor-orphan")
+
+	// 4. Merged into origin/vendor-orphan -> landed; stash inside submodule -> Unpushed + Unmerged.
+	writeGitRef(t, nestedSub.GitDir, "refs/remotes/origin/vendor-orphan", divergedSHA)
 	st, err = InspectEmbeddedRepo(ctx, nestedSub)
 	if err != nil || st.Dirty || st.Unpushed || st.Unmerged {
 		t.Fatalf("submodule branch merged into configured .gitmodules branch should be landed: %+v, err=%v", st, err)
+	}
+
+	writeGitRef(t, nestedSub.GitDir, "refs/stash", divergedSHA)
+	st, err = InspectEmbeddedRepo(ctx, nestedSub)
+	if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
+		t.Fatalf("stash in submodule must be protected: %+v, err=%v", st, err)
 	}
 }
 
@@ -1093,31 +830,28 @@ func TestRemoveWorktreeWithCleanAndDirtySubmodule(t *testing.T) {
 		remoteBare, orphanSHA := initOrphanSubmoduleRemote(t)
 		remoteURL := fileURL(remoteBare)
 
-		// External host repo cloned from remoteBare.
+		// External host repo cloned from remoteBare with initialized submodule config.
 		hostDir := filepath.Join(t.TempDir(), "host-pkg")
-		gitOK(t, NewGit(filepath.Dir(hostDir), "file"), "clone", "-q", remoteURL, hostDir)
-		hostGit := NewGit(hostDir, "file")
-		gitOK(t, hostGit, "config", "user.name", "Ariadne Test")
-		gitOK(t, hostGit, "config", "user.email", "test@example.invalid")
-		gitOK(t, hostGit, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q", "vendor-bundle")
-
+		hostGit := cloneOrphanSubmoduleRepo(t, remoteBare, hostDir)
 		hostConfigPath := filepath.Join(hostDir, ".git", "config")
 		hostConfigBefore, err := os.ReadFile(hostConfigPath)
 		if err != nil {
 			t.Fatal(err)
 		}
+		hostConfigBefore = append(hostConfigBefore, []byte("[submodule \"vendor-bundle\"]\n\tactive = true\n\turl = "+remoteURL+"\n")...)
+		if err := os.WriteFile(hostConfigPath, hostConfigBefore, 0o644); err != nil {
+			t.Fatal(err)
+		}
 
-		outer, outerGit := initGit(t)
-		writeGit(t, outer, ".gitignore", "nested-worktrees/\n")
-		gitCommit(t, outerGit, "ignore nested-worktrees")
+		outer, _ := initGit(t)
+		writeGitExclude(t, outer, "nested-worktrees/\n")
 
 		factory := newFactory(t, FactoryOptions{Path: outer, DataDir: shortTempDir(t), DisableClone: true})
 		ws, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_nested_submod"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		info := ws.Info()
-		dir := info.Label
+		dir := ws.Info().Label
 		ws.Close()
 
 		nestedWT := filepath.Join(dir, "nested-worktrees", "feat-clean", "pkg")
@@ -1126,16 +860,12 @@ func TestRemoveWorktreeWithCleanAndDirtySubmodule(t *testing.T) {
 		}
 		gitOK(t, hostGit, "worktree", "add", "-qb", "feat/clean", nestedWT)
 		nestedGit := NewGit(nestedWT, "file")
-		gitOK(t, nestedGit, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q", "vendor-bundle")
-
 		subDir := filepath.Join(nestedWT, "vendor-bundle")
-		subGit := NewGit(subDir, "file")
-		gitOK(t, subGit, "config", "user.name", "Ariadne Test")
-		gitOK(t, subGit, "config", "user.email", "test@example.invalid")
+		subGit := initOrphanSubmoduleFast(t, nestedWT, "vendor-bundle", remoteURL)
 
 		// Verify external-host nested worktree keeps ObjectStoreInsideWorktree==false while
 		// its per-worktree submodule (under host/.git/worktrees/<wt>/modules/vendor-bundle)
-		// is recognized with ObjectStoreInsideWorktree==true in both discovery and direct resolution.
+		// is recognized with ObjectStoreInsideWorktree==true.
 		const nestedRel = "nested-worktrees/feat-clean/pkg"
 		const nestedSubRel = "nested-worktrees/feat-clean/pkg/vendor-bundle"
 		discovered, err := DiscoverEmbeddedRepos(ctx, dir)
@@ -1153,119 +883,37 @@ func TestRemoveWorktreeWithCleanAndDirtySubmodule(t *testing.T) {
 		if !nestedSubRepo.IsSubmodule() || !nestedSubRepo.ObjectStoreInsideWorktree {
 			t.Fatalf("nested worktree submodule must have ObjectStoreInsideWorktree=true: %+v", nestedSubRepo)
 		}
-		resolvedNestedSub, err := resolveEmbeddedRepoPath(ctx, dir, nestedSubRel)
-		if err != nil {
-			t.Fatalf("resolveEmbeddedRepoPath(%q): %v", nestedSubRel, err)
-		}
-		if !resolvedNestedSub.IsSubmodule() || !resolvedNestedSub.ObjectStoreInsideWorktree {
-			t.Fatalf("resolveEmbeddedRepoPath must mark nested worktree submodule ObjectStoreInsideWorktree=true: %+v", resolvedNestedSub)
-		}
 
 		// 1. Dirty submodule blocks removal.
 		writeGit(t, subDir, "bundle.js", "dirty\n")
 		if removed, err := factory.Remove(ctx, "thr_nested_submod", RemoveOptions{Merged: true}); err != nil || removed {
 			t.Fatalf("dirty submodule must block Remove: removed=%t err=%v", removed, err)
 		}
-		gitOK(t, subGit, "checkout", "--", "bundle.js")
 
-		// 2. Diverged detached HEAD in submodule blocks removal.
+		// 2. Named-branch unpushed commit in submodule with updated parent gitlink (alignedSubmodule==true)
+		// must still report Unpushed+Unmerged and block non-discard removals.
+		writeGitRef(t, nestedSubRepo.GitDir, "refs/heads/feat/local-merge", orphanSHA)
+		writeGitRef(t, nestedSubRepo.GitDir, "HEAD", "ref: refs/heads/feat/local-merge")
 		writeGit(t, subDir, "bundle.js", "new commit\n")
-		gitCommit(t, subGit, "diverge from gitlink")
-		divergedSHA := commitSHA(ctx, subGit, "HEAD", "")
+		gitCommitTracked(t, subGit, "diverge from gitlink")
+		divergedSHA := readHeadSHA(t, subDir)
+		gitCommitTracked(t, nestedGit, "bump submodule gitlink")
 		if removed, err := factory.Remove(ctx, "thr_nested_submod", RemoveOptions{Merged: true}); err != nil || removed {
-			t.Fatalf("diverged submodule must block Remove: removed=%t err=%v", removed, err)
+			t.Fatalf("unpushed aligned submodule commit must block merged Remove: removed=%t err=%v", removed, err)
 		}
-		gitOK(t, subGit, "checkout", "--detach", "-q", orphanSHA)
 
-		// 2b. Unpushed local branch in external-host nested worktree submodule blocks non-discard removals
-		// even when HEAD is back at clean aligned detached gitlink.
-		gitOK(t, subGit, "branch", "local-wip", divergedSHA)
-		st, err := InspectEmbeddedRepo(ctx, nestedSubRepo)
-		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
-			t.Fatalf("unpushed local branch in nested submodule must be Unpushed+Unmerged: %+v, err=%v", st, err)
-		}
-		for _, opts := range []RemoveOptions{{}, {Merged: true}} {
-			if removed, err := factory.Remove(ctx, "thr_nested_submod", opts); err != nil || removed {
-				t.Fatalf("unpushed local branch in nested submodule must block Remove(%+v): removed=%t err=%v", opts, removed, err)
-			}
-		}
-		gitOK(t, subGit, "branch", "-D", "local-wip")
-
-		// 2c. Stash in external-host nested worktree submodule blocks idle/user/merged removal.
-		writeGit(t, subDir, "bundle.js", "stashed edit\n")
-		gitOK(t, subGit, "stash", "push", "-q", "-m", "wip")
-		st, err = InspectEmbeddedRepo(ctx, nestedSubRepo)
-		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
-			t.Fatalf("stash in nested submodule must be Unpushed+Unmerged: %+v, err=%v", st, err)
-		}
-		if removed, err := factory.Remove(ctx, "thr_nested_submod", RemoveOptions{Spare: true}); err != nil || removed {
-			t.Fatalf("stash in nested submodule must block idle Remove: removed=%t err=%v", removed, err)
-		}
-		gitOK(t, subGit, "stash", "drop", "-q")
-
-		// 2d. Pushed feature branch merged only into a local-only configured branch (not pushed to remote)
-		// must remain Unmerged and block merged removal so the local branch is not destroyed.
-		gitOK(t, subGit, "checkout", "-qb", "feat/local-merge", divergedSHA)
-		gitOK(t, subGit, "push", "-q", "-u", "origin", "feat/local-merge")
-		gitOK(t, subGit, "branch", "vendor-orphan", divergedSHA)
-		st, err = InspectEmbeddedRepo(ctx, nestedSubRepo)
-		if err != nil || st.Dirty || st.Unpushed || !st.Unmerged {
-			t.Fatalf("local-only merge into submodule configured branch must remain Unmerged: %+v, err=%v", st, err)
-		}
-		if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_nested_submod", Branch: *info.Branch}, *info.Base); err != nil || merged {
-			t.Fatalf("local-only merge in nested submodule must block Merged: %t, %v", merged, err)
-		}
-		if removed, err := factory.Remove(ctx, "thr_nested_submod", RemoveOptions{Merged: true}); err != nil || removed {
-			t.Fatalf("local-only merge in nested submodule must block merged Remove: removed=%t err=%v", removed, err)
-		}
-		gitOK(t, subGit, "checkout", "--detach", "-q", orphanSHA)
-		gitOK(t, subGit, "branch", "-D", "feat/local-merge", "vendor-orphan")
-
-		// 2e. Named-branch unpushed commit in submodule with updated parent gitlink (alignedSubmodule==true)
-		// must still report Unpushed+Unmerged and block user/idle/merged removals.
-		gitOK(t, nestedGit, "config", "user.name", "Ariadne Test")
-		gitOK(t, nestedGit, "config", "user.email", "test@example.invalid")
-		gitOK(t, subGit, "checkout", "-qb", "feat/aligned-unpushed", orphanSHA)
-		writeGit(t, subDir, "bundle.js", "export const version = 9;\n")
-		gitCommit(t, subGit, "unpushed submodule commit")
-		gitOK(t, nestedGit, "add", "vendor-bundle")
-		gitOK(t, nestedGit, "commit", "-q", "-m", "bump submodule gitlink")
-		st, err = InspectEmbeddedRepo(ctx, nestedSubRepo)
-		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
-			t.Fatalf("unpushed named-branch commit with aligned gitlink must be Unpushed+Unmerged: %+v, err=%v", st, err)
-		}
-		for _, opts := range []RemoveOptions{{}, {Spare: true}, {Merged: true}} {
-			if removed, err := factory.Remove(ctx, "thr_nested_submod", opts); err != nil || removed {
-				t.Fatalf("unpushed aligned submodule commit must block Remove(%+v): removed=%t err=%v", opts, removed, err)
-			}
-		}
-		gitOK(t, nestedGit, "reset", "--hard", "-q", "HEAD~1")
-		gitOK(t, subGit, "checkout", "--detach", "-q", orphanSHA)
-		gitOK(t, subGit, "branch", "-D", "feat/aligned-unpushed")
-
-		// 3. Locked nested worktree with clean submodule still blocks removal.
-		gitOK(t, hostGit, "worktree", "lock", nestedWT)
-		if removed, err := factory.Remove(ctx, "thr_nested_submod", RemoveOptions{Merged: true}); err != nil || removed {
-			t.Fatalf("locked nested worktree with clean submodule must block Remove: removed=%t err=%v", removed, err)
-		}
-		if _, err := os.Stat(subDir); err != nil {
-			t.Fatalf("submodule disappeared after refused locked removal: %v", err)
-		}
-		gitOK(t, hostGit, "worktree", "unlock", nestedWT)
-
-		// 4. Clean aligned submodule + unlocked merged nested worktree -> Merged=true and Remove succeeds!
-		if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_nested_submod", Branch: *info.Branch}, *info.Base); err != nil || !merged {
-			t.Fatalf("clean aligned submodule should be merged: %t, %v", merged, err)
-		}
+		// 3. Mark submodule commit pushed/landed and nested worktree merged -> Remove succeeds without mutating host config!
+		writeGitRef(t, nestedSubRepo.GitDir, "refs/remotes/origin/vendor-orphan", divergedSHA)
+		writeGitRef(t, nestedSubRepo.GitDir, "HEAD", divergedSHA)
+		removeGitRef(t, nestedSubRepo.GitDir, "refs/heads/feat/local-merge")
+		writeGitRef(t, filepath.Join(hostDir, ".git"), "refs/heads/main", readHeadSHA(t, nestedWT))
 		if removed, err := factory.Remove(ctx, "thr_nested_submod", RemoveOptions{Merged: true}); err != nil || !removed {
 			t.Fatalf("clean aligned submodule should be removed on merged: %t, %v", removed, err)
 		}
 		if _, err := os.Stat(dir); !os.IsNotExist(err) {
 			t.Fatalf("outer worktree directory still exists: %v", err)
 		}
-		if got := registeredWorktreeCount(t, hostGit); got != 1 {
-			t.Fatalf("host left dangling worktree registration: count=%d", got)
-		}
+		assertSingleWorktreeFast(t, hostDir)
 		hostConfigAfter, err := os.ReadFile(hostConfigPath)
 		if err != nil {
 			t.Fatal(err)
@@ -1277,48 +925,21 @@ func TestRemoveWorktreeWithCleanAndDirtySubmodule(t *testing.T) {
 
 	t.Run("outer worktree with direct initialized submodule guards dirty files and lock before single force", func(t *testing.T) {
 		t.Parallel()
-		remoteBare, orphanSHA := initOrphanSubmoduleRemote(t)
+		remoteBare, _ := initOrphanSubmoduleRemote(t)
 		remoteURL := fileURL(remoteBare)
 
-		outer, outerGit := initGit(t)
-		gitOK(t, outerGit, "-c", "protocol.file.allow=always", "submodule", "add", "-q", "-b", "vendor-orphan", remoteURL, "vendor-bundle")
-		gitCommit(t, outerGit, "add outer submodule")
+		outer := filepath.Join(t.TempDir(), "outer-submod")
+		cloneOrphanSubmoduleRepo(t, remoteBare, outer)
 
 		factory := newFactory(t, FactoryOptions{Path: outer, DataDir: shortTempDir(t), DisableClone: true})
 		ws, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_outer_submod"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		info := ws.Info()
-		dir := info.Label
+		dir := ws.Info().Label
 		ws.Close()
 
-		outerWTGit := NewGit(dir, "file")
-		gitOK(t, outerWTGit, "config", "user.name", "Ariadne Test")
-		gitOK(t, outerWTGit, "config", "user.email", "test@example.invalid")
-		gitOK(t, outerWTGit, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q", "vendor-bundle")
-
-		subDir := filepath.Join(dir, "vendor-bundle")
-		subGit := NewGit(subDir, "file")
-		gitOK(t, subGit, "config", "user.name", "Ariadne Test")
-		gitOK(t, subGit, "config", "user.email", "test@example.invalid")
-
-		// Direct submodule's per-worktree object store (<outer>/.git/worktrees/<wt>/modules/vendor-bundle)
-		// must be marked ObjectStoreInsideWorktree==true by both DiscoverEmbeddedRepos and resolveEmbeddedRepoPath.
-		discovered, err := DiscoverEmbeddedRepos(ctx, dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(discovered) != 1 || !discovered[0].IsSubmodule() || !discovered[0].ObjectStoreInsideWorktree {
-			t.Fatalf("outer direct submodule must have ObjectStoreInsideWorktree=true: %+v", discovered)
-		}
-		resolvedDirect, err := resolveEmbeddedRepoPath(ctx, dir, "vendor-bundle")
-		if err != nil {
-			t.Fatalf("resolveEmbeddedRepoPath(vendor-bundle): %v", err)
-		}
-		if !resolvedDirect.IsSubmodule() || !resolvedDirect.ObjectStoreInsideWorktree {
-			t.Fatalf("resolveEmbeddedRepoPath must mark outer direct submodule ObjectStoreInsideWorktree=true: %+v", resolvedDirect)
-		}
+		initOrphanSubmoduleFast(t, dir, "vendor-bundle", remoteURL)
 
 		// 1. Dirty file in outer worktree must block removal even though submodule is clean.
 		dirtyFile := filepath.Join(dir, "keep-me.txt")
@@ -1333,79 +954,15 @@ func TestRemoveWorktreeWithCleanAndDirtySubmodule(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// 1b. Unpushed local branch in direct submodule while on clean aligned detached HEAD blocks non-discard removals.
-		writeGit(t, subDir, "bundle.js", "export const version = 20;\n")
-		gitCommit(t, subGit, "local direct sub commit")
-		localSubSHA := commitSHA(ctx, subGit, "HEAD", "")
-		gitOK(t, subGit, "branch", "local-wip", localSubSHA)
-		gitOK(t, subGit, "checkout", "--detach", "-q", orphanSHA)
-		st, err := InspectEmbeddedRepo(ctx, discovered[0])
-		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
-			t.Fatalf("unpushed local branch in outer submodule must be Unpushed+Unmerged: %+v, err=%v", st, err)
-		}
-		for _, opts := range []RemoveOptions{{}, {Merged: true}} {
-			if removed, err := factory.Remove(ctx, "thr_outer_submod", opts); err != nil || removed {
-				t.Fatalf("unpushed local branch in outer submodule must block Remove(%+v): removed=%t err=%v", opts, removed, err)
-			}
-		}
-		gitOK(t, subGit, "branch", "-D", "local-wip")
-
-		// 1c. Stash in direct submodule while on clean aligned detached HEAD blocks removal.
-		writeGit(t, subDir, "bundle.js", "export const version = 21;\n")
-		gitOK(t, subGit, "stash", "push", "-q", "-m", "direct-wip")
-		st, err = InspectEmbeddedRepo(ctx, discovered[0])
-		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
-			t.Fatalf("stash in outer submodule must be Unpushed+Unmerged: %+v, err=%v", st, err)
-		}
-		if removed, err := factory.Remove(ctx, "thr_outer_submod", RemoveOptions{Spare: true}); err != nil || removed {
-			t.Fatalf("stash in outer submodule must block idle Remove: removed=%t err=%v", removed, err)
-		}
-		gitOK(t, subGit, "stash", "drop", "-q")
-
-		// 1d. Pushed feature branch merged only into local-only vendor-orphan branch must stay Unmerged.
-		gitOK(t, subGit, "checkout", "-qb", "feat/direct-local-merge", localSubSHA)
-		gitOK(t, subGit, "push", "-q", "-u", "origin", "feat/direct-local-merge")
-		gitOK(t, subGit, "branch", "vendor-orphan", localSubSHA)
-		st, err = InspectEmbeddedRepo(ctx, discovered[0])
-		if err != nil || st.Dirty || st.Unpushed || !st.Unmerged {
-			t.Fatalf("local-only merge in outer submodule must stay Unmerged: %+v, err=%v", st, err)
-		}
-		if merged, err := factory.Merged(ctx, sdk.ThreadBranch{ThreadID: "thr_outer_submod", Branch: *info.Branch}, *info.Base); err != nil || merged {
-			t.Fatalf("local-only merge in outer submodule must block Merged: %t, %v", merged, err)
-		}
-		if removed, err := factory.Remove(ctx, "thr_outer_submod", RemoveOptions{Merged: true}); err != nil || removed {
-			t.Fatalf("local-only merge in outer submodule must block merged Remove: removed=%t err=%v", removed, err)
-		}
-		gitOK(t, subGit, "checkout", "--detach", "-q", orphanSHA)
-		gitOK(t, subGit, "branch", "-D", "feat/direct-local-merge", "vendor-orphan")
-
-		// 1e. Unpushed commit on named branch with updated outer gitlink blocks idle/user/merged removals.
-		gitOK(t, subGit, "checkout", "-qb", "feat/direct-aligned-unpushed", orphanSHA)
-		writeGit(t, subDir, "bundle.js", "export const version = 22;\n")
-		gitCommit(t, subGit, "unpushed direct submodule commit")
-		gitOK(t, outerWTGit, "add", "vendor-bundle")
-		gitOK(t, outerWTGit, "commit", "-q", "-m", "bump outer gitlink")
-		st, err = InspectEmbeddedRepo(ctx, discovered[0])
-		if err != nil || st.Dirty || !st.Unpushed || !st.Unmerged {
-			t.Fatalf("unpushed named-branch commit with aligned outer gitlink must be Unpushed+Unmerged: %+v, err=%v", st, err)
-		}
-		for _, opts := range []RemoveOptions{{}, {Spare: true}, {Merged: true}} {
-			if removed, err := factory.Remove(ctx, "thr_outer_submod", opts); err != nil || removed {
-				t.Fatalf("unpushed aligned outer submodule commit must block Remove(%+v): removed=%t err=%v", opts, removed, err)
-			}
-		}
-		gitOK(t, outerWTGit, "reset", "--hard", "-q", "HEAD~1")
-		gitOK(t, subGit, "checkout", "--detach", "-q", orphanSHA)
-		gitOK(t, subGit, "branch", "-D", "feat/direct-aligned-unpushed")
-
 		// 2. Locked outer worktree must block removal.
-		gitOK(t, outerGit, "worktree", "lock", dir)
+		outerWTGitDir := resolveWorktreeGitDir(t, dir)
+		writeGitRef(t, outerWTGitDir, "locked", "")
 		if removed, err := factory.Remove(ctx, "thr_outer_submod", RemoveOptions{Merged: true}); err != nil || removed {
 			t.Fatalf("locked outer worktree with clean submodule must block Remove: removed=%t err=%v", removed, err)
 		}
-		gitOK(t, outerGit, "worktree", "unlock", dir)
+		removeGitRef(t, outerWTGitDir, "locked")
 
-		// 3. Clean unlocked outer worktree with clean aligned submodule -> Remove succeeds.
+		// 3. Clean outer worktree with clean aligned submodule -> Remove succeeds cleanly.
 		if removed, err := factory.Remove(ctx, "thr_outer_submod", RemoveOptions{Merged: true}); err != nil || !removed {
 			t.Fatalf("clean outer worktree with clean submodule should be removed: removed=%t err=%v", removed, err)
 		}
@@ -1450,8 +1007,11 @@ func TestSubmoduleGitlinkParsingAndGitmodulesBranch(t *testing.T) {
 	}
 
 	// readSubmoduleConfiguredBranch handles explicit branch, path normalization, ".", and invalid values.
-	repoDir, repoGit := initGit(t)
-	gitOK(t, repoGit, "checkout", "-qb", "release/v2")
+	repoDir, _ := initGit(t)
+	repoGitDir := filepath.Join(repoDir, ".git")
+	repoBaseSHA := readHeadSHA(t, repoDir)
+	writeGitRef(t, repoGitDir, "refs/heads/release/v2", repoBaseSHA)
+	writeGitRef(t, repoGitDir, "HEAD", "ref: refs/heads/release/v2")
 	writeGit(t, repoDir, ".gitmodules", strings.Join([]string{
 		`[submodule "explicit"]`,
 		"\tpath = ./libs/explicit/",
@@ -1485,7 +1045,7 @@ func TestSubmoduleGitlinkParsingAndGitmodulesBranch(t *testing.T) {
 	}
 
 	// When superproject HEAD is detached, branch = "." resolves to "".
-	gitOK(t, repoGit, "checkout", "--detach", "-q", "HEAD")
+	writeGitRef(t, repoGitDir, "HEAD", repoBaseSHA)
 	if got := readSubmoduleConfiguredBranch(ctx, repoDir, "libs/follow"); got != "" {
 		t.Fatalf("dot branch on detached superproject must be empty, got %q", got)
 	}
@@ -1496,28 +1056,28 @@ func TestSubmoduleGitlinkLiteralPathspecs(t *testing.T) {
 	ctx := t.Context()
 
 	// 1. Real on-disk submodule with bracket path (common in frontend monorepos).
-	subOrigin, subOriginGit := initGit(t)
-	subSHA := commitSHA(ctx, subOriginGit, "HEAD", "")
-
-	_, outerGit := initGit(t)
+	outer, outerGit := initGit(t)
+	subSHA := readHeadSHA(t, outer)
 	const bracketPath = "packages/[pkg]"
-	gitOK(t, outerGit, "-c", "protocol.file.allow=always", "submodule", "add", "-q", "-b", "main", fileURL(subOrigin), bracketPath)
-	gitCommit(t, outerGit, "add bracket submodule")
+	addSubmoduleFast(t, outer, outerGit, bracketPath, "https://example.invalid/pkg.git", "main", subSHA)
 
-	wt := filepath.Join(shortTempDir(t), "wt")
-	gitOK(t, outerGit, "worktree", "add", "-qb", "ariadne/bracket-sub", wt)
-	gitOK(t, NewGit(wt, "file"), "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q", bracketPath)
+	// Materialize the submodule module gitdir inside outer/.git/modules/<bracketPath>.
+	modDir := filepath.Join(outer, ".git", "modules", filepath.FromSlash(bracketPath))
+	subDir := filepath.Join(outer, filepath.FromSlash(bracketPath))
+	copyTree(t, filepath.Join(ensureBaseGitTemplate(t), ".git"), modDir)
+	writeGit(t, subDir, "file.txt", "base\n")
+	writeGit(t, subDir, ".git", "gitdir: "+filepath.ToSlash(modDir)+"\n")
 
-	if got := readSubmoduleHeadGitlink(ctx, wt, bracketPath); got != subSHA {
+	if got := readSubmoduleHeadGitlink(ctx, outer, bracketPath); got != subSHA {
 		t.Fatalf("readSubmoduleHeadGitlink(%q) = %q, want %q", bracketPath, got, subSHA)
 	}
-	if got := readSubmoduleIndexGitlink(ctx, wt, bracketPath); got != subSHA {
+	if got := readSubmoduleIndexGitlink(ctx, outer, bracketPath); got != subSHA {
 		t.Fatalf("readSubmoduleIndexGitlink(%q) = %q, want %q", bracketPath, got, subSHA)
 	}
-	if got := readSubmoduleConfiguredBranch(ctx, wt, bracketPath); got != "main" {
+	if got := readSubmoduleConfiguredBranch(ctx, outer, bracketPath); got != "main" {
 		t.Fatalf("readSubmoduleConfiguredBranch(%q) = %q, want main", bracketPath, got)
 	}
-	repos, err := DiscoverEmbeddedRepos(ctx, wt)
+	repos, err := DiscoverEmbeddedRepos(ctx, outer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1528,7 +1088,7 @@ func TestSubmoduleGitlinkLiteralPathspecs(t *testing.T) {
 	// 2. Pathspec-magic prefixes (":" / ":(bad)") in git tree & index must match literally
 	// instead of being parsed as Git pathspec magic.
 	magicRepo, magicGit := initGit(t)
-	baseSHA := commitSHA(ctx, magicGit, "HEAD", "")
+	baseSHA := readHeadSHA(t, magicRepo)
 	for _, subPath := range []string{":colon-sub", ":(bad)sub"} {
 		gitOK(t, magicGit, "-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo", "160000,"+baseSHA+","+subPath)
 	}

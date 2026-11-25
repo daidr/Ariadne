@@ -13,6 +13,7 @@ import (
 )
 
 func TestStorageCacheSurvivesRestartAndInvalidationRemovesIt(t *testing.T) {
+	t.Parallel()
 	first, _ := testStore(t, nil)
 	options := first.options
 	calls := int64(0)
@@ -49,6 +50,7 @@ func TestStorageCacheSurvivesRestartAndInvalidationRemovesIt(t *testing.T) {
 }
 
 func TestStorageSharesScanAndInvalidatesLastMeasurement(t *testing.T) {
+	t.Parallel()
 	store, _ := testStore(t, nil)
 	var calls atomic.Int64
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -96,6 +98,7 @@ func TestStorageSharesScanAndInvalidatesLastMeasurement(t *testing.T) {
 }
 
 func TestStorageInvalidationStopsMeasuringRemovedPaths(t *testing.T) {
+	t.Parallel()
 	store, _ := testStore(t, nil)
 	started := make(chan struct{})
 	var calls atomic.Int64
@@ -134,6 +137,7 @@ func TestStorageInvalidationStopsMeasuringRemovedPaths(t *testing.T) {
 }
 
 func TestStorageKeepsPreviousMeasurementUntilRefresh(t *testing.T) {
+	t.Parallel()
 	store, _ := testStore(t, nil)
 	now := time.Unix(100, 0)
 	store.options.Now = func() time.Time { return now }
@@ -157,6 +161,7 @@ func TestStorageKeepsPreviousMeasurementUntilRefresh(t *testing.T) {
 }
 
 func TestStoreMeasureStorageIncludesSiblingWorktreesWithoutDoubleCountingPlugins(t *testing.T) {
+	t.Parallel()
 	store, _ := testStore(t, nil)
 	managedWT := filepath.Join(store.options.Home, "plugins", "local", "worktrees", "repo1", "thr_1")
 	siblingWT := filepath.Join(t.TempDir(), ".ariadne-worktrees", "repo2", "thr_2")

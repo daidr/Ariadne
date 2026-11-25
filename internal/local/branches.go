@@ -162,35 +162,98 @@ func ParseStatus(output string) []string {
 
 type BranchInput struct{ Branch, Base, BaseRef, RemoteBaseRef, Worktree string }
 
-// resolveBaseSHA picks baseRef, or upgrades to remoteBaseRef when baseRef is a
-// strict ancestor of remoteBaseRef (for example, local master lagging behind
-// origin/master after the branch merged origin/master). Local unpushed commits
-// on baseRef are preserved because baseRef is not an ancestor of remoteBaseRef.
-func resolveBaseSHA(ctx context.Context, git GitRun, baseRef, remoteBaseRef string) string {
-	baseSHA := commitSHA(ctx, git, baseRef, "")
-	if remoteBaseRef == "" {
-		return baseSHA
+func resolveCommitRefs(ctx context.Context, git GitRun, refs ...string) (map[string]string, bool) {
+	args := make([]string, 0, len(refs)+3)
+	args = append(args, "--no-optional-locks", "for-each-ref", "--format=%(refname)%09%(objectname)%09%(objecttype)%09%(*objectname)%09%(*objecttype)")
+	seen := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		if ref == "" {
+			continue
+		}
+		if !strings.HasPrefix(ref, "refs/") {
+			return nil, false
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		args = append(args, ref)
 	}
-	remoteSHA := commitSHA(ctx, git, remoteBaseRef, "")
+	if len(seen) == 0 {
+		return map[string]string{}, true
+	}
+	res := git(ctx, args, GitOptions{Whole: true})
+	if res.ExitCode != 0 {
+		return nil, false
+	}
+	resolved := make(map[string]string, len(seen))
+	for _, raw := range strings.Split(res.Stdout, "\n") {
+		line := strings.TrimRight(raw, "\r")
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) < 5 {
+			continue
+		}
+		name := parts[0]
+		if _, want := seen[name]; !want {
+			continue
+		}
+		if parts[2] == "commit" {
+			resolved[name] = parts[1]
+		} else if parts[4] == "commit" {
+			resolved[name] = parts[3]
+		}
+	}
+	return resolved, true
+}
+
+func resolveBaseSHAPair(ctx context.Context, git GitRun, baseSHA, remoteSHA string) string {
 	if remoteSHA == "" || remoteSHA == baseSHA {
 		return baseSHA
 	}
 	if baseSHA == "" {
 		return remoteSHA
 	}
-	if git(ctx, []string{"merge-base", "--is-ancestor", baseSHA, remoteSHA}, GitOptions{}).ExitCode == 0 {
+	if git(ctx, []string{"--no-optional-locks", "merge-base", "--is-ancestor", baseSHA, remoteSHA}, GitOptions{}).ExitCode == 0 {
 		return remoteSHA
 	}
 	return baseSHA
 }
 
+// resolveBaseSHA picks baseRef, or upgrades to remoteBaseRef when baseRef is a
+// strict ancestor of remoteBaseRef (for example, local master lagging behind
+// origin/master after the branch merged origin/master). Local unpushed commits
+// on baseRef are preserved because baseRef is not an ancestor of remoteBaseRef.
+func resolveBaseSHA(ctx context.Context, git GitRun, baseRef, remoteBaseRef string) string {
+	if refs, ok := resolveCommitRefs(ctx, git, baseRef, remoteBaseRef); ok {
+		return resolveBaseSHAPair(ctx, git, refs[baseRef], refs[remoteBaseRef])
+	}
+	baseSHA := commitSHA(ctx, git, baseRef, "")
+	if remoteBaseRef == "" {
+		return baseSHA
+	}
+	remoteSHA := commitSHA(ctx, git, remoteBaseRef, "")
+	return resolveBaseSHAPair(ctx, git, baseSHA, remoteSHA)
+}
+
 func branchRevisions(ctx context.Context, git GitRun, branch, baseRef, remoteBaseRef string) (sdk.BranchRevisions, error) {
+	headRef := "refs/heads/" + branch
+	if refs, ok := resolveCommitRefs(ctx, git, headRef, baseRef, remoteBaseRef); ok {
+		head := refs[headRef]
+		if head == "" {
+			return sdk.BranchRevisions{}, ctx.Err()
+		}
+		base := resolveBaseSHAPair(ctx, git, refs[baseRef], refs[remoteBaseRef])
+		return sdk.BranchRevisions{Head: head, BaseHead: base}, ctx.Err()
+	}
 	var head, base string
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		head = commitSHA(ctx, git, "refs/heads/"+branch, "")
+		head = commitSHA(ctx, git, headRef, "")
 	}()
 	go func() {
 		defer wg.Done()
@@ -300,7 +363,19 @@ func TreeDiff(ctx context.Context, git GitRun, from, to string) ([]sdk.ChangedFi
 	return ParseRawNumstat(diff.Stdout), nil
 }
 func SnapshotRefs(threadID string) string { return "refs/ariadne/turns/" + threadID + "/" }
+func isASCIIString(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
 func validRef(ctx context.Context, git GitRun, ref string) error {
+	if strings.HasPrefix(ref, "refs/") && isASCIIString(ref) && refSpelling(ref, false) {
+		return nil
+	}
 	result := git(ctx, []string{"check-ref-format", ref}, GitOptions{})
 	if result.ExitCode != 0 {
 		return fmt.Errorf("invalid git ref %q", ref)
@@ -336,15 +411,71 @@ func seedSnapshotIndex(gitDir, snapIndex string) {
 	}
 }
 
+func commonDirForWorktree(gitDir string) string {
+	if gitDir == "" {
+		return ""
+	}
+	if raw, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+		line, _, _ := strings.Cut(string(raw), "\n")
+		target := filepath.FromSlash(strings.TrimSpace(strings.TrimRight(line, "\r")))
+		if target != "" {
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(gitDir, target)
+			}
+			return filepath.Clean(target)
+		}
+	}
+	return gitDir
+}
+
+func snapshotRefMatches(commonDir, threadID, sha string) bool {
+	if commonDir == "" || threadID == "" || !isObjectID(sha) {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(commonDir, "reftable")); !os.IsNotExist(err) {
+		return false
+	}
+	raw, err := os.ReadFile(filepath.Join(commonDir, "refs", "ariadne", "turns", threadID, sha))
+	return err == nil && strings.TrimSpace(string(raw)) == sha
+}
+
+func snapshotRefsDefinitelyEmpty(commonDir, threadID string) bool {
+	if commonDir == "" || threadID == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(commonDir, "reftable")); !os.IsNotExist(err) {
+		return false
+	}
+	entries, err := os.ReadDir(filepath.Join(commonDir, "refs", "ariadne", "turns", threadID))
+	if err == nil {
+		if len(entries) > 0 {
+			return false
+		}
+	} else if !os.IsNotExist(err) {
+		return false
+	}
+	raw, err := os.ReadFile(filepath.Join(commonDir, "packed-refs"))
+	if os.IsNotExist(err) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	return !strings.Contains(string(raw), " "+SnapshotRefs(threadID))
+}
+
 func WorktreeSnapshot(ctx context.Context, git GitRun, cwd, threadID string) (string, error) {
 	if err := validRef(ctx, git, SnapshotRefs(threadID)+"snapshot"); err != nil {
 		return "", err
 	}
-	dir := git(ctx, []string{"rev-parse", "--absolute-git-dir"}, GitOptions{Directory: cwd})
-	if dir.ExitCode != 0 {
-		return "", gitFailure(dir, "git rev-parse")
+	gitDir := directWorktreeGitDir(cwd)
+	if gitDir == "" || !isValidGitDirectory(gitDir) {
+		dir := git(ctx, []string{"rev-parse", "--absolute-git-dir"}, GitOptions{Directory: cwd})
+		if dir.ExitCode != 0 {
+			return "", gitFailure(dir, "git rev-parse")
+		}
+		gitDir = strings.TrimSpace(dir.Stdout)
 	}
-	gitDir := strings.TrimSpace(dir.Stdout)
 	snapIndex := filepath.Join(gitDir, SnapshotIndex)
 	seedSnapshotIndex(gitDir, snapIndex)
 	options := GitOptions{Directory: cwd, Env: map[string]string{"GIT_INDEX_FILE": snapIndex}}
@@ -358,9 +489,11 @@ func WorktreeSnapshot(ctx context.Context, git GitRun, cwd, threadID string) (st
 		return "", gitFailure(tree, "git write-tree")
 	}
 	written := strings.TrimSpace(tree.Stdout)
-	kept := git(ctx, []string{"update-ref", SnapshotRefs(threadID) + written, written}, GitOptions{Directory: cwd})
-	if kept.ExitCode != 0 {
-		return "", gitFailure(kept, "git update-ref")
+	if !snapshotRefMatches(commonDirForWorktree(gitDir), threadID, written) {
+		kept := git(ctx, []string{"update-ref", SnapshotRefs(threadID) + written, written}, GitOptions{Directory: cwd})
+		if kept.ExitCode != 0 {
+			return "", gitFailure(kept, "git update-ref")
+		}
 	}
 	return written, nil
 }
@@ -398,13 +531,27 @@ func FileVersions(ctx context.Context, git GitRun, input VersionInput) (sdk.File
 	if input.PreviousPath != nil {
 		oldPath = *input.PreviousPath
 	}
-	before, large1, err := readBlob(ctx, git, input.From, oldPath)
-	if err != nil {
-		return sdk.FileVersions{}, err
+	var (
+		before, after  *string
+		large1, large2 bool
+		err1, err2     error
+		wg             sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		before, large1, err1 = readBlob(ctx, git, input.From, oldPath)
+	}()
+	go func() {
+		defer wg.Done()
+		after, large2, err2 = readBlob(ctx, git, input.Head, input.Path)
+	}()
+	wg.Wait()
+	if err1 != nil {
+		return sdk.FileVersions{}, err1
 	}
-	after, large2, err := readBlob(ctx, git, input.Head, input.Path)
-	if err != nil {
-		return sdk.FileVersions{}, err
+	if err2 != nil {
+		return sdk.FileVersions{}, err2
 	}
 	if large1 || large2 {
 		return sdk.FileVersions{Skipped: new("large")}, nil
@@ -475,12 +622,19 @@ func binaryText(text string) bool {
 	return false
 }
 func BranchMerged(ctx context.Context, git GitRun, branch, baseRef string) bool {
-	head := commitSHA(ctx, git, "refs/heads/"+branch, "")
-	if head == "" {
-		return false
+	headRef := "refs/heads/" + branch
+	var head, base string
+	if refs, ok := resolveCommitRefs(ctx, git, headRef, baseRef); ok {
+		head = refs[headRef]
+		base = refs[baseRef]
+	} else {
+		head = commitSHA(ctx, git, headRef, "")
+		if head == "" {
+			return false
+		}
+		base = commitSHA(ctx, git, baseRef, "")
 	}
-	base := commitSHA(ctx, git, baseRef, "")
-	if base == "" {
+	if head == "" || base == "" {
 		return false
 	}
 	if head == base {

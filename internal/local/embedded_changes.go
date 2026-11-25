@@ -166,7 +166,7 @@ func resolveEmbeddedRepoPath(ctx context.Context, worktreeDir, repoPath string) 
 		return EmbeddedRepo{}, errors.New("invalid embedded repository metadata")
 	}
 	repoGit := NewGit(repo.Path, "file")
-	ok, err := verifyEmbeddedGitDir(ctx, repoGit, repo.GitDir)
+	ok, err := verifyEmbeddedGitDir(ctx, repo.Path, repoGit, repo.GitDir)
 	if err != nil {
 		return EmbeddedRepo{}, err
 	}
@@ -371,7 +371,7 @@ func EmbeddedRepoChanges(ctx context.Context, repo EmbeddedRepo, baseline *sdk.R
 		return nil, nil
 	}
 	repoGit := NewGit(repo.Path, "file")
-	valid, err := verifyEmbeddedGitDir(ctx, repoGit, repo.GitDir)
+	valid, err := verifyEmbeddedGitDir(ctx, repo.Path, repoGit, repo.GitDir)
 	if err != nil || !valid {
 		return nil, err
 	}
@@ -546,7 +546,7 @@ func snapshotEmbeddedRepo(ctx context.Context, repo EmbeddedRepo, threadID strin
 		return sdk.RepoSnapshot{}, false, nil
 	}
 	repoGit := NewGit(repo.Path, "file")
-	valid, err := verifyEmbeddedGitDir(ctx, repoGit, repo.GitDir)
+	valid, err := verifyEmbeddedGitDir(ctx, repo.Path, repoGit, repo.GitDir)
 	if err != nil || !valid {
 		return sdk.RepoSnapshot{}, false, err
 	}
@@ -581,8 +581,11 @@ func snapshotEmbeddedRepo(ctx context.Context, repo EmbeddedRepo, threadID strin
 	}, true, nil
 }
 
-func pinSnapshotObject(ctx context.Context, git GitRun, cwd, threadID, sha string) {
+func pinSnapshotObject(ctx context.Context, git GitRun, cwd, commonDir, threadID, sha string) {
 	if !isObjectID(sha) || sha == EmptyTreeSHA {
+		return
+	}
+	if snapshotRefMatches(commonDir, threadID, sha) {
 		return
 	}
 	ref := SnapshotRefs(threadID) + sha
@@ -604,7 +607,7 @@ func collectExternalEmbeddedCommonDirs(ctx context.Context, worktreeDir string) 
 			continue
 		}
 		repoGit := NewGit(repo.Path, "file")
-		if valid, err := verifyEmbeddedGitDir(ctx, repoGit, repo.GitDir); err != nil || !valid {
+		if valid, err := verifyEmbeddedGitDir(ctx, repo.Path, repoGit, repo.GitDir); err != nil || !valid {
 			continue
 		}
 		key := cleanPathKey(repo.CommonDir)
@@ -619,7 +622,7 @@ func collectExternalEmbeddedCommonDirs(ctx context.Context, worktreeDir string) 
 
 func dropSnapshotsInCommonDirs(ctx context.Context, commonDirs []string, threadID string) {
 	for _, commonDir := range commonDirs {
-		if commonDir == "" {
+		if commonDir == "" || snapshotRefsDefinitelyEmpty(commonDir, threadID) {
 			continue
 		}
 		info, err := os.Stat(commonDir)
@@ -809,8 +812,12 @@ func (factory *Workspaces) RepoDiff(ctx context.Context, threadID, repoPath, fro
 		return nil, err
 	}
 	if len(files) > 0 && threadID != "" {
-		pinSnapshotObject(ctx, repoGit, repo.Path, threadID, from)
-		pinSnapshotObject(ctx, repoGit, repo.Path, threadID, to)
+		commonDir := repo.CommonDir
+		if commonDir == "" {
+			commonDir = commonDirForWorktree(repo.GitDir)
+		}
+		pinSnapshotObject(ctx, repoGit, repo.Path, commonDir, threadID, from)
+		pinSnapshotObject(ctx, repoGit, repo.Path, commonDir, threadID, to)
 	}
 	return files, nil
 }

@@ -24,8 +24,9 @@ func hasTool(list []tool, name string) bool {
 }
 
 func TestMemoryToolsRegistrationByRole(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "memory-tools.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,9 +68,10 @@ func TestMemoryToolsRegistrationByRole(t *testing.T) {
 }
 
 func TestThreadRememberAndForgetOnDirectUserMessage(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "memory-thread.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,9 +254,10 @@ func TestThreadRememberAndForgetOnDirectUserMessage(t *testing.T) {
 }
 
 func TestThreadCannotEditMemoryWithoutDirectUserInputInTurn(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "memory-guard.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,9 +371,10 @@ func TestThreadCannotEditMemoryWithoutDirectUserInputInTurn(t *testing.T) {
 }
 
 func TestReviewerThreadCannotEditMemoryEvenIfUserSpoke(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "memory-reviewer.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,9 +413,10 @@ func TestReviewerThreadCannotEditMemoryEvenIfUserSpoke(t *testing.T) {
 }
 
 func TestCoordinatorMemoryRequiresDirectCoordinatorInput(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "memory-coordinator.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

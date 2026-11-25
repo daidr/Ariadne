@@ -97,6 +97,7 @@ func newThread(t *testing.T, repo *core.Repository, project string) core.ThreadV
 	return thread
 }
 func TestWorkspaceCacheExpiryPreservesBranchNullBaseAndFiles(t *testing.T) {
+	t.Parallel()
 	probe := &factoryProbe{isolate: true}
 	manager, repo, project := workspaceManager(t, probe, func(options *Options) { options.CacheTTL = 15 * time.Millisecond })
 	thread := newThread(t, repo, project.ID)
@@ -148,6 +149,7 @@ func TestWorkspaceCacheExpiryPreservesBranchNullBaseAndFiles(t *testing.T) {
 	}
 }
 func TestWorkspaceSetupRunsOnceWithProjectShellEnvAndTimeout(t *testing.T) {
+	t.Parallel()
 	optionsSeen := make(chan sdk.ExecOptions, 1)
 	finished := make(chan struct{})
 	probe := &factoryProbe{isolate: true, exec: func(ctx context.Context, options sdk.ExecOptions) (sdk.ExecResult, error) {
@@ -202,6 +204,7 @@ func TestWorkspaceSetupRunsOnceWithProjectShellEnvAndTimeout(t *testing.T) {
 	}
 }
 func TestModelNotedSetupIsHeldByPolicyAndSkippedForSharedWorkspace(t *testing.T) {
+	t.Parallel()
 	for _, isolated := range []bool{true, false} {
 		t.Run(map[bool]string{true: "isolated", false: "shared"}[isolated], func(t *testing.T) {
 			probe := &factoryProbe{isolate: isolated}
@@ -224,6 +227,7 @@ func TestModelNotedSetupIsHeldByPolicyAndSkippedForSharedWorkspace(t *testing.T)
 	}
 }
 func TestWorkspaceRemovalWaitsForActualOperationsAndHonorsDirtyFiles(t *testing.T) {
+	t.Parallel()
 	entered, finish := make(chan struct{}), make(chan struct{})
 	probe := &factoryProbe{exec: func(ctx context.Context, _ sdk.ExecOptions) (sdk.ExecResult, error) {
 		close(entered)
@@ -260,6 +264,7 @@ func TestWorkspaceRemovalWaitsForActualOperationsAndHonorsDirtyFiles(t *testing.
 	}
 }
 func TestDiscardCancelsCommandsReleasesHandlesAndBlocksReopen(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{})
 	probe := &factoryProbe{exec: func(ctx context.Context, _ sdk.ExecOptions) (sdk.ExecResult, error) {
 		close(started)
@@ -299,6 +304,7 @@ func TestDiscardCancelsCommandsReleasesHandlesAndBlocksReopen(t *testing.T) {
 	}
 }
 func TestRealLocalSetupAndStopReleaseWindowsDirectory(t *testing.T) {
+	t.Parallel()
 	probe := &factoryProbe{}
 	manager, repo, project := workspaceManager(t, probe, nil)
 	thread := newThread(t, repo, project.ID)

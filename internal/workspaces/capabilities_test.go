@@ -24,6 +24,7 @@ func (reader *countedReader) Close() error {
 	return err
 }
 func TestRepositoryAndTrackerProxiesDoNotWriteAfterConfigurationChanges(t *testing.T) {
+	t.Parallel()
 	repo, project, _ := testRepository(t)
 	registry := sources.New()
 	var opened, closed, writes atomic.Int32
@@ -85,6 +86,7 @@ func TestRepositoryAndTrackerProxiesDoNotWriteAfterConfigurationChanges(t *testi
 	}
 }
 func TestGitBundleLeasePinsConnectionAndClosesOnManagerShutdown(t *testing.T) {
+	t.Parallel()
 	repo, project, _ := testRepository(t)
 	registry := sources.New()
 	var opened, closed atomic.Int32
@@ -124,6 +126,7 @@ func TestGitBundleLeasePinsConnectionAndClosesOnManagerShutdown(t *testing.T) {
 	}
 }
 func TestGitReceiveClosesInputOnPreflightFailure(t *testing.T) {
+	t.Parallel()
 	repo, project, _ := testRepository(t)
 	registry := sources.New()
 	var opened, closed atomic.Int32

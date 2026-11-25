@@ -109,6 +109,7 @@ func agyChildCommand(t *testing.T, scenario string) (string, string) {
 }
 
 func TestAntigravityToolProfile(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	argv := []string{filepath.Join(directory, "AGY.EXE"), "acp", "--process-per-session"}
 	if !usesToolProfile(argv) {
@@ -138,6 +139,7 @@ func TestAntigravityToolProfile(t *testing.T) {
 }
 
 func TestAntigravityReplaysHistoryAfterToolProfileChange(t *testing.T) {
+	t.Parallel()
 	driver, err := Kind(nil, nil).Create(agentruntime.DriverContext{Resume: json.RawMessage(`{"sessionId":"old"}`)})
 	if err != nil {
 		t.Fatal(err)
@@ -151,6 +153,7 @@ func TestAntigravityReplaysHistoryAfterToolProfileChange(t *testing.T) {
 }
 
 func TestAntigravityExecutorError(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		scenario, reason, detail string
 		wantText                 string
@@ -178,6 +181,7 @@ func TestAntigravityExecutorError(t *testing.T) {
 		{scenario: "agy-warning-before-thought-then-done", reason: "stop", wantText: "final answer"},
 	} {
 		t.Run(test.scenario, func(t *testing.T) {
+			t.Parallel()
 			command, _ := agyChildCommand(t, test.scenario)
 			m := newTestSessions(t, Kind(nil, nil), agentruntime.SessionOptions{})
 			request := sdk.Request{Conversation: "errors", Messages: []sdk.Message{user("hello")}}
@@ -202,6 +206,7 @@ func TestAntigravityExecutorError(t *testing.T) {
 }
 
 func TestAntigravityQuotaDoesNotRetryAndAllowsFallback(t *testing.T) {
+	t.Parallel()
 	command, _ := agyChildCommand(t, "agy-quota")
 	m := newTestSessions(t, Kind(nil, nil), agentruntime.SessionOptions{})
 	provider := sdk.ModelProvider{Stream: m.Stream}
@@ -240,6 +245,7 @@ func TestAntigravityQuotaDoesNotRetryAndAllowsFallback(t *testing.T) {
 }
 
 func TestAntigravityUsageSeparatesTotalsFromContext(t *testing.T) {
+	t.Parallel()
 	command, _ := agyChildCommand(t, "agy-usage")
 	settings := map[string]any{"command": command}
 	opts := agentruntime.SessionOptions{DataDir: t.TempDir()}
@@ -272,6 +278,7 @@ func TestAntigravityUsageSeparatesTotalsFromContext(t *testing.T) {
 }
 
 func TestAntigravityMidTurnUsageBeforeFirstMessage(t *testing.T) {
+	t.Parallel()
 	command, _ := agyChildCommand(t, "agy-midturn-usage")
 	bridge := newTestBridge(t)
 	m := newTestSessions(t, Kind(bridge, nil), agentruntime.SessionOptions{})
@@ -318,6 +325,7 @@ func TestAntigravityMidTurnUsageBeforeFirstMessage(t *testing.T) {
 }
 
 func TestAntigravitySessionNewRaceRetriesAndSucceeds(t *testing.T) {
+	t.Parallel()
 	command, _ := agyChildCommand(t, "agy-session-new-race-once")
 	m := newTestSessions(t, Kind(nil, nil), agentruntime.SessionOptions{})
 	provider := sdk.ModelProvider{Stream: m.Stream}
@@ -355,8 +363,10 @@ func TestAntigravitySessionNewRaceRetriesAndSucceeds(t *testing.T) {
 }
 
 func TestAntigravitySessionNewOtherErrorsDoNotRetry(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"agy-session-new-auth-error", "agy-session-new-other-32603"} {
 		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
 			command, _ := agyChildCommand(t, scenario)
 			m := newTestSessions(t, Kind(nil, nil), agentruntime.SessionOptions{})
 			provider := sdk.ModelProvider{Stream: m.Stream}

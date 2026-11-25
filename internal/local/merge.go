@@ -20,18 +20,29 @@ func MergeBranch(ctx context.Context, git GitRun, identity Identity, input Merge
 	if err := validRef(ctx, git, baseRef); err != nil {
 		return sdk.MergeOutcome{}, err
 	}
-	head := commitSHA(ctx, git, "refs/heads/"+input.Branch, "")
+	var head, baseSHA, baseTreeSHA string
+	if batch := git(ctx, []string{"rev-parse", "refs/heads/" + input.Branch + "^{commit}", baseRef + "^{commit}", baseRef + "^{tree}"}, GitOptions{}); batch.ExitCode == 0 {
+		lines := strings.Fields(batch.Stdout)
+		if len(lines) == 3 && isObjectID(lines[0]) && isObjectID(lines[1]) && isObjectID(lines[2]) {
+			head, baseSHA, baseTreeSHA = lines[0], lines[1], lines[2]
+		}
+	}
 	if head == "" {
-		return sdk.MergeOutcome{}, fmt.Errorf("%s does not exist", input.Branch)
+		head = commitSHA(ctx, git, "refs/heads/"+input.Branch, "")
+		if head == "" {
+			return sdk.MergeOutcome{}, fmt.Errorf("%s does not exist", input.Branch)
+		}
 	}
 	if input.ExpectedHead != "" && head != input.ExpectedHead {
 		return sdk.MergeOutcome{Kind: "moved"}, nil
 	}
-	baseSHA := commitSHA(ctx, git, baseRef, "")
 	if baseSHA == "" {
-		return sdk.MergeOutcome{}, &sdk.MergeRefused{Reason: "no-base", Detail: input.Base + " does not exist"}
+		baseSHA = commitSHA(ctx, git, baseRef, "")
+		if baseSHA == "" {
+			return sdk.MergeOutcome{}, &sdk.MergeRefused{Reason: "no-base", Detail: input.Base + " does not exist"}
+		}
 	}
-	if git(ctx, []string{"merge-base", "--is-ancestor", head, baseSHA}, GitOptions{}).ExitCode == 0 {
+	if head == baseSHA || git(ctx, []string{"merge-base", "--is-ancestor", head, baseSHA}, GitOptions{}).ExitCode == 0 {
 		return sdk.MergeOutcome{Kind: "empty"}, nil
 	}
 	var author *Author
@@ -74,8 +85,11 @@ func MergeBranch(ctx context.Context, git GitRun, identity Identity, input Merge
 		return sdk.MergeOutcome{}, fmt.Errorf("git merge-tree returned no tree")
 	}
 	tree := lines[0]
-	baseTree := git(ctx, []string{"rev-parse", baseSHA + "^{tree}"}, GitOptions{})
-	if tree == strings.TrimSpace(baseTree.Stdout) {
+	if baseTreeSHA == "" {
+		baseTree := git(ctx, []string{"rev-parse", baseSHA + "^{tree}"}, GitOptions{})
+		baseTreeSHA = strings.TrimSpace(baseTree.Stdout)
+	}
+	if tree == baseTreeSHA {
 		return sdk.MergeOutcome{Kind: "empty"}, nil
 	}
 	args := []string{"-c", "user.name=" + author.Name, "-c", "user.email=" + author.Email, "commit-tree", tree, "-p", baseSHA}
@@ -88,12 +102,15 @@ func MergeBranch(ctx context.Context, git GitRun, identity Identity, input Merge
 		return sdk.MergeOutcome{}, gitFailure(commit, "git commit-tree")
 	}
 	result := strings.TrimSpace(commit.Stdout)
-	checkout, err := checkoutOf(ctx, git, baseRef)
+	checkout, checkoutHead, err := checkoutOf(ctx, git, baseRef)
 	if err != nil {
 		return sdk.MergeOutcome{}, err
 	}
 	if checkout != "" {
-		if commitSHA(ctx, git, "HEAD", checkout) != baseSHA {
+		if checkoutHead == "" {
+			checkoutHead = commitSHA(ctx, git, "HEAD", checkout)
+		}
+		if checkoutHead != baseSHA {
 			return sdk.MergeOutcome{}, &sdk.MergeRefused{Reason: "base-moved", Detail: input.Base + " moved in " + checkout}
 		}
 		filters, err := usesFilters(ctx, git, tree)
@@ -123,11 +140,22 @@ func UndoMerge(ctx context.Context, git GitRun, input UndoMergeInput) error {
 	if err := validRef(ctx, git, baseRef); err != nil {
 		return err
 	}
-	baseSHA := commitSHA(ctx, git, baseRef, "")
-	if baseSHA == "" {
-		return &sdk.MergeRefused{Reason: "no-base", Detail: input.Base + " does not exist"}
+	var baseSHA, before string
+	if batch := git(ctx, []string{"rev-parse", baseRef + "^{commit}", input.SHA + "^1^{commit}"}, GitOptions{}); batch.ExitCode == 0 {
+		lines := strings.Fields(batch.Stdout)
+		if len(lines) == 2 && isObjectID(lines[0]) && isObjectID(lines[1]) {
+			baseSHA, before = lines[0], lines[1]
+		}
 	}
-	before := commitSHA(ctx, git, input.SHA+"^1", "")
+	if baseSHA == "" {
+		baseSHA = commitSHA(ctx, git, baseRef, "")
+		if baseSHA == "" {
+			return &sdk.MergeRefused{Reason: "no-base", Detail: input.Base + " does not exist"}
+		}
+	}
+	if before == "" {
+		before = commitSHA(ctx, git, input.SHA+"^1", "")
+	}
 	if baseSHA != input.SHA || before == "" {
 		return &sdk.MergeRefused{Reason: "undo-moved", Detail: input.Base + " is at " + baseSHA[:min(12, len(baseSHA))]}
 	}
@@ -146,7 +174,7 @@ func UndoMerge(ctx context.Context, git GitRun, input UndoMergeInput) error {
 			return &sdk.MergeRefused{Reason: "undo-branched", Detail: shortRef(ref)}
 		}
 	}
-	checkout, err := checkoutOf(ctx, git, baseRef)
+	checkout, checkoutHead, err := checkoutOf(ctx, git, baseRef)
 	if err != nil {
 		return err
 	}
@@ -157,11 +185,13 @@ func UndoMerge(ctx context.Context, git GitRun, input UndoMergeInput) error {
 		}
 		return nil
 	}
-	if commitSHA(ctx, git, "HEAD", checkout) != baseSHA {
+	if checkoutHead == "" {
+		checkoutHead = commitSHA(ctx, git, "HEAD", checkout)
+	}
+	if checkoutHead != baseSHA {
 		return &sdk.MergeRefused{Reason: "undo-moved", Detail: input.Base + " moved in " + checkout}
 	}
-	tree := git(ctx, []string{"rev-parse", before + "^{tree}"}, GitOptions{})
-	filters, err := usesFilters(ctx, git, strings.TrimSpace(tree.Stdout))
+	filters, err := usesFilters(ctx, git, before)
 	if err != nil {
 		return err
 	}
@@ -200,24 +230,28 @@ func worktreeFields(ctx context.Context, git GitRun) ([]string, error) {
 	return strings.Split(list.Stdout, "\x00"), nil
 }
 
-func checkoutOf(ctx context.Context, git GitRun, ref string) (string, error) {
+func checkoutOf(ctx context.Context, git GitRun, ref string) (string, string, error) {
 	fields, err := worktreeFields(ctx, git)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	path := ""
+	head := ""
 	for _, field := range fields {
 		if field == "" {
 			path = ""
+			head = ""
 			continue
 		}
 		if strings.HasPrefix(field, "worktree ") {
 			path = strings.TrimPrefix(field, "worktree ")
+		} else if strings.HasPrefix(field, "HEAD ") {
+			head = strings.TrimPrefix(field, "HEAD ")
 		} else if field == "branch "+ref && path != "" {
-			return path, nil
+			return path, head, nil
 		}
 	}
-	return "", nil
+	return "", "", nil
 }
 func directWorktreeGitDir(directory string) string {
 	gitPath := filepath.Join(directory, ".git")
@@ -240,14 +274,18 @@ func directWorktreeGitDir(directory string) string {
 
 func holdsMore(ctx context.Context, git GitRun, directory string) bool {
 	options := GitOptions{Directory: directory, Whole: true}
-	if git(ctx, []string{"--no-optional-locks", "symbolic-ref", "-q", "HEAD"}, options).ExitCode != 0 {
-		return true
-	}
 	gitDir := directWorktreeGitDir(directory)
 	if gitDir != "" {
 		if info, err := os.Stat(filepath.Join(gitDir, "reftable")); err == nil && info.IsDir() {
 			gitDir = ""
 		}
+	}
+	if gitDir != "" {
+		if readCommonHeadRef(gitDir) == "" {
+			return true
+		}
+	} else if git(ctx, []string{"--no-optional-locks", "symbolic-ref", "-q", "HEAD"}, options).ExitCode != 0 {
+		return true
 	}
 	for _, ref := range []string{"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"} {
 		if gitDir != "" {
@@ -273,23 +311,37 @@ func holdsMore(ctx context.Context, git GitRun, directory string) bool {
 
 type RemoveOptions struct{ Discard, Spare, Merged bool }
 
+func hasBlockingGitMarkers(gitDir string, checkLocked bool) bool {
+	if gitDir == "" {
+		return false
+	}
+	if checkLocked {
+		if _, err := os.Lstat(filepath.Join(gitDir, "locked")); err == nil || !os.IsNotExist(err) {
+			return true
+		}
+	}
+	for _, marker := range inProgressGitMarkers {
+		if _, err := os.Lstat(filepath.Join(gitDir, marker)); err == nil || !os.IsNotExist(err) {
+			return true
+		}
+	}
+	return false
+}
+
 func outerWorktreeBlocked(ctx context.Context, git GitRun, directory string) (bool, error) {
-	gitDirRes := git(ctx, []string{"rev-parse", "--path-format=absolute", "--git-dir"}, GitOptions{Directory: directory})
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	if gitDirRes.ExitCode != 0 {
-		return true, nil
-	}
-	if outerGitDir := strings.TrimSpace(gitDirRes.Stdout); outerGitDir != "" {
-		if _, err := os.Lstat(filepath.Join(outerGitDir, "locked")); err == nil || !os.IsNotExist(err) {
+	outerGitDir := directWorktreeGitDir(directory)
+	if outerGitDir == "" || !isValidGitDirectory(outerGitDir) {
+		gitDirRes := git(ctx, []string{"rev-parse", "--path-format=absolute", "--git-dir"}, GitOptions{Directory: directory})
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if gitDirRes.ExitCode != 0 {
 			return true, nil
 		}
-		for _, marker := range inProgressGitMarkers {
-			if _, err := os.Lstat(filepath.Join(outerGitDir, marker)); err == nil || !os.IsNotExist(err) {
-				return true, nil
-			}
-		}
+		outerGitDir = strings.TrimSpace(gitDirRes.Stdout)
+	}
+	if hasBlockingGitMarkers(outerGitDir, true) {
+		return true, nil
 	}
 	statusArgs := append(worktreeConfigArgs(ctx, directory), "status", "--porcelain=v1", "-z", "--untracked-files=normal")
 	status := git(ctx, statusArgs, GitOptions{Directory: directory, Whole: true})
@@ -303,6 +355,10 @@ func outerWorktreeBlocked(ctx context.Context, git GitRun, directory string) (bo
 }
 
 func RemoveWorktree(ctx context.Context, git GitRun, directory string, options RemoveOptions) (bool, error) {
+	return removeWorktree(ctx, git, directory, options, nil, false)
+}
+
+func removeWorktree(ctx context.Context, git GitRun, directory string, options RemoveOptions, prediscovered []EmbeddedRepo, hasPrediscovered bool) (bool, error) {
 	if _, err := os.Lstat(directory); os.IsNotExist(err) {
 		pruned := git(ctx, []string{"worktree", "prune"}, GitOptions{})
 		if pruned.ExitCode != 0 {
@@ -315,21 +371,23 @@ func RemoveWorktree(ctx context.Context, git GitRun, directory string, options R
 	if options.Spare && !options.Discard && holdsMore(ctx, git, directory) {
 		return false, nil
 	}
-	embedded, err := DiscoverEmbeddedRepos(ctx, directory)
-	if err != nil {
-		if !options.Discard || ctx.Err() != nil {
-			return false, err
+	var embedded []EmbeddedRepo
+	if hasPrediscovered {
+		embedded = prediscovered
+	} else {
+		var err error
+		embedded, err = DiscoverEmbeddedRepos(ctx, directory)
+		if err != nil {
+			if !options.Discard || ctx.Err() != nil {
+				return false, err
+			}
+			embedded = nil
 		}
-		embedded = nil
 	}
 	outerHasSubmodule := hasDirectSubmodule(embedded, directory)
 	if !options.Discard && len(embedded) > 0 {
 		for _, repo := range embedded {
-			status, err := InspectEmbeddedRepo(ctx, repo)
-			if err != nil {
-				return false, err
-			}
-			if status.Dirty || (repo.ObjectStoreInsideWorktree && status.Unpushed) || (options.Merged && status.Unmerged) {
+			if hasBlockingGitMarkers(repo.GitDir, repo.Kind == EmbeddedWorktree) {
 				return false, nil
 			}
 		}
@@ -339,6 +397,15 @@ func RemoveWorktree(ctx context.Context, git GitRun, directory string, options R
 				return false, err
 			}
 			if blocked {
+				return false, nil
+			}
+		}
+		for _, repo := range embedded {
+			status, err := InspectEmbeddedRepo(ctx, repo)
+			if err != nil {
+				return false, err
+			}
+			if status.Dirty || (repo.ObjectStoreInsideWorktree && status.Unpushed) || (options.Merged && status.Unmerged) {
 				return false, nil
 			}
 		}

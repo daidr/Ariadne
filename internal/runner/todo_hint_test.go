@@ -44,6 +44,7 @@ func updateTodoCall(step int, status string) sdk.Part {
 }
 
 func TestThreadTodoMissingHintOnce(t *testing.T) {
+	t.Parallel()
 	results := runThreadToolSteps(t, todoMissingAfter+3, lookMessageCall)
 	var hintedAt []int
 	for i, res := range results {
@@ -63,6 +64,7 @@ func TestThreadTodoMissingHintOnce(t *testing.T) {
 }
 
 func TestThreadTodoWrittenFirstNoMissingHint(t *testing.T) {
+	t.Parallel()
 	results := runThreadToolSteps(t, todoMissingAfter+3, func(step int) sdk.Part {
 		if step == 0 {
 			return updateTodoCall(step, "doing")
@@ -77,6 +79,7 @@ func TestThreadTodoWrittenFirstNoMissingHint(t *testing.T) {
 }
 
 func TestThreadTodoStaleHintAtTenSteps(t *testing.T) {
+	t.Parallel()
 	results := runThreadToolSteps(t, todoStaleAfter+4, func(step int) sdk.Part {
 		if step == 0 {
 			return updateTodoCall(step, "doing")
@@ -102,6 +105,7 @@ func TestThreadTodoStaleHintAtTenSteps(t *testing.T) {
 }
 
 func TestThreadTodoFinishedThisTurnNotStale(t *testing.T) {
+	t.Parallel()
 	results := runThreadToolSteps(t, todoStaleAfter+4, func(step int) sdk.Part {
 		if step == 0 {
 			return updateTodoCall(step, "done")
@@ -118,6 +122,7 @@ func TestThreadTodoFinishedThisTurnNotStale(t *testing.T) {
 }
 
 func TestThreadTodoFinishedEarlierTurnReminded(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "多回合任务"})
 	if err != nil {
@@ -170,6 +175,7 @@ func TestThreadTodoFinishedEarlierTurnReminded(t *testing.T) {
 }
 
 func TestReviewThreadSkipsTodoHints(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	author, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "作者讨论串"})
 	if err != nil {
@@ -225,6 +231,7 @@ func clearTodoCall(step int) sdk.Part {
 }
 
 func TestCoordinatorTodoMissingHintUsesCoordinatorWording(t *testing.T) {
+	t.Parallel()
 	results := runCoordinatorToolSteps(t, todoMissingAfter+3, lookMessageCall)
 	var hintedAt []int
 	for i, res := range results {
@@ -245,6 +252,7 @@ func TestCoordinatorTodoMissingHintUsesCoordinatorWording(t *testing.T) {
 }
 
 func TestCoordinatorTodoStaleHintUsesCoordinatorWording(t *testing.T) {
+	t.Parallel()
 	results := runCoordinatorToolSteps(t, todoStaleAfter+4, func(step int) sdk.Part {
 		if step == 0 {
 			return updateTodoCall(step, "doing")
@@ -274,6 +282,7 @@ func TestCoordinatorTodoStaleHintUsesCoordinatorWording(t *testing.T) {
 }
 
 func TestCoordinatorTodoClearedThisTurnNotReminded(t *testing.T) {
+	t.Parallel()
 	results := runCoordinatorToolSteps(t, todoStaleAfter+4, func(step int) sdk.Part {
 		if step == 0 {
 			return clearTodoCall(step)
@@ -293,6 +302,7 @@ func TestCoordinatorTodoClearedThisTurnNotReminded(t *testing.T) {
 }
 
 func TestCoordinatorTodoFinishedEarlierTurnRemindedToDropDone(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
 
@@ -347,6 +357,7 @@ func TestCoordinatorTodoFinishedEarlierTurnRemindedToDropDone(t *testing.T) {
 }
 
 func TestStatefulSerialToolCallbacksCountByInferenceRound(t *testing.T) {
+	t.Parallel()
 	t.Run("serial callbacks inside one inference round do not prematurely trigger stale hint", func(t *testing.T) {
 		repo, store, project := openTestEnv(t)
 		thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "串行回调"})

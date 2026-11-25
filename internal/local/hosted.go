@@ -160,7 +160,103 @@ func (host *Hosted) network(ctx context.Context, args ...string) sdk.ExecResult 
 	}
 	return result
 }
+func safeGitConfigPlainValue(value string) bool {
+	if value == "" || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, r := range value {
+		if r < 0x20 || r == '"' || r == '\\' || r == '#' || r == ';' {
+			return false
+		}
+	}
+	return true
+}
+
+func hostedOriginConfigMatches(configPath, remoteURL string) bool {
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return false
+	}
+	const wantFetch = "+refs/heads/*:refs/remotes/origin/*"
+	inOrigin := false
+	originSections := 0
+	urls, fetches, pushurls := 0, 0, 0
+	urlOK, fetchOK, pushurlOK := false, false, false
+	for _, rawLine := range strings.Split(string(raw), "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(rawLine, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			header := strings.TrimSpace(line[1 : len(line)-1])
+			if strings.EqualFold(header, `remote "origin"`) {
+				inOrigin = true
+				originSections++
+			} else {
+				inOrigin = false
+			}
+			continue
+		}
+		if !inOrigin {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			return false
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		val = strings.TrimSpace(val)
+		switch key {
+		case "url":
+			urls++
+			urlOK = val == remoteURL
+		case "fetch":
+			fetches++
+			fetchOK = val == wantFetch
+		case "pushurl":
+			pushurls++
+			pushurlOK = val == noPushURL
+		}
+	}
+	return originSections == 1 && urls == 1 && fetches == 1 && pushurls == 1 && urlOK && fetchOK && pushurlOK
+}
+
+func (host *Hosted) ensureOriginConfig(ctx context.Context, freshBare bool) error {
+	configPath := filepath.Join(host.bare, "config")
+	if freshBare && safeGitConfigPlainValue(host.options.RemoteURL) {
+		if raw, err := os.ReadFile(configPath); err == nil && !strings.Contains(string(raw), `[remote "origin"]`) {
+			var b strings.Builder
+			b.Write(raw)
+			if len(raw) > 0 && raw[len(raw)-1] != '\n' {
+				b.WriteByte('\n')
+			}
+			b.WriteString("[remote \"origin\"]\n\turl = ")
+			b.WriteString(host.options.RemoteURL)
+			b.WriteString("\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n\tpushurl = ")
+			b.WriteString(noPushURL)
+			b.WriteByte('\n')
+			if err := os.WriteFile(configPath, []byte(b.String()), 0600); err == nil {
+				return nil
+			}
+		}
+	} else if !freshBare && hostedOriginConfigMatches(configPath, host.options.RemoteURL) {
+		return nil
+	}
+	for _, args := range [][]string{
+		{"config", "remote.origin.url", host.options.RemoteURL},
+		{"config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"},
+		{"config", "remote.origin.pushurl", noPushURL},
+	} {
+		result := host.owner.git(ctx, args, GitOptions{})
+		if result.ExitCode != 0 {
+			return gitFailure(result, "git config")
+		}
+	}
+	return nil
+}
+
 func (host *Hosted) ensureClone(ctx context.Context) error {
+	freshBare := false
 	if _, err := os.Stat(filepath.Join(host.bare, "HEAD")); os.IsNotExist(err) {
 		if err := os.MkdirAll(host.bare, 0700); err != nil {
 			return err
@@ -171,18 +267,12 @@ func (host *Hosted) ensureClone(ctx context.Context) error {
 				return gitFailure(result, "git "+args[0])
 			}
 		}
+		freshBare = true
 	} else if err != nil {
 		return err
 	}
-	for _, args := range [][]string{{"config", "remote.origin.url", host.options.RemoteURL}, {"config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"}} {
-		result := host.owner.git(ctx, args, GitOptions{})
-		if result.ExitCode != 0 {
-			return gitFailure(result, "git config")
-		}
-	}
-	configured := host.owner.git(ctx, []string{"config", "remote.origin.pushurl", noPushURL}, GitOptions{})
-	if configured.ExitCode != 0 {
-		return gitFailure(configured, "git config")
+	if err := host.ensureOriginConfig(ctx, freshBare); err != nil {
+		return err
 	}
 	result := host.network(ctx, "fetch", "--no-recurse-submodules", "--prune", "-q", host.options.RemoteURL, "+refs/heads/*:refs/remotes/origin/*")
 	if result.ExitCode != 0 {
@@ -335,11 +425,16 @@ func (host *Hosted) Open(ctx context.Context, input sdk.WorkspaceRequest) (sdk.W
 			if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
 				return err
 			}
-			pruned := host.owner.git(ctx, []string{"worktree", "prune"}, GitOptions{})
-			if pruned.ExitCode != 0 {
-				return gitFailure(pruned, "git worktree prune")
+			if worktreesDirHasEntries(host.bare) {
+				pruned := host.owner.git(ctx, []string{"worktree", "prune"}, GitOptions{})
+				if pruned.ExitCode != 0 {
+					return gitFailure(pruned, "git worktree prune")
+				}
 			}
-			hasBranch := commitSHA(ctx, host.owner.git, "refs/heads/"+branch, "") != ""
+			hasBranch := false
+			if !localBranchDefinitelyMissing(host.bare, branch) {
+				hasBranch = commitSHA(ctx, host.owner.git, "refs/heads/"+branch, "") != ""
+			}
 			from := ""
 			if host.owner.clone != nil {
 				root, err := host.owner.cloningRoot(ctx)
@@ -448,9 +543,9 @@ func (host *Hosted) Capability() *sdk.WorkspaceCapability {
 	branches.Merge = nil
 	branches.UndoMerge = nil
 	branches.SharesStorage = host.SharesStorage
-		branches.Revisions = func(ctx context.Context, thread sdk.ThreadBranch, base string) (sdk.BranchRevisions, error) {
-			return host.owner.revisions(ctx, thread.Branch, "refs/remotes/origin/"+base, "")
-		}
+	branches.Revisions = func(ctx context.Context, thread sdk.ThreadBranch, base string) (sdk.BranchRevisions, error) {
+		return host.owner.revisions(ctx, thread.Branch, "refs/remotes/origin/"+base, "")
+	}
 	branches.Changes = func(ctx context.Context, thread sdk.ThreadBranch, base string) (*sdk.BranchChanges, error) {
 		ctx, done, err := host.owner.begin(ctx)
 		if err != nil {

@@ -17,6 +17,7 @@ import (
 )
 
 func TestWriteReadAndLiveRuntime(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	info := RuntimeInfo{
 		PID:        os.Getpid(),
@@ -64,6 +65,7 @@ func TestWriteReadAndLiveRuntime(t *testing.T) {
 }
 
 func TestDashboardURLAndBuildServeArgs(t *testing.T) {
+	t.Parallel()
 	if got := DashboardURL("0.0.0.0", 7428, "tok+1"); got != "http://127.0.0.1:7428/#token=tok%2B1" {
 		t.Fatalf("unexpected 0.0.0.0 dashboard URL: %s", got)
 	}
@@ -96,6 +98,7 @@ func TestDashboardURLAndBuildServeArgs(t *testing.T) {
 }
 
 func TestRotatingLogAndTailLog(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "logs", "ariadne.log")
 
@@ -141,7 +144,7 @@ func TestRotatingLogAndTailLog(t *testing.T) {
 	go func() {
 		done <- TailLog(ctx, samplePath, 1, true, syncWriter)
 	}()
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 	f, err := os.OpenFile(samplePath, os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		t.Fatal(err)
@@ -157,7 +160,7 @@ func TestRotatingLogAndTailLog(t *testing.T) {
 		if strings.Contains(got, "f\n") {
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	cancel()
 	if err := <-done; err != nil {
@@ -184,7 +187,7 @@ func (w *lockedWriter) Write(p []byte) (int, error) {
 
 func newTestRepoAndScheduler(t *testing.T, run func(context.Context, core.ConversationView) error) (*core.Repository, *scheduler.Scheduler) {
 	t.Helper()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "ctrl.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,6 +215,7 @@ func newTestRepoAndScheduler(t *testing.T, run func(context.Context, core.Conver
 }
 
 func TestControllerDrainAutoShutdownAndCancel(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{}, 2)
 	release := make(chan struct{})
 	var repoRef *core.Repository
@@ -279,7 +283,7 @@ func TestControllerDrainAutoShutdownAndCancel(t *testing.T) {
 		CanRestart:      true,
 		Scheduler:       sched,
 		Repository:      repo,
-		IdleQuietWindow: 80 * time.Millisecond,
+		IdleQuietWindow: 25 * time.Millisecond,
 		OnShutdown: func(restart bool) {
 			shutdownCh <- restart
 		},
@@ -330,6 +334,7 @@ func TestControllerDrainAutoShutdownAndCancel(t *testing.T) {
 }
 
 func TestControllerWhenIdleTriggersAfterQuietWindow(t *testing.T) {
+	t.Parallel()
 	repo, sched := newTestRepoAndScheduler(t, func(ctx context.Context, _ core.ConversationView) error {
 		return nil
 	})
@@ -339,7 +344,7 @@ func TestControllerWhenIdleTriggersAfterQuietWindow(t *testing.T) {
 		CanRestart:      true,
 		Scheduler:       sched,
 		Repository:      repo,
-		IdleQuietWindow: 100 * time.Millisecond,
+		IdleQuietWindow: 25 * time.Millisecond,
 		OnShutdown: func(restart bool) {
 			shutdownCh <- restart
 		},
@@ -368,6 +373,7 @@ func TestControllerWhenIdleTriggersAfterQuietWindow(t *testing.T) {
 }
 
 func TestDetachedManagerLifecycleAndNote(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	note := "headless SSH fallback note"
 	mgr := &detachedManager{home: home, note: note}

@@ -11,6 +11,7 @@ import (
 )
 
 func TestPurgeReleasesAllProjectData(t *testing.T) {
+	t.Parallel()
 	store, err := eventstore.Open(t.Context(), eventstore.Options{Path: filepath.Join(t.TempDir(), "delete.sqlite"), Projections: []eventstore.Projection{LifecycleProjection{}}})
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +76,7 @@ func TestPurgeReleasesAllProjectData(t *testing.T) {
 
 // Check the schema refusal does not mutate an incompatible database.
 func TestUnsupportedProjectionVersionIsPreserved(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "old.sqlite")
 	store, err := eventstore.Open(t.Context(), eventstore.Options{Path: path})
 	if err != nil {

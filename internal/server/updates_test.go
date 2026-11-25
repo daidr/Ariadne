@@ -16,8 +16,9 @@ import (
 )
 
 func TestUpdateServiceConnectEndToEnd(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "app.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

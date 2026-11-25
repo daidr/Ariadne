@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -157,19 +159,160 @@ type Identity func(context.Context) (*Author, error)
 
 func LocalIdentity(directory string) Identity {
 	return func(ctx context.Context) (*Author, error) {
-		values := []string{}
-		for _, key := range []string{"user.name", "user.email"} {
-			result := process.Run(ctx, []string{gitExecutable(nil), "config", "--get", key}, process.RunOptions{Directory: directory, ForThread: true})
-			if result.ExitCode != 0 {
-				return nil, nil
-			}
-			values = append(values, strings.TrimSpace(result.Stdout))
-		}
-		if values[0] == "" || values[1] == "" {
+		result := process.Run(ctx, []string{gitExecutable(nil), "config", "--null", "--get-regexp", `^user\.(name|email)$`}, process.RunOptions{Directory: directory, ForThread: true})
+		if result.ExitCode != 0 {
 			return nil, nil
 		}
-		return &Author{Name: values[0], Email: values[1]}, nil
+		var name, email string
+		for _, entry := range strings.Split(result.Stdout, "\x00") {
+			if entry == "" {
+				continue
+			}
+			key, val, ok := strings.Cut(entry, "\n")
+			if !ok {
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(key)) {
+			case "user.name":
+				name = strings.TrimSpace(val)
+			case "user.email":
+				email = strings.TrimSpace(val)
+			}
+		}
+		if name == "" || email == "" {
+			return nil, nil
+		}
+		return &Author{Name: name, Email: email}, nil
 	}
+}
+
+var worktreeConfigCache struct {
+	mu      sync.RWMutex
+	key     string
+	args    []string
+	expires time.Time
+}
+
+func configFileFingerprint(path string) string {
+	if path == "" {
+		return ""
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "-"
+	}
+	return strconv.FormatInt(info.Size(), 10) + ":" + strconv.FormatInt(info.ModTime().UnixNano(), 10)
+}
+
+func globalWorktreeConfigKey() string {
+	home := os.Getenv("HOME")
+	userProfile := os.Getenv("USERPROFILE")
+	xdg := os.Getenv("XDG_CONFIG_HOME")
+	globalCfg := os.Getenv("GIT_CONFIG_GLOBAL")
+	systemCfg := os.Getenv("GIT_CONFIG_SYSTEM")
+	noSystem := os.Getenv("GIT_CONFIG_NOSYSTEM")
+	var b strings.Builder
+	b.Grow(192)
+	b.WriteString(noSystem)
+	b.WriteByte('|')
+	b.WriteString(systemCfg)
+	b.WriteByte('|')
+	b.WriteString(configFileFingerprint(systemCfg))
+	b.WriteByte('|')
+	b.WriteString(globalCfg)
+	b.WriteByte('|')
+	b.WriteString(configFileFingerprint(globalCfg))
+	b.WriteByte('|')
+	b.WriteString(home)
+	b.WriteByte('|')
+	if home != "" {
+		b.WriteString(configFileFingerprint(filepath.Join(home, ".gitconfig")))
+		b.WriteByte(',')
+		b.WriteString(configFileFingerprint(filepath.Join(home, ".config", "git", "config")))
+	}
+	b.WriteByte('|')
+	b.WriteString(userProfile)
+	b.WriteByte('|')
+	if userProfile != "" && userProfile != home {
+		b.WriteString(configFileFingerprint(filepath.Join(userProfile, ".gitconfig")))
+		b.WriteByte(',')
+		b.WriteString(configFileFingerprint(filepath.Join(userProfile, ".config", "git", "config")))
+	}
+	b.WriteByte('|')
+	b.WriteString(xdg)
+	b.WriteByte('|')
+	if xdg != "" {
+		b.WriteString(configFileFingerprint(filepath.Join(xdg, "git", "config")))
+	}
+	return b.String()
+}
+
+func findLocalGitDir(cwd string) (string, bool) {
+	dir := filepath.Clean(cwd)
+	for range 32 {
+		dotGit := filepath.Join(dir, ".git")
+		info, err := os.Lstat(dotGit)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return "", false
+			}
+			if info.IsDir() {
+				return dotGit, true
+			}
+			if info.Mode().IsRegular() {
+				return resolveGitFileTarget(dir, dotGit)
+			}
+			return "", false
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+	return "", false
+}
+
+func localGitConfigHasLineEndingOverride(cwd string) (hasOverride bool, ok bool) {
+	if os.Getenv("GIT_CONFIG_PARAMETERS") != "" || os.Getenv("GIT_CONFIG_COUNT") != "" {
+		return true, false
+	}
+	gitDir, found := findLocalGitDir(cwd)
+	if !found {
+		return true, false
+	}
+	commonDir := gitDir
+	if rawCommon, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+		line, _, _ := strings.Cut(string(rawCommon), "\n")
+		target := filepath.FromSlash(strings.TrimSpace(strings.TrimRight(line, "\r")))
+		if target != "" {
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(gitDir, target)
+			}
+			commonDir = filepath.Clean(target)
+		}
+	}
+	candidates := []string{filepath.Join(commonDir, "config")}
+	if worktreeCfg := filepath.Join(gitDir, "config.worktree"); worktreeCfg != candidates[0] {
+		candidates = append(candidates, worktreeCfg)
+	}
+	for i, cfgPath := range candidates {
+		raw, err := os.ReadFile(cfgPath)
+		if err != nil {
+			if i == 0 {
+				return true, false
+			}
+			if os.IsNotExist(err) {
+				continue
+			}
+			return true, false
+		}
+		lower := strings.ToLower(string(raw))
+		if strings.Contains(lower, "autocrlf") || strings.Contains(lower, "eol") || strings.Contains(lower, "include") {
+			return true, true
+		}
+	}
+	return false, true
 }
 
 // worktreeConfigArgs reads safe line-ending settings (core.autocrlf, core.eol)
@@ -180,6 +323,19 @@ func worktreeConfigArgs(ctx context.Context, cwd string) []string {
 	if cwd == "" {
 		return nil
 	}
+	hasLocalOverride, inspectedLocal := localGitConfigHasLineEndingOverride(cwd)
+	cacheKey := ""
+	if inspectedLocal && !hasLocalOverride {
+		cacheKey = globalWorktreeConfigKey()
+		now := time.Now()
+		worktreeConfigCache.mu.RLock()
+		if worktreeConfigCache.key == cacheKey && now.Before(worktreeConfigCache.expires) {
+			cached := slices.Clone(worktreeConfigCache.args)
+			worktreeConfigCache.mu.RUnlock()
+			return cached
+		}
+		worktreeConfigCache.mu.RUnlock()
+	}
 	result := process.Run(ctx, []string{gitExecutable(nil), "config", "--get-regexp", `^core\.(autocrlf|eol)$`}, process.RunOptions{
 		Directory: cwd,
 		ForThread: true,
@@ -189,39 +345,45 @@ func worktreeConfigArgs(ctx context.Context, cwd string) []string {
 			"GIT_TERMINAL_PROMPT": "0",
 		},
 	})
-	if result.ExitCode != 0 || result.Stdout == "" {
-		return nil
-	}
-	var autocrlf, eol string
-	for _, line := range strings.Split(result.Stdout, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		key, value, ok := strings.Cut(line, " ")
-		if !ok {
-			continue
-		}
-		value = strings.ToLower(strings.TrimSpace(value))
-		switch strings.ToLower(key) {
-		case "core.autocrlf":
-			switch value {
-			case "true", "false", "input":
-				autocrlf = value
-			}
-		case "core.eol":
-			switch value {
-			case "lf", "crlf", "native":
-				eol = value
-			}
-		}
-	}
 	var args []string
-	if autocrlf != "" {
-		args = append(args, "-c", "core.autocrlf="+autocrlf)
+	if result.ExitCode == 0 && result.Stdout != "" {
+		var autocrlf, eol string
+		for _, line := range strings.Split(result.Stdout, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			key, value, ok := strings.Cut(line, " ")
+			if !ok {
+				continue
+			}
+			value = strings.ToLower(strings.TrimSpace(value))
+			switch strings.ToLower(key) {
+			case "core.autocrlf":
+				switch value {
+				case "true", "false", "input":
+					autocrlf = value
+				}
+			case "core.eol":
+				switch value {
+				case "lf", "crlf", "native":
+					eol = value
+				}
+			}
+		}
+		if autocrlf != "" {
+			args = append(args, "-c", "core.autocrlf="+autocrlf)
+		}
+		if eol != "" {
+			args = append(args, "-c", "core.eol="+eol)
+		}
 	}
-	if eol != "" {
-		args = append(args, "-c", "core.eol="+eol)
+	if cacheKey != "" && (result.ExitCode == 0 || result.ExitCode == 1) && ctx.Err() == nil {
+		worktreeConfigCache.mu.Lock()
+		worktreeConfigCache.key = cacheKey
+		worktreeConfigCache.args = slices.Clone(args)
+		worktreeConfigCache.expires = time.Now().Add(30 * time.Second)
+		worktreeConfigCache.mu.Unlock()
 	}
 	return args
 }

@@ -2,7 +2,6 @@ package runner
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,8 +10,9 @@ import (
 )
 
 func TestPostUIDraftStaysTransientUntilValidated(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "test.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,22 +33,22 @@ func TestPostUIDraftStaysTransientUntilValidated(t *testing.T) {
 	defer drafts.Close()
 	agent := turn{Runner: &Runner{Repository: repo, Drafts: drafts}, conversation: conversation}
 
-		snapshot := func() *realtime.ReplyDraft {
-			t.Helper()
-			for update := range state.Snapshots(project.ID) {
-				if update.Kind == "draft" {
-					if payload, ok := update.Value.(*realtime.DraftUpdate); ok && payload != nil {
-						return payload.Draft
-					}
-					var payload realtime.DraftUpdate
-					if err := json.Unmarshal(update.Data, &payload); err != nil {
-						t.Fatal(err)
-					}
+	snapshot := func() *realtime.ReplyDraft {
+		t.Helper()
+		for update := range state.Snapshots(project.ID) {
+			if update.Kind == "draft" {
+				if payload, ok := update.Value.(*realtime.DraftUpdate); ok && payload != nil {
 					return payload.Draft
 				}
+				var payload realtime.DraftUpdate
+				if err := json.Unmarshal(update.Data, &payload); err != nil {
+					t.Fatal(err)
+				}
+				return payload.Draft
 			}
-			return nil
 		}
+		return nil
+	}
 
 	agent.preview(new(0), "post_ui", `{"blocks":[{"type":"choice","question":"Where?","options":[{"label":"Prev`)
 	draft := snapshot()
@@ -78,6 +78,7 @@ func TestPostUIDraftStaysTransientUntilValidated(t *testing.T) {
 }
 
 func TestDocumentDraftReplacesOnlyCompleteAnchors(t *testing.T) {
+	t.Parallel()
 	base := "Introduction\n\nOld paragraph\n\nKeep this."
 	for _, test := range []struct{ body, want string }{
 		{`{"artifactId":"doc","edits":[{"old":"Old para`, base},
@@ -103,6 +104,7 @@ func TestDocumentDraftReplacesOnlyCompleteAnchors(t *testing.T) {
 }
 
 func TestDocumentDraftRetainsAnchorBeforeReplacement(t *testing.T) {
+	t.Parallel()
 	input, _ := growingArtifactArguments(`{"artifactId":"doc","edits":[{"old":" Text with spaces ","new":"`)
 	if input["pendingAnchor"] != " Text with spaces " || input["edits"] != nil {
 		t.Fatalf("draft did not preserve the complete anchor before the replacement: %+v", input)
@@ -110,6 +112,7 @@ func TestDocumentDraftRetainsAnchorBeforeReplacement(t *testing.T) {
 }
 
 func TestJSONPrefixRetainsNestedPartialStrings(t *testing.T) {
+	t.Parallel()
 	full := `{"text":"See below","blocks":[{"type":"choice","question":"选一个","options":[{"label":"\uD83D\uDE00","consequence":"a"},{"label":"B","consequence":"b"}]}]}`
 	for end := 1; end <= len(full); end++ {
 		if prefixObject(full[:end]) == nil {

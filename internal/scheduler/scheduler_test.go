@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +15,7 @@ import (
 func intPointer(value int) *int { return &value }
 func testRepository(t *testing.T) *core.Repository {
 	t.Helper()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "scheduler.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +122,7 @@ func eventually(t *testing.T, predicate func() bool) {
 }
 
 func TestCoordinatorsStartWithEveryWorkerSlotOccupied(t *testing.T) {
+	t.Parallel()
 	repo := testRepository(t)
 	a, b := project(t, repo, "A"), project(t, repo, "B")
 	if _, err := repo.SetProjectSlots(t.Context(), a.ID, intPointer(1)); err != nil {
@@ -178,6 +178,7 @@ func TestCoordinatorsStartWithEveryWorkerSlotOccupied(t *testing.T) {
 	}
 }
 func TestProjectWorkerCapAndRuntimeSlotChanges(t *testing.T) {
+	t.Parallel()
 	repo := testRepository(t)
 	p := project(t, repo, "P")
 	if _, err := repo.SetProjectSlots(t.Context(), p.ID, intPointer(1)); err != nil {
@@ -206,6 +207,7 @@ func TestProjectWorkerCapAndRuntimeSlotChanges(t *testing.T) {
 	}
 }
 func TestHeldProjectInterruptsAndResumesCoordinatorWithZeroWorkerSlots(t *testing.T) {
+	t.Parallel()
 	repo := testRepository(t)
 	p := project(t, repo, "P")
 	post(t, repo, p.ID, p.CoordinatorID, "user")
@@ -248,6 +250,7 @@ func TestHeldProjectInterruptsAndResumesCoordinatorWithZeroWorkerSlots(t *testin
 	}
 }
 func TestRecoveryAndUnhandledRunnerFailure(t *testing.T) {
+	t.Parallel()
 	repo := testRepository(t)
 	p := project(t, repo, "P")
 	post(t, repo, p.ID, p.CoordinatorID, "user")
@@ -289,6 +292,7 @@ func TestRecoveryAndUnhandledRunnerFailure(t *testing.T) {
 }
 
 func TestCancellationBeforeModelTurnDoesNotBecomeNoModelOrRestart(t *testing.T) {
+	t.Parallel()
 	repo := testRepository(t)
 	p := project(t, repo, "P")
 	post(t, repo, p.ID, p.CoordinatorID, "user")
@@ -314,6 +318,7 @@ func TestCancellationBeforeModelTurnDoesNotBecomeNoModelOrRestart(t *testing.T) 
 }
 
 func TestSchedulerDrainBlocksNewTurnsAndWaitIdle(t *testing.T) {
+	t.Parallel()
 	repo := testRepository(t)
 	p := project(t, repo, "Drain")
 	post(t, repo, p.ID, p.CoordinatorID, "user")

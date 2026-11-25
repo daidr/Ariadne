@@ -2,7 +2,6 @@ package core
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,8 +13,9 @@ func planAdd(id, title string) object {
 }
 
 func TestCoordinatorPlanChangesApplyDirectlyWithoutConfirmation(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "direct-plan.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return time.UnixMilli(1800000000000) }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,8 +137,9 @@ func TestCoordinatorPlanChangesApplyDirectlyWithoutConfirmation(t *testing.T) {
 }
 
 func TestLegacyPlanProposalsRemainSupported(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "legacy-proposals.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return time.UnixMilli(1800000000000) }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,8 +205,9 @@ func TestLegacyPlanProposalsRemainSupported(t *testing.T) {
 }
 
 func TestPlanNodeGroupAddUpdateClearAndRevert(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "plan-groups.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return time.UnixMilli(1800000000000) }})
 	if err != nil {
 		t.Fatal(err)
 	}

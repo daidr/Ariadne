@@ -32,6 +32,7 @@ func TestLedgerChild(t *testing.T) {
 	time.Sleep(time.Minute)
 }
 func TestLedgerWritesTracksAndReleasesNativeProcess(t *testing.T) {
+	t.Parallel()
 	ledger := NewLedger()
 	defer ledger.Close()
 	path := filepath.Join(t.TempDir(), "processes.json")
@@ -68,6 +69,7 @@ func TestLedgerWritesTracksAndReleasesNativeProcess(t *testing.T) {
 	}
 }
 func TestLedgerLockProtectsConcurrentServerAndOldReleaseCannotDropReusedPID(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "processes.json")
 	one, two := NewLedger(), NewLedger()
 	defer one.Close()
@@ -120,6 +122,7 @@ func writeOldLedger(t *testing.T, path string, owner processOwner, entries []Tra
 	}
 }
 func TestLedgerReapsNativeAndLegacyLeftoversButPreservesPIDReuse(t *testing.T) {
+	t.Parallel()
 	for _, legacy := range []bool{false, true} {
 		t.Run(map[bool]string{false: "native", true: "legacy"}[legacy], func(t *testing.T) {
 			memory := NewLedger()
@@ -171,6 +174,7 @@ func TestLedgerReapsNativeAndLegacyLeftoversButPreservesPIDReuse(t *testing.T) {
 	}
 }
 func TestLedgerRespectsAnUnmodifiedLegacyLiveOwner(t *testing.T) {
+	t.Parallel()
 	memory := NewLedger()
 	defer memory.Close()
 	owner := ledgerChild(t, memory)
@@ -203,6 +207,7 @@ func TestLedgerRespectsAnUnmodifiedLegacyLiveOwner(t *testing.T) {
 	}
 }
 func TestLedgerCorruptionLimitsAndFailureRollBack(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"not json", `{"owner":{"pid":1},"processes":null}`, `{"owner":{"pid":0},"processes":[]}`} {
 		path := filepath.Join(t.TempDir(), "processes.json")
 		if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
@@ -244,6 +249,7 @@ func TestLedgerCorruptionLimitsAndFailureRollBack(t *testing.T) {
 	}
 }
 func TestNativeStartTimesAreFiniteAndIdentifyThisProcess(t *testing.T) {
+	t.Parallel()
 	values := StartTimes([]int{os.Getpid(), -1, 0, 2147483000, os.Getpid()})
 	at, exists := values[os.Getpid()]
 	if !exists || at <= 0 || at > time.Now().UnixMilli()+1000 {

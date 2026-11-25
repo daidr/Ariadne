@@ -318,6 +318,7 @@ func methodCount(messages []map[string]any, method string) int {
 }
 
 func TestCodexNativeProtocolAndConversationReuse(t *testing.T) {
+	t.Parallel()
 	command, log := codexTestCommand(t)
 	settings := map[string]any{"command": command}
 	m := newTestSessions(t, Kind(), agentruntime.SessionOptions{})
@@ -369,8 +370,10 @@ func TestCodexNativeProtocolAndConversationReuse(t *testing.T) {
 }
 
 func TestCodexToolReturnAndMutableEffort(t *testing.T) {
+	t.Parallel()
 	for _, fallback := range []bool{false, true} {
 		t.Run(fmt.Sprint(fallback), func(t *testing.T) {
+			t.Parallel()
 			extra := []string{}
 			if fallback {
 				extra = append(extra, "--fallback")
@@ -410,6 +413,7 @@ func TestCodexToolReturnAndMutableEffort(t *testing.T) {
 }
 
 func TestCodexCheckpointAcrossProcessRestart(t *testing.T) {
+	t.Parallel()
 	command, log := codexTestCommand(t)
 	home := t.TempDir()
 	settings := map[string]any{"command": command}
@@ -436,6 +440,7 @@ func TestCodexCheckpointAcrossProcessRestart(t *testing.T) {
 }
 
 func TestCodexNativeHistoryAndModels(t *testing.T) {
+	t.Parallel()
 	command, log := codexTestCommand(t)
 	models, err := ListModels(t.Context(), Settings{Command: command}, t.TempDir())
 	if err != nil {
@@ -463,6 +468,7 @@ func TestCodexNativeHistoryAndModels(t *testing.T) {
 }
 
 func TestCodexErrorsAndCancellation(t *testing.T) {
+	t.Parallel()
 	command, _ := codexTestCommand(t, "--old")
 	m := newTestSessions(t, Kind(), agentruntime.SessionOptions{})
 	request := sdk.Request{Conversation: "old", Messages: []sdk.Message{user("hello")}}
@@ -489,6 +495,7 @@ func TestCodexErrorsAndCancellation(t *testing.T) {
 }
 
 func TestCodexTokenUsageEmitsContextInputWithoutTotalGrowth(t *testing.T) {
+	t.Parallel()
 	var events []agentruntime.Event
 	d := &codexDriver{
 		ctx:     agentruntime.DriverContext{Emit: func(event agentruntime.Event) { events = append(events, event) }},

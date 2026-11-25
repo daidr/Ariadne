@@ -2,15 +2,15 @@ package core
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 )
 
 func TestProjectListCountsOnlyRunningConversations(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "projects.sqlite")})
+	repo, err := Open(ctx, Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,8 +68,9 @@ func TestProjectListCountsOnlyRunningConversations(t *testing.T) {
 }
 
 func TestProjectActivityShowsOnlyCurrentWork(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "activity.sqlite")})
+	repo, err := Open(ctx, Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,6 +140,7 @@ func TestProjectActivityShowsOnlyCurrentWork(t *testing.T) {
 }
 
 func TestStoredViewJSONErrorsSurface(t *testing.T) {
+	t.Parallel()
 	_, err := toThread(record{"merged": "broken"}, 0)
 	if err == nil {
 		t.Fatal("bad persisted JSON silently discarded")

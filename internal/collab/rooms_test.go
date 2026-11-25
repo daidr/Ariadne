@@ -2,7 +2,6 @@ package collab
 
 import (
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ import (
 func openTestRoom(t *testing.T, kind, content string) (*core.Repository, *Rooms, *room, *peer, *peer) {
 	t.Helper()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "collab.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +59,7 @@ func makeUpdateFrame(t *testing.T, doc *crdt.Doc, mutate func()) []byte {
 }
 
 func TestRoomIncrementalUpdatesCompactAndPersist(t *testing.T) {
+	t.Parallel()
 	repo, rooms, active, left, right := openTestRoom(t, "document", "# 标题\n\n第一段内容。\n")
 	clientDoc, err := active.cloneDoc()
 	if err != nil {
@@ -149,6 +149,7 @@ func TestRoomIncrementalUpdatesCompactAndPersist(t *testing.T) {
 }
 
 func TestRoomRestorePreservesUncompactedDeltas(t *testing.T) {
+	t.Parallel()
 	_, _, active, left, right := openTestRoom(t, "document", "# 标题\n\n初始正文。\n")
 	clientDoc, err := active.cloneDoc()
 	if err != nil {
@@ -203,6 +204,7 @@ func TestRoomRestorePreservesUncompactedDeltas(t *testing.T) {
 }
 
 func TestDashboardRejectsSnapshotEditsAndPreservesWidgets(t *testing.T) {
+	t.Parallel()
 	initial := `{"version":1,"dashboard":{"version":1,"widgets":[{"id":"w1","type":"stat","props":{"source":"m"},"place":{"lg":{"x":0,"y":0,"w":4,"h":3}}}]},"data":{"m":[{"v":1}]},"source":{"kind":"test","settings":{}}}`
 	_, rooms, active, left, right := openTestRoom(t, "dashboard", initial)
 
@@ -334,6 +336,7 @@ func TestDashboardRejectsSnapshotEditsAndPreservesWidgets(t *testing.T) {
 }
 
 func TestDocumentDraftShadowReuseLockEnforcementAndFallback(t *testing.T) {
+	t.Parallel()
 	initial := "# 标题\n\n锁定段落。\n\n自由段落。\n"
 	_, rooms, active, left, right := openTestRoom(t, "document", initial)
 
@@ -438,6 +441,7 @@ func TestDocumentDraftShadowReuseLockEnforcementAndFallback(t *testing.T) {
 }
 
 func TestRoomOutOfOrderUpdatesRetryAndBroadcast(t *testing.T) {
+	t.Parallel()
 	_, _, active, left, right := openTestRoom(t, "document", "# 标题\n\n正文：\n")
 	clientDoc, err := active.cloneDoc()
 	if err != nil {
@@ -500,6 +504,7 @@ done:
 }
 
 func TestRoomOutOfOrderAcrossDraftAndRejectedFrame(t *testing.T) {
+	t.Parallel()
 	t.Run("document unlocked edit broadcast and persistence", func(t *testing.T) {
 		repo, rooms, active, left, right := openTestRoom(t, "document", "# 标题\n\n锁定段落。\n\n自由段落：\n")
 		clientDoc, err := active.cloneDoc()
@@ -929,6 +934,7 @@ func TestRoomOutOfOrderAcrossDraftAndRejectedFrame(t *testing.T) {
 }
 
 func TestRoomPendingCompactsAtThreshold(t *testing.T) {
+	t.Parallel()
 	_, _, active, left, right := openTestRoom(t, "document", "# 标题\n\n开头。\n")
 	clientDoc, err := active.cloneDoc()
 	if err != nil {
@@ -962,6 +968,7 @@ func TestRoomPendingCompactsAtThreshold(t *testing.T) {
 }
 
 func TestRoomRejectsOversizedStateUpdate(t *testing.T) {
+	t.Parallel()
 	_, rooms, active, left, _ := openTestRoom(t, "document", "# 标题\n\n短文本。\n")
 
 	makeOversizedFrame := func() []byte {

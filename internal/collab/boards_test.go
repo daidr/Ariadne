@@ -8,6 +8,7 @@ import (
 )
 
 func TestBoardUpdatesKeepEditsOutsideTheBaseDiff(t *testing.T) {
+	t.Parallel()
 	board, err := Load("whiteboard", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -29,6 +30,7 @@ func TestBoardUpdatesKeepEditsOutsideTheBaseDiff(t *testing.T) {
 }
 
 func TestDashboardPreservesConcurrentBreakpointAndWidget(t *testing.T) {
+	t.Parallel()
 	dashboard, err := Load("dashboard", nil)
 	if err != nil {
 		t.Fatal(err)

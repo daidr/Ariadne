@@ -29,6 +29,7 @@ func testStore(t *testing.T, scan func(context.Context, string) *int64) (*Store,
 	return store, repo
 }
 func TestBackupNamesRestoreRemovalAndDailyRetention(t *testing.T) {
+	t.Parallel()
 	store, repo := testStore(t, nil)
 	ctx := t.Context()
 	name := "备份测试"
@@ -125,6 +126,7 @@ func TestBackupNamesRestoreRemovalAndDailyRetention(t *testing.T) {
 	}
 }
 func TestSummaryReturnsBackupsWithoutScanningPlugins(t *testing.T) {
+	t.Parallel()
 	store, _ := testStore(t, func(context.Context, string) *int64 {
 		t.Error("summary started a disk scan")
 		return nil
@@ -144,6 +146,7 @@ func TestSummaryReturnsBackupsWithoutScanningPlugins(t *testing.T) {
 }
 
 func TestUsageScansShareWorkExpireAndClose(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int64
 	entered, release := make(chan struct{}, 10), make(chan struct{}, 10)
 	store, _ := testStore(t, func(ctx context.Context, _ string) *int64 {
@@ -229,6 +232,7 @@ func TestUsageScansShareWorkExpireAndClose(t *testing.T) {
 }
 
 func TestDailyBackupStopsAndCanRestart(t *testing.T) {
+	t.Parallel()
 	store, _ := testStore(t, nil)
 	daily := &Daily{Store: store, OnError: func(err error) { t.Error(err) }}
 	daily.Start(t.Context())

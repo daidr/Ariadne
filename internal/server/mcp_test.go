@@ -22,6 +22,7 @@ import (
 )
 
 func TestMCPSettingsCheckAndProjectSelectionConnect(t *testing.T) {
+	t.Parallel()
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			w.WriteHeader(405)
@@ -59,7 +60,7 @@ func TestMCPSettingsCheckAndProjectSelectionConnect(t *testing.T) {
 
 	seed := []eventstore.NewEvent{{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"Project","coordinatorId":"crd_a"}`)}}
 	directory := t.TempDir()
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(directory, "data.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:", Now: func() time.Time { return time.UnixMilli(1800000000000) }})
 	if err != nil {
 		t.Fatal(err)
 	}

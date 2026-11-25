@@ -71,6 +71,7 @@ func extractLocalizedError(t *testing.T, err error) (*connect.Error, *ariadnev1.
 }
 
 func TestDataServiceConnectEndToEnd(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	path := filepath.Join(home, "ariadne.db")
 	now := time.UnixMilli(1_800_000_000_000)
@@ -209,8 +210,9 @@ func TestDataServiceConnectEndToEnd(t *testing.T) {
 }
 
 func TestConnectErrorMappingAndDirectAuthInterceptor(t *testing.T) {
+	t.Parallel()
 	var reported []error
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "rpc.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -27,7 +27,7 @@ func testRepository(t *testing.T) (*core.Repository, core.ProjectView, string) {
 	if err := os.WriteFile(filepath.Join(path, "file.txt"), []byte("hello"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(root, "data.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +60,7 @@ func closeManager(t *testing.T, manager *Manager) {
 	}
 }
 func TestSourceViewsReuseConnectionsAndCloseOnConfigurationOrProviderChange(t *testing.T) {
+	t.Parallel()
 	repo, project, path := testRepository(t)
 	registry := sources.New()
 	var opened, closed atomic.Int32
@@ -122,6 +123,7 @@ func TestSourceViewsReuseConnectionsAndCloseOnConfigurationOrProviderChange(t *t
 	}
 }
 func TestCoordinatorViewabilityDoesNotWaitForSlowSourceAndCloseCancelsLoad(t *testing.T) {
+	t.Parallel()
 	repo, project, _ := testRepository(t)
 	registry := sources.New()
 	started := make(chan struct{})
@@ -151,6 +153,7 @@ func TestCoordinatorViewabilityDoesNotWaitForSlowSourceAndCloseCancelsLoad(t *te
 	}
 }
 func TestReferenceViewsRevalidateSecretsAndDeletion(t *testing.T) {
+	t.Parallel()
 	repo, project, path := testRepository(t)
 	registry := sources.New()
 	var opened, closed atomic.Int32
@@ -228,6 +231,7 @@ func makeClosedManagerView(t *testing.T, repo *core.Repository, registry *source
 	return view
 }
 func TestClosedViewDoesNotRetainCapturedSourceSecrets(t *testing.T) {
+	t.Parallel()
 	repo, project, _ := testRepository(t)
 	registry := sources.New()
 	var opened, closed atomic.Int32

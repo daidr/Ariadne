@@ -19,12 +19,13 @@ import (
 )
 
 func TestDocumentFeedbackSurvivesAnEmptyModelReply(t *testing.T) {
+	t.Parallel()
 	for _, respond := range []bool{false, true} {
 		t.Run(fmt.Sprint(respond), func(t *testing.T) {
 			ctx := t.Context()
 			home := t.TempDir()
 			now := time.UnixMilli(1900000000000)
-			repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite"), Now: func() time.Time { return now }})
+			repo, err := core.Open(ctx, core.Options{Path: ":memory:", Now: func() time.Time { return now }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -145,9 +146,10 @@ func TestDocumentFeedbackSurvivesAnEmptyModelReply(t *testing.T) {
 }
 
 func TestUnreportedDiscussionReceivesActionableReminder(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,9 +228,10 @@ func TestUnreportedDiscussionReceivesActionableReminder(t *testing.T) {
 }
 
 func TestAgentContextLimitCompactsAndContinuesSameDiscussion(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,9 +322,10 @@ func TestAgentContextLimitCompactsAndContinuesSameDiscussion(t *testing.T) {
 }
 
 func TestThreadContextUsageUpdatesBeforeFirstVisibleMessage(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,9 +416,10 @@ func TestThreadContextUsageUpdatesBeforeFirstVisibleMessage(t *testing.T) {
 }
 
 func TestLongTurnCompactsDirectlyWithoutClearingOldToolResults(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,9 +520,10 @@ func TestLongTurnCompactsDirectlyWithoutClearingOldToolResults(t *testing.T) {
 }
 
 func TestEffectiveContextSizePreventsFalseCompactionFromEstimateInflation(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

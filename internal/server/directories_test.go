@@ -16,6 +16,7 @@ import (
 )
 
 func TestDirectoryPickerConnect(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for _, name := range []string{"a10", "a2", "A1", ".hidden", "notes"} {
 		if err := os.Mkdir(filepath.Join(root, name), 0700); err != nil {
@@ -25,7 +26,7 @@ func TestDirectoryPickerConnect(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "file"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

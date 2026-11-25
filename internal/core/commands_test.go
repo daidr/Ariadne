@@ -2,7 +2,6 @@ package core
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,7 +10,8 @@ import (
 )
 
 func TestCreateThreadValidatesProjectAndNodeAtomically(t *testing.T) {
-	repo, err := Open(t.Context(), Options{Path: filepath.Join(t.TempDir(), "new-thread.sqlite")})
+	t.Parallel()
+	repo, err := Open(t.Context(), Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,8 +53,9 @@ func TestCreateThreadValidatesProjectAndNodeAtomically(t *testing.T) {
 }
 
 func TestSetThreadNode(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "set-node.sqlite")})
+	repo, err := Open(ctx, Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

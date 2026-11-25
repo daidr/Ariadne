@@ -8,6 +8,7 @@ import (
 )
 
 func TestDocumentUpdateRetainsBlockIDsAndUnchangedFormatting(t *testing.T) {
+	t.Parallel()
 	doc, err := Load("document", nil)
 	if err != nil {
 		t.Fatal(err)

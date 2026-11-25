@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,8 +21,9 @@ import (
 )
 
 func TestTraceExportIncludesFailedRequestsAndRedactsCredentials(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "trace.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

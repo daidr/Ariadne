@@ -19,6 +19,7 @@ import (
 )
 
 func TestCommandExcerptPreservesDiagnosticAfterLargeOutput(t *testing.T) {
+	t.Parallel()
 	result, err := formatCommand(background.Execution{Result: sdk.ExecResult{
 		ExitCode: 1,
 		Stdout:   "build starting\n" + strings.Repeat("verbose output\n", 5000) + "build finished",
@@ -35,12 +36,14 @@ func TestCommandExcerptPreservesDiagnosticAfterLargeOutput(t *testing.T) {
 }
 
 func TestStalledCommandChild(t *testing.T) {
+	t.Parallel()
 	if os.Args[len(os.Args)-1] == "--stalled-workspace-command" {
 		time.Sleep(time.Minute)
 	}
 }
 
 func TestCommandTimeoutPersistsAfterYield(t *testing.T) {
+	t.Parallel()
 	program, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -69,6 +72,7 @@ func TestCommandTimeoutPersistsAfterYield(t *testing.T) {
 }
 
 func TestCommandApprovalBindsToOneExecutionInItsWorkspace(t *testing.T) {
+	t.Parallel()
 	home, folder := t.TempDir(), t.TempDir()
 	const command = "echo approved > result.txt"
 	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(`{"commands":{"rules":[{"pattern":"echo*","action":"ask"}]}}`), 0600); err != nil {
@@ -78,7 +82,7 @@ func TestCommandApprovalBindsToOneExecutionInItsWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(home, "ariadne.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,6 +174,7 @@ func TestCommandApprovalBindsToOneExecutionInItsWorkspace(t *testing.T) {
 }
 
 func TestRunCommandDescriptionIncludesActiveShell(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		shell process.Shell
 		want  []string
@@ -195,7 +200,7 @@ func TestRunCommandDescriptionIncludesActiveShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(home, "ariadne.sqlite")})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

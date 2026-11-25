@@ -2,16 +2,16 @@ package core
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestPrototypeNodeValidationAndTweakFeedback(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	clock := time.UnixMilli(1931000000000)
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return clock }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +173,7 @@ func TestPrototypeNodeValidationAndTweakFeedback(t *testing.T) {
 }
 
 func TestValidatePrototypeSrcRejectsPathTraversal(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		src     string

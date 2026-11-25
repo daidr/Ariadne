@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -76,12 +75,13 @@ func canonical(raw any) any {
 	return visit(value)
 }
 func TestDomainHTTPResponses(t *testing.T) {
+	t.Parallel()
 	seed := []eventstore.NewEvent{
 		{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"项目","coordinatorId":"crd_a"}`)},
 	}
 	hash := sha256.Sum256([]byte("abc"))
 	sql := fmt.Sprintf(`INSERT INTO files VALUES ('fil_text','prj_a','text/plain',3,'%s',x'616263',0)`, hex.EncodeToString(hash[:]))
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "api.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:", Now: func() time.Time { return time.UnixMilli(1800000000000) }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,8 @@ func TestDomainHTTPResponses(t *testing.T) {
 }
 
 func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "auth.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,19 +153,19 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	}
 	defer api.Close()
 	parameter := regexp.MustCompile(`:[a-zA-Z]+`)
-		wantNativeRoutes := []string{
-			"GET /api/artifacts/:artifactId/live",
-			"GET /api/conversations/:conversationId/trace/export",
-			"GET /api/files/:fileId",
-			"GET /api/health",
-			"GET /api/projects/:projectId/export",
-			"GET /api/service/status",
-			"HEAD /api/files/:fileId",
-			"POST /api/projects/:projectId/files",
-			"POST /api/service/cancel-drain",
-			"POST /api/service/drain",
-			"POST /api/service/shutdown",
-		}
+	wantNativeRoutes := []string{
+		"GET /api/artifacts/:artifactId/live",
+		"GET /api/conversations/:conversationId/trace/export",
+		"GET /api/files/:fileId",
+		"GET /api/health",
+		"GET /api/projects/:projectId/export",
+		"GET /api/service/status",
+		"HEAD /api/files/:fileId",
+		"POST /api/projects/:projectId/files",
+		"POST /api/service/cancel-drain",
+		"POST /api/service/drain",
+		"POST /api/service/shutdown",
+	}
 	gotNativeRoutes := slices.Clone(api.routes)
 	slices.Sort(gotNativeRoutes)
 	if !slices.Equal(gotNativeRoutes, wantNativeRoutes) {
@@ -253,7 +254,8 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 }
 
 func TestEventStreamAuthCursorAndDisconnect(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "stream.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +341,8 @@ func TestEventStreamAuthCursorAndDisconnect(t *testing.T) {
 }
 
 func TestPingRequiresAuthAndSucceedsWithToken(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "ping.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +377,8 @@ func TestPingRequiresAuthAndSucceedsWithToken(t *testing.T) {
 }
 
 func TestStaticAssetsAndPWAMIME(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "static.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

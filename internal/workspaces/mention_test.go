@@ -26,6 +26,7 @@ func (view *mentionView) List(_ context.Context, path string) ([]sdk.DirectoryEn
 }
 
 func TestMentionRanksAndWalk(t *testing.T) {
+	t.Parallel()
 	files := []string{"src/file.ts", "file.txt", "other/file.ts", "profile", "中文.txt", "İFILE.md", "ΟΣ.md", "😀.md"}
 	for range 40 {
 		files = append(files, "same-rank.txt")
@@ -52,6 +53,7 @@ func TestMentionRanksAndWalk(t *testing.T) {
 	}
 }
 func TestMentionWalkBoundsEmptyTreesFilesAndPathBytes(t *testing.T) {
+	t.Parallel()
 	view := &mentionView{tree: map[string][]sdk.DirectoryEntry{}}
 	for i := range maxMentionFiles + 10 {
 		view.tree["."] = append(view.tree["."], sdk.DirectoryEntry{Name: "dir-" + string(rune(0x1000+i)), Kind: "directory"})
@@ -74,6 +76,7 @@ func TestMentionWalkBoundsEmptyTreesFilesAndPathBytes(t *testing.T) {
 	}
 }
 func TestMentionCacheRefreshesHotEntriesAndClosesOnDelete(t *testing.T) {
+	t.Parallel()
 	repo, project, _ := testRepository(t)
 	view := &mentionView{tree: map[string][]sdk.DirectoryEntry{".": {{Name: "original.txt", Kind: "file"}}}}
 	registry := sources.New()

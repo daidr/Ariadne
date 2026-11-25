@@ -2,7 +2,6 @@ package core_test
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,7 +11,8 @@ import (
 )
 
 func TestModelContextSkipsSummarisedOutputButKeepsUserWordsAndPrompts(t *testing.T) {
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "context.sqlite")})
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}

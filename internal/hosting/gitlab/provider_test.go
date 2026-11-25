@@ -23,6 +23,7 @@ import (
 )
 
 func TestIssueLinkPreview(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.Method != "GET" || request.URL.Path != "/api/v4/projects/group/sub/app/issues/16" ||
 			request.Header.Get("Authorization") != "Bearer fixture" {
@@ -58,6 +59,7 @@ func TestIssueLinkPreview(t *testing.T) {
 }
 
 func TestTokenResolutionKeepsEnvironmentWithinItsHost(t *testing.T) {
+	t.Parallel()
 	var runs atomic.Int32
 	run := func(ctx context.Context, args []string, options process.RunOptions) sdk.ExecResult {
 		runs.Add(1)
@@ -96,6 +98,7 @@ func TestTokenResolutionKeepsEnvironmentWithinItsHost(t *testing.T) {
 }
 
 func TestPluginTokenMatchesOnlyConfiguredGitLabInstance(t *testing.T) {
+	t.Parallel()
 	options := Options{PluginSettings: func() map[string]any {
 		return map[string]any{"instance": "https://GITLAB.example:443/team/", "token": "fixture"}
 	}}
@@ -107,6 +110,7 @@ func TestPluginTokenMatchesOnlyConfiguredGitLabInstance(t *testing.T) {
 	}
 }
 func TestInstancesUpdateDeleteBoundsAndClose(t *testing.T) {
+	t.Parallel()
 	instances := NewInstances(map[string]string{})
 	defer instances.Close()
 	address, _ := url.Parse("https://one.test/group/app/-/merge_requests/1")
@@ -149,6 +153,7 @@ func TestInstancesUpdateDeleteBoundsAndClose(t *testing.T) {
 	}
 }
 func TestLinkPreviewTriesOnlyTokensOfItsInstanceAndReleasesRequests(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -198,6 +203,7 @@ func TestLinkPreviewTriesOnlyTokensOfItsInstanceAndReleasesRequests(t *testing.T
 	}
 }
 func TestProviderDoesNotRegisterFailedCredentials(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
 		io.WriteString(w, `{"message":"Unauthorized"}`)
@@ -215,6 +221,7 @@ func TestProviderDoesNotRegisterFailedCredentials(t *testing.T) {
 	}
 }
 func TestHostedProviderUsesWindowsSafeInstanceDirectoriesAndDefaultBranch(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin", "group", "sub", "app.git")
 	if err := os.MkdirAll(origin, 0700); err != nil {
@@ -237,7 +244,14 @@ func TestHostedProviderUsesWindowsSafeInstanceDirectoriesAndDefaultBranch(t *tes
 	git(origin, "add", "base.txt")
 	git(origin, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "initial")
 	// The receiver need not be checked out: pushes to a checked-out branch are refused by Git.
-	git(origin, "config", "receive.denyCurrentBranch", "ignore")
+	cfgPath := filepath.Join(origin, ".git", "config")
+	cfgRaw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, append(cfgRaw, []byte("\n[receive]\n\tdenyCurrentBranch = ignore\n")...), 0644); err != nil {
+		t.Fatal(err)
+	}
 	var metadata atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer explicit-token" {
@@ -301,6 +315,7 @@ func TestHostedProviderUsesWindowsSafeInstanceDirectoriesAndDefaultBranch(t *tes
 	}
 }
 func TestLinkCloseCancelsCLILookup(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{})
 	instances := NewInstances(map[string]string{})
 	defer instances.Close()
@@ -324,6 +339,7 @@ func TestLinkCloseCancelsCLILookup(t *testing.T) {
 	}
 }
 func TestLargePlainLogStreamsWithoutRetainingFullText(t *testing.T) {
+	t.Parallel()
 	text := "section_start:1:build\r\x1b[0K" + strings.Repeat("\x1b[32mline\x1b[0m\r", 100_000) + "section_end:2:build\r\x1b[0K\r\n"
 	streamed, err := io.ReadAll(plainStream(strings.NewReader(text)))
 	if err != nil || string(streamed) != PlainLog(text) {

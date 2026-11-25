@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -16,8 +15,9 @@ import (
 )
 
 func TestDomain3ConnectServices(t *testing.T) {
+	t.Parallel()
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
-	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "domain3.sqlite"), Now: now})
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}

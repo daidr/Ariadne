@@ -9,6 +9,7 @@ import (
 )
 
 func TestReferenceRefusals(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join(t.TempDir(), "home")
 	own := []string{filepath.Join(home, "app-data")}
 	if err := os.MkdirAll(filepath.Join(home, "work"), 0700); err != nil {
@@ -34,6 +35,7 @@ func TestReferenceRefusals(t *testing.T) {
 	}
 }
 func TestMissingDescendantOfSymlinkCannotBypassReferenceGuard(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	secret := filepath.Join(home, ".ssh")
 	if err := os.Mkdir(secret, 0700); err != nil {
@@ -48,6 +50,7 @@ func TestMissingDescendantOfSymlinkCannotBypassReferenceGuard(t *testing.T) {
 	}
 }
 func TestNativeDirectorySchemaIsCheckedWithoutFieldOrder(t *testing.T) {
+	t.Parallel()
 	provider := sdk.ContextProviderInfo{Remote: true, Settings: sdk.SettingsSchema{Properties: map[string]sdk.SettingField{"path": {Type: "string", Directory: true}}}}
 	if ReferenceRefusal(provider, map[string]any{"path": "~/.ssh"}, nil) == "" {
 		t.Fatal("native schema skipped guard")

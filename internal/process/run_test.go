@@ -12,6 +12,7 @@ import (
 )
 
 func TestRunBoundsOutputAndDecodesSplitUTF8(t *testing.T) {
+	t.Parallel()
 	options := RunOptions{Env: map[string]string{"ARIADNE_PROCESS_HELPER": "1"}, ForThread: true}
 	result := Run(t.Context(), helper(t, "unicode"), options)
 	if result.ExitCode != 0 || result.Stdout != "中文😀" {
@@ -28,6 +29,7 @@ func TestRunBoundsOutputAndDecodesSplitUTF8(t *testing.T) {
 	}
 }
 func TestRunTimeoutAndPreCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if result := Run(ctx, helper(t, "echo"), RunOptions{}); result.ExitCode != 130 || result.Stderr != "cancelled" {
@@ -60,6 +62,7 @@ func TestRunPlainOutputUsesShellDefaultsAndKeepsBothStreams(t *testing.T) {
 }
 
 func TestPlainOutputFiltersSplitTerminalEscapesBeforeBuffering(t *testing.T) {
+	t.Parallel()
 	var live strings.Builder
 	buffer := outputBuffer{plain: true, notify: func(chunk, _ string) { live.WriteString(chunk) }}
 	for _, chunk := range []string{"A\x1b[3", "1m中文", "\x1b[0m\x1b]8;;https://example.test\x1b", "\\link\x1b]8;;\x07", "\tend\n"} {
@@ -74,6 +77,7 @@ func TestPlainOutputFiltersSplitTerminalEscapesBeforeBuffering(t *testing.T) {
 }
 
 func TestWholeOutputLimitAndLiteralShellEncoding(t *testing.T) {
+	t.Parallel()
 	stopped := false
 	buffer := &outputBuffer{whole: true, stop: func() { stopped = true }}
 	piece := []byte(strings.Repeat("x", 4096))

@@ -1,16 +1,16 @@
 package core
 
 import (
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 )
 
 func TestTodoPositionMovesOnlyWhenStepsChange(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	now := time.UnixMilli(1800000000000)
-	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "todo.sqlite"), Now: func() time.Time { return now }})
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}

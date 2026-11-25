@@ -9,6 +9,7 @@ import (
 )
 
 func TestReadFileRangeAndFormatting(t *testing.T) {
+	t.Parallel()
 	t.Run("default reads 600 lines in one call with end-of-file marker", func(t *testing.T) {
 		lines := make([]string, 600)
 		for i := range lines {
@@ -97,6 +98,7 @@ func TestReadFileRangeAndFormatting(t *testing.T) {
 }
 
 func TestReadFileRejectsOversizedTextWithImageExtension(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	fx := newFileStateFixture(t, "", nil)
 

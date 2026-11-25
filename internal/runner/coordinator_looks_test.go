@@ -91,7 +91,7 @@ func openTestEnv(t *testing.T) (*core.Repository, *settings.Store, core.ProjectV
 	t.Helper()
 	ctx := t.Context()
 	home := t.TempDir()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,6 +116,7 @@ func makeCall(id, name string, input args) sdk.Part {
 }
 
 func TestCoordinatorLooksHintAndRefuse(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
 
@@ -161,6 +162,7 @@ func TestCoordinatorLooksHintAndRefuse(t *testing.T) {
 }
 
 func TestCoordinatorLooksIncludesBrowser(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
 
@@ -204,6 +206,7 @@ func TestCoordinatorLooksIncludesBrowser(t *testing.T) {
 }
 
 func TestCoordinatorLooksResetOnHandover(t *testing.T) {
+	t.Parallel()
 	for _, handover := range []string{"create_thread", "message_thread"} {
 		t.Run(handover, func(t *testing.T) {
 			repo, store, project := openTestEnv(t)
@@ -267,6 +270,7 @@ func TestCoordinatorLooksResetOnHandover(t *testing.T) {
 }
 
 func TestCoordinatorLooksResetInSameStepAsHandover(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
 
@@ -298,6 +302,7 @@ func TestCoordinatorLooksResetInSameStepAsHandover(t *testing.T) {
 }
 
 func TestCoordinatorResearchLookWeight(t *testing.T) {
+	t.Parallel()
 	t.Run("five research calls hint on second and refuse fifth", func(t *testing.T) {
 		repo, store, project := openTestEnv(t)
 		conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
@@ -404,6 +409,7 @@ func TestCoordinatorResearchLookWeight(t *testing.T) {
 }
 
 func TestThreadNotLimitedByCoordinatorLooks(t *testing.T) {
+	t.Parallel()
 	repo, store, project := openTestEnv(t)
 	thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "调研讨论串"})
 	if err != nil {
