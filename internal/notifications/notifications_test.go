@@ -35,9 +35,25 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func testClock(start time.Time) (*time.Time, func() time.Time) {
-	current := start
-	return &current, func() time.Time { return current }
+type lockedClock struct {
+	mu      sync.Mutex
+	current time.Time
+}
+
+func testClock(start time.Time) *lockedClock {
+	return &lockedClock{current: start}
+}
+
+func (c *lockedClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.current
+}
+
+func (c *lockedClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	c.current = c.current.Add(d)
+	c.mu.Unlock()
 }
 
 func makeTestSubscriptionKeys(t *testing.T) (*ecdh.PrivateKey, string, []byte, string) {
@@ -296,8 +312,8 @@ func TestWebhookDeliveryAndHMACSignature(t *testing.T) {
 }
 
 func TestPresenceTrackerSuppressionGraceAndTTL(t *testing.T) {
-	current, now := testClock(time.Date(2026, 11, 26, 2, 0, 0, 0, time.UTC))
-	tracker := NewPresenceTracker(now)
+	clock := testClock(time.Date(2026, 11, 26, 2, 0, 0, 0, time.UTC))
+	tracker := NewPresenceTracker(clock.Now)
 
 	if tracker.IsActive() {
 		t.Fatal("fresh tracker should not be active")
@@ -308,14 +324,14 @@ func TestPresenceTrackerSuppressionGraceAndTTL(t *testing.T) {
 	}
 
 	// Blur enters leave grace window.
-	*current = current.Add(5 * time.Second)
+	clock.Advance(5 * time.Second)
 	tracker.Report("tab_1", false, "prj_1", "thr_1")
 	if !tracker.IsActive() {
 		t.Fatal("client within leave grace should still suppress")
 	}
 
 	// After leave grace expires, offline pushes are allowed.
-	*current = current.Add(DefaultLeaveGrace + time.Second)
+	clock.Advance(DefaultLeaveGrace + time.Second)
 	if tracker.IsActive() {
 		t.Fatal("client past leave grace should no longer suppress")
 	}
@@ -325,7 +341,7 @@ func TestPresenceTrackerSuppressionGraceAndTTL(t *testing.T) {
 	if !tracker.IsActive() {
 		t.Fatal("tab_2 should be active")
 	}
-	*current = current.Add(DefaultHeartbeatTTL + time.Second)
+	clock.Advance(DefaultHeartbeatTTL + time.Second)
 	if tracker.IsActive() {
 		t.Fatal("stale client past heartbeat TTL should expire")
 	}
@@ -446,13 +462,13 @@ func TestServiceEventRulesNoReplayAutoCleanupAndPresence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	current, now := testClock(time.Date(2026, 11, 26, 3, 0, 0, 0, time.UTC))
+	clock := testClock(time.Date(2026, 11, 26, 3, 0, 0, 0, time.UTC))
 	service, err := NewService(Options{
 		Repository:            repo,
 		Settings:              store,
 		Notifiers:             registry,
 		HTTPClient:            hookSrv.Client(),
-		Now:                   now,
+		Now:                   clock.Now,
 		AllowInsecureEndpoint: true,
 	})
 	if err != nil {
@@ -557,7 +573,7 @@ func TestServiceEventRulesNoReplayAutoCleanupAndPresence(t *testing.T) {
 	}
 
 	// Expire presence and verify 410 Gone cleans up subscription automatically.
-	*current = current.Add(DefaultHeartbeatTTL + time.Second)
+	clock.Advance(DefaultHeartbeatTTL + time.Second)
 	pushGone.Store(true)
 	if _, err := repo.Store.Append(t.Context(), []eventstore.NewEvent{
 		{Type: "turn.finished", ProjectID: "prj_1", Data: json.RawMessage(`{"conversationId":"thr_1","turnId":"trn_1","outcome":"failed","error":{"message":"boom"}}`)},
