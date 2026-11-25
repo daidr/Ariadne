@@ -12,14 +12,34 @@ import { state } from '../store'
 import { askDocumentBlock, normalizeAskProps } from './ask-block'
 import {
   applyRecommendedDocumentAsks,
+  isAskAnswerOnlyTransaction,
   readSharedDocumentAsks,
+  snapshotDocumentAsks,
   summarizeDocumentAsks,
 } from './document-asks'
-import { fallbackAskId } from './document-block-data'
+import { fallbackAskId, type AskBlockProps } from './document-block-data'
 import RefBlockView from './RefBlockView.vue'
 import { refDocumentBlock } from './ref-block'
 
 const extensions = [editorKit(), askDocumentBlock, refDocumentBlock]
+
+function makeAsk(overrides: Partial<AskBlockProps>): AskBlockProps {
+  return {
+    id: 'ask-1',
+    question: '缓存策略？',
+    description: '',
+    pick: 'one',
+    options: [
+      { id: 'redis', label: 'Redis', recommended: true },
+      { id: 'mem', label: '内存' },
+    ],
+    allowNote: true,
+    selected: [],
+    note: '',
+    confirmed: false,
+    ...overrides,
+  }
+}
 
 describe('document ask and ref blocks', () => {
   test('round-trips fenced ask and ref blocks through markdown', () => {
@@ -133,6 +153,8 @@ describe('document ask and ref blocks', () => {
       recommendedFallbackAsks: 2,
       remainingAsks: 1,
       hasActiveAsks: true,
+      hasUnsentChanges: false,
+      needsSubmit: true,
     })
 
     const applied = applyRecommendedDocumentAsks(doc)
@@ -151,7 +173,155 @@ describe('document ask and ref blocks', () => {
       recommendedFallbackAsks: 0,
       remainingAsks: 1,
       hasActiveAsks: true,
+      hasUnsentChanges: true,
+      needsSubmit: true,
     })
+  })
+
+  test('computes needsSubmit and hasUnsentChanges across single, multi, text, and partial asks', () => {
+    // Single ask: unanswered -> needsSubmit=true even with empty baseline.
+    const emptyBaseline = [{ id: 'ask-1', selected: [], note: '' }]
+    expect(summarizeDocumentAsks([makeAsk({})], emptyBaseline)).toMatchObject({
+      totalAsks: 1,
+      answeredAsks: 0,
+      hasUnsentChanges: false,
+      needsSubmit: true,
+    })
+
+    // Single ask: answered before submit -> hasUnsentChanges=true, needsSubmit=true.
+    const answeredOne = makeAsk({ selected: ['redis'], note: '  多实例共享  ' })
+    expect(summarizeDocumentAsks([answeredOne], emptyBaseline)).toMatchObject({
+      totalAsks: 1,
+      answeredAsks: 1,
+      hasUnsentChanges: true,
+      needsSubmit: true,
+    })
+
+    // Single ask: submitted & unchanged -> needsSubmit=false (submit button hidden).
+    const submittedOne = snapshotDocumentAsks([answeredOne])
+    expect(submittedOne).toEqual([{ id: 'ask-1', selected: ['redis'], note: '多实例共享' }])
+    expect(summarizeDocumentAsks([answeredOne], submittedOne)).toMatchObject({
+      totalAsks: 1,
+      answeredAsks: 1,
+      hasUnsentChanges: false,
+      needsSubmit: false,
+    })
+
+    // Whitespace-only note edit matches trimmed baseline -> still hidden.
+    expect(
+      summarizeDocumentAsks(
+        [makeAsk({ selected: ['redis'], note: '多实例共享   ' })],
+        submittedOne,
+      ),
+    ).toMatchObject({
+      hasUnsentChanges: false,
+      needsSubmit: false,
+    })
+
+    // Modifying selection or note -> needsSubmit=true again.
+    expect(
+      summarizeDocumentAsks([makeAsk({ selected: ['mem'], note: '多实例共享' })], submittedOne),
+    ).toMatchObject({
+      hasUnsentChanges: true,
+      needsSubmit: true,
+    })
+    expect(
+      summarizeDocumentAsks([makeAsk({ selected: ['redis'], note: '补充集群要求' })], submittedOne),
+    ).toMatchObject({
+      hasUnsentChanges: true,
+      needsSubmit: true,
+    })
+
+    // Multi-ask: multi-select order invariance + text ask.
+    const multiA = makeAsk({
+      id: 'ask-multi',
+      pick: 'many',
+      options: [
+        { id: 'a', label: 'A' },
+        { id: 'b', label: 'B' },
+      ],
+      selected: ['b', 'a'],
+    })
+    const textAsk = makeAsk({
+      id: 'ask-text',
+      pick: 'text',
+      options: [],
+      selected: [],
+      note: '使用 PostgreSQL',
+    })
+    const multiBaseline = snapshotDocumentAsks([multiA, textAsk])
+    expect(
+      summarizeDocumentAsks(
+        [
+          { ...multiA, selected: ['a', 'b'] },
+          { ...textAsk, note: ' 使用 PostgreSQL ' },
+        ],
+        multiBaseline,
+      ),
+    ).toMatchObject({
+      totalAsks: 2,
+      answeredAsks: 2,
+      hasUnsentChanges: false,
+      needsSubmit: false,
+    })
+
+    // Multi-ask partial submit: 1/2 submitted, 2nd still unanswered -> stays visible (needsSubmit=true)
+    // but hasUnsentChanges=false so the submit button stays disabled until user answers or edits.
+    const partialBaseline = [
+      { id: 'ask-multi', selected: ['a'], note: '' },
+      { id: 'ask-text', selected: [], note: '' },
+    ]
+    expect(
+      summarizeDocumentAsks(
+        [
+          { ...multiA, selected: ['a'] },
+          { ...textAsk, note: '' },
+        ],
+        partialBaseline,
+      ),
+    ).toMatchObject({
+      totalAsks: 2,
+      answeredAsks: 1,
+      remainingAsks: 1,
+      hasUnsentChanges: false,
+      needsSubmit: true,
+    })
+  })
+
+  test('detects ask-answer-only Yjs transactions accurately', () => {
+    const doc = new Y.Doc()
+    const root = doc.getMap('document')
+    const askBlock = new Y.Map<unknown>()
+    askBlock.set('type', 'ask')
+    const askProps = new Y.Map<unknown>()
+    askProps.set('id', 'ask-1')
+    askProps.set('selected', [])
+    askProps.set('note', '')
+    askBlock.set('props', askProps)
+    root.set('b1', askBlock)
+
+    const paraBlock = new Y.Map<unknown>()
+    paraBlock.set('type', 'paragraph')
+    const paraText = new Y.Text('hello')
+    paraBlock.set('text', paraText)
+    root.set('b2', paraBlock)
+
+    const results: boolean[] = []
+    doc.on('update', (_u, _o, d, tr) => {
+      results.push(isAskAnswerOnlyTransaction(d, tr))
+    })
+
+    doc.transact(() => askProps.set('selected', ['redis']))
+    doc.transact(() => askProps.set('note', '备注'))
+    doc.transact(() => askProps.set('question', '改题目'))
+    doc.transact(() => paraText.insert(5, ' world'))
+    doc.transact(() => {
+      askProps.set('selected', ['mem'])
+      paraText.insert(0, '!')
+    })
+    doc.transact(() => root.delete('b1'))
+
+    expect(results).toEqual([true, true, false, false, false, false])
   })
 
   test('computes the same UTF-8 FNV-1a fallback ask ID as the Go backend', () => {

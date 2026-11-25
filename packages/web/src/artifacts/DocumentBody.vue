@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import type { ArtifactCommentAnchor, ArtifactCommentThreadView } from '@ariadne/core'
+import type {
+  ArtifactCommentAnchor,
+  ArtifactCommentThreadView,
+  DocumentAskAnswerBaseline,
+} from '@ariadne/core'
 import { DouEditor, editorKit, type EditorDocument, type PartialBlock } from '@dou-ui/editor'
 import { collaboration } from '@dou-ui/editor/collaboration'
 import { whiteboardBlock } from '@dou-ui/editor/flow'
@@ -16,8 +20,7 @@ import { askDocumentBlock, normalizeAskProps, type AskBlockProps } from './ask-b
 import {
   applyRecommendedDocumentAsks,
   readSharedDocumentAsks,
-  summarizeDocumentAsks,
-  type DocumentAskSummary,
+  snapshotDocumentAsks,
 } from './document-asks'
 import { documentCodeLanguages, highlightDocumentCode } from './document-code'
 import { documentLocks } from './document-locks'
@@ -41,7 +44,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   comment: [action: CommentAction, target: string | ArtifactCommentAnchor | null, quote?: string]
-  'ask-summary': [summary: DocumentAskSummary]
+  asks: [asks: AskBlockProps[]]
 }>()
 const active = defineModel<string | null>('activeComment', { default: null })
 
@@ -96,11 +99,9 @@ watch(() => props.content, load, { immediate: true })
 
 const ready = computed(() => !props.shared || props.shared.ready.value)
 
-function emitAskSummary() {
+function readCurrentAsks(): AskBlockProps[] {
   if (props.shared) {
-    const entries = readSharedDocumentAsks(props.shared.doc.getMap('document'))
-    emit('ask-summary', summarizeDocumentAsks(entries.map((entry) => entry.ask)))
-    return
+    return readSharedDocumentAsks(props.shared.doc.getMap('document')).map((entry) => entry.ask)
   }
   const asks: AskBlockProps[] = []
   const collect = (list: readonly PartialBlock[]) => {
@@ -113,17 +114,27 @@ function emitAskSummary() {
     }
   }
   collect(doc.value.blocks)
-  emit('ask-summary', summarizeDocumentAsks(asks))
+  return asks
+}
+
+function emitAsks() {
+  emit('asks', readCurrentAsks())
+}
+
+function currentAskSnapshot(): DocumentAskAnswerBaseline[] {
+  return snapshotDocumentAsks(readCurrentAsks())
 }
 
 if (props.shared) {
   const root = props.shared.doc.getMap('document')
-  const onDocChange = () => emitAskSummary()
+  const onDocChange = () => {
+    if (ready.value) emitAsks()
+  }
   root.observeDeep(onDocChange)
-  watch(ready, (now) => now && emitAskSummary(), { immediate: true })
+  watch(ready, (now) => now && emitAsks(), { immediate: true })
   onBeforeUnmount(() => root.unobserveDeep(onDocChange))
 } else {
-  watch(() => doc.value.blocks, emitAskSummary, { immediate: true })
+  watch(() => doc.value.blocks, emitAsks, { immediate: true })
 }
 
 function applyRecommendedPicks(): number {
@@ -173,7 +184,7 @@ function revealComment(id: string) {
   editor.value?.scrollToComment(id)
 }
 
-defineExpose({ quotes, anchored, revealComment, applyRecommendedPicks })
+defineExpose({ quotes, anchored, revealComment, applyRecommendedPicks, currentAskSnapshot })
 </script>
 
 <template>

@@ -295,6 +295,10 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
               comments: [],
               nextVersionPageToken: '',
               hasMoreVersions: false,
+              askBaseline: {
+                version: 3n,
+                asks: [{ id: 'ask-1', selected: ['pg'], note: 'keep' }],
+              },
             })
           case 'GetPlan':
             return protoResponse(GetPlanResponseSchema, {
@@ -384,6 +388,10 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
     const art = await client.getArtifact('art_1', { versions: false })
     expect(art.artifact.content).toBe('# Hello')
     expect(art.versions).toEqual([])
+    expect(art.askBaseline).toEqual({
+      version: 3,
+      asks: [{ id: 'ask-1', selected: ['pg'], note: 'keep' }],
+    })
 
     const plan = await client.getPlan('prj_1', { revisionPageSize: 1 })
     expect(plan.hasMoreRevisions).toBe(true)

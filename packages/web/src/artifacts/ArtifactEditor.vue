@@ -5,7 +5,9 @@ import type {
   ArtifactCommentThreadView,
   ArtifactVersionView,
   ArtifactView,
+  DocumentAskAnswerBaseline,
 } from '@ariadne/core'
+import type * as Y from 'yjs'
 import { DouButton, DouInput, DouPopover, DouText, type CommentAction } from 'dou-ui'
 import {
   CheckIcon,
@@ -38,7 +40,13 @@ import ViewActions from '../full/ViewActions.vue'
 import ArtifactHistory from './ArtifactHistory.vue'
 import CommentList from './CommentList.vue'
 import type { DecisionGroupSummary } from './decision-groups'
-import type { DocumentAskSummary } from './document-asks'
+import {
+  isAskAnswerOnlyTransaction,
+  snapshotDocumentAsks,
+  summarizeDocumentAsks,
+  type DocumentAskSummary,
+} from './document-asks'
+import type { AskBlockProps } from './document-block-data'
 import {
   clearPendingArtifactFeedback,
   getPendingArtifactFeedback,
@@ -79,6 +87,7 @@ const body = ref<{
   setHeard?: (snapshot: unknown) => void
   currentSnapshot?: () => unknown
   applyRecommendedPicks?: () => number
+  currentAskSnapshot?: () => DocumentAskAnswerBaseline[]
 } | null>(null)
 /** The newest version; an older one is shown read-only. */
 const latest = ref(0)
@@ -111,16 +120,34 @@ let viewRequest = 0
 
 async function load(version?: number) {
   const request = ++viewRequest
+  const baselineEpoch = askBaselineEpoch
   const id = props.id
   try {
     const detail = await api.getArtifact(id, { version, versions: version !== undefined })
     if (request !== viewRequest || id !== props.id) return
     if (version !== undefined) versions.value = detail.versions
+    else if (baselineEpoch === askBaselineEpoch) {
+      askBaseline.value =
+        detail.artifact.kind === 'document' ? (detail.askBaseline?.asks ?? null) : null
+    }
     comments.value = detail.comments
     latest.value = detail.versions[0]?.version ?? detail.artifact.version
     show(detail.artifact)
   } catch (error) {
     if (request === viewRequest && id === props.id) report(error)
+  }
+}
+
+async function refreshAskBaseline(id: string) {
+  const baselineEpoch = askBaselineEpoch
+  try {
+    const detail = await api.getArtifact(id, { versions: false })
+    if (props.id !== id || viewingOld.value || baselineEpoch !== askBaselineEpoch) return
+    if (detail.artifact.kind === 'document') {
+      askBaseline.value = detail.askBaseline?.asks ?? null
+    }
+  } catch {
+    // Keep existing local ask baseline if sync fails.
   }
 }
 
@@ -172,21 +199,34 @@ const quietSeconds = ref(0)
 const withdrawSeconds = ref(0)
 const pendingChanges = ref(0)
 const pendingNotes = ref(0)
-/** A round is being sent with pictures, which takes a moment. */
-const sending = ref(false)
-const withdrawing = ref(false)
+/** A round is being sent with pictures, which takes a moment (tracked per artifact ID). */
+const sendingArtifacts = ref<ReadonlySet<string>>(new Set())
+const withdrawingArtifacts = ref<ReadonlySet<string>>(new Set())
+const sending = computed(() => sendingArtifacts.value.has(props.id))
+const withdrawing = computed(() => withdrawingArtifacts.value.has(props.id))
+function setArtifactFlag(target: typeof sendingArtifacts, id: string, active: boolean) {
+  const next = new Set(target.value)
+  if (active) next.add(id)
+  else next.delete(id)
+  target.value = next
+}
 /** Synchronous guard around applyRecommendedPicks() so real concurrent user edits are never dropped. */
 let applyingRecommended = false
-let localMutationSeq = 0
 const sentRound = ref<{
   artifactId: string
   round: number
   hadPending: number
   hadNotes: number
   previousHeard?: unknown
+  previousAskBaseline?: DocumentAskAnswerBaseline[] | null
 } | null>(null)
 const decisionSummary = ref<DecisionGroupSummary | null>(null)
-const askSummary = ref<DocumentAskSummary | null>(null)
+const documentAsks = ref<AskBlockProps[]>([])
+const askBaseline = ref<DocumentAskAnswerBaseline[] | null>(null)
+let askBaselineEpoch = 0
+const askSummary = computed<DocumentAskSummary>(() =>
+  summarizeDocumentAsks(documentAsks.value, askBaseline.value),
+)
 
 const hasActiveDecisionGroups = computed(
   () =>
@@ -195,14 +235,18 @@ const hasActiveDecisionGroups = computed(
     !!decisionSummary.value?.hasActiveDecisionGroups,
 )
 
-const hasActiveDocumentAsks = computed(
-  () =>
-    artifact.value?.kind === 'document' && !viewingOld.value && !!askSummary.value?.hasActiveAsks,
+const hasPendingDocumentAsks = computed(
+  () => artifact.value?.kind === 'document' && !viewingOld.value && askSummary.value.needsSubmit,
 )
 
 const hasStructuredRound = computed(
-  () => hasActiveDecisionGroups.value || hasActiveDocumentAsks.value,
+  () => hasActiveDecisionGroups.value || hasPendingDocumentAsks.value,
 )
+
+watch(hasStructuredRound, (active) => {
+  if (active) stopQuietTimer()
+  else if (waiting.value && !quietPaused.value) scheduleQuietSend()
+})
 
 function stopQuietTimer() {
   if (quietTimer) clearInterval(quietTimer)
@@ -240,7 +284,9 @@ watch(
     menu.value = null
     artifact.value = null
     decisionSummary.value = null
-    askSummary.value = null
+    documentAsks.value = []
+    askBaseline.value = null
+    askBaselineEpoch++
     clearSentRound()
     void load()
   },
@@ -276,7 +322,7 @@ watch(
 
 /** The room of the artifact open now, joined while its newest version is shown. */
 const shared = shallowRef<SharedArtifact | null>(null)
-let room: { id: string; scope: EffectScope } | null = null
+let room: { id: string; scope: EffectScope; mutations: number } | null = null
 const roomGeneration = shallowRef(0)
 
 function syncPendingStore(id = room?.id) {
@@ -292,9 +338,20 @@ function syncPendingStore(id = room?.id) {
   }
 }
 
+function mergePendingStore(id: string, changes: number, notes: number, paused: boolean) {
+  if (changes <= 0) return
+  const existing = getPendingArtifactFeedback(id)
+  setPendingArtifactFeedback(id, {
+    pendingChanges: (existing?.pendingChanges ?? 0) + changes,
+    pendingNotes: (existing?.pendingNotes ?? 0) + notes,
+    paused: paused || (existing?.paused ?? false),
+  })
+}
+
 function join(id: string) {
   const scope = effectScope()
-  room = { id, scope }
+  room = { id, scope, mutations: 0 }
+  documentAsks.value = []
   const saved = getPendingArtifactFeedback(id)
   if (saved && saved.pendingChanges > 0) {
     waiting.value = true
@@ -319,9 +376,17 @@ function join(id: string) {
       : undefined
   shared.value = scope.run(() => useSharedArtifact(id, onLockedEdit)) ?? null
   roomGeneration.value++
-  shared.value?.doc.on('update', (_update: Uint8Array, origin: unknown) => {
-    if (origin !== shared.value?.provider.value && !applyingRecommended) touched()
-  })
+  shared.value?.doc.on(
+    'update',
+    (_update: Uint8Array, origin: unknown, doc: Y.Doc, tr: Y.Transaction) => {
+      if (origin === shared.value?.provider.value || applyingRecommended) return
+      if (artifact.value?.kind === 'document' && isAskAnswerOnlyTransaction(doc, tr)) {
+        touchAskAnswer()
+        return
+      }
+      touched()
+    },
+  )
 }
 
 watch(
@@ -366,8 +431,13 @@ function toggleQuietPause() {
   }
 }
 
+function touchAskAnswer() {
+  if (room) room.mutations++
+  clearSentRound()
+}
+
 function touched(kind: 'edit' | 'comment' = 'edit') {
-  localMutationSeq++
+  if (room) room.mutations++
   clearSentRound()
   waiting.value = true
   pendingChanges.value++
@@ -381,23 +451,35 @@ function onDecisionSummary(summary: DecisionGroupSummary) {
   if (summary.hasActiveDecisionGroups) stopQuietTimer()
 }
 
-function onAskSummary(summary: DocumentAskSummary) {
-  askSummary.value = summary
-  if (summary.hasActiveAsks) stopQuietTimer()
+function onDocumentAsks(asks: AskBlockProps[]) {
+  if (viewingOld.value || !shared.value?.ready.value) return
+  documentAsks.value = asks
 }
 
 async function sendFeedback(explicit = false) {
   stopQuietTimer()
   if (!room) return
-  if (sending.value) return
+  const sendRoom = room
+  const id = sendRoom.id
+  if (sendingArtifacts.value.has(id)) return
   if (!explicit && (!waiting.value || hasStructuredRound.value)) return
 
-  const id = room.id
+  const isDocument = artifact.value?.kind === 'document'
+  const projectId = artifact.value?.projectId ?? ''
   const initialPending = pendingChanges.value
-  const hadPending = Math.max(1, initialPending)
+  const hadPending = isDocument ? initialPending : Math.max(1, initialPending)
   const hadNotes = pendingNotes.value
+  const hadUnsentAsks = isDocument && askSummary.value.hasUnsentChanges
+  const previousAskBaseline = isDocument
+    ? askBaseline.value
+      ? askBaseline.value.map((entry) => ({ ...entry, selected: [...entry.selected] }))
+      : null
+    : undefined
+  const isSameRoom = () => props.id === id && room === sendRoom && !viewingOld.value
+  const isCurrentLiveArtifact = () => props.id === id && room?.id === id && !viewingOld.value
   let applied = 0
-  sending.value = true
+  let clearedPending = false
+  setArtifactFlag(sendingArtifacts, id, true)
   try {
     if (explicit && hasStructuredRound.value) {
       applyingRecommended = true
@@ -411,83 +493,152 @@ async function sendFeedback(explicit = false) {
         await new Promise((resolve) => setTimeout(resolve, 120))
       }
     }
-    const previousHeard = body.value?.getHeard?.()
-    const boardAtSend = body.value?.currentSnapshot?.()
-    const sentMutationSeq = localMutationSeq
-    waiting.value = false
-    quietPaused.value = false
-    pendingChanges.value = 0
-    pendingNotes.value = 0
+    const activeBeforeSend = isSameRoom()
+    const previousHeard = activeBeforeSend ? body.value?.getHeard?.() : undefined
+    const boardAtSend = activeBeforeSend ? body.value?.currentSnapshot?.() : undefined
+    const asksAtSend =
+      isDocument && activeBeforeSend
+        ? (body.value?.currentAskSnapshot?.() ?? snapshotDocumentAsks(documentAsks.value))
+        : undefined
+    const sentMutationSeq = sendRoom.mutations
+    if (activeBeforeSend) {
+      waiting.value = false
+      quietPaused.value = false
+      pendingChanges.value = 0
+      pendingNotes.value = 0
+    }
     clearPendingArtifactFeedback(id)
-    const pictures = (await body.value?.markedPictures?.()) ?? []
-    const projectId = artifact.value?.projectId ?? ''
+    clearedPending = true
+    const pictures = activeBeforeSend ? ((await body.value?.markedPictures?.()) ?? []) : []
     const images = await Promise.all(
       pictures.map(async (picture) => (await api.uploadFile(projectId, picture)).file.id),
     )
     let result = await api.sendFeedback(id, images)
-    // If recommended picks were just written to Yjs and the first flush raced WebSocket delivery,
-    // wait briefly and try once more before restoring pending state.
-    if (explicit && applied > 0 && !result?.feedback) {
+    // If ask answers or recommended picks were just written to Yjs and the first flush raced
+    // WebSocket delivery, wait briefly and try once more before restoring pending state.
+    if (explicit && (applied > 0 || hadUnsentAsks) && !result?.feedback) {
       await new Promise((resolve) => setTimeout(resolve, 250))
       result = await api.sendFeedback(id, images)
     }
-    const editedDuringSend = localMutationSeq !== sentMutationSeq
+    const editedDuringSend = sendRoom.mutations !== sentMutationSeq
     if (result?.feedback && result.feedback.round > 0) {
-      if (boardAtSend !== undefined) body.value?.setHeard?.(boardAtSend)
-      else body.value?.markHeard?.()
-      if (!editedDuringSend) {
-        clearSentRound()
-        sentRound.value = {
-          artifactId: id,
-          round: result.feedback.round,
-          hadPending,
-          hadNotes,
-          previousHeard,
+      if (isSameRoom()) {
+        if (boardAtSend !== undefined) body.value?.setHeard?.(boardAtSend)
+        else body.value?.markHeard?.()
+        if (asksAtSend !== undefined) {
+          askBaselineEpoch++
+          askBaseline.value = asksAtSend
+          if (editedDuringSend) void refreshAskBaseline(id)
         }
-        startSentRoundCountdown()
+        if (!editedDuringSend) {
+          clearSentRound()
+          sentRound.value = {
+            artifactId: id,
+            round: result.feedback.round,
+            hadPending,
+            hadNotes,
+            previousHeard,
+            previousAskBaseline,
+          }
+          startSentRoundCountdown()
+        }
+      } else if (isDocument && props.id === id && !viewingOld.value) {
+        askBaselineEpoch++
+        void refreshAskBaseline(id)
       }
-    } else if (explicit && !editedDuringSend && (initialPending > 0 || applied > 0)) {
-      waiting.value = true
-      quietPaused.value = true
-      pendingChanges.value = Math.max(initialPending, applied)
-      pendingNotes.value = hadNotes
-      syncPendingStore(id)
+    } else if (explicit && !editedDuringSend) {
+      const restorePending = isDocument ? initialPending : Math.max(initialPending, applied)
+      if (restorePending > 0) {
+        if (isCurrentLiveArtifact()) {
+          waiting.value = true
+          quietPaused.value = true
+          pendingChanges.value += restorePending
+          pendingNotes.value += hadNotes
+          syncPendingStore(id)
+        } else {
+          mergePendingStore(id, restorePending, hadNotes, true)
+        }
+      }
+      if (isDocument && props.id === id && !viewingOld.value) {
+        void refreshAskBaseline(id)
+      }
     }
   } catch (error) {
-    if (initialPending > 0 || applied > 0) {
-      waiting.value = true
-      quietPaused.value = true
-      pendingChanges.value += Math.max(initialPending, applied)
-      pendingNotes.value += hadNotes
-      syncPendingStore(id)
+    if (clearedPending) {
+      const restorePending = isDocument ? initialPending : Math.max(initialPending, applied)
+      if (restorePending > 0) {
+        if (isCurrentLiveArtifact()) {
+          waiting.value = true
+          quietPaused.value = true
+          pendingChanges.value += restorePending
+          pendingNotes.value += hadNotes
+          syncPendingStore(id)
+        } else {
+          mergePendingStore(id, restorePending, hadNotes, true)
+        }
+      }
     }
     report(error)
   } finally {
-    sending.value = false
+    setArtifactFlag(sendingArtifacts, id, false)
   }
 }
 
 async function withdrawSentFeedback() {
   const target = sentRound.value
-  if (!target || withdrawing.value) return
-  withdrawing.value = true
+  if (!target || withdrawingArtifacts.value.has(target.artifactId)) return
+  const withdrawRoom = room
+  const isSameRoom = () =>
+    props.id === target.artifactId && room === withdrawRoom && !viewingOld.value
+  const isCurrentLiveArtifact = () =>
+    props.id === target.artifactId && room?.id === target.artifactId && !viewingOld.value
+
+  setArtifactFlag(withdrawingArtifacts, target.artifactId, true)
   try {
     const { withdrawn } = await api.withdrawFeedback(target.artifactId, target.round)
-    clearSentRound()
+    if (sentRound.value === target) clearSentRound()
     if (withdrawn) {
-      if (target.previousHeard !== undefined) body.value?.setHeard?.(target.previousHeard)
-      waiting.value = true
-      pendingChanges.value += target.hadPending
-      pendingNotes.value += target.hadNotes
-      syncPendingStore(target.artifactId)
-      scheduleQuietSend()
+      if (isSameRoom()) {
+        if (target.previousHeard !== undefined) body.value?.setHeard?.(target.previousHeard)
+        if (target.previousAskBaseline !== undefined) {
+          askBaselineEpoch++
+          askBaseline.value = target.previousAskBaseline
+        }
+        if (target.hadPending > 0) {
+          waiting.value = true
+          pendingChanges.value += target.hadPending
+          pendingNotes.value += target.hadNotes
+          syncPendingStore(target.artifactId)
+          scheduleQuietSend()
+        }
+      } else {
+        if (
+          target.previousAskBaseline !== undefined &&
+          props.id === target.artifactId &&
+          !viewingOld.value
+        ) {
+          askBaselineEpoch++
+          void refreshAskBaseline(target.artifactId)
+        }
+        if (target.hadPending > 0) {
+          if (isCurrentLiveArtifact()) {
+            waiting.value = true
+            pendingChanges.value += target.hadPending
+            pendingNotes.value += target.hadNotes
+            syncPendingStore(target.artifactId)
+            scheduleQuietSend()
+          } else {
+            mergePendingStore(target.artifactId, target.hadPending, target.hadNotes, true)
+          }
+        }
+      }
     } else {
       report(t('artifact.feedback.withdrawTooLate'))
     }
   } catch (error) {
     report(error)
   } finally {
-    withdrawing.value = false
+    setArtifactFlag(withdrawingArtifacts, target.artifactId, false)
   }
 }
 
@@ -495,7 +646,7 @@ const feedbackBarState = computed<'sent' | 'decision' | 'ask' | 'pending' | null
   if (!artifact.value || viewingOld.value || artifact.value.kind === 'dashboard') return null
   if (sentRound.value && sentRound.value.artifactId === artifact.value.id) return 'sent'
   if (hasActiveDecisionGroups.value) return 'decision'
-  if (hasActiveDocumentAsks.value) return 'ask'
+  if (hasPendingDocumentAsks.value) return 'ask'
   if (waiting.value && pendingChanges.value > 0) return 'pending'
   return null
 })
@@ -565,13 +716,14 @@ const askBarText = computed(() => {
 
 const canSubmitAsk = computed(() => {
   const s = askSummary.value
-  if (!s || sending.value) return false
-  return s.answeredAsks > 0 || s.recommendedFallbackAsks > 0 || waiting.value
+  if (!s.needsSubmit || sending.value) return false
+  return s.hasUnsentChanges || s.recommendedFallbackAsks > 0 || waiting.value
 })
 
 function leave() {
   stopQuietTimer()
   clearSentRound()
+  documentAsks.value = []
   if (!room) return
   if (waiting.value && pendingChanges.value > 0) {
     setPendingArtifactFeedback(room.id, {
@@ -959,7 +1111,7 @@ async function rename() {
         :readonly="viewingOld"
         :label="artifact.title"
         @decision-summary="onDecisionSummary"
-        @ask-summary="onAskSummary"
+        @asks="onDocumentAsks"
       />
     </div>
     <div v-if="feedbackBarState" class="artifact-feedback-bar" role="status" aria-live="polite">

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"slices"
 
 	"connectrpc.com/connect"
 
@@ -107,6 +108,7 @@ func (s *artifactService) GetArtifact(
 		Comments:             toProtoArtifactCommentThreads(detail.Comments),
 		NextVersionPageToken: detail.NextVersionPageToken,
 		HasMoreVersions:      detail.HasMoreVersions,
+		AskBaseline:          toProtoDocumentAskBaseline(detail.AskBaseline),
 	}), nil
 }
 
@@ -578,6 +580,24 @@ func toProtoArtifactSummary(item core.ArtifactSummary) *ariadnev1.ArtifactSummar
 		Preview:      toProtoArtifactPreview(item.Preview),
 		OpenComments: item.OpenComments,
 		CommentedAt:  item.CommentedAt,
+	}
+}
+
+func toProtoDocumentAskBaseline(item *core.DocumentAskBaseline) *ariadnev1.DocumentAskBaseline {
+	if item == nil {
+		return nil
+	}
+	asks := make([]*ariadnev1.DocumentAskAnswerBaseline, 0, len(item.Asks))
+	for _, ask := range item.Asks {
+		asks = append(asks, &ariadnev1.DocumentAskAnswerBaseline{
+			Id:       ask.ID,
+			Selected: slices.Clone(ask.Selected),
+			Note:     ask.Note,
+		})
+	}
+	return &ariadnev1.DocumentAskBaseline{
+		Version: item.Version,
+		Asks:    asks,
 	}
 }
 
