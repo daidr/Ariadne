@@ -21,7 +21,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
 import { api, followEvents, type StreamStatus, type UpdateStatus } from './api'
 import { useUpdatesSettings } from './components/useUpdatesSettings'
-import { start, state } from './store'
+import { applyUpdateStatus, resetUpdateVersionTracker, start, state } from './store'
 
 const encoder = new TextEncoder()
 
@@ -29,6 +29,8 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.useRealTimers()
   state.stream = 'connecting'
+  state.updateStatus = null
+  resetUpdateVersionTracker()
 })
 
 describe('ConnectRPC EventService.StreamEvents client', () => {
@@ -213,7 +215,9 @@ describe('ConnectRPC EventService.StreamEvents client', () => {
       downloadPercent: 64,
       canRestart: false,
       restarting: false,
+      restartPhase: '',
       activeTurns: 0,
+      activeBackground: 0,
       release: {
         version: '1.1.0',
         notes: 'Notes',
@@ -530,9 +534,17 @@ describe('ConnectRPC EventService.StreamEvents client', () => {
 
     updates.restart()
     await flushPromises()
-    expect(restartSpy).toHaveBeenCalledTimes(1)
+    expect(restartSpy).toHaveBeenCalledWith('when-idle', expect.any(AbortSignal))
     expect(updates.restarting.value).toBe(true)
     expect(updates.message.value).toContain('2')
+
+    updates.requestRestartNow()
+    expect(updates.confirmingRestartNow.value).toBe(true)
+    expect(restartSpy).toHaveBeenCalledTimes(1)
+
+    updates.restart('now')
+    await flushPromises()
+    expect(restartSpy).toHaveBeenCalledWith('now', expect.any(AbortSignal))
 
     updates.cancelRestart()
     await flushPromises()
@@ -540,6 +552,40 @@ describe('ConnectRPC EventService.StreamEvents client', () => {
     expect(updates.restarting.value).toBe(false)
 
     wrapper.unmount()
+  })
+
+  test('applyUpdateStatus triggers auto-reload once the server reconnects on a new version', () => {
+    vi.useFakeTimers()
+    const onReload = vi.fn()
+    const base: UpdateStatus = {
+      version: '0.1.0-alpha.23',
+      preferences: { channel: 'preview', automatic: true },
+      canInstall: true,
+      canRestart: true,
+      restarting: false,
+      restartPhase: '',
+      activeTurns: 0,
+      activeBackground: 0,
+      state: 'current',
+      downloadPercent: 0,
+      release: null,
+    }
+
+    applyUpdateStatus(base, { trackVersion: true, onReload })
+    applyUpdateStatus(
+      { ...base, state: 'ready', restarting: true, restartPhase: 'restarting' },
+      { trackVersion: true, onReload },
+    )
+    vi.advanceTimersByTime(5_000)
+    expect(onReload).not.toHaveBeenCalled()
+
+    applyUpdateStatus(
+      { ...base, version: '0.1.0-alpha.24', state: 'current', restarting: false, restartPhase: '' },
+      { trackVersion: true, onReload },
+    )
+    expect(onReload).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1_300)
+    expect(onReload).toHaveBeenCalledTimes(1)
   })
 
   test('assembles incremental reply draft frames and reuses unchanged blocks', async () => {

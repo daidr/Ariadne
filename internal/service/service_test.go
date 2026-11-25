@@ -425,3 +425,321 @@ func TestDetachedManagerLifecycleAndNote(t *testing.T) {
 		t.Fatalf("expected uninstalled after Uninstall, got %+v err=%v", info, err)
 	}
 }
+
+func TestControllerWhenIdleNonBlockingAndUserActivityReset(t *testing.T) {
+	t.Parallel()
+	started := make(chan string, 4)
+	release := make(chan struct{})
+	var repoRef *core.Repository
+
+	repo, sched := newTestRepoAndScheduler(t, func(ctx context.Context, conv core.ConversationView) error {
+		turn, err := repoRef.StartTurn(ctx, conv.ID, "mock-model")
+		if err != nil {
+			return err
+		}
+		started <- conv.ID
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return repoRef.FinishTurn(ctx, conv.ID, turn, "cancelled", nil)
+	})
+	repoRef = repo
+
+	name := "IdleNonBlocking"
+	proj, err := repo.CreateProject(t.Context(), &name, core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var nowMu sync.Mutex
+	fakeNow := time.Date(2026, 11, 26, 2, 0, 0, 0, time.UTC)
+	advance := func(d time.Duration) {
+		nowMu.Lock()
+		fakeNow = fakeNow.Add(d)
+		nowMu.Unlock()
+	}
+	getNow := func() time.Time {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		return fakeNow
+	}
+
+	shutdownCh := make(chan bool, 1)
+	ctrl := NewController(ControllerOptions{
+		Runtime:         RuntimeInfo{PID: 400, Version: "0.1.0", Host: "127.0.0.1", Port: 7428, ManagedBy: ManagedSystemd},
+		CanRestart:      true,
+		Scheduler:       sched,
+		Repository:      repo,
+		Now:             getNow,
+		IdleQuietWindow: 100 * time.Millisecond,
+		ShutdownDelay:   10 * time.Millisecond,
+		PollInterval:    15 * time.Millisecond,
+		OnShutdown: func(restart bool) {
+			shutdownCh <- restart
+		},
+	})
+	defer ctrl.Close()
+
+	// Start a first turn so server is busy.
+	if _, err := repo.PostMessage(t.Context(), proj.ID, core.MessageInput{
+		ConversationID: proj.CoordinatorID,
+		Author:         "user",
+		Content:        "first",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first turn did not start")
+	}
+
+	// Schedule when-idle restart while busy: must NOT freeze scheduler.
+	snap, err := ctrl.BeginDrain(t.Context(), DrainRequest{
+		Mode:          DrainModeWhenIdle,
+		Action:        ActionRestart,
+		QuietWindowMs: 100,
+	})
+	if err != nil {
+		t.Fatalf("BeginDrain when-idle: %v", err)
+	}
+	if snap.RestartPhase != RestartPhaseWaitingIdle || sched.IsDraining() {
+		t.Fatalf("expected non-blocking waiting_idle, snap=%+v schedDraining=%v", snap, sched.IsDraining())
+	}
+
+	// A new thread posted while waiting_idle MUST still start immediately.
+	thr, err := repo.CreateThread(t.Context(), proj.ID, core.NewThread{Title: "New Thread"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PostMessage(t.Context(), proj.ID, core.MessageInput{
+		ConversationID: thr.ID,
+		Author:         "user",
+		Content:        "must not queue",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case id := <-started:
+		if id != thr.ID {
+			t.Fatalf("expected thread %s to start, got %s", thr.ID, id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("new thread was blocked during waiting_idle")
+	}
+
+	// Finish all active turns, then keep recording user activity so quiet window resets.
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for sched.ActiveCount() > 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	advance(60 * time.Millisecond)
+	ctrl.RecordUserActivity()
+	advance(60 * time.Millisecond)
+	select {
+	case <-shutdownCh:
+		t.Fatal("shutdown fired despite recent user activity")
+	case <-time.After(60 * time.Millisecond):
+	}
+
+	// Advance past quiet window after last user activity -> should restart.
+	advance(120 * time.Millisecond)
+	select {
+	case restart := <-shutdownCh:
+		if !restart {
+			t.Fatal("expected restart=true")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("when-idle did not trigger after user activity quiet window elapsed")
+	}
+}
+
+func TestControllerWhenIdleImmediateIfIdle(t *testing.T) {
+	t.Parallel()
+	repo, sched := newTestRepoAndScheduler(t, func(ctx context.Context, _ core.ConversationView) error {
+		return nil
+	})
+	shutdownCh := make(chan bool, 1)
+	ctrl := NewController(ControllerOptions{
+		Runtime:         RuntimeInfo{PID: 401, Version: "0.1.0", Host: "127.0.0.1", Port: 7428, ManagedBy: ManagedLaunchd},
+		CanRestart:      true,
+		Scheduler:       sched,
+		Repository:      repo,
+		IdleQuietWindow: 5 * time.Minute,
+		ShutdownDelay:   10 * time.Millisecond,
+		OnShutdown: func(restart bool) {
+			shutdownCh <- restart
+		},
+	})
+	defer ctrl.Close()
+
+	if _, err := ctrl.BeginDrain(t.Context(), DrainRequest{
+		Mode:            DrainModeWhenIdle,
+		Action:          ActionRestart,
+		QuietWindowMs:   int64(5 * time.Minute / time.Millisecond),
+		ImmediateIfIdle: true,
+	}); err != nil {
+		t.Fatalf("BeginDrain immediateIfIdle: %v", err)
+	}
+	select {
+	case restart := <-shutdownCh:
+		if !restart {
+			t.Fatal("expected restart=true")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected immediate shutdown when already idle")
+	}
+}
+
+func TestControllerImmediateRestartNowSkipsStatefulWait(t *testing.T) {
+	t.Parallel()
+	started := make(chan string, 1)
+	release := make(chan struct{})
+	var repoRef *core.Repository
+	var schedRef *scheduler.Scheduler
+
+	repo, sched := newTestRepoAndScheduler(t, func(ctx context.Context, conv core.ConversationView) error {
+		turn, err := repoRef.StartTurn(ctx, conv.ID, "claudecode/sonnet")
+		if err != nil {
+			return err
+		}
+		schedRef.SetTurnModel(conv.ID, "claudecode/sonnet", true)
+		started <- conv.ID
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return repoRef.FinishTurn(ctx, conv.ID, turn, "interrupted", nil)
+	})
+	repoRef = repo
+	schedRef = sched
+	defer close(release)
+
+	name := "StatefulNow"
+	proj, err := repo.CreateProject(t.Context(), &name, core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PostMessage(t.Context(), proj.ID, core.MessageInput{
+		ConversationID: proj.CoordinatorID,
+		Author:         "user",
+		Content:        "busy cli",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stateful turn did not start")
+	}
+
+	shutdownCh := make(chan bool, 1)
+	ctrl := NewController(ControllerOptions{
+		Runtime:                   RuntimeInfo{PID: 402, Version: "0.1.0", Host: "127.0.0.1", Port: 7428, ManagedBy: ManagedLaunchd},
+		CanRestart:                true,
+		Scheduler:                 sched,
+		Repository:                repo,
+		ImmediateSafePointTimeout: 10 * time.Second,
+		ShutdownDelay:             10 * time.Millisecond,
+		OnShutdown: func(restart bool) {
+			shutdownCh <- restart
+		},
+	})
+	defer ctrl.Close()
+
+	begin := time.Now()
+	snap, err := ctrl.BeginDrain(t.Context(), DrainRequest{
+		Mode:         DrainModeNow,
+		Action:       ActionRestart,
+		AutoShutdown: true,
+	})
+	if err != nil {
+		t.Fatalf("BeginDrain now: %v", err)
+	}
+	if snap.RestartPhase != RestartPhaseRestarting {
+		t.Fatalf("expected restarting phase, got %+v", snap)
+	}
+	select {
+	case restart := <-shutdownCh:
+		if !restart {
+			t.Fatal("expected restart=true")
+		}
+		if elapsed := time.Since(begin); elapsed > 2*time.Second {
+			t.Fatalf("stateful immediate restart waited too long: %s", elapsed)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("immediate restart with stateful turn did not fire quickly")
+	}
+}
+
+func TestControllerDrainLeaseExpiryAndRenewal(t *testing.T) {
+	t.Parallel()
+	repo, sched := newTestRepoAndScheduler(t, func(ctx context.Context, _ core.ConversationView) error {
+		return nil
+	})
+	var nowMu sync.Mutex
+	fakeNow := time.Date(2026, 11, 26, 3, 0, 0, 0, time.UTC)
+	advance := func(d time.Duration) {
+		nowMu.Lock()
+		fakeNow = fakeNow.Add(d)
+		nowMu.Unlock()
+	}
+	getNow := func() time.Time {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		return fakeNow
+	}
+
+	ctrl := NewController(ControllerOptions{
+		Runtime:       RuntimeInfo{PID: 403, Version: "0.1.0", Host: "127.0.0.1", Port: 7428, ManagedBy: ManagedDirect},
+		CanRestart:    false,
+		Scheduler:     sched,
+		Repository:    repo,
+		Now:           getNow,
+		DrainLeaseTTL: 100 * time.Millisecond,
+		PollInterval:  20 * time.Millisecond,
+	})
+	defer ctrl.Close()
+
+	snap, err := ctrl.BeginDrain(t.Context(), DrainRequest{
+		Mode:         DrainModeSafePoint,
+		Action:       ActionRestart,
+		AutoShutdown: false,
+		LeaseMs:      100,
+	})
+	if err != nil {
+		t.Fatalf("BeginDrain lease: %v", err)
+	}
+	if !snap.Draining || snap.RestartPhase != RestartPhaseDraining || !sched.IsDraining() {
+		t.Fatalf("expected active drain, snap=%+v schedDraining=%v", snap, sched.IsDraining())
+	}
+
+	// Polling Snapshot renews the lease before expiry.
+	advance(70 * time.Millisecond)
+	renewed := ctrl.Snapshot(t.Context())
+	if !renewed.Draining {
+		t.Fatalf("expected drain active during renewal, got %+v", renewed)
+	}
+	advance(70 * time.Millisecond)
+	time.Sleep(40 * time.Millisecond)
+	if !sched.IsDraining() {
+		t.Fatal("expected drain still active after lease renewal")
+	}
+
+	// Advancing past renewed lease without polling expires drain and resumes scheduler.
+	advance(120 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
+	for sched.IsDraining() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if sched.IsDraining() {
+		t.Fatal("expected scheduler drain to auto-cancel after lease expiry")
+	}
+	if st := ctrl.RestartState(); st.Phase != RestartPhaseNone {
+		t.Fatalf("expected phase cleared after lease expiry, got %+v", st)
+	}
+}

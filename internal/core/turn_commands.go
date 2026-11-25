@@ -521,8 +521,25 @@ func (reader Reader) PendingIsTriage(ctx context.Context, id string) (bool, erro
 	return triage, nil
 }
 func (reader Reader) PendingIsUserMessage(ctx context.Context, id string) (bool, error) {
-	rows, err := records(ctx, reader.DB, `SELECT m.author FROM conversations c JOIN transcript t ON t.conversation_id = c.id AND t.seq = c.pending_seq JOIN messages m ON m.id = t.ref WHERE c.id = ? AND t.kind = 'message'`, id)
-	return len(rows) > 0 && rows[0].text("author") == "user", err
+	rows, err := records(ctx, reader.DB, `SELECT 1 AS ok
+		FROM conversations c
+		WHERE c.id = ? AND c.pending_seq > 0 AND (
+			EXISTS (
+				SELECT 1 FROM transcript t
+				JOIN messages m ON m.id = t.ref
+				WHERE t.conversation_id = c.id AND t.seq = c.pending_seq AND t.kind = 'message' AND m.author = 'user'
+			)
+			OR EXISTS (
+				SELECT 1 FROM transcript t
+				WHERE t.conversation_id = c.id AND t.seq = c.pending_seq AND t.kind = 'note'
+				  AND json_extract(t.payload, '$.type') IN ('answer', 'artifact-feedback', 'artifact-comment')
+			)
+			OR EXISTS (
+				SELECT 1 FROM events e
+				WHERE e.seq = c.pending_seq AND e.type = 'turn.requested'
+			)
+		)`, id)
+	return len(rows) > 0, err
 }
 
 func (reader Reader) LastHandledSeq(ctx context.Context, id string) (int64, error) {

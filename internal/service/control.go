@@ -16,10 +16,27 @@ const (
 	DrainModeSafePoint = "safe-point"
 	DrainModeTurn      = "turn"
 	DrainModeWhenIdle  = "when-idle"
+	DrainModeNow       = "now"
 
 	ActionStop    = "stop"
 	ActionRestart = "restart"
+
+	RestartPhaseNone        = ""
+	RestartPhaseWaitingIdle = "waiting_idle"
+	RestartPhaseDraining    = "draining"
+	RestartPhaseRestarting  = "restarting"
 )
+
+type RestartState struct {
+	CanRestart       bool
+	Phase            string
+	ActiveTurns      int
+	ActiveBackground int
+}
+
+func (s RestartState) Restarting() bool {
+	return s.Phase != RestartPhaseNone
+}
 
 type ActiveTurn struct {
 	ConversationID string `json:"conversationId"`
@@ -50,6 +67,7 @@ type StatusSnapshot struct {
 	Draining         bool               `json:"draining"`
 	DrainMode        string             `json:"drainMode,omitempty"`
 	DrainAction      string             `json:"drainAction,omitempty"`
+	RestartPhase     string             `json:"restartPhase,omitempty"`
 	WaitBackground   bool               `json:"waitBackground,omitempty"`
 	AutoShutdown     bool               `json:"autoShutdown,omitempty"`
 	ActiveTurns      []ActiveTurn       `json:"activeTurns"`
@@ -67,10 +85,13 @@ func (s StatusSnapshot) ReadyToStop(waitBackground bool) bool {
 }
 
 type DrainRequest struct {
-	Mode           string `json:"mode"`
-	Action         string `json:"action"`
-	WaitBackground bool   `json:"waitBackground,omitempty"`
-	AutoShutdown   bool   `json:"autoShutdown,omitempty"`
+	Mode            string `json:"mode"`
+	Action          string `json:"action"`
+	WaitBackground  bool   `json:"waitBackground,omitempty"`
+	AutoShutdown    bool   `json:"autoShutdown,omitempty"`
+	QuietWindowMs   int64  `json:"quietWindowMs,omitempty"`
+	LeaseMs         int64  `json:"leaseMs,omitempty"`
+	ImmediateIfIdle bool   `json:"immediateIfIdle,omitempty"`
 }
 
 type ShutdownRequest struct {

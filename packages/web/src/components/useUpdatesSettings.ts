@@ -1,18 +1,36 @@
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
-import { api, ApiError, type UpdatePreferences, type UpdateStatus } from '../api'
+import { api, ApiError, type RestartMode, type UpdatePreferences, type UpdateStatus } from '../api'
 import { t, tm } from '../i18n'
-import { onUpdateStatus, state } from '../store'
+import { applyUpdateStatus, onUpdateStatus, state } from '../store'
+import {
+  effectiveRestartPhase,
+  hasActiveRestartWork,
+  restartNowWarningMessage,
+  restartStatusMessage,
+} from '../update-restart'
 
 export function useUpdatesSettings() {
-  const status = shallowRef<UpdateStatus | null>(null)
+  const status = shallowRef<UpdateStatus | null>(state.updateStatus)
   const pending = shallowRef<
-    'load' | 'save' | 'check' | 'install' | 'restart' | 'cancelRestart' | null
-  >('load')
+    'load' | 'save' | 'check' | 'install' | 'restart' | 'restartNow' | 'cancelRestart' | null
+  >(state.updateStatus ? null : 'load')
   const error = shallowRef<string | null>(null)
+  const confirmingRestartNow = shallowRef(false)
   const controller = new AbortController()
   let sequence = 0
   let pushGeneration = 0
+  let applyingLocal = false
   let stopListening: (() => void) | undefined
+
+  function syncLocalStatus(view: UpdateStatus) {
+    status.value = view
+    applyingLocal = true
+    try {
+      applyUpdateStatus(view)
+    } finally {
+      applyingLocal = false
+    }
+  }
 
   const updating = computed(
     () =>
@@ -31,9 +49,13 @@ export function useUpdatesSettings() {
   const restartable = computed(
     () => status.value?.state === 'ready' && Boolean(status.value?.canRestart),
   )
+  const restartPhase = computed(() => effectiveRestartPhase(status.value))
   const restarting = computed(
-    () => pending.value === 'restart' || Boolean(status.value?.restarting),
+    () =>
+      pending.value === 'restart' || pending.value === 'restartNow' || restartPhase.value !== '',
   )
+  const hasActiveWork = computed(() => hasActiveRestartWork(status.value))
+  const restartNowWarning = computed(() => restartNowWarningMessage(status.value))
   const installLabel = computed(() => {
     if (status.value?.state === 'installing') return t('updates.installing')
     if (updating.value)
@@ -47,19 +69,22 @@ export function useUpdatesSettings() {
     if (pending.value === 'check' || view?.state === 'checking') return t('updates.checking')
     if (!view || updating.value) return null
     if (view.failure) return t(`updates.error.${view.failure}`)
+    const phaseMessage = restartStatusMessage(view)
+    if (phaseMessage) return phaseMessage
     if (view.state === 'no-release') {
       return t(view.preferences.channel === 'stable' ? 'updates.noStable' : 'updates.noRelease')
     }
     if (view.state === 'current') return t('updates.current')
     if (view.state === 'ready') {
-      if (view.restarting) {
-        const count = view.activeTurns ?? 0
-        if (count > 0) return t('updates.restartingDraining', { count })
-        return t('updates.restarting')
-      }
       return t('updates.ready', { version: view.release?.version ?? '' })
     }
     return null
+  })
+
+  watch([restartPhase, hasActiveWork], ([nextPhase, active]) => {
+    if (nextPhase === 'restarting' || !active) {
+      confirmingRestartNow.value = false
+    }
   })
 
   async function perform(action: typeof pending.value, request: () => Promise<UpdateStatus>) {
@@ -74,12 +99,12 @@ export function useUpdatesSettings() {
         current === sequence &&
         pushGeneration === startedPushGeneration
       ) {
-        status.value = view
+        syncLocalStatus(view)
         error.value = null
       }
     } catch (cause) {
       if (!controller.signal.aborted && current === sequence) {
-        if (action === 'restart') {
+        if (action === 'restart' || action === 'restartNow') {
           const isBusinessError =
             cause instanceof ApiError &&
             cause.localized &&
@@ -88,7 +113,13 @@ export function useUpdatesSettings() {
           if (isBusinessError) {
             error.value = tm(cause.localized)
           } else if (status.value) {
-            status.value = { ...status.value, restarting: true }
+            const next: UpdateStatus = {
+              ...status.value,
+              restarting: true,
+              restartPhase: 'restarting',
+            }
+            syncLocalStatus(next)
+            confirmingRestartNow.value = false
             error.value = null
           }
           return
@@ -120,7 +151,7 @@ export function useUpdatesSettings() {
       const view = await api.saveUpdatePreferences(preferences, controller.signal)
       if (refresh && !controller.signal.aborted) {
         if (pushGeneration === beforeSavePush) {
-          status.value = view
+          syncLocalStatus(view)
         }
         return api.checkForUpdate(controller.signal)
       }
@@ -143,13 +174,32 @@ export function useUpdatesSettings() {
     void perform('install', () => api.installUpdate(version, controller.signal))
   }
 
-  function restart() {
-    if (!restartable.value || restarting.value) return
-    void perform('restart', () => api.restartToApplyUpdate(controller.signal))
+  function restart(mode: RestartMode = 'when-idle') {
+    if (!restartable.value) return
+    if (mode === 'when-idle' && restarting.value) return
+    if (mode === 'now' && restartPhase.value === 'restarting') return
+    confirmingRestartNow.value = false
+    const action = mode === 'now' ? 'restartNow' : 'restart'
+    void perform(action, () => api.restartToApplyUpdate(mode, controller.signal))
+  }
+
+  function requestRestartNow() {
+    if (!restartable.value || restartPhase.value === 'restarting') return
+    if (hasActiveWork.value && !confirmingRestartNow.value) {
+      confirmingRestartNow.value = true
+      error.value = null
+      return
+    }
+    restart('now')
+  }
+
+  function dismissRestartNowConfirm() {
+    confirmingRestartNow.value = false
   }
 
   function cancelRestart() {
     if (!restarting.value || pending.value === 'cancelRestart') return
+    confirmingRestartNow.value = false
     void perform('cancelRestart', () => api.cancelRestart(controller.signal))
   }
 
@@ -164,7 +214,7 @@ export function useUpdatesSettings() {
 
   onMounted(() => {
     stopListening = onUpdateStatus((view) => {
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted || applyingLocal) return
       pushGeneration++
       status.value = view
       error.value = null
@@ -188,12 +238,18 @@ export function useUpdatesSettings() {
     installable,
     installLabel,
     restartable,
+    restartPhase,
     restarting,
+    hasActiveWork,
+    confirmingRestartNow,
+    restartNowWarning,
     check,
     setChannel,
     setAutomatic,
     install,
     restart,
+    requestRestartNow,
+    dismissRestartNowConfirm,
     cancelRestart,
     load,
   }

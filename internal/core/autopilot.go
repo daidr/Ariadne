@@ -54,9 +54,6 @@ func (repo *Repository) advanceAutopilotPlan(ctx context.Context, tx *eventstore
 	if err != nil {
 		return err
 	}
-	if n, ok := project.Slots.(int64); ok {
-		slots = int(n)
-	}
 	for _, thread := range threads {
 		if !truthy(thread.ReviewOf) && thread.Stage != "done" && thread.Stage != "stopped" {
 			slots--

@@ -16,8 +16,10 @@ import type { WorkspaceLayoutMode } from '../workspace-layout'
 import AriadneLogo from './AriadneLogo.vue'
 import AttentionBar from './AttentionBar.vue'
 import AutopilotSwitch from './AutopilotSwitch.vue'
+import type { SettingsTab } from './ModelSettings.vue'
 import ProjectList from './ProjectList.vue'
 import ProjectSearch from './ProjectSearch.vue'
+import UpdateStatusIndicator from './UpdateStatusIndicator.vue'
 
 const props = defineProps<{
   layoutMode: WorkspaceLayoutMode
@@ -26,7 +28,11 @@ const props = defineProps<{
   sideCollapsed?: boolean
   unauthorized?: boolean
 }>()
-const emit = defineEmits<{ toggleProjects: []; toggleSide: []; openSettings: [] }>()
+const emit = defineEmits<{
+  toggleProjects: []
+  toggleSide: []
+  openSettings: [tab?: SettingsTab]
+}>()
 const projectsPopoverOpen = defineModel<boolean>('projectsPopoverOpen', { default: false })
 
 const { summary } = useSourceStatus()
@@ -168,6 +174,10 @@ watch(showMediumProjectPopover, (allowed) => {
           </DouButton>
           <DouDivider v-if="!isNarrow" direction="vertical" />
         </template>
+        <UpdateStatusIndicator
+          :compact="actionsCompact"
+          @open-settings="emit('openSettings', 'updates')"
+        />
         <DouButton
           variant="ghost"
           size="sm"

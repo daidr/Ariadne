@@ -18,25 +18,35 @@ var ErrBusy = errors.New("an update is in progress")
 var ErrUnavailable = errors.New("that update is unavailable")
 
 type Options struct {
-	Version    string
-	Executable string // Empty for development builds and externally managed installations.
-	Client     *http.Client
-	Interval   time.Duration
-	OnError    func(error)
-	OnChange   func(View)
+	Version     string
+	Executable  string // Empty for development builds and externally managed installations.
+	Client      *http.Client
+	Interval    time.Duration
+	OnError     func(error)
+	OnChange    func(View)
+	OnAutoReady func(View)
+}
+
+type RestartStatus struct {
+	CanRestart       bool
+	Phase            string
+	ActiveTurns      int
+	ActiveBackground int
 }
 
 type View struct {
-	Version         string                     `json:"version"`
-	Preferences     settings.UpdatePreferences `json:"preferences"`
-	CanInstall      bool                       `json:"canInstall"`
-	State           string                     `json:"state"`
-	Release         *Release                   `json:"release"`
-	Failure         string                     `json:"failure,omitempty"`
-	DownloadPercent int                        `json:"downloadPercent"`
-	CanRestart      bool                       `json:"canRestart,omitempty"`
-	Restarting      bool                       `json:"restarting,omitempty"`
-	ActiveTurns     int                        `json:"activeTurns,omitempty"`
+	Version          string                     `json:"version"`
+	Preferences      settings.UpdatePreferences `json:"preferences"`
+	CanInstall       bool                       `json:"canInstall"`
+	State            string                     `json:"state"`
+	Release          *Release                   `json:"release"`
+	Failure          string                     `json:"failure,omitempty"`
+	DownloadPercent  int                        `json:"downloadPercent"`
+	CanRestart       bool                       `json:"canRestart,omitempty"`
+	Restarting       bool                       `json:"restarting,omitempty"`
+	RestartPhase     string                     `json:"restartPhase,omitempty"`
+	ActiveTurns      int                        `json:"activeTurns,omitempty"`
+	ActiveBackground int                        `json:"activeBackground,omitempty"`
 }
 
 func (view View) updating() bool {
@@ -63,6 +73,7 @@ type Service struct {
 	closed      bool
 	onError     func(error)
 	onChange    func(View)
+	onAutoReady func(View)
 }
 
 func New(ctx context.Context, store *settings.Store, options Options) *Service {
@@ -79,7 +90,7 @@ func New(ctx context.Context, store *settings.Store, options Options) *Service {
 	service := &Service{
 		store: store, view: View{Version: options.Version, Preferences: store.UpdatePreferences(channel), State: "idle"},
 		checkClient: releaseClient(options.Client, false), assetClient: releaseClient(options.Client, true),
-		wake: make(chan struct{}, 1), life: life, cancel: cancel, done: make(chan struct{}), onError: options.OnError, onChange: options.OnChange,
+		wake: make(chan struct{}, 1), life: life, cancel: cancel, done: make(chan struct{}), onError: options.OnError, onChange: options.OnChange, onAutoReady: options.OnAutoReady,
 	}
 	if executable := options.Executable; tag != "" && executable != "" {
 		if path, err := filepath.EvalSymlinks(executable); err == nil {
@@ -128,15 +139,22 @@ func (service *Service) View() View {
 	return cloneView(service.view)
 }
 
-func (service *Service) SetRestartState(canRestart, restarting bool, activeTurns int) {
+func (service *Service) SetRestartState(status RestartStatus) {
+	restarting := status.Phase != ""
 	service.mu.Lock()
-	if service.view.CanRestart == canRestart && service.view.Restarting == restarting && service.view.ActiveTurns == activeTurns {
+	if service.view.CanRestart == status.CanRestart &&
+		service.view.Restarting == restarting &&
+		service.view.RestartPhase == status.Phase &&
+		service.view.ActiveTurns == status.ActiveTurns &&
+		service.view.ActiveBackground == status.ActiveBackground {
 		service.mu.Unlock()
 		return
 	}
-	service.view.CanRestart = canRestart
+	service.view.CanRestart = status.CanRestart
 	service.view.Restarting = restarting
-	service.view.ActiveTurns = activeTurns
+	service.view.RestartPhase = status.Phase
+	service.view.ActiveTurns = status.ActiveTurns
+	service.view.ActiveBackground = status.ActiveBackground
 	service.viewSeq++
 	service.mu.Unlock()
 	service.emitChange()
@@ -274,12 +292,20 @@ func (service *Service) startInstall(version string, automatic bool) (View, erro
 			case errors.Is(err, os.ErrPermission):
 				service.view.Failure = "permission"
 			}
-		} else {
-			service.view.State = "ready"
-		}
-		service.viewSeq++
-		service.mu.Unlock()
-		service.emitChange()
+			} else {
+				service.view.State = "ready"
+			}
+			service.viewSeq++
+			readyView := cloneView(service.view)
+			shouldAutoSchedule := err == nil && readyView.Preferences.Automatic && readyView.CanRestart && !readyView.Restarting && service.onAutoReady != nil
+			service.mu.Unlock()
+			service.emitChange()
+			if shouldAutoSchedule {
+				func() {
+					defer func() { _ = recover() }()
+					service.onAutoReady(readyView)
+				}()
+			}
 	})
 	service.mu.Unlock()
 	service.emitChange()

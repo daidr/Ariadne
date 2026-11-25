@@ -221,7 +221,7 @@ watchEffect(() => {
         :unauthorized="unauthorized"
         @toggle-projects="toggleProjectSidebar(!projectsCollapsed)"
         @toggle-side="toggleMediumSide()"
-        @open-settings="openSettings()"
+        @open-settings="openSettings"
       />
       <DouLayoutMain v-if="unauthorized" class="body main">
         <UnauthorizedScreen />

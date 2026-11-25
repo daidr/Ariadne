@@ -173,6 +173,9 @@ export interface UpdatePreferences {
   automatic: boolean
 }
 
+export type RestartPhase = '' | 'waiting_idle' | 'draining' | 'restarting'
+export type RestartMode = 'when-idle' | 'now'
+
 export interface UpdateStatus {
   version: string
   preferences: UpdatePreferences
@@ -189,7 +192,9 @@ export interface UpdateStatus {
   downloadPercent: number
   canRestart?: boolean
   restarting?: boolean
+  restartPhase?: RestartPhase
   activeTurns?: number
+  activeBackground?: number
   failure?: 'check' | 'download' | 'downloadTimeout' | 'verification' | 'install' | 'permission'
   release: {
     version: string
@@ -716,8 +721,14 @@ export const api = {
     const response = await updateClient.installUpdate({ version }, signal ? { signal } : undefined)
     return fromProtoUpdateStatus(response.status)
   },
-  restartToApplyUpdate: async (signal?: AbortSignal): Promise<UpdateStatus> => {
-    const response = await updateClient.restartToApplyUpdate({}, signal ? { signal } : undefined)
+  restartToApplyUpdate: async (
+    mode: RestartMode = 'when-idle',
+    signal?: AbortSignal,
+  ): Promise<UpdateStatus> => {
+    const response = await updateClient.restartToApplyUpdate(
+      { mode },
+      signal ? { signal } : undefined,
+    )
     return fromProtoUpdateStatus(response.status)
   },
   cancelRestart: async (signal?: AbortSignal): Promise<UpdateStatus> => {

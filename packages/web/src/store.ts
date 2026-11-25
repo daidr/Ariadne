@@ -221,6 +221,8 @@ interface State {
    * they go to the thread together.
    */
   lineComments: Record<string, LineComment[]>
+  /** Latest software update and server restart status pushed by the server. */
+  updateStatus: UpdateStatus | null
 }
 
 export const state = reactive<State>({
@@ -257,6 +259,7 @@ export const state = reactive<State>({
   pendingMessages: {},
   background: {},
   lineComments: {},
+  updateStatus: null,
 })
 
 let stopStream: (() => void) | null = null
@@ -1428,6 +1431,8 @@ const touched = new Set<string>()
 const parts = new Set<RefreshKey>()
 const listeners = new Set<(event: AnyStoredEvent) => void>()
 const updateStatusListeners = new Set<(status: UpdateStatus) => void>()
+let bootedServerVersion: string | null = null
+let reloadForUpdateTimer: ReturnType<typeof setTimeout> | null = null
 
 /** Hear every event as it arrives, e.g. to notify the user. */
 export function onLiveEvent(listener: (event: AnyStoredEvent) => void): () => void {
@@ -1439,6 +1444,49 @@ export function onLiveEvent(listener: (event: AnyStoredEvent) => void): () => vo
 export function onUpdateStatus(listener: (status: UpdateStatus) => void): () => void {
   updateStatusListeners.add(listener)
   return () => updateStatusListeners.delete(listener)
+}
+
+/**
+ * Sync the latest update/restart snapshot into reactive store state and reload the page
+ * automatically once the server reconnects on a new version after restarting.
+ */
+export function applyUpdateStatus(
+  status: UpdateStatus,
+  options?: { trackVersion?: boolean; onReload?: () => void },
+) {
+  state.updateStatus = status
+  if (options?.trackVersion && status.version) {
+    if (bootedServerVersion === null) {
+      bootedServerVersion = status.version
+    } else if (status.version !== bootedServerVersion && !reloadForUpdateTimer) {
+      bootedServerVersion = status.version
+      toast.loading(t('updates.updatedReloading', { version: status.version }), {
+        duration: 0,
+        closable: false,
+      })
+      const reload =
+        options.onReload ??
+        (() => {
+          if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') {
+            window.location.reload()
+          }
+        })
+      reloadForUpdateTimer = setTimeout(() => {
+        reloadForUpdateTimer = null
+        reload()
+      }, 1200)
+    }
+  }
+  for (const listener of updateStatusListeners) listener(status)
+}
+
+/** Reset the tracked server version between unit tests. */
+export function resetUpdateVersionTracker() {
+  bootedServerVersion = null
+  if (reloadForUpdateTimer) {
+    clearTimeout(reloadForUpdateTimer)
+    reloadForUpdateTimer = null
+  }
 }
 
 /**
@@ -1728,7 +1776,7 @@ export async function start(restore: () => Promise<void>) {
     onDraft,
     (status) => {
       if (streamSession !== session || state.stream === 'unauthorized') return
-      for (const listener of updateStatusListeners) listener(status)
+      applyUpdateStatus(status, { trackVersion: true })
     },
   )
 }

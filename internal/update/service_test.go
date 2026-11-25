@@ -424,3 +424,60 @@ func TestOnChangeEmitsMonotonicFinalStateOnFastFailure(t *testing.T) {
 		}
 	}
 }
+
+func TestAutoReadyCallbackTriggeredWhenAutomaticAndRestartable(t *testing.T) {
+	t.Parallel()
+	platform := targetAsset(runtime.GOOS, runtime.GOARCH)
+	if platform == "" {
+		t.Skip("platform has no published updater asset")
+	}
+	dir := t.TempDir()
+	old := copyInstalledTestBinary(t, dir, "installed")
+	newer := buildUpdateFixture(t, dir, "release", "1.1.0")
+	payload, err := os.ReadFile(newer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := settings.Open(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: releaseTransport(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.String() {
+		case releaseAPI + "/latest":
+			return response(http.StatusOK, encodedRelease(githubRelease{
+				Tag: "v1.1.0", Assets: []asset{{Name: platform, Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(payload)), Size: int64(len(payload))}},
+			})), nil
+		case releaseWeb + "/download/v1.1.0/" + platform:
+			return response(http.StatusOK, payload), nil
+		default:
+			return nil, fmt.Errorf("unexpected request: %s", req.URL)
+		}
+	})}
+	autoReadyCh := make(chan View, 1)
+	service := New(t.Context(), store, Options{
+		Version:    "1.0.0",
+		Executable: old,
+		Client:     client,
+		OnAutoReady: func(view View) {
+			autoReadyCh <- view
+		},
+	})
+	defer service.Close(context.Background())
+
+	service.SetRestartState(RestartStatus{CanRestart: true, Phase: "", ActiveTurns: 2, ActiveBackground: 1})
+	if view := service.View(); !view.CanRestart || view.Restarting || view.ActiveTurns != 2 || view.ActiveBackground != 1 {
+		t.Fatalf("unexpected restart state in view: %+v", view)
+	}
+	if _, err := service.Save(settings.UpdatePreferences{Channel: "stable", Automatic: true}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ready := <-autoReadyCh:
+		if ready.State != "ready" || !ready.Preferences.Automatic {
+			t.Fatalf("unexpected OnAutoReady view: %+v", ready)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatalf("timed out waiting for OnAutoReady; view=%+v", service.View())
+	}
+}

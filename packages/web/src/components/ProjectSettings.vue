@@ -65,10 +65,9 @@ const tab = computed({
 const source = ref<InstanceType<typeof FileSourcesForm> | null>(null)
 const settings = ref<ProjectSettings | null>(null)
 const env = ref<DraftPair[]>([])
-const slots = ref<number | null>(null)
 const mcp = ref<string[]>([])
 const mcpServers = ref<McpServerView[]>([])
-/** How many turns may run at once in all, the cap of a project without its own. */
+/** How many turns may run at once globally across Ariadne. */
 const totalSlots = ref(3)
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -132,7 +131,7 @@ const startsNow = computed(() => {
     state.detail?.threads.filter(
       (thread) => !thread.reviewOf && thread.stage !== 'done' && thread.stage !== 'stopped',
     ).length ?? 0
-  const room = Math.max(0, (slots.value || totalSlots.value) - atWork)
+  const room = Math.max(0, totalSlots.value - atWork)
   return plan.nodes
     .filter(
       (node) =>
@@ -165,7 +164,6 @@ function currentSnapshot() {
     setup: setup.value,
     check: check.value,
     env: env.value,
-    slots: slots.value,
     mcp: mcp.value,
   })
 }
@@ -207,7 +205,6 @@ watch(
     settings.value = null
     savedSnapshot.value = ''
     now.value = Date.now()
-    slots.value = project.slots
     mcp.value = [...project.mcp]
     try {
       const [view, servers, concurrency] = await Promise.all([
@@ -281,7 +278,7 @@ async function save() {
   }
   error.value = await saveProjectSettings(
     { settings: next, env: pairsInput(env.value) },
-    slots.value || null,
+    null,
     mcp.value,
   )
   saving.value = false

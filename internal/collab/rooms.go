@@ -34,11 +34,12 @@ var (
 )
 
 type Rooms struct {
-	repo    *core.Repository
-	onError func(error)
-	mu      sync.Mutex
-	active  map[string]*room
-	closed  bool
+	repo       *core.Repository
+	onError    func(error)
+	onUserEdit atomic.Pointer[func()]
+	mu         sync.Mutex
+	active     map[string]*room
+	closed     bool
 }
 
 type room struct {
@@ -69,6 +70,22 @@ type peer struct {
 
 func NewRooms(repo *core.Repository, onError func(error)) *Rooms {
 	return &Rooms{repo: repo, onError: onError, active: make(map[string]*room)}
+}
+
+// SetOnUserEdit registers a lightweight callback invoked whenever a connected
+// browser peer edits a collaborative document, whiteboard, or dashboard.
+func (rooms *Rooms) SetOnUserEdit(fn func()) {
+	if fn == nil {
+		rooms.onUserEdit.Store(nil)
+		return
+	}
+	rooms.onUserEdit.Store(&fn)
+}
+
+func (rooms *Rooms) notifyUserEdit() {
+	if fn := rooms.onUserEdit.Load(); fn != nil && *fn != nil {
+		(*fn)()
+	}
 }
 
 func Enabled(kind string) bool {
@@ -552,6 +569,7 @@ func (active *room) broadcast(frame []byte, except *peer) {
 }
 
 func (active *room) changed() {
+	active.owner.notifyUserEdit()
 	now := time.Now()
 	if active.dirty.IsZero() {
 		active.dirty = now

@@ -36,6 +36,8 @@ message UpdateStatus {
   bool can_restart = 8;
   bool restarting = 9;
   int32 active_turns = 10;
+  string restart_phase = 11;
+  int32 active_background = 12;
 }
 
 message GetUpdateStatusRequest {}
@@ -67,7 +69,9 @@ message InstallUpdateResponse {
   UpdateStatus status = 1;
 }
 
-message RestartToApplyUpdateRequest {}
+message RestartToApplyUpdateRequest {
+  string mode = 1;
+}
 
 message RestartToApplyUpdateResponse {
   UpdateStatus status = 1;

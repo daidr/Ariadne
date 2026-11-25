@@ -202,8 +202,13 @@ func TestUpdateServiceRestartEndpoints(t *testing.T) {
 	ctrl := service.NewController(service.ControllerOptions{
 		Runtime:    service.RuntimeInfo{PID: 42, Version: "0.1.0", Host: "127.0.0.1", Port: 7428, ManagedBy: service.ManagedDirect},
 		CanRestart: false,
-		OnStateChange: func(canRestart, restarting bool, activeTurns int) {
-			updates.SetRestartState(canRestart, restarting, activeTurns)
+		OnStateChange: func(status service.RestartState) {
+			updates.SetRestartState(update.RestartStatus{
+				CanRestart:       status.CanRestart,
+				Phase:            status.Phase,
+				ActiveTurns:      status.ActiveTurns,
+				ActiveBackground: status.ActiveBackground,
+			})
 		},
 	})
 	defer ctrl.Close()
@@ -242,5 +247,36 @@ func TestUpdateServiceRestartEndpoints(t *testing.T) {
 	}
 	if cancelRes.Msg.GetStatus().GetRestarting() || cancelRes.Msg.GetStatus().GetCanRestart() {
 		t.Fatalf("unexpected status after CancelRestart: %+v", cancelRes.Msg.GetStatus())
+	}
+}
+
+func TestIsUserWriteProcedureClassification(t *testing.T) {
+	t.Parallel()
+	writes := []string{
+		"/ariadne.v1.ConversationService/PostMessage",
+		"/ariadne.v1.ConversationService/RetryTurn",
+		"/ariadne.v1.ArtifactService/SaveArtifact",
+		"/ariadne.v1.ProjectService/UpdateProject",
+		"/ariadne.v1.SettingsService/SaveConcurrency",
+	}
+	for _, proc := range writes {
+		if !isUserWriteProcedure(proc) {
+			t.Fatalf("expected %q to count as user write activity", proc)
+		}
+	}
+	reads := []string{
+		"/ariadne.v1.MetaService/Ping",
+		"/ariadne.v1.ProjectService/ListProjects",
+		"/ariadne.v1.ConversationService/GetConversation",
+		"/ariadne.v1.ConversationService/MarkRead",
+		"/ariadne.v1.UpdateService/GetUpdateStatus",
+		"/ariadne.v1.UpdateService/RestartToApplyUpdate",
+		"/ariadne.v1.UpdateService/CancelRestart",
+		"/ariadne.v1.EventService/StreamEvents",
+	}
+	for _, proc := range reads {
+		if isUserWriteProcedure(proc) {
+			t.Fatalf("expected %q NOT to count as user write activity", proc)
+		}
 	}
 }

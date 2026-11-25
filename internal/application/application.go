@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/agentruntime"
@@ -124,6 +125,7 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	addSimple(func() error { eventHub.Close(); return nil })
 	state := realtime.NewState(eventHub)
 	addSimple(func() error { state.Close(); return nil })
+	var serviceControlRef atomic.Pointer[service.Controller]
 	var updates *update.Service
 	version := ""
 	if options.Update != nil {
@@ -132,6 +134,23 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 		supplied.OnError = onError
 		supplied.OnChange = func(view update.View) {
 			_ = state.Set(realtime.Update{Kind: "update", Value: view}, true)
+		}
+		supplied.OnAutoReady = func(_ update.View) {
+			ctrl := serviceControlRef.Load()
+			if ctrl == nil || !ctrl.CanRestart() {
+				return
+			}
+			if ctrl.RestartState().Phase != service.RestartPhaseNone {
+				return
+			}
+			_, _ = ctrl.BeginDrain(life, service.DrainRequest{
+				Mode:            service.DrainModeWhenIdle,
+				Action:          service.ActionRestart,
+				WaitBackground:  true,
+				AutoShutdown:    true,
+				QuietWindowMs:   int64(service.DefaultAutoIdleQuietWindow / time.Millisecond),
+				ImmediateIfIdle: false,
+			})
 		}
 		updates = update.New(life, user, supplied)
 		add(updates.Close)
@@ -190,6 +209,11 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 			limits, _ := user.TurnSettings(project)["limits"].(map[string]any)
 			duration, _ := limits["commandTimeoutMax"].(float64)
 			return time.Duration(duration * float64(time.Second))
+		},
+		OnBackgroundChange: func() {
+			if ctrl := serviceControlRef.Load(); ctrl != nil {
+				ctrl.NotifyBackgroundChange()
+			}
 		},
 	})
 	if err != nil {
@@ -260,12 +284,22 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 		Background: manager.Background,
 		Repository: repo,
 		OnShutdown: options.OnShutdown,
-		OnStateChange: func(canRestart, restarting bool, activeTurns int) {
+		OnStateChange: func(status service.RestartState) {
 			if updates != nil {
-				updates.SetRestartState(canRestart, restarting, activeTurns)
+				updates.SetRestartState(update.RestartStatus{
+					CanRestart:       status.CanRestart,
+					Phase:            status.Phase,
+					ActiveTurns:      status.ActiveTurns,
+					ActiveBackground: status.ActiveBackground,
+				})
 			}
 		},
 	})
+	serviceControlRef.Store(serviceControl)
+	if updates != nil {
+		_ = state.Set(realtime.Update{Kind: "update", Value: updates.View()}, true)
+	}
+	rooms.SetOnUserEdit(serviceControl.RecordUserActivity)
 	app.ServiceControl = serviceControl
 	addSimple(func() error { serviceControl.Close(); return nil })
 	daily := &data.Daily{Store: storage, OnError: onError}

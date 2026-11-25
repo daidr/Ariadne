@@ -394,6 +394,7 @@ func drainBeforeShutdown(ctx context.Context, client *service.Client, action str
 		Action:         action,
 		WaitBackground: opts.WaitBackground,
 		AutoShutdown:   false,
+		LeaseMs:        int64(30 * time.Second / time.Millisecond),
 	})
 	if err != nil {
 		return nil, err
@@ -408,6 +409,15 @@ func drainBeforeShutdown(ctx context.Context, client *service.Client, action str
 
 	fmt.Fprintf(stdout, "Draining Ariadne before %s (mode: %s)...\n", action, mode)
 	printActiveWork(stdout, snap)
+	statefulCount := 0
+	for _, turn := range snap.ActiveTurns {
+		if turn.Stateful {
+			statefulCount++
+		}
+	}
+	if statefulCount > 0 {
+		fmt.Fprintf(stdout, "Note: %d active local CLI session(s) cannot pause at mid-turn checkpoints and must finish their current turn (use --when-idle to keep scheduling new work, or --force to %s immediately).\n", statefulCount, action)
+	}
 	fmt.Fprintln(stdout, "Waiting for active sessions to reach a safe checkpoint (press Ctrl+C to cancel and resume)...")
 
 	deadline := time.Now().Add(timeout)
@@ -439,6 +449,9 @@ func drainBeforeShutdown(ctx context.Context, client *service.Client, action str
 				return nil, fmt.Errorf("lost connection to Ariadne while draining: %w", err)
 			}
 			snap = cur
+			if !snap.Draining {
+				return nil, errors.New("drain was cancelled externally; normal Ariadne scheduling has resumed")
+			}
 			if snap.ReadyToStop(opts.WaitBackground) {
 				fmt.Fprintln(stdout, "All active sessions reached a safe checkpoint.")
 				return snap, nil
@@ -753,7 +766,7 @@ func cmdServiceStatus(ctx context.Context, args []string, stdout, stderr io.Writ
 			fmt.Fprintf(stdout, "Uptime:       %s\n", uptime)
 		}
 		if snap.Draining {
-			fmt.Fprintf(stdout, "Draining:     yes (mode=%s, action=%s)\n", snap.DrainMode, snap.DrainAction)
+			fmt.Fprintf(stdout, "Draining:     yes (mode=%s, action=%s, phase=%s)\n", snap.DrainMode, snap.DrainAction, snap.RestartPhase)
 		}
 	} else {
 		fmt.Fprintf(stdout, "Status:       stopped\n")

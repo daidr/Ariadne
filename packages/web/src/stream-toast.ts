@@ -3,11 +3,13 @@ import { onScopeDispose, watch } from 'vue'
 import type { StreamStatus } from './api'
 import { locale, t } from './i18n'
 import { state } from './store'
+import { effectiveRestartPhase } from './update-restart'
 
 function lostOptions(): ToastOptions {
+  const restarting = effectiveRestartPhase(state.updateStatus) === 'restarting'
   return {
-    message: t('error.connection'),
-    tone: 'warning',
+    message: restarting ? t('updates.restarting') : t('error.connection'),
+    tone: restarting ? 'primary' : 'warning',
     loading: true,
     duration: 0,
     closable: false,
@@ -57,6 +59,12 @@ export function useStreamStatusToast() {
   }
 
   watch(() => state.stream, sync, { immediate: true, flush: 'post' })
+  watch(
+    () => effectiveRestartPhase(state.updateStatus),
+    () => {
+      if (handle) showOrUpdate()
+    },
+  )
   watch(locale, () => {
     if (handle) showOrUpdate()
   })
