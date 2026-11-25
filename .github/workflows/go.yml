@@ -112,18 +112,20 @@ jobs:
             github.com/daidr/Ariadne/internal/browser \
             github.com/daidr/Ariadne/internal/runner \
             github.com/daidr/Ariadne/internal/workspaces \
-            github.com/daidr/Ariadne/internal/sources; do
+            github.com/daidr/Ariadne/internal/sources \
+            github.com/daidr/Ariadne/internal/process \
+            github.com/daidr/Ariadne/internal/update; do
             if printf '%s\n' "$all" | grep -qx "$p"; then
               pkgs+=("$p")
             fi
           done
           while IFS= read -r pkg; do
             case "$pkg" in
-              github.com/daidr/Ariadne/internal/local|github.com/daidr/Ariadne/internal/browser|github.com/daidr/Ariadne/internal/runner|github.com/daidr/Ariadne/internal/workspaces|github.com/daidr/Ariadne/internal/sources) ;;
+              github.com/daidr/Ariadne/internal/local|github.com/daidr/Ariadne/internal/browser|github.com/daidr/Ariadne/internal/runner|github.com/daidr/Ariadne/internal/workspaces|github.com/daidr/Ariadne/internal/sources|github.com/daidr/Ariadne/internal/process|github.com/daidr/Ariadne/internal/update) ;;
               *) pkgs+=("$pkg") ;;
             esac
           done <<< "$all"
-          go test -count=1 -parallel=4 -timeout=180s "${pkgs[@]}"
+          go test -vet=off -count=1 -parallel=4 -timeout=180s "${pkgs[@]}"
       - name: Test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -132,6 +134,11 @@ jobs:
           GOCACHE: ${{ runner.temp }}/gobuild
         run: |
           $ErrorActionPreference = 'Stop'
+          $testTmp = Join-Path $env:RUNNER_TEMP 'testtmp'
+          New-Item -ItemType Directory -Force -Path $testTmp | Out-Null
+          $env:TEMP = $testTmp
+          $env:TMP = $testTmp
+          $env:GOTMPDIR = $testTmp
           $all = @(go list ./...)
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $priority = @(
@@ -139,10 +146,12 @@ jobs:
             'github.com/daidr/Ariadne/internal/browser',
             'github.com/daidr/Ariadne/internal/runner',
             'github.com/daidr/Ariadne/internal/workspaces',
-            'github.com/daidr/Ariadne/internal/sources'
+            'github.com/daidr/Ariadne/internal/sources',
+            'github.com/daidr/Ariadne/internal/process',
+            'github.com/daidr/Ariadne/internal/update'
           ) | Where-Object { $_ -in $all }
           $pkgs = $priority + ($all | Where-Object { $_ -notin $priority })
-          go test -count=1 -parallel=4 -timeout=180s @pkgs
+          go test -vet=off -count=1 -p=6 -parallel=4 -timeout=180s @pkgs
           exit $LASTEXITCODE
       - if: matrix.os == 'ubuntu-latest'
         env:
@@ -180,15 +189,17 @@ jobs:
             github.com/daidr/Ariadne/internal/browser \
             github.com/daidr/Ariadne/internal/runner \
             github.com/daidr/Ariadne/internal/workspaces \
-            github.com/daidr/Ariadne/internal/sources; do
+            github.com/daidr/Ariadne/internal/sources \
+            github.com/daidr/Ariadne/internal/process \
+            github.com/daidr/Ariadne/internal/update; do
             if printf '%s\n' "$all" | grep -qx "$p"; then
               pkgs+=("$p")
             fi
           done
           while IFS= read -r pkg; do
             case "$pkg" in
-              github.com/daidr/Ariadne/internal/local|github.com/daidr/Ariadne/internal/browser|github.com/daidr/Ariadne/internal/runner|github.com/daidr/Ariadne/internal/workspaces|github.com/daidr/Ariadne/internal/sources) ;;
+              github.com/daidr/Ariadne/internal/local|github.com/daidr/Ariadne/internal/browser|github.com/daidr/Ariadne/internal/runner|github.com/daidr/Ariadne/internal/workspaces|github.com/daidr/Ariadne/internal/sources|github.com/daidr/Ariadne/internal/process|github.com/daidr/Ariadne/internal/update) ;;
               *) pkgs+=("$pkg") ;;
             esac
           done <<< "$all"
-          go test -race -count=1 -parallel=4 -timeout=300s "${pkgs[@]}"
+          go test -vet=off -race -count=1 -parallel=4 -timeout=300s "${pkgs[@]}"

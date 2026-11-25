@@ -208,6 +208,23 @@ func TestJanitorMultiRepoEmbeddedProtectionAndCleanup(t *testing.T) {
 			t.Fatalf("nested worktree directory disappeared: %v", err)
 		}
 
+		// Also verify a closed outer PR does not bypass protection for unmerged embedded repos.
+		if err := repo.SyncPullRequest(t.Context(), thread.ID, map[string]any{
+			"state": "closed", "number": 42, "headSha": "abc", "base": "main",
+		}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := janitor.Check(t.Context(), thread.ID); err != nil {
+			t.Fatal(err)
+		}
+		current, err = repo.GetThread(t.Context(), thread.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.Workspace.Removed {
+			t.Fatal("closed outer PR deleted worktree with unmerged embedded repo")
+		}
+
 		// Merge nested branch into host main -> Janitor cleans up nested + outer cleanly.
 		runGitOK(t, hostDir, "merge", "--ff-only", "feat/svc")
 		if err := janitor.Check(t.Context(), thread.ID); err != nil {
@@ -228,17 +245,23 @@ func TestJanitorMultiRepoEmbeddedProtectionAndCleanup(t *testing.T) {
 		}
 	})
 
-	t.Run("standalone unpushed embedded repo protected under merged and idle", func(t *testing.T) {
+	t.Run("standalone embedded repo protected until pushed then reclaimed with dist artifacts", func(t *testing.T) {
 		t.Parallel()
-		manager, repo, project, _ := localJanitorFixture(t, "subrepos/\n")
+		manager, repo, project, _ := localJanitorFixture(t, "subrepos/\ndist/\n")
 		if _, err := repo.SetProjectSettings(t.Context(), project.ID, map[string]any{
 			"workspace": map[string]any{"retention": "auto"},
 		}, nil); err != nil {
 			t.Fatal(err)
 		}
-		thread, wtDir := openAndReportThread(t, manager, repo, project.ID, "ready")
+		thread, wtDir := openAndReportThread(t, manager, repo, project.ID, "done")
+		if err := os.MkdirAll(filepath.Join(wtDir, "dist"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(wtDir, "dist", "bundle.js"), []byte("built"), 0644); err != nil {
+			t.Fatal(err)
+		}
 		subDir := filepath.Join(wtDir, "subrepos", "standalone")
-		initLocalRepo(t, subDir, "")
+		sha := initLocalRepo(t, subDir, "")
 
 		janitor := NewJanitor(manager, JanitorOptions{
 			Now: func() time.Time { return time.UnixMilli(thread.ActiveAt).Add(25 * time.Hour) },
@@ -256,15 +279,8 @@ func TestJanitorMultiRepoEmbeddedProtectionAndCleanup(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(subDir, "README.md")); err != nil {
 			t.Fatalf("standalone embedded repo disappeared: %v", err)
 		}
-	})
 
-	t.Run("research thread with clean readonly embedded clone is reclaimed", func(t *testing.T) {
-		t.Parallel()
-		manager, repo, project, _ := localJanitorFixture(t, "subrepos/\n")
-
-		thread, wtDir := openAndReportThread(t, manager, repo, project.ID, "done")
-		subDir := filepath.Join(wtDir, "subrepos", "readonly")
-		sha := initLocalRepo(t, subDir, "")
+		// Once the embedded clone matches origin/main, the clean research worktree (and dist/) is reclaimed.
 		originRef := filepath.Join(subDir, ".git", "refs", "remotes", "origin", "main")
 		if err := os.MkdirAll(filepath.Dir(originRef), 0755); err != nil {
 			t.Fatal(err)
@@ -283,83 +299,18 @@ func TestJanitorMultiRepoEmbeddedProtectionAndCleanup(t *testing.T) {
 		if err := os.WriteFile(cfgPath, append(cfgRaw, []byte("\n[remote \"origin\"]\n\turl = file:///origin.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n")...), 0644); err != nil {
 			t.Fatal(err)
 		}
-
-		janitor := NewJanitor(manager, JanitorOptions{})
 		if err := janitor.Check(t.Context(), thread.ID); err != nil {
 			t.Fatal(err)
 		}
-		current, err := repo.GetThread(t.Context(), thread.ID)
+		current, err = repo.GetThread(t.Context(), thread.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !current.Workspace.Removed {
-			t.Fatalf("clean research thread with readonly embedded clone was not reclaimed: %+v", current.Workspace)
+			t.Fatalf("clean research thread with readonly embedded clone and dist/ was not reclaimed: %+v", current.Workspace)
 		}
 		if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
 			t.Fatalf("outer worktree still on disk: %v", err)
-		}
-	})
-
-	t.Run("single repo with dist artifacts is reclaimed on merged", func(t *testing.T) {
-		t.Parallel()
-		manager, repo, project, _ := localJanitorFixture(t, "dist/\n")
-		thread, wtDir := openAndReportThread(t, manager, repo, project.ID, "done")
-		if err := os.MkdirAll(filepath.Join(wtDir, "dist"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(wtDir, "dist", "bundle.js"), []byte("built"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		janitor := NewJanitor(manager, JanitorOptions{})
-		if err := janitor.Check(t.Context(), thread.ID); err != nil {
-			t.Fatal(err)
-		}
-		current, err := repo.GetThread(t.Context(), thread.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !current.Workspace.Removed {
-			t.Fatalf("single repo with dist/ was not reclaimed: %+v", current.Workspace)
-		}
-		if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
-			t.Fatalf("single repo worktree still on disk: %v", err)
-		}
-	})
-
-	t.Run("closed outer PR still protects unmerged embedded repo", func(t *testing.T) {
-		t.Parallel()
-		manager, repo, project, _ := localJanitorFixture(t, "nested/\n")
-		hostDir := filepath.Join(t.TempDir(), "host-subrepo")
-		initLocalRepo(t, hostDir, "")
-
-		thread, wtDir := openAndReportThread(t, manager, repo, project.ID, "ready")
-		nestedDir := filepath.Join(wtDir, "nested", "svc")
-		runGitOK(t, hostDir, "worktree", "add", "-qb", "feat/pr-guard", nestedDir)
-		if err := os.WriteFile(filepath.Join(nestedDir, "README.md"), []byte("hello\nunmerged\n"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		runGitOK(t, nestedDir, "-c", "user.name=Ariadne Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "unmerged subrepo commit")
-
-		if err := repo.SyncPullRequest(t.Context(), thread.ID, map[string]any{
-			"state": "closed", "number": 42, "headSha": "abc", "base": "main",
-		}, nil); err != nil {
-			t.Fatal(err)
-		}
-
-		janitor := NewJanitor(manager, JanitorOptions{})
-		if err := janitor.Check(t.Context(), thread.ID); err != nil {
-			t.Fatal(err)
-		}
-		current, err := repo.GetThread(t.Context(), thread.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if current.Workspace.Removed {
-			t.Fatal("closed outer PR deleted worktree with unmerged embedded repo")
-		}
-		if _, err := os.Stat(nestedDir); err != nil {
-			t.Fatalf("nested worktree was deleted: %v", err)
 		}
 	})
 }

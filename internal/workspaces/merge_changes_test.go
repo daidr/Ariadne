@@ -3,6 +3,8 @@ package workspaces
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/core"
@@ -84,13 +86,20 @@ func initHostedChangesRepo(t *testing.T) (*core.Repository, *Manager, core.Proje
 	return repo, manager, project, prInfo
 }
 
-func commitInWorkspace(t *testing.T, ws sdk.Workspace, file, content, message string) {
+func commitInWorkspace(t *testing.T, ws sdk.Workspace, file, content, message string, tracked bool) {
 	t.Helper()
 	ctx := t.Context()
 	if err := ws.WriteFile(ctx, file, content); err != nil {
 		t.Fatal(err)
 	}
 	git := local.NewGit(ws.Info().Label, "file")
+	if tracked {
+		res := git(ctx, []string{"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", message}, local.GitOptions{})
+		if res.ExitCode != 0 {
+			t.Fatalf("git commit -qam: exit=%d stderr=%s", res.ExitCode, res.Stderr)
+		}
+		return
+	}
 	for _, argv := range [][]string{
 		{"add", file},
 		{"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", message},
@@ -107,8 +116,7 @@ func TestThreadChangesAndSyncPullRequestBackfillTotals(t *testing.T) {
 	ctx := t.Context()
 	repo, manager, project, prInfo := initHostedChangesRepo(t)
 
-	// 1. ThreadChanges backfills NULL thread.Changes and is idempotent on repeat reads.
-	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Backfill via ThreadChanges"})
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Backfill and self-heal"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +124,36 @@ func TestThreadChangesAndSyncPullRequestBackfillTotals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitInWorkspace(t, ws, "README.md", "hello\nsecond\nthird\n", "add lines")
+
+	// 0. Clean outer repo: ThreadChangesSince self-heals stale non-zero totals, then takes fast path.
+	initial, err := manager.ThreadChanges(ctx, thread.ID)
+	if err != nil || initial.Changes == nil || initial.Changes.Head == "" || initial.Changes.Head != initial.Changes.BaseHead {
+		t.Fatalf("expected clean outer repo with Head==BaseHead, got %+v err=%v", initial, err)
+	}
+	known := &sdk.BranchRevisions{Head: initial.Changes.Head, BaseHead: initial.Changes.BaseHead}
+	if err := repo.SyncBranchChanges(ctx, thread.ID, core.ChangeTotals{Files: 500, Added: 10000, Removed: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	healed, err := manager.ThreadChangesSince(ctx, thread.ID, known)
+	if err != nil || healed.Unchanged {
+		t.Fatalf("expected stale non-zero totals on empty outer repo to bypass Unchanged fast path, got %+v err=%v", healed, err)
+	}
+	if afterHeal, err := repo.GetThread(ctx, thread.ID); err != nil || !core.SameChangeTotals(afterHeal.Changes, core.ChangeTotals{}) {
+		t.Fatalf("expected thread.Changes to be reconciled to zero, got %#v err=%v", afterHeal.Changes, err)
+	}
+	if nextPoll, err := manager.ThreadChangesSince(ctx, thread.ID, known); err != nil || !nextPoll.Unchanged {
+		t.Fatalf("expected Unchanged=true once stale totals are cleared, got %+v err=%v", nextPoll, err)
+	}
+
+	// 1. ThreadChanges backfills NULL thread.Changes and is idempotent on repeat reads.
+	if _, err := repo.Store.DB().ExecContext(ctx, "UPDATE threads SET changes = NULL WHERE id = ?", thread.ID); err != nil {
+		t.Fatal(err)
+	}
+	var syncedBefore int
+	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT count(*) FROM events WHERE type = 'branch.changes_synced'").Scan(&syncedBefore); err != nil {
+		t.Fatal(err)
+	}
+	commitInWorkspace(t, ws, "README.md", "hello\nsecond\nthird\n", "add lines", true)
 
 	result, err := manager.ThreadChanges(ctx, thread.ID)
 	if err != nil || result.Changes == nil {
@@ -135,12 +172,12 @@ func TestThreadChangesAndSyncPullRequestBackfillTotals(t *testing.T) {
 	if _, err := manager.ThreadChanges(ctx, thread.ID); err != nil {
 		t.Fatal(err)
 	}
-	var syncedCount int
-	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT count(*) FROM events WHERE type = 'branch.changes_synced'").Scan(&syncedCount); err != nil {
+	var syncedAfter int
+	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT count(*) FROM events WHERE type = 'branch.changes_synced'").Scan(&syncedAfter); err != nil {
 		t.Fatal(err)
 	}
-	if syncedCount != 1 {
-		t.Fatalf("expected 1 branch.changes_synced event, got %d", syncedCount)
+	if syncedAfter-syncedBefore != 1 {
+		t.Fatalf("expected 1 new branch.changes_synced event, got %d", syncedAfter-syncedBefore)
 	}
 
 	// When uncommitted changes exist and thread.Changes is already recorded (e.g. from turnChanges),
@@ -164,40 +201,36 @@ func TestThreadChangesAndSyncPullRequestBackfillTotals(t *testing.T) {
 	}
 
 	// 2. SyncPullRequest backfills NULL thread.Changes and refreshes when headSha changes.
-	thread2, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Backfill via SyncPullRequest"})
-	if err != nil {
+	if err := os.Remove(filepath.Join(ws.Info().Label, "draft.txt")); err != nil {
 		t.Fatal(err)
 	}
-	ws2, err := manager.ForThread(ctx, project.ID, thread2.ID)
-	if err != nil {
+	if _, err := repo.Store.DB().ExecContext(ctx, "UPDATE threads SET changes = NULL WHERE id = ?", thread.ID); err != nil {
 		t.Fatal(err)
 	}
-	commitInWorkspace(t, ws2, "README.md", "updated\n", "replace line")
-
-	if _, err := manager.SyncPullRequest(ctx, thread2.ID, prInfo, nil); err != nil {
+	if _, err := manager.SyncPullRequest(ctx, thread.ID, prInfo, nil); err != nil {
 		t.Fatal(err)
 	}
-	synced2, err := repo.GetThread(ctx, thread2.ID)
+	synced2, err := repo.GetThread(ctx, thread.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	totals2, ok := synced2.Changes.(map[string]any)
-	if !ok || totals2["files"] != float64(1) || totals2["added"] != float64(1) || totals2["removed"] != float64(1) {
+	if !ok || totals2["files"] != float64(1) || totals2["added"] != float64(2) || totals2["removed"] != float64(0) {
 		t.Fatalf("expected SyncPullRequest to backfill totals, got %#v", synced2.Changes)
 	}
 
 	// Subsequent commit + new PR headSha refreshes totals.
-	commitInWorkspace(t, ws2, "extra.txt", "a\nb\nc\n", "add extra")
+	commitInWorkspace(t, ws, "extra.txt", "a\nb\nc\n", "add extra", false)
 	prInfo.HeadSHA = "2222222222222222222222222222222222222222"
-	if _, err := manager.SyncPullRequest(ctx, thread2.ID, prInfo, nil); err != nil {
+	if _, err := manager.SyncPullRequest(ctx, thread.ID, prInfo, nil); err != nil {
 		t.Fatal(err)
 	}
-	synced3, err := repo.GetThread(ctx, thread2.ID)
+	synced3, err := repo.GetThread(ctx, thread.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	totals3, ok := synced3.Changes.(map[string]any)
-	if !ok || totals3["files"] != float64(2) || totals3["added"] != float64(4) || totals3["removed"] != float64(1) {
+	if !ok || totals3["files"] != float64(2) || totals3["added"] != float64(5) || totals3["removed"] != float64(0) {
 		t.Fatalf("expected SyncPullRequest head change to refresh totals, got %#v", synced3.Changes)
 	}
 }
@@ -282,58 +315,5 @@ func TestSyncBranchChangesSkipsZeroFallbackWhenUncommittedSnapshotFails(t *testi
 	totals, ok := afterRetry.Changes.(map[string]any)
 	if !ok || totals["files"] != float64(1) || totals["added"] != float64(3) || totals["removed"] != float64(0) {
 		t.Fatalf("expected uncommitted snapshot retry to populate totals, got %#v", afterRetry.Changes)
-	}
-}
-
-func TestThreadChangesSinceFastPathSelfHealsStaleTotalsWhenOuterEmpty(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	repo, manager, project, _ := initHostedChangesRepo(t)
-	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Self-heal stale totals"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.ForThread(ctx, project.ID, thread.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	// Capture the clean outer repo's revisions (Head == BaseHead, 0 outer changes).
-	initial, err := manager.ThreadChanges(ctx, thread.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if initial.Changes == nil || initial.Changes.Head == "" || initial.Changes.Head != initial.Changes.BaseHead {
-		t.Fatalf("expected clean outer repo with Head==BaseHead, got %+v", initial.Changes)
-	}
-	known := &sdk.BranchRevisions{Head: initial.Changes.Head, BaseHead: initial.Changes.BaseHead}
-
-	// Seed stale non-zero totals (simulating pre-fix false embedded diff persisted in threads.changes).
-	if err := repo.SyncBranchChanges(ctx, thread.ID, core.ChangeTotals{Files: 500, Added: 10000, Removed: 2000}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Polling with matching known revisions must not stay stuck on Unchanged=true; it must self-heal totals to 0.
-	healed, err := manager.ThreadChangesSince(ctx, thread.ID, known)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if healed.Unchanged {
-		t.Fatalf("expected stale non-zero totals on empty outer repo to bypass Unchanged fast path")
-	}
-	afterHeal, err := repo.GetThread(ctx, thread.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !core.SameChangeTotals(afterHeal.Changes, core.ChangeTotals{}) {
-		t.Fatalf("expected thread.Changes to be reconciled to zero, got %#v", afterHeal.Changes)
-	}
-
-	// Subsequent poll with matching known revisions now takes the Unchanged fast path.
-	nextPoll, err := manager.ThreadChangesSince(ctx, thread.ID, known)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !nextPoll.Unchanged {
-		t.Fatalf("expected Unchanged=true once stale totals are cleared, got %+v", nextPoll)
 	}
 }

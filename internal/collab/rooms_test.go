@@ -934,7 +934,10 @@ func TestRoomOutOfOrderAcrossDraftAndRejectedFrame(t *testing.T) {
 }
 
 func TestRoomPendingCompactsAtThreshold(t *testing.T) {
-	t.Parallel()
+	prevMaxPending := maxPendingBytes
+	maxPendingBytes = 5 << 10
+	t.Cleanup(func() { maxPendingBytes = prevMaxPending })
+
 	_, _, active, left, right := openTestRoom(t, "document", "# 标题\n\n开头。\n")
 	clientDoc, err := active.cloneDoc()
 	if err != nil {
@@ -947,7 +950,7 @@ func TestRoomPendingCompactsAtThreshold(t *testing.T) {
 	}
 	text := clientDoc.GetMap("document").Get(blocks[1].id).(*crdt.YMap).Get("text").(*crdt.YText)
 
-	chunk := strings.Repeat("x", 200<<10) // 200 KiB per frame; 3 frames > 512 KiB maxPendingBytes
+	chunk := strings.Repeat("x", 2<<10) // 2 KiB per frame; 3 frames > 4 KiB maxPendingBytes
 	for i := range 3 {
 		frame := makeUpdateFrame(t, clientDoc, func() {
 			clientDoc.Transact(func(*crdt.Transaction) {
@@ -962,13 +965,16 @@ func TestRoomPendingCompactsAtThreshold(t *testing.T) {
 	if len(active.pending) != 0 || active.pendingLen != 0 {
 		t.Fatalf("expected auto-compaction past maxPendingBytes, got pending=%d len=%d", len(active.pending), active.pendingLen)
 	}
-	if len(active.state) < 512<<10 {
+	if len(active.state) < maxPendingBytes {
 		t.Fatalf("expected compacted state to include appended chunks, got %d bytes", len(active.state))
 	}
 }
 
 func TestRoomRejectsOversizedStateUpdate(t *testing.T) {
-	t.Parallel()
+	prevMaxRoomState := maxRoomState
+	maxRoomState = 16 << 10
+	t.Cleanup(func() { maxRoomState = prevMaxRoomState })
+
 	_, rooms, active, left, _ := openTestRoom(t, "document", "# 标题\n\n短文本。\n")
 
 	makeOversizedFrame := func() []byte {

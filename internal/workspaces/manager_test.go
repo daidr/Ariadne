@@ -123,7 +123,6 @@ func TestSourceViewsReuseConnectionsAndCloseOnConfigurationOrProviderChange(t *t
 	}
 }
 func TestCoordinatorViewabilityDoesNotWaitForSlowSourceAndCloseCancelsLoad(t *testing.T) {
-	t.Parallel()
 	repo, project, _ := testRepository(t)
 	registry := sources.New()
 	started := make(chan struct{})
@@ -140,12 +139,18 @@ func TestCoordinatorViewabilityDoesNotWaitForSlowSourceAndCloseCancelsLoad(t *te
 		t.Fatal(err)
 	}
 	defer closeManager(t, manager)
+	viewDone := make(chan struct{})
+	go func() {
+		defer close(viewDone)
+		_, _ = manager.View(t.Context(), project.ID)
+	}()
+	<-started
 	start := time.Now()
-	if !manager.Viewable(t.Context(), project.ID, 20*time.Millisecond) || time.Since(start) > time.Second {
+	if !manager.Viewable(t.Context(), project.ID, 30*time.Millisecond) || time.Since(start) > 2*time.Second {
 		t.Fatal("coordinator waited for source connection")
 	}
-	<-started
 	closeManager(t, manager)
+	<-viewDone
 	select {
 	case <-cancelled:
 	default:

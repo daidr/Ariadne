@@ -68,7 +68,8 @@ func fixtureRoot(t *testing.T) string {
 }
 
 func runFixtureGit(dir string, args ...string) (string, error) {
-	res := NewGit(dir, "file")(context.Background(), args, GitOptions{Whole: true})
+	full := append([]string{"-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)
+	res := NewGit(dir, "file")(context.Background(), full, GitOptions{Whole: true})
 	if res.ExitCode != 0 {
 		return "", fmt.Errorf("git %v in %s: %s", args, dir, strings.TrimSpace(res.Stderr))
 	}
@@ -99,6 +100,9 @@ func copyTreeErr(src, dst string) error {
 		return err
 	}
 	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".lock") {
+			continue
+		}
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 		if entry.IsDir() {
@@ -109,6 +113,9 @@ func copyTreeErr(src, dst string) error {
 		}
 		info, err := entry.Info()
 		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
 			return err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
@@ -123,6 +130,9 @@ func copyTreeErr(src, dst string) error {
 		}
 		data, err := os.ReadFile(srcPath)
 		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
 			return err
 		}
 		// Keep copied objects writable so Windows TempDir cleanup never fails on 0444 git objects.

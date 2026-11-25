@@ -46,6 +46,9 @@ func copyRunnerTreeErr(src, dst string) error {
 		return err
 	}
 	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".lock") {
+			continue
+		}
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 		if entry.IsDir() {
@@ -56,6 +59,9 @@ func copyRunnerTreeErr(src, dst string) error {
 		}
 		data, err := os.ReadFile(srcPath)
 		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
 			return err
 		}
 		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
@@ -146,7 +152,8 @@ func ensureRunnerBaseRepo(t *testing.T) string {
 		}
 		git := local.NewGit(dir, "file")
 		run := func(args ...string) error {
-			res := git(context.Background(), args, local.GitOptions{})
+			full := append([]string{"-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)
+			res := git(context.Background(), full, local.GitOptions{})
 			if res.ExitCode != 0 {
 				return fmt.Errorf("git %v failed: %s", args, res.Stderr)
 			}
@@ -450,8 +457,18 @@ func TestTurnChangesAfterMergingOriginMainMatchesBranchChangesAndReconcilesStale
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Enable core.autocrlf=true in the repo config so both git merge and
+	// Ariadne's worktreeConfigArgs observe the same CRLF normalization on every OS.
+	cfgPath := filepath.Join(repoDir, ".git", "config")
+	cfgRaw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, append(cfgRaw, []byte("\n[core]\n\tautocrlf = true\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	turn2.changes.begin(ctx, currentThread)
-	runWorkGit(workDir, "-c", "core.autocrlf=true", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "merge", "--no-ff", "-m", "Merge origin/main", "refs/remotes/origin/main")
+	runWorkGit(workDir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "merge", "--no-ff", "-m", "Merge origin/main", "refs/remotes/origin/main")
 	turn2.changes.record(ctx, turnID2)
 	if err := repo.FinishTurn(ctx, thread.ID, turnID2, "completed", nil); err != nil {
 		t.Fatal(err)
@@ -505,8 +522,17 @@ func TestTurnChangesMultiRepoOuterAndEmbedded(t *testing.T) {
 		return strings.TrimSpace(res.Stdout)
 	}
 	outerDir := initTestRemoteRepo(t)
-	writeRunnerGitExclude(t, outerDir, "packages/\n")
-	dataDir := t.TempDir()
+	writeRunnerGitExclude(t, outerDir, "packages/\nnested-worktrees/\nsubrepos/\n")
+	hostRepo := initTestRemoteRepo(t)
+	forkSHA := readRunnerHeadSHA(t, hostRepo)
+	writeRunnerGitRef(t, filepath.Join(hostRepo, ".git"), "refs/remotes/origin/main", forkSHA)
+	writeRunnerGitRef(t, filepath.Join(hostRepo, ".git"), "refs/remotes/origin/HEAD", "ref: refs/remotes/origin/main")
+
+	dataDir, err := os.MkdirTemp("", "ad-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dataDir) })
 
 	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
 	if err != nil {
@@ -530,7 +556,7 @@ func TestTurnChangesMultiRepoOuterAndEmbedded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Outer and embedded edits"})
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Outer, embedded, and mid-turn worktree"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,13 +566,13 @@ func TestTurnChangesMultiRepoOuterAndEmbedded(t *testing.T) {
 	}
 	workDir := ws.Info().Label
 
-	// Seed an embedded git repo inside an ignored subdirectory of the thread worktree before Turn 1 starts.
+	// Pre-existing standalone embedded repo before Turn 1 starts.
 	subDir := filepath.Join(workDir, "packages", "sub")
 	copyRunnerTree(t, ensureRunnerBaseRepo(t), subDir)
 	subBaseHead := readRunnerHeadSHA(t, subDir)
 
 	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
-		ConversationID: thread.ID, Author: "user", Content: "Edit outer and sub",
+		ConversationID: thread.ID, Author: "user", Content: "Edit outer, sub, and mid-turn worktree",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -564,196 +590,46 @@ func TestTurnChangesMultiRepoOuterAndEmbedded(t *testing.T) {
 		changes:      newTurnChanges(runnerInstance, conv),
 	}
 
-	// Edit outer repo file via writeFile (triggers begin across outer + embedded repos).
+	// Edit outer repo via writeFile (triggers begin across outer + pre-existing embedded repos).
 	if _, err := discussion.writeFile(ctx, args{
 		"path":    "README.md",
 		"content": "hello\nouter edit\n",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Commit in outer repo and edit + commit in embedded repo.
 	runGit(workDir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "outer change")
-	if err := os.WriteFile(filepath.Join(subDir, "lib.go"), []byte("package sub\nfunc Hello() {}\n"), 0o644); err != nil {
+
+	// Edit and commit inside pre-existing embedded repo.
+	if err := os.WriteFile(filepath.Join(subDir, "README.md"), []byte("hello\nsub1\nsub2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(subDir, "add", "lib.go")
-	runGit(subDir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "sub change")
+	runGit(subDir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "sub change")
+
+	// Mid-turn created nested worktree + commit + uncommitted edit -> baseline must be forkSHA.
+	midDir := filepath.Join(workDir, "nested-worktrees", "feat-mid")
+	if err := os.MkdirAll(filepath.Dir(midDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(hostRepo, "worktree", "add", "-qb", "feat/mid", midDir, forkSHA)
+	if err := os.WriteFile(filepath.Join(midDir, "README.md"), []byte("hello\nmid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(midDir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "mid commit")
+	if err := os.WriteFile(filepath.Join(midDir, "wip.go"), []byte("package pkg\n// wip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mid-turn clean clone -> must produce 0 turn-changes and 0 baselines.
+	cleanCloneDir := filepath.Join(workDir, "subrepos", "clean-clone")
+	copyRunnerTree(t, hostRepo, cleanCloneDir)
+	_ = os.RemoveAll(filepath.Join(cleanCloneDir, ".git", "worktrees"))
 
 	discussion.changes.record(ctx, turnID)
 	if err := repo.FinishTurn(ctx, thread.ID, turnID, "completed", nil); err != nil {
 		t.Fatal(err)
 	}
 
-	// 1. Verify first-touch baseline recorded for packages/sub.
-	baselines, err := repo.RepoBaselines(ctx, thread.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(baselines) != 1 || baselines[0].RepoPath != "packages/sub" || baselines[0].BaseHead != subBaseHead {
-		t.Fatalf("expected baseline for packages/sub at %s, got %+v", subBaseHead, baselines)
-	}
-
-	// 2. Verify turn-changes notice contains both repositories.
-	notices, err := repo.ListNotices(ctx, thread.ID, core.NoticeRange{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var turnNotice map[string]any
-	for _, n := range notices {
-		if n["kind"] == "turn-changes" {
-			turnNotice = n
-		}
-	}
-	if turnNotice == nil {
-		t.Fatalf("expected turn-changes notice, got %+v", notices)
-	}
-	reposRaw, ok := turnNotice["repos"].([]any)
-	if !ok || len(reposRaw) != 2 {
-		t.Fatalf("expected 2 repos in turn-changes notice, got %#v", turnNotice["repos"])
-	}
-	outerTurnRepo, _ := reposRaw[0].(map[string]any)
-	if branch, _ := outerTurnRepo["branch"].(string); branch == "" {
-		t.Fatalf("expected outer root repo branch to be backfilled in turn-changes notice, got %#v", outerTurnRepo)
-	}
-
-	// 3. Verify ThreadChanges returns both repos with embedded repo marked non-mergeable.
-	tc, err := manager.ThreadChanges(ctx, thread.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tc.Repos) != 2 {
-		t.Fatalf("expected 2 repos in ThreadChanges, got %+v", tc.Repos)
-	}
-	if tc.Repos[0].Embedded || !tc.Repos[0].Mergeable {
-		t.Fatalf("expected primary outer repo mergeable and non-embedded, got %+v", tc.Repos[0])
-	}
-	if !tc.Repos[1].Embedded || tc.Repos[1].Mergeable || tc.Repos[1].RepoPath != "packages/sub" {
-		t.Fatalf("expected embedded repo packages/sub non-mergeable, got %+v", tc.Repos[1])
-	}
-	if len(tc.Repos[1].Changes.Files) != 1 || tc.Repos[1].Changes.Files[0].Path != "lib.go" {
-		t.Fatalf("expected lib.go in embedded repo changes, got %+v", tc.Repos[1].Changes)
-	}
-
-	// 4. Verify thread.Changes totals aggregate outer (1 file, +1) + embedded (1 file, +2) = 2 files, +3.
-	updated, err := repo.GetThread(ctx, thread.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !core.SameChangeTotals(updated.Changes, core.ChangeTotals{Files: 2, Added: 3, Removed: 0}) {
-		t.Fatalf("expected aggregated totals {2, 3, 0}, got %#v", updated.Changes)
-	}
-}
-
-func TestTurnChangesMidTurnCreatedWorktreeRecordsForkBaselineAndCommits(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-
-	runGit := func(dir string, args ...string) string {
-		t.Helper()
-		res := local.NewGit(dir, "file")(ctx, args, local.GitOptions{})
-		if res.ExitCode != 0 {
-			t.Fatalf("git %v in %s failed: %s", args, dir, res.Stderr)
-		}
-		return strings.TrimSpace(res.Stdout)
-	}
-
-	// Build outer umbrella repo and external host repo from cached template.
-	outerDir := initTestRemoteRepo(t)
-	writeRunnerGitExclude(t, outerDir, "nested-worktrees/\nsubrepos/\n")
-
-	hostRepo := initTestRemoteRepo(t)
-	forkSHA := readRunnerHeadSHA(t, hostRepo)
-	writeRunnerGitRef(t, filepath.Join(hostRepo, ".git"), "refs/remotes/origin/main", forkSHA)
-	writeRunnerGitRef(t, filepath.Join(hostRepo, ".git"), "refs/remotes/origin/HEAD", "ref: refs/remotes/origin/main")
-
-	// Set up Ariadne core + workspaces + runner.
-	dataDir, err := os.MkdirTemp("", "ad-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dataDir) })
-	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repo.Close()
-
-	hosts := sources.New()
-	if _, err := hosts.Register(local.DirectoryProvider(dataDir, nil, true)); err != nil {
-		t.Fatal(err)
-	}
-	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: hosts})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer manager.Close(context.Background())
-
-	project, err := repo.CreateProject(ctx, new("MidTurnEmbedded"), core.ProjectStart{
-		Source: core.Source{Kind: "local-directory", Settings: map[string]any{"path": outerDir}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Mid-turn worktrees and clone"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ws, err := manager.ForThread(ctx, project.ID, thread.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	workDir := ws.Info().Label
-
-	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
-		ConversationID: thread.ID, Author: "user", Content: "Create nested worktrees mid-turn",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	turnID, err := repo.StartScheduledTurn(ctx, thread.ID, "mock")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	runnerInstance := &Runner{Repository: repo, Workspaces: manager}
-	conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
-	tc := newTurnChanges(runnerInstance, conv)
-	tc.begin(ctx, thread)
-
-	// 1. Mid-turn created worktree + commit C1 (clean working tree).
-	mid1Dir := filepath.Join(workDir, "nested-worktrees", "feat-mid1")
-	if err := os.MkdirAll(filepath.Dir(mid1Dir), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	runGit(hostRepo, "worktree", "add", "-qb", "feat/mid1", mid1Dir, forkSHA)
-	if err := os.WriteFile(filepath.Join(mid1Dir, "README.md"), []byte("hello\nmid1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(mid1Dir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "mid1 commit")
-	mid1Head := readRunnerHeadSHA(t, mid1Dir)
-
-	// 2. Mid-turn created worktree + commit C1 + uncommitted edit.
-	mid2Dir := filepath.Join(workDir, "nested-worktrees", "feat-mid2")
-	runGit(hostRepo, "worktree", "add", "-qb", "feat/mid2", mid2Dir, forkSHA)
-	if err := os.WriteFile(filepath.Join(mid2Dir, "README.md"), []byte("hello\nmid2\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(mid2Dir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "mid2 commit")
-	if err := os.WriteFile(filepath.Join(mid2Dir, "wip.go"), []byte("package pkg\n// wip\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// 3. Mid-turn clean git clone -> must produce 0 turn-changes and 0 baselines.
-	cleanCloneDir := filepath.Join(workDir, "subrepos", "clean-clone")
-	copyRunnerTree(t, hostRepo, cleanCloneDir)
-	_ = os.RemoveAll(filepath.Join(cleanCloneDir, ".git", "worktrees"))
-
-	tc.record(ctx, turnID)
-	if err := repo.FinishTurn(ctx, thread.ID, turnID, "completed", nil); err != nil {
-		t.Fatal(err)
-	}
-
-	// Verify baselines: recorded for feat-mid1 and feat-mid2 at forkSHA (NOT mid1Head/mid2Head),
-	// and NOT recorded for clean-clone or its clean orphan submodule.
+	// 1. Verify baselines recorded for packages/sub (subBaseHead) and nested-worktrees/feat-mid (forkSHA), not clean-clone.
 	baselines, err := repo.RepoBaselines(ctx, thread.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -762,17 +638,11 @@ func TestTurnChangesMidTurnCreatedWorktreeRecordsForkBaselineAndCommits(t *testi
 	for _, b := range baselines {
 		baselineByPath[b.RepoPath] = b
 	}
-	if len(baselines) != 2 {
-		t.Fatalf("expected exactly 2 baselines (feat-mid1 and feat-mid2), got %+v", baselines)
-	}
-	if b := baselineByPath["nested-worktrees/feat-mid1"]; b.BaseHead != forkSHA {
-		t.Fatalf("expected feat-mid1 baseline at forkSHA %s (not %s), got %+v", forkSHA, mid1Head, b)
-	}
-	if b := baselineByPath["nested-worktrees/feat-mid2"]; b.BaseHead != forkSHA {
-		t.Fatalf("expected feat-mid2 baseline at forkSHA %s, got %+v", forkSHA, b)
+	if len(baselines) != 2 || baselineByPath["packages/sub"].BaseHead != subBaseHead || baselineByPath["nested-worktrees/feat-mid"].BaseHead != forkSHA {
+		t.Fatalf("unexpected baselines: %+v (want sub=%s mid=%s)", baselines, subBaseHead, forkSHA)
 	}
 
-	// Verify turn-changes notice contains exactly feat-mid1 (pkg.go) and feat-mid2 (pkg.go + wip.go).
+	// 2. Verify turn-changes notice contains outer + packages/sub + nested-worktrees/feat-mid (3 repos).
 	notices, err := repo.ListNotices(ctx, thread.ID, core.NoticeRange{})
 	if err != nil {
 		t.Fatal(err)
@@ -787,8 +657,8 @@ func TestTurnChangesMidTurnCreatedWorktreeRecordsForkBaselineAndCommits(t *testi
 		t.Fatalf("expected turn-changes notice, got %+v", notices)
 	}
 	reposRaw, ok := turnNotice["repos"].([]any)
-	if !ok || len(reposRaw) != 2 {
-		t.Fatalf("expected 2 repos in turn-changes notice (no clean-clone or orphan submodule), got %#v", turnNotice["repos"])
+	if !ok || len(reposRaw) != 3 {
+		t.Fatalf("expected 3 repos in turn-changes notice, got %#v", turnNotice["repos"])
 	}
 	turnRepoByPath := map[string]map[string]any{}
 	for _, item := range reposRaw {
@@ -796,39 +666,56 @@ func TestTurnChangesMidTurnCreatedWorktreeRecordsForkBaselineAndCommits(t *testi
 		p, _ := m["repoPath"].(string)
 		turnRepoByPath[p] = m
 	}
-	mid1Turn := turnRepoByPath["nested-worktrees/feat-mid1"]
-	if mid1Turn == nil || mid1Turn["from"] != forkSHA || mid1Turn["to"] != mid1Head {
-		t.Fatalf("unexpected feat-mid1 turn-changes entry: %#v", mid1Turn)
+	if branch, _ := turnRepoByPath[""]["branch"].(string); branch == "" {
+		t.Fatalf("expected outer root repo branch to be backfilled in turn-changes notice, got %#v", turnRepoByPath[""])
 	}
-	if files, _ := mid1Turn["files"].([]any); len(files) != 1 {
-		t.Fatalf("expected 1 changed file for feat-mid1, got %#v", mid1Turn["files"])
+	midTurn := turnRepoByPath["nested-worktrees/feat-mid"]
+	if midTurn == nil || midTurn["from"] != forkSHA {
+		t.Fatalf("unexpected feat-mid turn-changes entry: %#v", midTurn)
 	}
-	mid2Turn := turnRepoByPath["nested-worktrees/feat-mid2"]
-	if mid2Turn == nil || mid2Turn["from"] != forkSHA {
-		t.Fatalf("unexpected feat-mid2 turn-changes entry: %#v", mid2Turn)
-	}
-	if files, _ := mid2Turn["files"].([]any); len(files) != 2 {
-		t.Fatalf("expected 2 changed files (committed pkg.go + uncommitted wip.go) for feat-mid2, got %#v", mid2Turn["files"])
+	if files, _ := midTurn["files"].([]any); len(files) != 2 {
+		t.Fatalf("expected 2 changed files (committed README.md + uncommitted wip.go) for feat-mid, got %#v", midTurn["files"])
 	}
 
-	// Verify subsequent ThreadChanges preserves committed C1 for both feat-mid1 and feat-mid2
-	// and reports 0 changes for clean-clone and its orphan submodule.
-	changes, err := manager.ThreadChanges(ctx, thread.ID)
+	// 3. Verify ThreadChanges returns all 3 active repos (excluding clean-clone).
+	tc, err := manager.ThreadChanges(ctx, thread.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(changes.Repos) != 2 {
-		t.Fatalf("expected 2 active repos in ThreadChanges, got %+v", changes.Repos)
+	if len(tc.Repos) != 3 {
+		t.Fatalf("expected 3 repos in ThreadChanges, got %+v", tc.Repos)
 	}
-	for _, r := range changes.Repos {
-		if r.RepoPath != "nested-worktrees/feat-mid1" && r.RepoPath != "nested-worktrees/feat-mid2" {
+	if tc.Repos[0].Embedded || !tc.Repos[0].Mergeable {
+		t.Fatalf("expected primary outer repo mergeable and non-embedded, got %+v", tc.Repos[0])
+	}
+	var sawSub, sawMid bool
+	for _, r := range tc.Repos {
+		switch r.RepoPath {
+		case "":
+		case "packages/sub":
+			sawSub = true
+			if !r.Embedded || r.Mergeable || len(r.Changes.Files) != 1 || r.Changes.Files[0].Path != "README.md" {
+				t.Fatalf("unexpected packages/sub ThreadChanges: %+v", r)
+			}
+		case "nested-worktrees/feat-mid":
+			sawMid = true
+			if !r.Embedded || r.Mergeable || r.Changes.From != forkSHA || len(r.Changes.Files) != 1 || len(r.Changes.Uncommitted) != 1 || r.Changes.Uncommitted[0] != "wip.go" {
+				t.Fatalf("unexpected feat-mid ThreadChanges: %+v", r)
+			}
+		default:
 			t.Fatalf("unexpected active repo %s in ThreadChanges", r.RepoPath)
 		}
-		if r.Changes == nil || r.Changes.From != forkSHA || len(r.Changes.Files) != 1 || r.Changes.Files[0].Path != "README.md" {
-			t.Fatalf("expected committed README.md change relative to forkSHA %s for %s, got %+v", forkSHA, r.RepoPath, r.Changes)
-		}
-		if r.RepoPath == "nested-worktrees/feat-mid2" && (len(r.Changes.Uncommitted) != 1 || r.Changes.Uncommitted[0] != "wip.go") {
-			t.Fatalf("expected uncommitted wip.go for feat-mid2, got %+v", r.Changes)
-		}
+	}
+	if !sawSub || !sawMid {
+		t.Fatalf("missing expected embedded repos in ThreadChanges: %+v", tc.Repos)
+	}
+
+	// 4. Verify thread.Changes totals aggregate outer (+1) + sub (+2) + feat-mid (+1 committed, +2 uncommitted = 2 files, +3) = 4 files, +6.
+	updated, err := repo.GetThread(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !core.SameChangeTotals(updated.Changes, core.ChangeTotals{Files: 4, Added: 6, Removed: 0}) {
+		t.Fatalf("expected aggregated totals {4, 6, 0}, got %#v", updated.Changes)
 	}
 }

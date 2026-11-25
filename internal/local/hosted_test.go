@@ -37,7 +37,7 @@ func newHostedTest(t *testing.T, remote, data string, clone Cloner) *Hosted {
 	})
 	return host
 }
-func TestHostedCloneBranchWorkAndSafePush(t *testing.T) {
+func TestHostedCloneSharedWorkAndSafePush(t *testing.T) {
 	t.Parallel()
 	remote, remoteGit := initGit(t)
 	storage := t.TempDir()
@@ -45,17 +45,54 @@ func TestHostedCloneBranchWorkAndSafePush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host := newHostedTest(t, remote, data, nil)
+	host := newHostedTest(t, remote, data, fakeClone)
+	peer := newHostedTest(t, remote, data, fakeClone)
+
+	// Concurrent Open across two projects sharing the same bare clone coalesces cloning safely.
+	var jobs sync.WaitGroup
+	failures := make(chan error, 2)
+	var workspace, peerWS sdk.Workspace
+	jobs.Go(func() {
+		ws, err := host.Open(t.Context(), sdk.WorkspaceRequest{ThreadID: "hosted_thread"})
+		if err != nil {
+			failures <- err
+		} else {
+			workspace = ws
+		}
+	})
+	jobs.Go(func() {
+		ws, err := peer.Open(t.Context(), sdk.WorkspaceRequest{ThreadID: "peer_thread"})
+		if err != nil {
+			failures <- err
+		} else {
+			peerWS = ws
+		}
+	})
+	jobs.Wait()
+	close(failures)
+	for err := range failures {
+		t.Fatal(err)
+	}
+	hostedOperations.Lock()
+	retained := false
+	for key := range hostedOperations.entries {
+		if strings.EqualFold(key, host.bare) {
+			retained = true
+		}
+	}
+	hostedOperations.Unlock()
+	if retained {
+		t.Fatal("shared clone operation locks retained")
+	}
+	if got, err := peerWS.ReadFile(t.Context(), "file.txt"); err != nil || got != "base\n" {
+		t.Fatal(got, err)
+	}
 	view, err := host.View(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if data, err := view.ReadBytes(t.Context(), "file.txt", 1024); err != nil || string(data) != "base\n" {
-		t.Fatal(string(data), err)
-	}
-	workspace, err := host.Open(t.Context(), sdk.WorkspaceRequest{ThreadID: "hosted_thread"})
-	if err != nil {
-		t.Fatal(err)
+	if raw, err := view.ReadBytes(t.Context(), "file.txt", 1024); err != nil || string(raw) != "base\n" {
+		t.Fatal(string(raw), err)
 	}
 	info := workspace.Info()
 	if info.Branch == nil || info.Base == nil || *info.Base != "main" || !info.Local {
@@ -82,6 +119,9 @@ func TestHostedCloneBranchWorkAndSafePush(t *testing.T) {
 		t.Fatal("credential written into git config", err)
 	}
 	branches := host.Capability().Branches
+	if branches.Merge != nil || branches.UndoMerge != nil {
+		t.Fatal("hosted branches expose local merging")
+	}
 	if branches.Snapshot == nil || branches.Diff == nil {
 		t.Fatal("hosted branches missing snapshot or diff")
 	}
@@ -136,6 +176,21 @@ func TestHostedCloneBranchWorkAndSafePush(t *testing.T) {
 	if _, err := view.ReadBytes(t.Context(), "file.txt", 1024); err == nil {
 		t.Fatal("closed hosted source still starts readers")
 	}
+	// Closing one host leaves the peer sharing the same bare clone usable and able to remove its worktree.
+	peerView, err := peer.View(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := peerView.ReadBytes(t.Context(), "file.txt", 1024); err != nil || string(raw) != "base\n" {
+		t.Fatal(string(raw), err)
+	}
+	removed, err := peer.Capability().Branches.Remove(t.Context(), "peer_thread", sdk.WorktreeRemoveOptions{Spare: true})
+	if err != nil || !removed {
+		t.Fatal(removed, err)
+	}
+	if sha := readRefSHA(t, peer.bare, "refs/heads/"+BranchFor("peer_thread")); sha == "" {
+		t.Fatal("removed thread's branch lost")
+	}
 }
 func TestHostedEnvironmentChild(t *testing.T) {
 	for _, arg := range os.Args {
@@ -151,74 +206,6 @@ func TestHostedEnvironmentChild(t *testing.T) {
 			fmt.Print(string(data))
 			os.Exit(0)
 		}
-	}
-}
-func TestHostedSharedCloneConcurrentProjectsAndClonedCheckout(t *testing.T) {
-	t.Parallel()
-	remote, _ := initGit(t)
-	data := t.TempDir()
-	one, two := newHostedTest(t, remote, data, fakeClone), newHostedTest(t, remote, data, fakeClone)
-	var jobs sync.WaitGroup
-	failures := make(chan error, 2)
-	opened := make(chan sdk.Workspace, 2)
-	for index, host := range []*Hosted{one, two} {
-		jobs.Go(func() {
-			workspace, err := host.Open(t.Context(), sdk.WorkspaceRequest{ThreadID: fmt.Sprintf("thread_%d", index)})
-			if err != nil {
-				failures <- err
-			} else {
-				opened <- workspace
-			}
-		})
-	}
-	jobs.Wait()
-	close(failures)
-	close(opened)
-	for err := range failures {
-		t.Error(err)
-	}
-	for workspace := range opened {
-		if data, err := workspace.ReadFile(t.Context(), "file.txt"); err != nil || data != "base\n" {
-			t.Error(data, err)
-		}
-	}
-	if t.Failed() {
-		return
-	}
-	hostedOperations.Lock()
-	retained := false
-	for key := range hostedOperations.entries {
-		if strings.EqualFold(key, one.bare) {
-			retained = true
-		}
-	}
-	hostedOperations.Unlock()
-	if retained {
-		t.Fatal("shared clone operation locks retained")
-	}
-	if err := one.Close(); err != nil {
-		t.Fatal(err)
-	}
-	view, err := two.View(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if data, err := view.ReadBytes(t.Context(), "file.txt", 1024); err != nil || string(data) != "base\n" {
-		t.Fatal(string(data), err)
-	}
-	branches := two.Capability().Branches
-	if branches.Merge != nil || branches.UndoMerge != nil {
-		t.Fatal("hosted branches expose local merging")
-	}
-	if branches.Snapshot == nil || branches.Diff == nil {
-		t.Fatal("hosted branches missing snapshot or diff capability")
-	}
-	removed, err := branches.Remove(t.Context(), "thread_1", sdk.WorktreeRemoveOptions{Spare: true})
-	if err != nil || !removed {
-		t.Fatal(removed, err)
-	}
-	if sha := commitSHA(t.Context(), two.owner.git, "refs/heads/"+BranchFor("thread_1"), ""); sha == "" {
-		t.Fatal("removed thread's branch lost")
 	}
 }
 func TestHostedGitEnvBindsCredentialsToURLAndDisablesHelpers(t *testing.T) {

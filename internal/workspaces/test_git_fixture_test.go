@@ -44,6 +44,9 @@ func copyWorkspaceTreeErr(src, dst string) error {
 		return err
 	}
 	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".lock") {
+			continue
+		}
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 		if entry.IsDir() {
@@ -54,6 +57,9 @@ func copyWorkspaceTreeErr(src, dst string) error {
 		}
 		data, err := os.ReadFile(srcPath)
 		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
 			return err
 		}
 		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
@@ -76,7 +82,8 @@ func ensureBaseGitTemplate(t *testing.T) (dir, sha string) {
 		}
 		git := local.NewGit(root, "file")
 		run := func(args ...string) error {
-			res := git(context.Background(), args, local.GitOptions{})
+			full := append([]string{"-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)
+			res := git(context.Background(), full, local.GitOptions{})
 			if res.ExitCode != 0 {
 				return fmt.Errorf("git %v failed: %s", args, res.Stderr)
 			}
