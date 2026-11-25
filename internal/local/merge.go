@@ -219,17 +219,47 @@ func checkoutOf(ctx context.Context, git GitRun, ref string) (string, error) {
 	}
 	return "", nil
 }
+func directWorktreeGitDir(directory string) string {
+	gitPath := filepath.Join(directory, ".git")
+	info, err := os.Lstat(gitPath)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		return ""
+	}
+	if info.IsDir() {
+		return gitPath
+	}
+	if !info.Mode().IsRegular() {
+		return ""
+	}
+	gitDir, ok := resolveGitFileTarget(directory, gitPath)
+	if !ok {
+		return ""
+	}
+	return gitDir
+}
+
 func holdsMore(ctx context.Context, git GitRun, directory string) bool {
 	options := GitOptions{Directory: directory, Whole: true}
-	if git(ctx, []string{"symbolic-ref", "-q", "HEAD"}, options).ExitCode != 0 {
+	if git(ctx, []string{"--no-optional-locks", "symbolic-ref", "-q", "HEAD"}, options).ExitCode != 0 {
 		return true
 	}
+	gitDir := directWorktreeGitDir(directory)
+	if gitDir != "" {
+		if info, err := os.Stat(filepath.Join(gitDir, "reftable")); err == nil && info.IsDir() {
+			gitDir = ""
+		}
+	}
 	for _, ref := range []string{"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"} {
-		if git(ctx, []string{"rev-parse", "-q", "--verify", ref}, options).ExitCode == 0 {
+		if gitDir != "" {
+			if _, err := os.Lstat(filepath.Join(gitDir, ref)); os.IsNotExist(err) {
+				continue
+			}
+		}
+		if git(ctx, []string{"--no-optional-locks", "rev-parse", "-q", "--verify", ref}, options).ExitCode == 0 {
 			return true
 		}
 	}
-	ignored := git(ctx, []string{"ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"}, options)
+	ignored := git(ctx, []string{"--no-optional-locks", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"}, options)
 	if ignored.ExitCode != 0 {
 		return true
 	}

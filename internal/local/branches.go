@@ -215,28 +215,35 @@ func BranchChanges(ctx context.Context, git GitRun, input BranchInput) (*sdk.Bra
 	if baseSHA == "" {
 		return nil, &sdk.MergeRefused{Reason: "no-base", Detail: input.Base + " does not exist"}
 	}
-	mergeBase := git(ctx, []string{"merge-base", baseSHA, head}, GitOptions{})
 	from := baseSHA
-	if mergeBase.ExitCode == 0 {
-		from = strings.TrimSpace(mergeBase.Stdout)
+	if head != baseSHA {
+		mergeBase := git(ctx, []string{"merge-base", baseSHA, head}, GitOptions{})
+		if mergeBase.ExitCode == 0 {
+			from = strings.TrimSpace(mergeBase.Stdout)
+		}
 	}
 
 	var (
-		files       []sdk.ChangedFile
+		files       = []sdk.ChangedFile{}
 		diffErr     error
 		logResult   sdk.ExecResult
 		uncommitted = []string{}
 		wg          sync.WaitGroup
 	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		files, diffErr = TreeDiff(ctx, git, from, head)
-	}()
-	go func() {
-		defer wg.Done()
-		logResult = git(ctx, []string{"log", "-z", "--max-count=100", "--format=%H %s", baseSHA + ".." + head}, GitOptions{Whole: true})
-	}()
+	if from != head {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			files, diffErr = TreeDiff(ctx, git, from, head)
+		}()
+	}
+	if head != baseSHA {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			logResult = git(ctx, []string{"log", "-z", "--max-count=100", "--format=%H %s", baseSHA + ".." + head}, GitOptions{Whole: true})
+		}()
+	}
 	if input.Worktree != "" {
 		wg.Add(1)
 		go func() {
@@ -269,6 +276,9 @@ func BranchChanges(ctx context.Context, git GitRun, input BranchInput) (*sdk.Bra
 	return &sdk.BranchChanges{Branch: input.Branch, Base: input.Base, From: from, Head: head, BaseHead: baseSHA, Commits: commits, Files: files, Uncommitted: uncommitted}, nil
 }
 func TreeDiff(ctx context.Context, git GitRun, from, to string) ([]sdk.ChangedFile, error) {
+	if from == to && isObjectID(from) {
+		return []sdk.ChangedFile{}, nil
+	}
 	// Resolve user-supplied revisions before handing them to a command that
 	// accepts options; --end-of-options protects leading '-' and '--' names.
 	revisions := []string{from, to}
@@ -473,5 +483,8 @@ func BranchMerged(ctx context.Context, git GitRun, branch, baseRef string) bool 
 	if base == "" {
 		return false
 	}
-	return git(ctx, []string{"merge-base", "--is-ancestor", head, base}, GitOptions{}).ExitCode == 0
+	if head == base {
+		return true
+	}
+	return git(ctx, []string{"--no-optional-locks", "merge-base", "--is-ancestor", head, base}, GitOptions{}).ExitCode == 0
 }

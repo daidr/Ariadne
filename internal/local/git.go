@@ -5,13 +5,92 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/process"
 	"github.com/daidr/Ariadne/sdk"
 )
+
+var gitBinaryCache struct {
+	mu       sync.RWMutex
+	pathEnv  string
+	resolved string
+}
+
+func gitExecutable(env map[string]string) string {
+	for key := range env {
+		if strings.EqualFold(key, "PATH") {
+			return "git"
+		}
+	}
+	pathEnv := os.Getenv("PATH")
+	gitBinaryCache.mu.RLock()
+	cached := ""
+	if gitBinaryCache.resolved != "" && gitBinaryCache.pathEnv == pathEnv {
+		cached = gitBinaryCache.resolved
+	}
+	gitBinaryCache.mu.RUnlock()
+	if cached != "" {
+		if info, err := os.Stat(cached); err == nil && !info.IsDir() {
+			return cached
+		}
+	}
+	found, err := exec.LookPath("git")
+	if err != nil {
+		return "git"
+	}
+	if !filepath.IsAbs(found) {
+		return found
+	}
+	resolved := unwrapWindowsGit(found)
+	gitBinaryCache.mu.Lock()
+	gitBinaryCache.pathEnv = pathEnv
+	gitBinaryCache.resolved = resolved
+	gitBinaryCache.mu.Unlock()
+	return resolved
+}
+
+// unwrapWindowsGit skips Git for Windows' cmd/git.exe and bin/git.exe shim
+// wrappers when the underlying mingw64/clangarm64 git.exe is installed next to
+// them, avoiding a second Windows process spawn on every Git call.
+func unwrapWindowsGit(found string) string {
+	return unwrapWindowsGitForArch(found, runtime.GOOS, runtime.GOARCH)
+}
+
+func unwrapWindowsGitForArch(found, goos, goarch string) string {
+	if goos != "windows" {
+		return found
+	}
+	abs, err := filepath.Abs(found)
+	if err != nil {
+		return found
+	}
+	if !strings.EqualFold(filepath.Base(abs), "git.exe") {
+		return abs
+	}
+	parentDir := filepath.Dir(abs)
+	parentBase := filepath.Base(parentDir)
+	if !strings.EqualFold(parentBase, "cmd") && !strings.EqualFold(parentBase, "bin") {
+		return abs
+	}
+	installRoot := filepath.Dir(parentDir)
+	subdirs := []string{"mingw64", "clangarm64", "mingw32"}
+	if goarch == "arm64" {
+		subdirs = []string{"clangarm64", "mingw64", "mingw32"}
+	}
+	for _, subdir := range subdirs {
+		candidate := filepath.Join(installRoot, subdir, "bin", "git.exe")
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return abs
+}
 
 type GitOptions struct {
 	Directory string
@@ -48,7 +127,7 @@ func NewGit(directory string, protocols ...string) GitRun {
 		}
 		env := ServerGitEnv(protocols...)
 		maps.Copy(env, options.Env)
-		return process.Run(ctx, append([]string{"git"}, args...), process.RunOptions{Directory: cwd, Env: env, ForThread: true, Whole: options.Whole, Timeout: options.Timeout})
+		return process.Run(ctx, append([]string{gitExecutable(env)}, args...), process.RunOptions{Directory: cwd, Env: env, ForThread: true, Whole: options.Whole, Timeout: options.Timeout})
 	}
 }
 func gitFailure(result sdk.ExecResult, what string) error {
@@ -80,7 +159,7 @@ func LocalIdentity(directory string) Identity {
 	return func(ctx context.Context) (*Author, error) {
 		values := []string{}
 		for _, key := range []string{"user.name", "user.email"} {
-			result := process.Run(ctx, []string{"git", "config", "--get", key}, process.RunOptions{Directory: directory, ForThread: true})
+			result := process.Run(ctx, []string{gitExecutable(nil), "config", "--get", key}, process.RunOptions{Directory: directory, ForThread: true})
 			if result.ExitCode != 0 {
 				return nil, nil
 			}
@@ -101,7 +180,7 @@ func worktreeConfigArgs(ctx context.Context, cwd string) []string {
 	if cwd == "" {
 		return nil
 	}
-	result := process.Run(ctx, []string{"git", "config", "--get-regexp", `^core\.(autocrlf|eol)$`}, process.RunOptions{
+	result := process.Run(ctx, []string{gitExecutable(nil), "config", "--get-regexp", `^core\.(autocrlf|eol)$`}, process.RunOptions{
 		Directory: cwd,
 		ForThread: true,
 		Timeout:   5 * time.Second,

@@ -93,7 +93,7 @@ func (b *catFileBatch) ensureStartedLocked() error {
 		_ = inW.Close()
 		return err
 	}
-	cmd, err := process.Start(context.Background(), []string{"git", "cat-file", "--batch-command", "--buffer"}, process.Options{
+	cmd, err := process.Start(context.Background(), []string{gitExecutable(nil), "cat-file", "--batch-command", "--buffer"}, process.Options{
 		Directory: b.directory,
 		Env:       ServerGitEnv("file"),
 		ForThread: true,

@@ -211,7 +211,10 @@ func isAncestorSHA(ctx context.Context, git GitRun, ancestor, descendant string)
 	if ancestor == "" || descendant == "" {
 		return false
 	}
-	return git(ctx, []string{"merge-base", "--is-ancestor", ancestor, descendant}, GitOptions{}).ExitCode == 0
+	if ancestor == descendant && isObjectID(ancestor) {
+		return true
+	}
+	return git(ctx, []string{"--no-optional-locks", "merge-base", "--is-ancestor", ancestor, descendant}, GitOptions{}).ExitCode == 0
 }
 
 // resolveEmbeddedFallbackBase finds the default remote/upstream base ref for an
@@ -219,23 +222,30 @@ func isAncestorSHA(ctx context.Context, git GitRun, ancestor, descendant string)
 // upgrade a baseline that tracks an advancing default branch). Only candidates
 // that share history (a valid merge-base) with headSHA are returned.
 func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedRepo, branchRef, headSHA string) (ref, name, sha, mergeBase string) {
-	upstreamRef := resolveUpstreamRef(ctx, git, "")
+	snap := loadEmbeddedRefSnapshot(ctx, git)
+	upstreamRef := snap.resolveHeadUpstream(ctx, git, branchRef)
 	upstreamRemote, upstreamShort, hasRemoteUpstream := remoteNameAndBranch(upstreamRef)
 	branchShort := strings.TrimPrefix(branchRef, "refs/heads/")
 
 	checked := make(map[string]bool)
+	mergeBaseCache := make(map[string]string)
 	tryCandidate := func(candidate string) (string, string, string, string, bool) {
 		if candidate == "" || candidate == branchRef || checked[candidate] {
 			return "", "", "", "", false
 		}
 		checked[candidate] = true
-		resolved := commitSHA(ctx, git, candidate, "")
+		resolved := snap.commitSHA(ctx, git, candidate)
 		if resolved == "" {
 			return "", "", "", "", false
 		}
 		mb := resolved
 		if headSHA != "" && resolved != headSHA {
-			mb = mergeBaseSHA(ctx, git, resolved, headSHA)
+			if cached, ok := mergeBaseCache[resolved]; ok {
+				mb = cached
+			} else {
+				mb = mergeBaseSHA(ctx, git, resolved, headSHA)
+				mergeBaseCache[resolved] = mb
+			}
 			if mb == "" {
 				return "", "", "", "", false
 			}
@@ -267,7 +277,7 @@ func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedR
 			if r, n, s, mb, ok := tryCandidate("refs/remotes/origin/" + configuredBranch); ok {
 				return r, n, s, mb
 			}
-			if onlyRemote := soleRemoteName(ctx, git); onlyRemote != "" {
+			if onlyRemote := snap.soleRemoteName(ctx, git); onlyRemote != "" {
 				if r, n, s, mb, ok := tryCandidate("refs/remotes/" + onlyRemote + "/" + configuredBranch); ok {
 					return r, n, s, mb
 				}
@@ -279,7 +289,7 @@ func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedR
 	}
 
 	// 3. Explicit remote default branch (refs/remotes/<remote>/HEAD).
-	if remoteDefault := resolveRemoteDefaultRef(ctx, git, upstreamRemote); remoteDefault != "" {
+	if remoteDefault := snap.resolveRemoteDefaultRef(ctx, git, upstreamRemote); remoteDefault != "" {
 		if r, n, s, mb, ok := tryCandidate(remoteDefault); ok {
 			return r, n, s, mb
 		}
@@ -293,7 +303,7 @@ func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedR
 	// 4. Host repository HEAD for external object stores (nested linked worktrees).
 	if !repo.ObjectStoreInsideWorktree && !repo.IsSubmodule() {
 		if hostRef := readCommonHeadRef(repo.CommonDir); hostRef != "" {
-			if hostUpstream := resolveUpstreamRef(ctx, git, hostRef); hostUpstream != "" {
+			if hostUpstream := snap.resolveBranchUpstream(ctx, git, hostRef); hostUpstream != "" {
 				if r, n, s, mb, ok := tryCandidate(hostUpstream); ok {
 					return r, n, s, mb
 				}
@@ -327,7 +337,7 @@ func resolveEmbeddedFallbackBase(ctx context.Context, git GitRun, repo EmbeddedR
 			return r, n, s, mb
 		}
 	}
-	if onlyRemote := soleRemoteName(ctx, git); onlyRemote != "" {
+	if onlyRemote := snap.soleRemoteName(ctx, git); onlyRemote != "" {
 		for _, candidate := range []string{"refs/remotes/" + onlyRemote + "/main", "refs/remotes/" + onlyRemote + "/master"} {
 			if r, n, s, mb, ok := tryCandidate(candidate); ok {
 				return r, n, s, mb
@@ -408,7 +418,10 @@ func EmbeddedRepoChanges(ctx context.Context, repo EmbeddedRepo, baseline *sdk.R
 		}
 		if from == "" {
 			baseSHA = recordedSHA
-			mb := mergeBaseSHA(ctx, repoGit, baseSHA, status.headSHA)
+			mb := baseSHA
+			if baseSHA != status.headSHA {
+				mb = mergeBaseSHA(ctx, repoGit, baseSHA, status.headSHA)
+			}
 			if mb != "" {
 				from = mb
 				switch {

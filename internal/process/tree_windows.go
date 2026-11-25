@@ -43,13 +43,25 @@ func prepareTree(command *exec.Cmd) (*processTree, error) {
 	command.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED | windows.CREATE_NO_WINDOW
 	return &processTree{job: job}, nil
 }
+
+var (
+	ntdllDLL            = windows.NewLazySystemDLL("ntdll.dll")
+	procNtResumeProcess = ntdllDLL.NewProc("NtResumeProcess")
+)
+
 func (tree *processTree) attach(command *exec.Cmd) error {
 	if command.Process == nil || command.Process.Pid == os.Getpid() {
 		return errors.New("invalid command process")
 	}
-	process, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(command.Process.Pid))
+	pid := uint32(command.Process.Pid)
+	canResumeHandle := true
+	process, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.PROCESS_SUSPEND_RESUME, false, pid)
 	if err != nil {
-		return err
+		canResumeHandle = false
+		process, err = windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, pid)
+		if err != nil {
+			return err
+		}
 	}
 	defer windows.CloseHandle(process)
 	tree.mu.Lock()
@@ -63,7 +75,18 @@ func (tree *processTree) attach(command *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
-	return resumeProcess(uint32(command.Process.Pid))
+	if canResumeHandle && resumeProcessHandle(process) {
+		return nil
+	}
+	return resumeProcess(pid)
+}
+
+func resumeProcessHandle(process windows.Handle) bool {
+	if procNtResumeProcess.Find() != nil {
+		return false
+	}
+	status, _, _ := procNtResumeProcess.Call(uintptr(process))
+	return uint32(status) == 0
 }
 func resumeProcess(pid uint32) error {
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
@@ -113,6 +136,21 @@ func (tree *processTree) kill(command *exec.Cmd) error {
 	return err
 }
 func (tree *processTree) close(command *exec.Cmd) {
+	tree.mu.Lock()
+	job := tree.job
+	if job == 0 {
+		tree.mu.Unlock()
+		return
+	}
+	var accounting jobAccounting
+	if err := windows.QueryInformationJobObject(job, windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(&accounting)), uint32(unsafe.Sizeof(accounting)), nil); err == nil && accounting.ActiveProcesses == 0 {
+		windows.CloseHandle(job)
+		tree.job = 0
+		tree.mu.Unlock()
+		return
+	}
+	tree.mu.Unlock()
+
 	_ = tree.kill(command)
 	tree.mu.Lock()
 	defer tree.mu.Unlock()

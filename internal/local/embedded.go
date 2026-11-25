@@ -691,27 +691,43 @@ func InspectEmbeddedRepo(ctx context.Context, repo EmbeddedRepo) (EmbeddedRepoSt
 		}
 	}
 
-	sym := repoGit(ctx, []string{"symbolic-ref", "-q", "HEAD"}, GitOptions{})
-	if err := ctx.Err(); err != nil {
-		return EmbeddedRepoStatus{}, err
-	}
-	branchRef := ""
-	if sym.ExitCode == 0 {
-		branchRef = strings.TrimSpace(sym.Stdout)
-	}
-
-	statusArgs := append(worktreeConfigArgs(ctx, repo.Path), "status", "--porcelain=v1", "-z", "--untracked-files=normal")
+	statusArgs := append([]string{"--no-optional-locks"}, worktreeConfigArgs(ctx, repo.Path)...)
+	statusArgs = append(statusArgs, "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal")
 	st := repoGit(ctx, statusArgs, GitOptions{Whole: true})
 	if err := ctx.Err(); err != nil {
 		return EmbeddedRepoStatus{}, err
 	}
-	if st.ExitCode != 0 || st.Stdout != "" {
+	branchRef := ""
+	headSHA := ""
+	if st.ExitCode != 0 {
 		status.Dirty = true
-	}
-
-	headSHA := commitSHA(ctx, repoGit, "HEAD", "")
-	if err := ctx.Err(); err != nil {
-		return EmbeddedRepoStatus{}, err
+		sym := repoGit(ctx, []string{"symbolic-ref", "-q", "HEAD"}, GitOptions{})
+		if err := ctx.Err(); err != nil {
+			return EmbeddedRepoStatus{}, err
+		}
+		if sym.ExitCode == 0 {
+			branchRef = strings.TrimSpace(sym.Stdout)
+		}
+		headSHA = commitSHA(ctx, repoGit, "HEAD", "")
+		if err := ctx.Err(); err != nil {
+			return EmbeddedRepoStatus{}, err
+		}
+	} else {
+		parsedBranch, parsedHead, dirty, needSymbolicFallback := parseEmbeddedInspectStatus(st.Stdout)
+		branchRef = parsedBranch
+		headSHA = parsedHead
+		if dirty {
+			status.Dirty = true
+		}
+		if needSymbolicFallback {
+			sym := repoGit(ctx, []string{"symbolic-ref", "-q", "HEAD"}, GitOptions{})
+			if err := ctx.Err(); err != nil {
+				return EmbeddedRepoStatus{}, err
+			}
+			if sym.ExitCode == 0 {
+				branchRef = strings.TrimSpace(sym.Stdout)
+			}
+		}
 	}
 
 	headGitlinkSHA := ""
@@ -728,8 +744,9 @@ func InspectEmbeddedRepo(ctx context.Context, repo EmbeddedRepo) (EmbeddedRepoSt
 		status.Dirty = true
 	}
 
+	var refSnap embeddedRefSnapshot
 	if repo.ObjectStoreInsideWorktree {
-		revArgs := []string{"rev-list"}
+		revArgs := []string{"--no-optional-locks", "rev-list"}
 		if headSHA != "" && !alignedDetachedSubmodule {
 			revArgs = append(revArgs, "HEAD")
 		}
@@ -740,8 +757,18 @@ func InspectEmbeddedRepo(ctx context.Context, repo EmbeddedRepo) (EmbeddedRepoSt
 		}
 		if unpushed.ExitCode != 0 || strings.TrimSpace(unpushed.Stdout) != "" {
 			status.Unpushed = true
-		} else if repoGit(ctx, []string{"rev-parse", "--verify", "--quiet", "refs/stash"}, GitOptions{}).ExitCode == 0 {
-			status.Unpushed = true
+		} else {
+			refSnap = loadEmbeddedRefSnapshot(ctx, repoGit)
+			if err := ctx.Err(); err != nil {
+				return EmbeddedRepoStatus{}, err
+			}
+			if refSnap.loaded {
+				if refSnap.hasStash {
+					status.Unpushed = true
+				}
+			} else if repoGit(ctx, []string{"rev-parse", "--verify", "--quiet", "refs/stash"}, GitOptions{}).ExitCode == 0 {
+				status.Unpushed = true
+			}
 		}
 		if err := ctx.Err(); err != nil {
 			return EmbeddedRepoStatus{}, err
@@ -758,7 +785,13 @@ func InspectEmbeddedRepo(ctx context.Context, repo EmbeddedRepo) (EmbeddedRepoSt
 	case branchRef == "":
 		status.Unmerged = true
 	default:
-		status.Unmerged = !embeddedBranchMerged(ctx, repoGit, repo, branchRef, headSHA)
+		if !refSnap.loaded {
+			refSnap = loadEmbeddedRefSnapshot(ctx, repoGit)
+			if err := ctx.Err(); err != nil {
+				return EmbeddedRepoStatus{}, err
+			}
+		}
+		status.Unmerged = !embeddedBranchMerged(ctx, repoGit, repo, branchRef, headSHA, &refSnap)
 	}
 	if err := ctx.Err(); err != nil {
 		return EmbeddedRepoStatus{}, err
@@ -766,24 +799,248 @@ func InspectEmbeddedRepo(ctx context.Context, repo EmbeddedRepo) (EmbeddedRepoSt
 	return status, nil
 }
 
-func embeddedBranchMerged(ctx context.Context, git GitRun, repo EmbeddedRepo, branchRef, headSHA string) bool {
+func parseEmbeddedInspectStatus(output string) (branchRef, headSHA string, dirty, needSymbolicFallback bool) {
+	tokens := strings.Split(output, "\x00")
+	for i := 0; i < len(tokens); i++ {
+		rec := tokens[i]
+		if rec == "" {
+			continue
+		}
+		if strings.HasPrefix(rec, "# ") {
+			if oid, ok := strings.CutPrefix(rec, "# branch.oid "); ok {
+				oid = strings.TrimSpace(oid)
+				if oid != "" && oid != "(initial)" {
+					headSHA = oid
+				}
+			} else if head, ok := strings.CutPrefix(rec, "# branch.head "); ok {
+				head = strings.TrimSpace(head)
+				switch head {
+				case "", "(detached)":
+					branchRef = ""
+				case "(NULL)":
+					needSymbolicFallback = true
+				default:
+					branchRef = "refs/heads/" + head
+				}
+			}
+			continue
+		}
+		dirty = true
+		break
+	}
+	return branchRef, headSHA, dirty, needSymbolicFallback
+}
+
+type embeddedRefInfo struct {
+	commitSHA string
+	symref    string
+	upstream  string
+}
+
+type embeddedRefSnapshot struct {
+	loaded      bool
+	refs        map[string]embeddedRefInfo
+	remoteHeads []string
+	hasStash    bool
+}
+
+func loadEmbeddedRefSnapshot(ctx context.Context, git GitRun) embeddedRefSnapshot {
+	res := git(ctx, []string{
+		"--no-optional-locks",
+		"for-each-ref",
+		"--format=%(refname)%09%(objectname)%09%(objecttype)%09%(*objectname)%09%(*objecttype)%09%(symref)%09%(upstream)",
+		"refs/heads", "refs/remotes", "refs/stash",
+	}, GitOptions{Whole: true})
+	if res.ExitCode != 0 {
+		return embeddedRefSnapshot{}
+	}
+	snap := embeddedRefSnapshot{
+		loaded: true,
+		refs:   make(map[string]embeddedRefInfo),
+	}
+	for _, rawLine := range strings.Split(res.Stdout, "\n") {
+		line := strings.TrimRight(rawLine, "\r")
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) < 7 {
+			continue
+		}
+		name := parts[0]
+		if name == "" {
+			continue
+		}
+		if name == "refs/stash" {
+			snap.hasStash = true
+			continue
+		}
+		sha := ""
+		if parts[2] == "commit" {
+			sha = parts[1]
+		} else if parts[4] == "commit" {
+			sha = parts[3]
+		}
+		snap.refs[name] = embeddedRefInfo{
+			commitSHA: sha,
+			symref:    parts[5],
+			upstream:  parts[6],
+		}
+		if strings.HasPrefix(name, "refs/remotes/") && strings.HasSuffix(name, "/HEAD") {
+			rest := strings.TrimPrefix(name, "refs/remotes/")
+			if strings.Count(rest, "/") == 1 {
+				snap.remoteHeads = append(snap.remoteHeads, name)
+			}
+		}
+	}
+	return snap
+}
+
+func (s *embeddedRefSnapshot) commitSHA(ctx context.Context, git GitRun, targetRef string) string {
+	if targetRef == "" {
+		return ""
+	}
+	if s != nil && s.loaded && (strings.HasPrefix(targetRef, "refs/heads/") || strings.HasPrefix(targetRef, "refs/remotes/")) {
+		return s.refs[targetRef].commitSHA
+	}
+	return commitSHA(ctx, git, targetRef, "")
+}
+
+func (s *embeddedRefSnapshot) resolveHeadUpstream(ctx context.Context, git GitRun, branchRef string) string {
+	if branchRef == "" {
+		return ""
+	}
+	if s == nil || !s.loaded {
+		return resolveUpstreamRef(ctx, git, "")
+	}
+	upstream := s.refs[branchRef].upstream
+	if upstream == "" {
+		return ""
+	}
+	if _, exists := s.refs[upstream]; exists {
+		return upstream
+	}
+	if strings.HasPrefix(upstream, "refs/heads/") || strings.HasPrefix(upstream, "refs/remotes/") {
+		return ""
+	}
+	if commitSHA(ctx, git, upstream, "") != "" {
+		return upstream
+	}
+	return ""
+}
+
+func (s *embeddedRefSnapshot) resolveBranchUpstream(ctx context.Context, git GitRun, branchRef string) string {
+	if branchRef == "" {
+		return ""
+	}
+	if s == nil || !s.loaded {
+		return resolveUpstreamRef(ctx, git, branchRef)
+	}
+	return s.refs[branchRef].upstream
+}
+
+func (s *embeddedRefSnapshot) resolveRemoteDefaultRef(ctx context.Context, git GitRun, preferredRemote string) string {
+	if s == nil || !s.loaded {
+		return resolveRemoteDefaultRef(ctx, git, preferredRemote)
+	}
+	if preferredRemote != "" {
+		if ref := s.refs["refs/remotes/"+preferredRemote+"/HEAD"].symref; ref != "" {
+			return ref
+		}
+	}
+	if preferredRemote != "origin" {
+		if ref := s.refs["refs/remotes/origin/HEAD"].symref; ref != "" {
+			return ref
+		}
+	}
+	for _, name := range s.remoteHeads {
+		if ref := s.refs[name].symref; ref != "" {
+			return ref
+		}
+	}
+	return ""
+}
+
+func (s *embeddedRefSnapshot) soleRemoteName(ctx context.Context, git GitRun) string {
+	if s == nil || !s.loaded {
+		return soleRemoteName(ctx, git)
+	}
+	sole := ""
+	for name := range s.refs {
+		remote, _, ok := remoteNameAndBranch(name)
+		if !ok {
+			continue
+		}
+		if sole == "" {
+			sole = remote
+		} else if sole != remote {
+			return ""
+		}
+	}
+	return sole
+}
+
+func (s *embeddedRefSnapshot) isPureSingleBranchTracking(ctx context.Context, git GitRun, repo EmbeddedRepo, branchRef, upstreamRef, upstreamRemote, hostRef string, hostHasCommit bool) bool {
+	if s == nil || !s.loaded {
+		return isPureSingleBranchTracking(ctx, git, repo, branchRef, upstreamRef, upstreamRemote, hostRef, hostHasCommit)
+	}
+	if !repo.ObjectStoreInsideWorktree {
+		if hostHasCommit && hostRef != "" && hostRef != branchRef {
+			return false
+		}
+	} else {
+		for name := range s.refs {
+			if strings.HasPrefix(name, "refs/heads/") && name != branchRef {
+				return false
+			}
+		}
+	}
+	branchShort := strings.TrimPrefix(branchRef, "refs/heads/")
+	upstreamPrefix := "refs/remotes/" + upstreamRemote + "/"
+	for name := range s.refs {
+		if !strings.HasPrefix(name, "refs/remotes/") || strings.HasSuffix(name, "/HEAD") {
+			continue
+		}
+		if strings.HasPrefix(name, upstreamPrefix) {
+			if name != upstreamRef {
+				return false
+			}
+			continue
+		}
+		if shortBranchName(name) != branchShort {
+			return false
+		}
+	}
+	return true
+}
+
+func embeddedBranchMerged(ctx context.Context, git GitRun, repo EmbeddedRepo, branchRef, headSHA string, snap *embeddedRefSnapshot) bool {
+	ancestorCache := make(map[string]bool)
 	isAncestor := func(targetRef string) bool {
 		if targetRef == "" || targetRef == branchRef {
 			return false
 		}
-		targetSHA := commitSHA(ctx, git, targetRef, "")
+		targetSHA := snap.commitSHA(ctx, git, targetRef)
 		if targetSHA == "" {
 			return false
 		}
-		return git(ctx, []string{"merge-base", "--is-ancestor", headSHA, targetSHA}, GitOptions{}).ExitCode == 0
+		if targetSHA == headSHA {
+			return true
+		}
+		if cached, ok := ancestorCache[targetSHA]; ok {
+			return cached
+		}
+		ok := git(ctx, []string{"--no-optional-locks", "merge-base", "--is-ancestor", headSHA, targetSHA}, GitOptions{}).ExitCode == 0
+		ancestorCache[targetSHA] = ok
+		return ok
 	}
 
-	upstreamRef := resolveUpstreamRef(ctx, git, "")
+	upstreamRef := snap.resolveHeadUpstream(ctx, git, branchRef)
 	upstreamRemote, upstreamShort, hasRemoteUpstream := remoteNameAndBranch(upstreamRef)
 
 	// 1. Explicit remote default branch (refs/remotes/<remote>/HEAD), preferring
 	//    the current branch's remote, then origin, then any remote HEAD.
-	remoteDefault := resolveRemoteDefaultRef(ctx, git, upstreamRemote)
+	remoteDefault := snap.resolveRemoteDefaultRef(ctx, git, upstreamRemote)
 	if remoteDefault != "" {
 		if isAncestor(remoteDefault) {
 			return true
@@ -802,13 +1059,13 @@ func embeddedBranchMerged(ctx context.Context, git GitRun, repo EmbeddedRepo, br
 	if !repo.ObjectStoreInsideWorktree && !repo.IsSubmodule() {
 		hostRef = readCommonHeadRef(repo.CommonDir)
 		if hostRef != "" {
-			if commitSHA(ctx, git, hostRef, "") != "" {
+			if snap.commitSHA(ctx, git, hostRef) != "" {
 				hostHasCommit = true
 			}
 			if isAncestor(hostRef) {
 				return true
 			}
-			if hostUpstream := resolveUpstreamRef(ctx, git, hostRef); isAncestor(hostUpstream) {
+			if hostUpstream := snap.resolveBranchUpstream(ctx, git, hostRef); isAncestor(hostUpstream) {
 				return true
 			}
 			if hostShort, ok := strings.CutPrefix(hostRef, "refs/heads/"); ok && hostShort != "" {
@@ -832,7 +1089,7 @@ func embeddedBranchMerged(ctx context.Context, git GitRun, repo EmbeddedRepo, br
 			return false
 		}
 		checkedCandidates[candidate] = true
-		if commitSHA(ctx, git, candidate, "") == "" {
+		if snap.commitSHA(ctx, git, candidate) == "" {
 			return false
 		}
 		hasExplicitDefaultCandidate = true
@@ -847,7 +1104,7 @@ func embeddedBranchMerged(ctx context.Context, git GitRun, repo EmbeddedRepo, br
 			if checkCandidate("refs/remotes/origin/" + configuredBranch) {
 				return true
 			}
-			if onlyRemote := soleRemoteName(ctx, git); onlyRemote != "" {
+			if onlyRemote := snap.soleRemoteName(ctx, git); onlyRemote != "" {
 				if checkCandidate("refs/remotes/" + onlyRemote + "/" + configuredBranch) {
 					return true
 				}
@@ -868,7 +1125,7 @@ func embeddedBranchMerged(ctx context.Context, git GitRun, repo EmbeddedRepo, br
 		return true
 	}
 	if !hasExplicitDefaultCandidate {
-		if onlyRemote := soleRemoteName(ctx, git); onlyRemote != "" {
+		if onlyRemote := snap.soleRemoteName(ctx, git); onlyRemote != "" {
 			if checkCandidate("refs/remotes/"+onlyRemote+"/main") ||
 				checkCandidate("refs/remotes/"+onlyRemote+"/master") {
 				return true
@@ -897,7 +1154,7 @@ func embeddedBranchMerged(ctx context.Context, git GitRun, repo EmbeddedRepo, br
 				return true
 			}
 		} else if hasRemoteUpstream && !hasExplicitDefaultCandidate && isAncestor(upstreamRef) {
-			if isPureSingleBranchTracking(ctx, git, repo, branchRef, upstreamRef, upstreamRemote, hostRef, hostHasCommit) {
+			if snap.isPureSingleBranchTracking(ctx, git, repo, branchRef, upstreamRef, upstreamRemote, hostRef, hostHasCommit) {
 				return true
 			}
 		}

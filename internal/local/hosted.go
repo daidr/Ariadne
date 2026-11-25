@@ -152,7 +152,7 @@ func (host *Hosted) network(ctx context.Context, args ...string) sdk.ExecResult 
 	if err != nil {
 		return sdk.ExecResult{ExitCode: 1, Stderr: err.Error()}
 	}
-	result := process.Run(ctx, append([]string{"git"}, args...), process.RunOptions{Directory: host.bare, Timeout: 10 * time.Minute, ForThread: true, Env: env})
+	result := process.Run(ctx, append([]string{gitExecutable(env)}, args...), process.RunOptions{Directory: host.bare, Timeout: 10 * time.Minute, ForThread: true, Env: env})
 	if credential != nil {
 		private := []string{credential.Token, base64.StdEncoding.EncodeToString([]byte(credential.User + ":" + credential.Token))}
 		result.Stdout = secrets.Redact(result.Stdout, private)

@@ -41,7 +41,7 @@ func NewGitBytes(directory string, protocols ...string) GitBytes {
 		defer cancel()
 		stdout := &limitedBytes{max: limit, cancel: cancel}
 		stderr := &limitedBytes{max: 64 << 10}
-		command, err := process.Start(ctx, append([]string{"git"}, args...), process.Options{Directory: directory, ForThread: true, Env: ServerGitEnv(protocols...), Stdout: stdout, Stderr: stderr})
+		command, err := process.Start(ctx, append([]string{gitExecutable(nil)}, args...), process.Options{Directory: directory, ForThread: true, Env: ServerGitEnv(protocols...), Stdout: stdout, Stderr: stderr})
 		if err != nil {
 			return nil, err
 		}

@@ -80,21 +80,21 @@ func (workspace *Workspace) Files(ctx context.Context, path string) (sdk.FileLis
 		}
 	}
 	if files == nil {
-		inGit, err := workspace.probe(ctx, "git", []string{"git", "rev-parse", "--is-inside-work-tree"})
+		inGit, err := workspace.probe(ctx, "git", []string{gitExecutable(nil), "rev-parse", "--is-inside-work-tree"})
 		if err != nil {
 			return sdk.FileListing{}, err
 		}
 		if inGit {
 			ignoredTarget := false
 			if !isRoot {
-				check, err := workspace.ExecFile(ctx, []string{"git", "check-ignore", "-q", "--", target}, options)
+				check, err := workspace.ExecFile(ctx, []string{gitExecutable(nil), "check-ignore", "-q", "--", target}, options)
 				if err != nil {
 					return sdk.FileListing{}, err
 				}
 				ignoredTarget = check.ExitCode == 0
 			}
 			if !ignoredTarget {
-				result, err := workspace.ExecFile(ctx, []string{"git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", target}, options)
+				result, err := workspace.ExecFile(ctx, []string{gitExecutable(nil), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", target}, options)
 				if err != nil {
 					return sdk.FileListing{}, err
 				}
@@ -144,7 +144,7 @@ func (workspace *Workspace) Search(ctx context.Context, pattern, path string, op
 	if err != nil {
 		return sdk.FileSearchResult{}, err
 	}
-	inGit, err := workspace.probe(ctx, "git", []string{"git", "rev-parse", "--is-inside-work-tree"})
+	inGit, err := workspace.probe(ctx, "git", []string{gitExecutable(nil), "rev-parse", "--is-inside-work-tree"})
 	if err != nil {
 		return sdk.FileSearchResult{}, err
 	}
@@ -165,7 +165,7 @@ func (workspace *Workspace) Search(ctx context.Context, pattern, path string, op
 		argv = append(argv, caseless...)
 		argv = append(argv, "--max-count", "50", "-e", pattern, "--", path)
 	} else if inGit {
-		argv = []string{"git", "grep", "-n", "-I", "-E"}
+		argv = []string{gitExecutable(nil), "grep", "-n", "-I", "-E"}
 		argv = append(argv, caseless...)
 		argv = append(argv, "--untracked", "--no-color", "-e", pattern, "--")
 		under := path

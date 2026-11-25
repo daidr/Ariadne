@@ -33,10 +33,10 @@ func resolveProgram(program string, environment []string, directory string) (str
 		}
 	}
 	abs := func(path string) string {
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(directory, path)
+		if filepath.IsAbs(path) {
+			return filepath.Clean(path)
 		}
-		absolute, _ := filepath.Abs(path)
+		absolute, _ := filepath.Abs(filepath.Join(directory, path))
 		return absolute
 	}
 	extensions := []string{""}
