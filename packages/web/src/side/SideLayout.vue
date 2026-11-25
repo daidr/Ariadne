@@ -108,6 +108,7 @@ const panels = computed<DockPanel[]>(() => [
               icon: lists[list]!.icon,
               pinned: side.isPinned(key),
               closable: !side.isPinned(key),
+              mergeId: list,
             },
           ]
         : []
@@ -181,20 +182,14 @@ function bring(group: DockGroup, key: side.ListKey) {
       @remove="(key) => closePane(key as PaneKey, compact)"
     >
       <template #label="{ value }">
-        <span
-          v-if="threadAt(value as PaneKey)"
-          class="pane-thread-label"
-          :title="threadAt(value as PaneKey)!.title"
-        >
+        <span v-if="threadAt(value as PaneKey)" class="pane-thread-label">
           <StageIcon
             :stage="threadAt(value as PaneKey)!.stage"
             :pull-request-state="threadAt(value as PaneKey)!.pullRequest?.state"
           />
           <span class="pane-thread-title">{{ threadAt(value as PaneKey)!.title }}</span>
         </span>
-        <span v-else class="pane-label-text" :title="labelOf(value as PaneKey)">
-          {{ labelOf(value as PaneKey) }}
-        </span>
+        <template v-else>{{ labelOf(value as PaneKey) }}</template>
       </template>
       <template #default="{ value }">
         <div
@@ -305,6 +300,7 @@ function bring(group: DockGroup, key: side.ListKey) {
   --dou-dock-header-padding-x: 8px;
   --dou-dock-group-padding-bottom: 0px;
   --dou-dock-panel-gap: 0px;
+  --dou-tabs-tab-max-width: 20em;
 }
 
 .pane-list {
@@ -323,19 +319,16 @@ function bring(group: DockGroup, key: side.ListKey) {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
 }
 
 /* Trimmed to its letters, so the stage icon centres on them; see ThreadRow. Clipped
    sideways only: CJK letters reach below the trimmed baseline. */
-.pane-thread-title,
-.pane-label-text {
-  max-width: 16em;
+.pane-thread-title {
+  min-width: 0;
   overflow-x: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.pane-thread-title {
   text-box: trim-both cap alphabetic;
 }
 </style>
