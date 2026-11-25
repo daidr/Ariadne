@@ -394,9 +394,7 @@ function headline(thread: NeedsMeThreadSummary): string {
 .attention-list {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  max-height: min(70vh, 520px);
-  overflow-y: auto;
+  gap: 16px;
 }
 
 .attention-status {
@@ -412,11 +410,6 @@ function headline(thread: NeedsMeThreadSummary): string {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.attention-group + .attention-group {
-  padding-top: 12px;
-  border-top: 1px solid var(--dou-color-border);
 }
 
 .attention-group-header {
