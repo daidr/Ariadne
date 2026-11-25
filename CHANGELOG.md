@@ -1,5 +1,24 @@
 # 更新日志
 
+## 0.1.0-alpha.22 (2026-11-24)
+
+- fix(local,runner,workspaces): 修复多仓内嵌 Submodule 与无共同祖先场景 Diff 及清理异常 (#244)
+- perf(web): virtualize long lists, lazy-render board thumbnails, and optimize runtime hotspots (#243)
+- perf(web,i18n): 收敛前端首屏分包并剥离非首屏图表、样式与语言包依赖 (#242)
+- chore(web): 升级 DouUI 至 0.1.0-alpha.25 并接入 Worker 池与 Shiki 离主线程高亮 (#241)
+- perf(collab): 优化 Yjs 协作房间增量编码、草稿复用与看板变更检测 (#238)
+- fix(web): 统一修复前端 UI/UX 排查出的 12 项交互、视觉与响应式问题 (#235)
+- perf(repowatch,core): PR 并发限流轮询与 GetProjectDetail 跨整点增量优化 (#240)
+- perf(realtime,eventstore,web): 消除推送重复 JSON 编解码并支持增量草稿与项目级唤醒 (#239)
+- perf(web): deduplicate Shiki runtime and grammar chunks between main thread and worker (#236)
+- perf(server,files,web): 静态资源启用 Gzip/Brotli 压缩与 ETag 缓存，优化附件 304 与 Range 传输 (#237)
+- perf(core,eventstore,scheduler): 优化搜索按需查元数据、SQLite PRAGMA 与调度器事件过滤 (#234)
+- feat(web): 引入 Web Worker 池异步处理代码语法高亮 (#233)
+- fix(web): 优化计划图空状态文案并移除中间重复的显示已完成按钮 (#232)
+- fix(runner,transcript,agentruntime): 历史压缩与回放截断后保留当前 Todo List 上下文 (#231)
+- feat(web): 优化聊天框气泡栏滚轮横向滚动与两侧边缘渐变 (#229)
+- Merge pull request #228 from daidr/release/alpha
+
 ## 0.1.0-alpha.21 (2026-11-24)
 
 - fix(runner,acp): 收紧摘要重放预算并增加跨压缩无进展循环护栏 (#227)
