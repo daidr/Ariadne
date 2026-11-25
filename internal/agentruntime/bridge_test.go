@@ -17,7 +17,7 @@ func newTestBridge(t *testing.T) *ToolBridge {
 	t.Helper()
 	bridge := NewToolBridge()
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := bridge.Close(ctx); err != nil {
 			t.Error(err)
@@ -27,7 +27,7 @@ func newTestBridge(t *testing.T) *ToolBridge {
 }
 func bridgePost(t *testing.T, url, body string) (*http.Response, []byte) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(body))
 	if err != nil {

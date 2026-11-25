@@ -85,9 +85,6 @@ jobs:
     env:
       CGO_ENABLED: '0'
     steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
       - name: Exclude workspace and build paths from Windows Defender
         if: runner.os == 'Windows'
         shell: powershell
@@ -98,6 +95,9 @@ jobs:
               -ExclusionProcess @('go.exe', 'git.exe', 'compile.exe', 'link.exe', 'asm.exe', 'chrome.exe', 'msedge.exe') `
               -ErrorAction SilentlyContinue
           } catch {}
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: .go-version
@@ -110,10 +110,11 @@ jobs:
           key: go-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
           restore-keys: |
             go-native-${{ runner.os }}-${{ runner.arch }}-
-      # Start the heaviest test packages first so they run alongside fast packages
-      # instead of leaving a long serial tail at the end of the run.
-      - name: Test (Unix)
-        if: runner.os != 'Windows'
+      # Ubuntu runs the complete test suite; macOS and Windows compile every
+      # library package and run all OS-sensitive / integration packages so every
+      # platform stays fast without losing cross-OS behavioral coverage.
+      - name: Test (Linux)
+        if: runner.os == 'Linux'
         shell: bash
         env:
           GOMODCACHE: ${{ runner.temp }}/gomod
@@ -126,6 +127,9 @@ jobs:
             github.com/daidr/Ariadne/internal/browser \
             github.com/daidr/Ariadne/internal/runner \
             github.com/daidr/Ariadne/internal/workspaces \
+            github.com/daidr/Ariadne/internal/server \
+            github.com/daidr/Ariadne/internal/application \
+            github.com/daidr/Ariadne/internal/service \
             github.com/daidr/Ariadne/internal/sources \
             github.com/daidr/Ariadne/internal/process \
             github.com/daidr/Ariadne/internal/update; do
@@ -135,11 +139,65 @@ jobs:
           done
           while IFS= read -r pkg; do
             case "$pkg" in
-              github.com/daidr/Ariadne/internal/local|github.com/daidr/Ariadne/internal/browser|github.com/daidr/Ariadne/internal/runner|github.com/daidr/Ariadne/internal/workspaces|github.com/daidr/Ariadne/internal/sources|github.com/daidr/Ariadne/internal/process|github.com/daidr/Ariadne/internal/update) ;;
+              github.com/daidr/Ariadne/internal/local|github.com/daidr/Ariadne/internal/browser|github.com/daidr/Ariadne/internal/runner|github.com/daidr/Ariadne/internal/workspaces|github.com/daidr/Ariadne/internal/server|github.com/daidr/Ariadne/internal/application|github.com/daidr/Ariadne/internal/service|github.com/daidr/Ariadne/internal/sources|github.com/daidr/Ariadne/internal/process|github.com/daidr/Ariadne/internal/update) ;;
               *) pkgs+=("$pkg") ;;
             esac
           done <<< "$all"
           go test -vet=off -count=1 -parallel=4 -timeout=180s "${pkgs[@]}"
+      - name: Test (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          GOMODCACHE: ${{ runner.temp }}/gomod
+          GOCACHE: ${{ runner.temp }}/gobuild
+        run: |
+          go build ./internal/... ./sdk/...
+          listed="$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}} {{.GoFiles}} {{.TestGoFiles}} {{.XTestGoFiles}}{{end}}' ./... | grep -v '^$')"
+          all="$(printf '%s\n' "$listed" | awk '{print $1}')"
+          os_tagged="$(printf '%s\n' "$listed" | grep -E '_darwin|_unix' | awk '{print $1}' || true)"
+          pkgs=()
+          add_pkg() {
+            local p="$1"
+            printf '%s\n' "$all" | grep -qx "$p" || return 0
+            local existing
+            for existing in ${pkgs[@]+"${pkgs[@]}"}; do
+              [ "$existing" = "$p" ] && return 0
+            done
+            pkgs+=("$p")
+          }
+          for p in \
+            github.com/daidr/Ariadne/internal/browser \
+            github.com/daidr/Ariadne/internal/runner \
+            github.com/daidr/Ariadne/internal/local \
+            github.com/daidr/Ariadne/internal/server \
+            github.com/daidr/Ariadne/internal/workspaces \
+            github.com/daidr/Ariadne/internal/application \
+            github.com/daidr/Ariadne/internal/service \
+            github.com/daidr/Ariadne/cmd/ariadne \
+            github.com/daidr/Ariadne/internal/process \
+            github.com/daidr/Ariadne/internal/update \
+            github.com/daidr/Ariadne/internal/core \
+            github.com/daidr/Ariadne/internal/sources \
+            github.com/daidr/Ariadne/internal/agentruntime \
+            github.com/daidr/Ariadne/internal/fsutil \
+            github.com/daidr/Ariadne/internal/plugins \
+            github.com/daidr/Ariadne/internal/repowatch \
+            github.com/daidr/Ariadne/internal/background \
+            github.com/daidr/Ariadne/internal/providers/acp \
+            github.com/daidr/Ariadne/internal/providers/antigravity \
+            github.com/daidr/Ariadne/internal/providers/claudecode \
+            github.com/daidr/Ariadne/internal/providers/codex \
+            github.com/daidr/Ariadne/internal/eventstore \
+            github.com/daidr/Ariadne/internal/settings \
+            github.com/daidr/Ariadne/internal/trace \
+            github.com/daidr/Ariadne/internal/modelhttp \
+            github.com/daidr/Ariadne/internal/data; do
+            add_pkg "$p"
+          done
+          while IFS= read -r p; do
+            [ -n "$p" ] && add_pkg "$p"
+          done <<< "$os_tagged"
+          go test -vet=off -count=1 -p=4 -parallel=4 -timeout=180s "${pkgs[@]}"
       - name: Test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -153,23 +211,46 @@ jobs:
           $env:TEMP = $testTmp
           $env:TMP = $testTmp
           $env:GOTMPDIR = $testTmp
-          $all = @(go list ./...)
+          go build ./internal/... ./sdk/...
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $priority = @(
+          $listed = @(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}} {{.GoFiles}} {{.TestGoFiles}} {{.XTestGoFiles}}{{end}}' ./... | Where-Object { $_ -ne '' })
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $all = @($listed | ForEach-Object { ($_ -split ' ')[0] })
+          $osTagged = @($listed | Where-Object { $_ -match '_windows' } | ForEach-Object { ($_ -split ' ')[0] })
+          $core = @(
             'github.com/daidr/Ariadne/internal/local',
             'github.com/daidr/Ariadne/internal/runner',
-            'github.com/daidr/Ariadne/internal/workspaces',
             'github.com/daidr/Ariadne/internal/browser',
-            'github.com/daidr/Ariadne/internal/plugins',
-            'github.com/daidr/Ariadne/internal/sources',
-            'github.com/daidr/Ariadne/internal/fsutil',
-            'github.com/daidr/Ariadne/internal/agentruntime',
-            'github.com/daidr/Ariadne/internal/repowatch',
+            'github.com/daidr/Ariadne/internal/workspaces',
+            'github.com/daidr/Ariadne/internal/server',
+            'github.com/daidr/Ariadne/internal/application',
+            'github.com/daidr/Ariadne/internal/service',
+            'github.com/daidr/Ariadne/cmd/ariadne',
             'github.com/daidr/Ariadne/internal/core',
+            'github.com/daidr/Ariadne/internal/sources',
             'github.com/daidr/Ariadne/internal/process',
-            'github.com/daidr/Ariadne/internal/update'
-          ) | Where-Object { $_ -in $all }
-          $pkgs = $priority + ($all | Where-Object { $_ -notin $priority })
+            'github.com/daidr/Ariadne/internal/update',
+            'github.com/daidr/Ariadne/internal/agentruntime',
+            'github.com/daidr/Ariadne/internal/fsutil',
+            'github.com/daidr/Ariadne/internal/plugins',
+            'github.com/daidr/Ariadne/internal/repowatch',
+            'github.com/daidr/Ariadne/internal/background',
+            'github.com/daidr/Ariadne/internal/providers/acp',
+            'github.com/daidr/Ariadne/internal/providers/antigravity',
+            'github.com/daidr/Ariadne/internal/providers/claudecode',
+            'github.com/daidr/Ariadne/internal/providers/codex',
+            'github.com/daidr/Ariadne/internal/eventstore',
+            'github.com/daidr/Ariadne/internal/settings',
+            'github.com/daidr/Ariadne/internal/trace',
+            'github.com/daidr/Ariadne/internal/modelhttp',
+            'github.com/daidr/Ariadne/internal/data'
+          )
+          $pkgs = [System.Collections.Generic.List[string]]::new()
+          foreach ($p in ($core + $osTagged)) {
+            if (($p -in $all) -and -not $pkgs.Contains($p)) {
+              $pkgs.Add($p)
+            }
+          }
           go test -vet=off -count=1 -p=4 -parallel=4 -timeout=180s @pkgs
           exit $LASTEXITCODE
       - if: matrix.os == 'ubuntu-latest'
@@ -206,20 +287,24 @@ jobs:
           all="$(go list ./...)"
           pkgs=()
           for p in \
-            github.com/daidr/Ariadne/internal/local \
-            github.com/daidr/Ariadne/internal/browser \
             github.com/daidr/Ariadne/internal/runner \
+            github.com/daidr/Ariadne/internal/local \
+            github.com/daidr/Ariadne/internal/core \
+            github.com/daidr/Ariadne/internal/update \
             github.com/daidr/Ariadne/internal/workspaces \
-            github.com/daidr/Ariadne/internal/sources \
+            github.com/daidr/Ariadne/internal/browser \
+            github.com/daidr/Ariadne/internal/server \
+            github.com/daidr/Ariadne/internal/application \
+            github.com/daidr/Ariadne/internal/service \
             github.com/daidr/Ariadne/internal/process \
-            github.com/daidr/Ariadne/internal/update; do
+            github.com/daidr/Ariadne/internal/sources; do
             if printf '%s\n' "$all" | grep -qx "$p"; then
               pkgs+=("$p")
             fi
           done
           while IFS= read -r pkg; do
             case "$pkg" in
-              github.com/daidr/Ariadne/internal/local|github.com/daidr/Ariadne/internal/browser|github.com/daidr/Ariadne/internal/runner|github.com/daidr/Ariadne/internal/workspaces|github.com/daidr/Ariadne/internal/sources|github.com/daidr/Ariadne/internal/process|github.com/daidr/Ariadne/internal/update) ;;
+              github.com/daidr/Ariadne/internal/runner|github.com/daidr/Ariadne/internal/local|github.com/daidr/Ariadne/internal/core|github.com/daidr/Ariadne/internal/update|github.com/daidr/Ariadne/internal/workspaces|github.com/daidr/Ariadne/internal/browser|github.com/daidr/Ariadne/internal/server|github.com/daidr/Ariadne/internal/application|github.com/daidr/Ariadne/internal/service|github.com/daidr/Ariadne/internal/process|github.com/daidr/Ariadne/internal/sources) ;;
               *) pkgs+=("$pkg") ;;
             esac
           done <<< "$all"
