@@ -3,6 +3,7 @@ import { reactive } from 'vue'
 import { api } from './api'
 import { askTitle } from './blocks/ask'
 import { t, tm } from './i18n'
+import { isWebPushActiveForDevice } from './push'
 import { openProject, openThread, state, threadsById } from './store'
 
 const KEY = 'ariadne.notify'
@@ -110,6 +111,14 @@ function reasonOf(
         title: t('notify.failed'),
         body: event.data.error ? tm(event.data.error) : '',
       }
+    case 'thread.aside_due': {
+      const thread = threadsById.value.get(event.data.threadId)
+      return {
+        threadId: event.data.threadId,
+        title: t('notify.aside'),
+        body: thread?.aside?.reason ?? '',
+      }
+    }
     default:
       return null
   }
@@ -126,6 +135,9 @@ async function threadOf(projectId: string, threadId: string): Promise<ThreadView
  * One notification per thread at a time: a newer one replaces it.
  */
 export function notifyAbout(event: AnyStoredEvent) {
+  // When this device already has an active server-side Web Push subscription, let the
+  // Service Worker show the notification instead of duplicating it locally.
+  if (isWebPushActiveForDevice()) return
   if (!notifications.enabled || !supported() || Notification.permission !== 'granted') return
   if (document.visibilityState === 'visible' && document.hasFocus()) return
   const project = state.projects.find((p) => p.id === event.projectId)

@@ -4312,6 +4312,1314 @@ func (x *CheckMcpServerResponse) GetStatus() *McpServerStatus {
 	return nil
 }
 
+type PushSubscriptionView struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Endpoint      string                 `protobuf:"bytes,2,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	Label         string                 `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
+	UserAgent     string                 `protobuf:"bytes,4,opt,name=user_agent,json=userAgent,proto3" json:"user_agent,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	LastUsedAt    *int64                 `protobuf:"varint,6,opt,name=last_used_at,json=lastUsedAt,proto3,oneof" json:"last_used_at,omitempty"`
+	LastError     *string                `protobuf:"bytes,7,opt,name=last_error,json=lastError,proto3,oneof" json:"last_error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PushSubscriptionView) Reset() {
+	*x = PushSubscriptionView{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[72]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PushSubscriptionView) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PushSubscriptionView) ProtoMessage() {}
+
+func (x *PushSubscriptionView) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[72]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PushSubscriptionView.ProtoReflect.Descriptor instead.
+func (*PushSubscriptionView) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{72}
+}
+
+func (x *PushSubscriptionView) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *PushSubscriptionView) GetEndpoint() string {
+	if x != nil {
+		return x.Endpoint
+	}
+	return ""
+}
+
+func (x *PushSubscriptionView) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *PushSubscriptionView) GetUserAgent() string {
+	if x != nil {
+		return x.UserAgent
+	}
+	return ""
+}
+
+func (x *PushSubscriptionView) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *PushSubscriptionView) GetLastUsedAt() int64 {
+	if x != nil && x.LastUsedAt != nil {
+		return *x.LastUsedAt
+	}
+	return 0
+}
+
+func (x *PushSubscriptionView) GetLastError() string {
+	if x != nil && x.LastError != nil {
+		return *x.LastError
+	}
+	return ""
+}
+
+type WebhookView struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Url           string                 `protobuf:"bytes,3,opt,name=url,proto3" json:"url,omitempty"`
+	Enabled       bool                   `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	SecretSet     bool                   `protobuf:"varint,5,opt,name=secret_set,json=secretSet,proto3" json:"secret_set,omitempty"`
+	Headers       []string               `protobuf:"bytes,6,rep,name=headers,proto3" json:"headers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WebhookView) Reset() {
+	*x = WebhookView{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[73]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WebhookView) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WebhookView) ProtoMessage() {}
+
+func (x *WebhookView) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[73]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WebhookView.ProtoReflect.Descriptor instead.
+func (*WebhookView) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{73}
+}
+
+func (x *WebhookView) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *WebhookView) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *WebhookView) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *WebhookView) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *WebhookView) GetSecretSet() bool {
+	if x != nil {
+		return x.SecretSet
+	}
+	return false
+}
+
+func (x *WebhookView) GetHeaders() []string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+type WebhookInput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Url           string                 `protobuf:"bytes,3,opt,name=url,proto3" json:"url,omitempty"`
+	Enabled       bool                   `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Secret        *string                `protobuf:"bytes,5,opt,name=secret,proto3,oneof" json:"secret,omitempty"`
+	ClearSecret   bool                   `protobuf:"varint,6,opt,name=clear_secret,json=clearSecret,proto3" json:"clear_secret,omitempty"`
+	Headers       []*SecretPair          `protobuf:"bytes,7,rep,name=headers,proto3" json:"headers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WebhookInput) Reset() {
+	*x = WebhookInput{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[74]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WebhookInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WebhookInput) ProtoMessage() {}
+
+func (x *WebhookInput) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[74]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WebhookInput.ProtoReflect.Descriptor instead.
+func (*WebhookInput) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{74}
+}
+
+func (x *WebhookInput) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *WebhookInput) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *WebhookInput) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *WebhookInput) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *WebhookInput) GetSecret() string {
+	if x != nil && x.Secret != nil {
+		return *x.Secret
+	}
+	return ""
+}
+
+func (x *WebhookInput) GetClearSecret() bool {
+	if x != nil {
+		return x.ClearSecret
+	}
+	return false
+}
+
+func (x *WebhookInput) GetHeaders() []*SecretPair {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+type NotifierCapabilities struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SupportsCheck bool                   `protobuf:"varint,1,opt,name=supports_check,json=supportsCheck,proto3" json:"supports_check,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NotifierCapabilities) Reset() {
+	*x = NotifierCapabilities{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[75]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NotifierCapabilities) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NotifierCapabilities) ProtoMessage() {}
+
+func (x *NotifierCapabilities) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[75]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NotifierCapabilities.ProtoReflect.Descriptor instead.
+func (*NotifierCapabilities) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{75}
+}
+
+func (x *NotifierCapabilities) GetSupportsCheck() bool {
+	if x != nil {
+		return x.SupportsCheck
+	}
+	return false
+}
+
+type NotifierServiceView struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Title         *LocalizedText         `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Description   *LocalizedText         `protobuf:"bytes,3,opt,name=description,proto3,oneof" json:"description,omitempty"`
+	Settings      *SettingsSchema        `protobuf:"bytes,4,opt,name=settings,proto3" json:"settings,omitempty"`
+	Capabilities  *NotifierCapabilities  `protobuf:"bytes,5,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
+	Enabled       bool                   `protobuf:"varint,6,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Values        *structpb.Struct       `protobuf:"bytes,7,opt,name=values,proto3" json:"values,omitempty"`
+	SecretsSet    []string               `protobuf:"bytes,8,rep,name=secrets_set,json=secretsSet,proto3" json:"secrets_set,omitempty"`
+	Ready         bool                   `protobuf:"varint,9,opt,name=ready,proto3" json:"ready,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NotifierServiceView) Reset() {
+	*x = NotifierServiceView{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[76]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NotifierServiceView) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NotifierServiceView) ProtoMessage() {}
+
+func (x *NotifierServiceView) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[76]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NotifierServiceView.ProtoReflect.Descriptor instead.
+func (*NotifierServiceView) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{76}
+}
+
+func (x *NotifierServiceView) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *NotifierServiceView) GetTitle() *LocalizedText {
+	if x != nil {
+		return x.Title
+	}
+	return nil
+}
+
+func (x *NotifierServiceView) GetDescription() *LocalizedText {
+	if x != nil {
+		return x.Description
+	}
+	return nil
+}
+
+func (x *NotifierServiceView) GetSettings() *SettingsSchema {
+	if x != nil {
+		return x.Settings
+	}
+	return nil
+}
+
+func (x *NotifierServiceView) GetCapabilities() *NotifierCapabilities {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *NotifierServiceView) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *NotifierServiceView) GetValues() *structpb.Struct {
+	if x != nil {
+		return x.Values
+	}
+	return nil
+}
+
+func (x *NotifierServiceView) GetSecretsSet() []string {
+	if x != nil {
+		return x.SecretsSet
+	}
+	return nil
+}
+
+func (x *NotifierServiceView) GetReady() bool {
+	if x != nil {
+		return x.Ready
+	}
+	return false
+}
+
+type NotifierServiceInput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Values        *structpb.Struct       `protobuf:"bytes,2,opt,name=values,proto3" json:"values,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NotifierServiceInput) Reset() {
+	*x = NotifierServiceInput{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[77]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NotifierServiceInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NotifierServiceInput) ProtoMessage() {}
+
+func (x *NotifierServiceInput) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[77]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NotifierServiceInput.ProtoReflect.Descriptor instead.
+func (*NotifierServiceInput) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{77}
+}
+
+func (x *NotifierServiceInput) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *NotifierServiceInput) GetValues() *structpb.Struct {
+	if x != nil {
+		return x.Values
+	}
+	return nil
+}
+
+type NotificationSettings struct {
+	state          protoimpl.MessageState  `protogen:"open.v1"`
+	Enabled        bool                    `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	WebPushEnabled bool                    `protobuf:"varint,2,opt,name=web_push_enabled,json=webPushEnabled,proto3" json:"web_push_enabled,omitempty"`
+	VapidPublicKey string                  `protobuf:"bytes,3,opt,name=vapid_public_key,json=vapidPublicKey,proto3" json:"vapid_public_key,omitempty"`
+	Subscriptions  []*PushSubscriptionView `protobuf:"bytes,4,rep,name=subscriptions,proto3" json:"subscriptions,omitempty"`
+	Webhooks       []*WebhookView          `protobuf:"bytes,5,rep,name=webhooks,proto3" json:"webhooks,omitempty"`
+	Notifiers      []*NotifierServiceView  `protobuf:"bytes,6,rep,name=notifiers,proto3" json:"notifiers,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *NotificationSettings) Reset() {
+	*x = NotificationSettings{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[78]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NotificationSettings) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NotificationSettings) ProtoMessage() {}
+
+func (x *NotificationSettings) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[78]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NotificationSettings.ProtoReflect.Descriptor instead.
+func (*NotificationSettings) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{78}
+}
+
+func (x *NotificationSettings) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *NotificationSettings) GetWebPushEnabled() bool {
+	if x != nil {
+		return x.WebPushEnabled
+	}
+	return false
+}
+
+func (x *NotificationSettings) GetVapidPublicKey() string {
+	if x != nil {
+		return x.VapidPublicKey
+	}
+	return ""
+}
+
+func (x *NotificationSettings) GetSubscriptions() []*PushSubscriptionView {
+	if x != nil {
+		return x.Subscriptions
+	}
+	return nil
+}
+
+func (x *NotificationSettings) GetWebhooks() []*WebhookView {
+	if x != nil {
+		return x.Webhooks
+	}
+	return nil
+}
+
+func (x *NotificationSettings) GetNotifiers() []*NotifierServiceView {
+	if x != nil {
+		return x.Notifiers
+	}
+	return nil
+}
+
+type GetNotificationSettingsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetNotificationSettingsRequest) Reset() {
+	*x = GetNotificationSettingsRequest{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[79]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetNotificationSettingsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetNotificationSettingsRequest) ProtoMessage() {}
+
+func (x *GetNotificationSettingsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[79]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetNotificationSettingsRequest.ProtoReflect.Descriptor instead.
+func (*GetNotificationSettingsRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{79}
+}
+
+type GetNotificationSettingsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Notifications *NotificationSettings  `protobuf:"bytes,1,opt,name=notifications,proto3" json:"notifications,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetNotificationSettingsResponse) Reset() {
+	*x = GetNotificationSettingsResponse{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[80]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetNotificationSettingsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetNotificationSettingsResponse) ProtoMessage() {}
+
+func (x *GetNotificationSettingsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[80]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetNotificationSettingsResponse.ProtoReflect.Descriptor instead.
+func (*GetNotificationSettingsResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{80}
+}
+
+func (x *GetNotificationSettingsResponse) GetNotifications() *NotificationSettings {
+	if x != nil {
+		return x.Notifications
+	}
+	return nil
+}
+
+type SaveNotificationSettingsRequest struct {
+	state          protoimpl.MessageState           `protogen:"open.v1"`
+	Enabled        bool                             `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	WebPushEnabled bool                             `protobuf:"varint,2,opt,name=web_push_enabled,json=webPushEnabled,proto3" json:"web_push_enabled,omitempty"`
+	Webhooks       []*WebhookInput                  `protobuf:"bytes,3,rep,name=webhooks,proto3" json:"webhooks,omitempty"`
+	Notifiers      map[string]*NotifierServiceInput `protobuf:"bytes,4,rep,name=notifiers,proto3" json:"notifiers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SaveNotificationSettingsRequest) Reset() {
+	*x = SaveNotificationSettingsRequest{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[81]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SaveNotificationSettingsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SaveNotificationSettingsRequest) ProtoMessage() {}
+
+func (x *SaveNotificationSettingsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[81]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SaveNotificationSettingsRequest.ProtoReflect.Descriptor instead.
+func (*SaveNotificationSettingsRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{81}
+}
+
+func (x *SaveNotificationSettingsRequest) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *SaveNotificationSettingsRequest) GetWebPushEnabled() bool {
+	if x != nil {
+		return x.WebPushEnabled
+	}
+	return false
+}
+
+func (x *SaveNotificationSettingsRequest) GetWebhooks() []*WebhookInput {
+	if x != nil {
+		return x.Webhooks
+	}
+	return nil
+}
+
+func (x *SaveNotificationSettingsRequest) GetNotifiers() map[string]*NotifierServiceInput {
+	if x != nil {
+		return x.Notifiers
+	}
+	return nil
+}
+
+type SaveNotificationSettingsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Notifications *NotificationSettings  `protobuf:"bytes,1,opt,name=notifications,proto3" json:"notifications,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SaveNotificationSettingsResponse) Reset() {
+	*x = SaveNotificationSettingsResponse{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[82]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SaveNotificationSettingsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SaveNotificationSettingsResponse) ProtoMessage() {}
+
+func (x *SaveNotificationSettingsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[82]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SaveNotificationSettingsResponse.ProtoReflect.Descriptor instead.
+func (*SaveNotificationSettingsResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{82}
+}
+
+func (x *SaveNotificationSettingsResponse) GetNotifications() *NotificationSettings {
+	if x != nil {
+		return x.Notifications
+	}
+	return nil
+}
+
+type SubscribePushRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Endpoint      string                 `protobuf:"bytes,1,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	P256Dh        string                 `protobuf:"bytes,2,opt,name=p256dh,proto3" json:"p256dh,omitempty"`
+	Auth          string                 `protobuf:"bytes,3,opt,name=auth,proto3" json:"auth,omitempty"`
+	Label         string                 `protobuf:"bytes,4,opt,name=label,proto3" json:"label,omitempty"`
+	UserAgent     string                 `protobuf:"bytes,5,opt,name=user_agent,json=userAgent,proto3" json:"user_agent,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribePushRequest) Reset() {
+	*x = SubscribePushRequest{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[83]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribePushRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribePushRequest) ProtoMessage() {}
+
+func (x *SubscribePushRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[83]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribePushRequest.ProtoReflect.Descriptor instead.
+func (*SubscribePushRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{83}
+}
+
+func (x *SubscribePushRequest) GetEndpoint() string {
+	if x != nil {
+		return x.Endpoint
+	}
+	return ""
+}
+
+func (x *SubscribePushRequest) GetP256Dh() string {
+	if x != nil {
+		return x.P256Dh
+	}
+	return ""
+}
+
+func (x *SubscribePushRequest) GetAuth() string {
+	if x != nil {
+		return x.Auth
+	}
+	return ""
+}
+
+func (x *SubscribePushRequest) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *SubscribePushRequest) GetUserAgent() string {
+	if x != nil {
+		return x.UserAgent
+	}
+	return ""
+}
+
+type SubscribePushResponse struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Subscription  *PushSubscriptionView   `protobuf:"bytes,1,opt,name=subscription,proto3" json:"subscription,omitempty"`
+	Subscriptions []*PushSubscriptionView `protobuf:"bytes,2,rep,name=subscriptions,proto3" json:"subscriptions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribePushResponse) Reset() {
+	*x = SubscribePushResponse{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[84]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribePushResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribePushResponse) ProtoMessage() {}
+
+func (x *SubscribePushResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[84]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribePushResponse.ProtoReflect.Descriptor instead.
+func (*SubscribePushResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{84}
+}
+
+func (x *SubscribePushResponse) GetSubscription() *PushSubscriptionView {
+	if x != nil {
+		return x.Subscription
+	}
+	return nil
+}
+
+func (x *SubscribePushResponse) GetSubscriptions() []*PushSubscriptionView {
+	if x != nil {
+		return x.Subscriptions
+	}
+	return nil
+}
+
+type UnsubscribePushRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Endpoint      string                 `protobuf:"bytes,1,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnsubscribePushRequest) Reset() {
+	*x = UnsubscribePushRequest{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[85]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnsubscribePushRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnsubscribePushRequest) ProtoMessage() {}
+
+func (x *UnsubscribePushRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[85]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnsubscribePushRequest.ProtoReflect.Descriptor instead.
+func (*UnsubscribePushRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{85}
+}
+
+func (x *UnsubscribePushRequest) GetEndpoint() string {
+	if x != nil {
+		return x.Endpoint
+	}
+	return ""
+}
+
+type UnsubscribePushResponse struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Subscriptions []*PushSubscriptionView `protobuf:"bytes,1,rep,name=subscriptions,proto3" json:"subscriptions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnsubscribePushResponse) Reset() {
+	*x = UnsubscribePushResponse{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[86]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnsubscribePushResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnsubscribePushResponse) ProtoMessage() {}
+
+func (x *UnsubscribePushResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[86]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnsubscribePushResponse.ProtoReflect.Descriptor instead.
+func (*UnsubscribePushResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{86}
+}
+
+func (x *UnsubscribePushResponse) GetSubscriptions() []*PushSubscriptionView {
+	if x != nil {
+		return x.Subscriptions
+	}
+	return nil
+}
+
+type DeletePushSubscriptionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeletePushSubscriptionRequest) Reset() {
+	*x = DeletePushSubscriptionRequest{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[87]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeletePushSubscriptionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeletePushSubscriptionRequest) ProtoMessage() {}
+
+func (x *DeletePushSubscriptionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[87]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeletePushSubscriptionRequest.ProtoReflect.Descriptor instead.
+func (*DeletePushSubscriptionRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{87}
+}
+
+func (x *DeletePushSubscriptionRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type DeletePushSubscriptionResponse struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Subscriptions []*PushSubscriptionView `protobuf:"bytes,1,rep,name=subscriptions,proto3" json:"subscriptions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeletePushSubscriptionResponse) Reset() {
+	*x = DeletePushSubscriptionResponse{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[88]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeletePushSubscriptionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeletePushSubscriptionResponse) ProtoMessage() {}
+
+func (x *DeletePushSubscriptionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[88]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeletePushSubscriptionResponse.ProtoReflect.Descriptor instead.
+func (*DeletePushSubscriptionResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{88}
+}
+
+func (x *DeletePushSubscriptionResponse) GetSubscriptions() []*PushSubscriptionView {
+	if x != nil {
+		return x.Subscriptions
+	}
+	return nil
+}
+
+type TestNotificationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Channel       string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
+	TargetId      *string                `protobuf:"bytes,2,opt,name=target_id,json=targetId,proto3,oneof" json:"target_id,omitempty"`
+	WebhookDraft  *WebhookInput          `protobuf:"bytes,3,opt,name=webhook_draft,json=webhookDraft,proto3,oneof" json:"webhook_draft,omitempty"`
+	NotifierDraft *NotifierServiceInput  `protobuf:"bytes,4,opt,name=notifier_draft,json=notifierDraft,proto3,oneof" json:"notifier_draft,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestNotificationRequest) Reset() {
+	*x = TestNotificationRequest{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[89]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestNotificationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestNotificationRequest) ProtoMessage() {}
+
+func (x *TestNotificationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[89]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestNotificationRequest.ProtoReflect.Descriptor instead.
+func (*TestNotificationRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{89}
+}
+
+func (x *TestNotificationRequest) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+func (x *TestNotificationRequest) GetTargetId() string {
+	if x != nil && x.TargetId != nil {
+		return *x.TargetId
+	}
+	return ""
+}
+
+func (x *TestNotificationRequest) GetWebhookDraft() *WebhookInput {
+	if x != nil {
+		return x.WebhookDraft
+	}
+	return nil
+}
+
+func (x *TestNotificationRequest) GetNotifierDraft() *NotifierServiceInput {
+	if x != nil {
+		return x.NotifierDraft
+	}
+	return nil
+}
+
+type TestNotificationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Status        *int32                 `protobuf:"varint,2,opt,name=status,proto3,oneof" json:"status,omitempty"`
+	Message       *LocalizedText         `protobuf:"bytes,3,opt,name=message,proto3,oneof" json:"message,omitempty"`
+	Delivered     int32                  `protobuf:"varint,4,opt,name=delivered,proto3" json:"delivered,omitempty"`
+	Failed        int32                  `protobuf:"varint,5,opt,name=failed,proto3" json:"failed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestNotificationResponse) Reset() {
+	*x = TestNotificationResponse{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[90]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestNotificationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestNotificationResponse) ProtoMessage() {}
+
+func (x *TestNotificationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[90]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestNotificationResponse.ProtoReflect.Descriptor instead.
+func (*TestNotificationResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{90}
+}
+
+func (x *TestNotificationResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *TestNotificationResponse) GetStatus() int32 {
+	if x != nil && x.Status != nil {
+		return *x.Status
+	}
+	return 0
+}
+
+func (x *TestNotificationResponse) GetMessage() *LocalizedText {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+func (x *TestNotificationResponse) GetDelivered() int32 {
+	if x != nil {
+		return x.Delivered
+	}
+	return 0
+}
+
+func (x *TestNotificationResponse) GetFailed() int32 {
+	if x != nil {
+		return x.Failed
+	}
+	return 0
+}
+
+type ReportNotificationPresenceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClientId      string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	Focused       bool                   `protobuf:"varint,2,opt,name=focused,proto3" json:"focused,omitempty"`
+	ProjectId     *string                `protobuf:"bytes,3,opt,name=project_id,json=projectId,proto3,oneof" json:"project_id,omitempty"`
+	ThreadId      *string                `protobuf:"bytes,4,opt,name=thread_id,json=threadId,proto3,oneof" json:"thread_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportNotificationPresenceRequest) Reset() {
+	*x = ReportNotificationPresenceRequest{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[91]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportNotificationPresenceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportNotificationPresenceRequest) ProtoMessage() {}
+
+func (x *ReportNotificationPresenceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[91]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportNotificationPresenceRequest.ProtoReflect.Descriptor instead.
+func (*ReportNotificationPresenceRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{91}
+}
+
+func (x *ReportNotificationPresenceRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *ReportNotificationPresenceRequest) GetFocused() bool {
+	if x != nil {
+		return x.Focused
+	}
+	return false
+}
+
+func (x *ReportNotificationPresenceRequest) GetProjectId() string {
+	if x != nil && x.ProjectId != nil {
+		return *x.ProjectId
+	}
+	return ""
+}
+
+func (x *ReportNotificationPresenceRequest) GetThreadId() string {
+	if x != nil && x.ThreadId != nil {
+		return *x.ThreadId
+	}
+	return ""
+}
+
+type ReportNotificationPresenceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportNotificationPresenceResponse) Reset() {
+	*x = ReportNotificationPresenceResponse{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[92]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportNotificationPresenceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportNotificationPresenceResponse) ProtoMessage() {}
+
+func (x *ReportNotificationPresenceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[92]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportNotificationPresenceResponse.ProtoReflect.Descriptor instead.
+func (*ReportNotificationPresenceResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{92}
+}
+
+func (x *ReportNotificationPresenceResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
 var File_ariadne_v1_settings_proto protoreflect.FileDescriptor
 
 const file_ariadne_v1_settings_proto_rawDesc = "" +
@@ -4702,7 +6010,122 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"\x15CheckMcpServerRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\"M\n" +
 	"\x16CheckMcpServerResponse\x123\n" +
-	"\x06status\x18\x01 \x01(\v2\x1b.ariadne.v1.McpServerStatusR\x06status2\xaa\r\n" +
+	"\x06status\x18\x01 \x01(\v2\x1b.ariadne.v1.McpServerStatusR\x06status\"\x81\x02\n" +
+	"\x14PushSubscriptionView\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\bendpoint\x18\x02 \x01(\tR\bendpoint\x12\x14\n" +
+	"\x05label\x18\x03 \x01(\tR\x05label\x12\x1d\n" +
+	"\n" +
+	"user_agent\x18\x04 \x01(\tR\tuserAgent\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x05 \x01(\x03R\tcreatedAt\x12%\n" +
+	"\flast_used_at\x18\x06 \x01(\x03H\x00R\n" +
+	"lastUsedAt\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"last_error\x18\a \x01(\tH\x01R\tlastError\x88\x01\x01B\x0f\n" +
+	"\r_last_used_atB\r\n" +
+	"\v_last_error\"\x96\x01\n" +
+	"\vWebhookView\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
+	"\x03url\x18\x03 \x01(\tR\x03url\x12\x18\n" +
+	"\aenabled\x18\x04 \x01(\bR\aenabled\x12\x1d\n" +
+	"\n" +
+	"secret_set\x18\x05 \x01(\bR\tsecretSet\x12\x18\n" +
+	"\aheaders\x18\x06 \x03(\tR\aheaders\"\xdb\x01\n" +
+	"\fWebhookInput\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
+	"\x03url\x18\x03 \x01(\tR\x03url\x12\x18\n" +
+	"\aenabled\x18\x04 \x01(\bR\aenabled\x12\x1b\n" +
+	"\x06secret\x18\x05 \x01(\tH\x00R\x06secret\x88\x01\x01\x12!\n" +
+	"\fclear_secret\x18\x06 \x01(\bR\vclearSecret\x120\n" +
+	"\aheaders\x18\a \x03(\v2\x16.ariadne.v1.SecretPairR\aheadersB\t\n" +
+	"\a_secret\"=\n" +
+	"\x14NotifierCapabilities\x12%\n" +
+	"\x0esupports_check\x18\x01 \x01(\bR\rsupportsCheck\"\xac\x03\n" +
+	"\x13NotifierServiceView\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12/\n" +
+	"\x05title\x18\x02 \x01(\v2\x19.ariadne.v1.LocalizedTextR\x05title\x12@\n" +
+	"\vdescription\x18\x03 \x01(\v2\x19.ariadne.v1.LocalizedTextH\x00R\vdescription\x88\x01\x01\x126\n" +
+	"\bsettings\x18\x04 \x01(\v2\x1a.ariadne.v1.SettingsSchemaR\bsettings\x12D\n" +
+	"\fcapabilities\x18\x05 \x01(\v2 .ariadne.v1.NotifierCapabilitiesR\fcapabilities\x12\x18\n" +
+	"\aenabled\x18\x06 \x01(\bR\aenabled\x12/\n" +
+	"\x06values\x18\a \x01(\v2\x17.google.protobuf.StructR\x06values\x12\x1f\n" +
+	"\vsecrets_set\x18\b \x03(\tR\n" +
+	"secretsSet\x12\x14\n" +
+	"\x05ready\x18\t \x01(\bR\x05readyB\x0e\n" +
+	"\f_description\"a\n" +
+	"\x14NotifierServiceInput\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12/\n" +
+	"\x06values\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x06values\"\xc0\x02\n" +
+	"\x14NotificationSettings\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12(\n" +
+	"\x10web_push_enabled\x18\x02 \x01(\bR\x0ewebPushEnabled\x12(\n" +
+	"\x10vapid_public_key\x18\x03 \x01(\tR\x0evapidPublicKey\x12F\n" +
+	"\rsubscriptions\x18\x04 \x03(\v2 .ariadne.v1.PushSubscriptionViewR\rsubscriptions\x123\n" +
+	"\bwebhooks\x18\x05 \x03(\v2\x17.ariadne.v1.WebhookViewR\bwebhooks\x12=\n" +
+	"\tnotifiers\x18\x06 \x03(\v2\x1f.ariadne.v1.NotifierServiceViewR\tnotifiers\" \n" +
+	"\x1eGetNotificationSettingsRequest\"i\n" +
+	"\x1fGetNotificationSettingsResponse\x12F\n" +
+	"\rnotifications\x18\x01 \x01(\v2 .ariadne.v1.NotificationSettingsR\rnotifications\"\xd5\x02\n" +
+	"\x1fSaveNotificationSettingsRequest\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12(\n" +
+	"\x10web_push_enabled\x18\x02 \x01(\bR\x0ewebPushEnabled\x124\n" +
+	"\bwebhooks\x18\x03 \x03(\v2\x18.ariadne.v1.WebhookInputR\bwebhooks\x12X\n" +
+	"\tnotifiers\x18\x04 \x03(\v2:.ariadne.v1.SaveNotificationSettingsRequest.NotifiersEntryR\tnotifiers\x1a^\n" +
+	"\x0eNotifiersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
+	"\x05value\x18\x02 \x01(\v2 .ariadne.v1.NotifierServiceInputR\x05value:\x028\x01\"j\n" +
+	" SaveNotificationSettingsResponse\x12F\n" +
+	"\rnotifications\x18\x01 \x01(\v2 .ariadne.v1.NotificationSettingsR\rnotifications\"\x93\x01\n" +
+	"\x14SubscribePushRequest\x12\x1a\n" +
+	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12\x16\n" +
+	"\x06p256dh\x18\x02 \x01(\tR\x06p256dh\x12\x12\n" +
+	"\x04auth\x18\x03 \x01(\tR\x04auth\x12\x14\n" +
+	"\x05label\x18\x04 \x01(\tR\x05label\x12\x1d\n" +
+	"\n" +
+	"user_agent\x18\x05 \x01(\tR\tuserAgent\"\xa5\x01\n" +
+	"\x15SubscribePushResponse\x12D\n" +
+	"\fsubscription\x18\x01 \x01(\v2 .ariadne.v1.PushSubscriptionViewR\fsubscription\x12F\n" +
+	"\rsubscriptions\x18\x02 \x03(\v2 .ariadne.v1.PushSubscriptionViewR\rsubscriptions\"4\n" +
+	"\x16UnsubscribePushRequest\x12\x1a\n" +
+	"\bendpoint\x18\x01 \x01(\tR\bendpoint\"a\n" +
+	"\x17UnsubscribePushResponse\x12F\n" +
+	"\rsubscriptions\x18\x01 \x03(\v2 .ariadne.v1.PushSubscriptionViewR\rsubscriptions\"/\n" +
+	"\x1dDeletePushSubscriptionRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"h\n" +
+	"\x1eDeletePushSubscriptionResponse\x12F\n" +
+	"\rsubscriptions\x18\x01 \x03(\v2 .ariadne.v1.PushSubscriptionViewR\rsubscriptions\"\x9a\x02\n" +
+	"\x17TestNotificationRequest\x12\x18\n" +
+	"\achannel\x18\x01 \x01(\tR\achannel\x12 \n" +
+	"\ttarget_id\x18\x02 \x01(\tH\x00R\btargetId\x88\x01\x01\x12B\n" +
+	"\rwebhook_draft\x18\x03 \x01(\v2\x18.ariadne.v1.WebhookInputH\x01R\fwebhookDraft\x88\x01\x01\x12L\n" +
+	"\x0enotifier_draft\x18\x04 \x01(\v2 .ariadne.v1.NotifierServiceInputH\x02R\rnotifierDraft\x88\x01\x01B\f\n" +
+	"\n" +
+	"_target_idB\x10\n" +
+	"\x0e_webhook_draftB\x11\n" +
+	"\x0f_notifier_draft\"\xce\x01\n" +
+	"\x18TestNotificationResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x1b\n" +
+	"\x06status\x18\x02 \x01(\x05H\x00R\x06status\x88\x01\x01\x128\n" +
+	"\amessage\x18\x03 \x01(\v2\x19.ariadne.v1.LocalizedTextH\x01R\amessage\x88\x01\x01\x12\x1c\n" +
+	"\tdelivered\x18\x04 \x01(\x05R\tdelivered\x12\x16\n" +
+	"\x06failed\x18\x05 \x01(\x05R\x06failedB\t\n" +
+	"\a_statusB\n" +
+	"\n" +
+	"\b_message\"\xbd\x01\n" +
+	"!ReportNotificationPresenceRequest\x12\x1b\n" +
+	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12\x18\n" +
+	"\afocused\x18\x02 \x01(\bR\afocused\x12\"\n" +
+	"\n" +
+	"project_id\x18\x03 \x01(\tH\x00R\tprojectId\x88\x01\x01\x12 \n" +
+	"\tthread_id\x18\x04 \x01(\tH\x01R\bthreadId\x88\x01\x01B\r\n" +
+	"\v_project_idB\f\n" +
+	"\n" +
+	"_thread_id\"4\n" +
+	"\"ReportNotificationPresenceResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok2\x94\x13\n" +
 	"\x0fSettingsService\x12W\n" +
 	"\x0eGetConcurrency\x12!.ariadne.v1.GetConcurrencyRequest\x1a\".ariadne.v1.GetConcurrencyResponse\x12Z\n" +
 	"\x0fSaveConcurrency\x12\".ariadne.v1.SaveConcurrencyRequest\x1a#.ariadne.v1.SaveConcurrencyResponse\x12]\n" +
@@ -4721,7 +6144,14 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"\rUseFoundSetup\x12 .ariadne.v1.UseFoundSetupRequest\x1a!.ariadne.v1.UseFoundSetupResponse\x12W\n" +
 	"\x0eGetMcpSettings\x12!.ariadne.v1.GetMcpSettingsRequest\x1a\".ariadne.v1.GetMcpSettingsResponse\x12Z\n" +
 	"\x0fSaveMcpSettings\x12\".ariadne.v1.SaveMcpSettingsRequest\x1a#.ariadne.v1.SaveMcpSettingsResponse\x12W\n" +
-	"\x0eCheckMcpServer\x12!.ariadne.v1.CheckMcpServerRequest\x1a\".ariadne.v1.CheckMcpServerResponseB\xaa\x01\n" +
+	"\x0eCheckMcpServer\x12!.ariadne.v1.CheckMcpServerRequest\x1a\".ariadne.v1.CheckMcpServerResponse\x12r\n" +
+	"\x17GetNotificationSettings\x12*.ariadne.v1.GetNotificationSettingsRequest\x1a+.ariadne.v1.GetNotificationSettingsResponse\x12u\n" +
+	"\x18SaveNotificationSettings\x12+.ariadne.v1.SaveNotificationSettingsRequest\x1a,.ariadne.v1.SaveNotificationSettingsResponse\x12T\n" +
+	"\rSubscribePush\x12 .ariadne.v1.SubscribePushRequest\x1a!.ariadne.v1.SubscribePushResponse\x12Z\n" +
+	"\x0fUnsubscribePush\x12\".ariadne.v1.UnsubscribePushRequest\x1a#.ariadne.v1.UnsubscribePushResponse\x12o\n" +
+	"\x16DeletePushSubscription\x12).ariadne.v1.DeletePushSubscriptionRequest\x1a*.ariadne.v1.DeletePushSubscriptionResponse\x12]\n" +
+	"\x10TestNotification\x12#.ariadne.v1.TestNotificationRequest\x1a$.ariadne.v1.TestNotificationResponse\x12{\n" +
+	"\x1aReportNotificationPresence\x12-.ariadne.v1.ReportNotificationPresenceRequest\x1a..ariadne.v1.ReportNotificationPresenceResponseB\xaa\x01\n" +
 	"\x0ecom.ariadne.v1B\rSettingsProtoP\x01Z@github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1;ariadnev1\xa2\x02\x03AXX\xaa\x02\n" +
 	"Ariadne.V1\xca\x02\n" +
 	"Ariadne\\V1\xe2\x02\x16Ariadne\\V1\\GPBMetadata\xea\x02\vAriadne::V1b\x06proto3"
@@ -4738,105 +6168,127 @@ func file_ariadne_v1_settings_proto_rawDescGZIP() []byte {
 	return file_ariadne_v1_settings_proto_rawDescData
 }
 
-var file_ariadne_v1_settings_proto_msgTypes = make([]protoimpl.MessageInfo, 80)
+var file_ariadne_v1_settings_proto_msgTypes = make([]protoimpl.MessageInfo, 102)
 var file_ariadne_v1_settings_proto_goTypes = []any{
-	(*LocalizedText)(nil),               // 0: ariadne.v1.LocalizedText
-	(*StringList)(nil),                  // 1: ariadne.v1.StringList
-	(*SecretPair)(nil),                  // 2: ariadne.v1.SecretPair
-	(*SettingField)(nil),                // 3: ariadne.v1.SettingField
-	(*SettingsSchema)(nil),              // 4: ariadne.v1.SettingsSchema
-	(*ConcurrencySettings)(nil),         // 5: ariadne.v1.ConcurrencySettings
-	(*GetConcurrencyRequest)(nil),       // 6: ariadne.v1.GetConcurrencyRequest
-	(*GetConcurrencyResponse)(nil),      // 7: ariadne.v1.GetConcurrencyResponse
-	(*SaveConcurrencyRequest)(nil),      // 8: ariadne.v1.SaveConcurrencyRequest
-	(*SaveConcurrencyResponse)(nil),     // 9: ariadne.v1.SaveConcurrencyResponse
-	(*Snippet)(nil),                     // 10: ariadne.v1.Snippet
-	(*InputSettings)(nil),               // 11: ariadne.v1.InputSettings
-	(*GetInputSettingsRequest)(nil),     // 12: ariadne.v1.GetInputSettingsRequest
-	(*GetInputSettingsResponse)(nil),    // 13: ariadne.v1.GetInputSettingsResponse
-	(*SaveInputSettingsRequest)(nil),    // 14: ariadne.v1.SaveInputSettingsRequest
-	(*SaveInputSettingsResponse)(nil),   // 15: ariadne.v1.SaveInputSettingsResponse
-	(*CommandRule)(nil),                 // 16: ariadne.v1.CommandRule
-	(*CommandRuleList)(nil),             // 17: ariadne.v1.CommandRuleList
-	(*WorkLimits)(nil),                  // 18: ariadne.v1.WorkLimits
-	(*WorkLimitsInput)(nil),             // 19: ariadne.v1.WorkLimitsInput
-	(*WorkSettings)(nil),                // 20: ariadne.v1.WorkSettings
-	(*GetWorkSettingsRequest)(nil),      // 21: ariadne.v1.GetWorkSettingsRequest
-	(*GetWorkSettingsResponse)(nil),     // 22: ariadne.v1.GetWorkSettingsResponse
-	(*SaveWorkSettingsRequest)(nil),     // 23: ariadne.v1.SaveWorkSettingsRequest
-	(*SaveWorkSettingsResponse)(nil),    // 24: ariadne.v1.SaveWorkSettingsResponse
-	(*SearchCapabilities)(nil),          // 25: ariadne.v1.SearchCapabilities
-	(*SearchServiceView)(nil),           // 26: ariadne.v1.SearchServiceView
-	(*SearchSettings)(nil),              // 27: ariadne.v1.SearchSettings
-	(*GetSearchSettingsRequest)(nil),    // 28: ariadne.v1.GetSearchSettingsRequest
-	(*GetSearchSettingsResponse)(nil),   // 29: ariadne.v1.GetSearchSettingsResponse
-	(*SaveSearchSettingsRequest)(nil),   // 30: ariadne.v1.SaveSearchSettingsRequest
-	(*SaveSearchSettingsResponse)(nil),  // 31: ariadne.v1.SaveSearchSettingsResponse
-	(*CheckSearchSettingsRequest)(nil),  // 32: ariadne.v1.CheckSearchSettingsRequest
-	(*CheckSearchSettingsResponse)(nil), // 33: ariadne.v1.CheckSearchSettingsResponse
-	(*ModelPrice)(nil),                  // 34: ariadne.v1.ModelPrice
-	(*ModelKind)(nil),                   // 35: ariadne.v1.ModelKind
-	(*ModelProviderView)(nil),           // 36: ariadne.v1.ModelProviderView
-	(*ModelProviderInput)(nil),          // 37: ariadne.v1.ModelProviderInput
-	(*ModelEntry)(nil),                  // 38: ariadne.v1.ModelEntry
-	(*RoleConfig)(nil),                  // 39: ariadne.v1.RoleConfig
-	(*ModelRoles)(nil),                  // 40: ariadne.v1.ModelRoles
-	(*ModelSettings)(nil),               // 41: ariadne.v1.ModelSettings
-	(*ModelProblem)(nil),                // 42: ariadne.v1.ModelProblem
-	(*GetModelSettingsRequest)(nil),     // 43: ariadne.v1.GetModelSettingsRequest
-	(*GetModelSettingsResponse)(nil),    // 44: ariadne.v1.GetModelSettingsResponse
-	(*SaveModelSettingsRequest)(nil),    // 45: ariadne.v1.SaveModelSettingsRequest
-	(*SaveModelSettingsResponse)(nil),   // 46: ariadne.v1.SaveModelSettingsResponse
-	(*ModelInfo)(nil),                   // 47: ariadne.v1.ModelInfo
-	(*ListedModel)(nil),                 // 48: ariadne.v1.ListedModel
-	(*ListedModelList)(nil),             // 49: ariadne.v1.ListedModelList
-	(*DraftModelProviderInput)(nil),     // 50: ariadne.v1.DraftModelProviderInput
-	(*ListProviderModelsRequest)(nil),   // 51: ariadne.v1.ListProviderModelsRequest
-	(*ListProviderModelsResponse)(nil),  // 52: ariadne.v1.ListProviderModelsResponse
-	(*GetModelInfoRequest)(nil),         // 53: ariadne.v1.GetModelInfoRequest
-	(*GetModelInfoResponse)(nil),        // 54: ariadne.v1.GetModelInfoResponse
-	(*FoundSetup)(nil),                  // 55: ariadne.v1.FoundSetup
-	(*ListFoundSetupsRequest)(nil),      // 56: ariadne.v1.ListFoundSetupsRequest
-	(*ListFoundSetupsResponse)(nil),     // 57: ariadne.v1.ListFoundSetupsResponse
-	(*UseFoundSetupRequest)(nil),        // 58: ariadne.v1.UseFoundSetupRequest
-	(*UseFoundSetupResponse)(nil),       // 59: ariadne.v1.UseFoundSetupResponse
-	(*McpServerView)(nil),               // 60: ariadne.v1.McpServerView
-	(*McpServerInput)(nil),              // 61: ariadne.v1.McpServerInput
-	(*McpServerInfo)(nil),               // 62: ariadne.v1.McpServerInfo
-	(*McpToolInfo)(nil),                 // 63: ariadne.v1.McpToolInfo
-	(*McpToolInfoList)(nil),             // 64: ariadne.v1.McpToolInfoList
-	(*McpServerStatus)(nil),             // 65: ariadne.v1.McpServerStatus
-	(*GetMcpSettingsRequest)(nil),       // 66: ariadne.v1.GetMcpSettingsRequest
-	(*GetMcpSettingsResponse)(nil),      // 67: ariadne.v1.GetMcpSettingsResponse
-	(*SaveMcpSettingsRequest)(nil),      // 68: ariadne.v1.SaveMcpSettingsRequest
-	(*SaveMcpSettingsResponse)(nil),     // 69: ariadne.v1.SaveMcpSettingsResponse
-	(*CheckMcpServerRequest)(nil),       // 70: ariadne.v1.CheckMcpServerRequest
-	(*CheckMcpServerResponse)(nil),      // 71: ariadne.v1.CheckMcpServerResponse
-	nil,                                 // 72: ariadne.v1.LocalizedText.ValuesEntry
-	nil,                                 // 73: ariadne.v1.SettingsSchema.PropertiesEntry
-	nil,                                 // 74: ariadne.v1.InputSettings.KeysEntry
-	nil,                                 // 75: ariadne.v1.SaveInputSettingsRequest.KeysEntry
-	nil,                                 // 76: ariadne.v1.SaveSearchSettingsRequest.ServicesEntry
-	nil,                                 // 77: ariadne.v1.CheckSearchSettingsRequest.ServicesEntry
-	nil,                                 // 78: ariadne.v1.McpServerView.ToolsEntry
-	nil,                                 // 79: ariadne.v1.McpServerInput.ToolsEntry
-	(*structpb.Value)(nil),              // 80: google.protobuf.Value
-	(*structpb.Struct)(nil),             // 81: google.protobuf.Struct
-	(*LocalizedError)(nil),              // 82: ariadne.v1.LocalizedError
+	(*LocalizedText)(nil),                      // 0: ariadne.v1.LocalizedText
+	(*StringList)(nil),                         // 1: ariadne.v1.StringList
+	(*SecretPair)(nil),                         // 2: ariadne.v1.SecretPair
+	(*SettingField)(nil),                       // 3: ariadne.v1.SettingField
+	(*SettingsSchema)(nil),                     // 4: ariadne.v1.SettingsSchema
+	(*ConcurrencySettings)(nil),                // 5: ariadne.v1.ConcurrencySettings
+	(*GetConcurrencyRequest)(nil),              // 6: ariadne.v1.GetConcurrencyRequest
+	(*GetConcurrencyResponse)(nil),             // 7: ariadne.v1.GetConcurrencyResponse
+	(*SaveConcurrencyRequest)(nil),             // 8: ariadne.v1.SaveConcurrencyRequest
+	(*SaveConcurrencyResponse)(nil),            // 9: ariadne.v1.SaveConcurrencyResponse
+	(*Snippet)(nil),                            // 10: ariadne.v1.Snippet
+	(*InputSettings)(nil),                      // 11: ariadne.v1.InputSettings
+	(*GetInputSettingsRequest)(nil),            // 12: ariadne.v1.GetInputSettingsRequest
+	(*GetInputSettingsResponse)(nil),           // 13: ariadne.v1.GetInputSettingsResponse
+	(*SaveInputSettingsRequest)(nil),           // 14: ariadne.v1.SaveInputSettingsRequest
+	(*SaveInputSettingsResponse)(nil),          // 15: ariadne.v1.SaveInputSettingsResponse
+	(*CommandRule)(nil),                        // 16: ariadne.v1.CommandRule
+	(*CommandRuleList)(nil),                    // 17: ariadne.v1.CommandRuleList
+	(*WorkLimits)(nil),                         // 18: ariadne.v1.WorkLimits
+	(*WorkLimitsInput)(nil),                    // 19: ariadne.v1.WorkLimitsInput
+	(*WorkSettings)(nil),                       // 20: ariadne.v1.WorkSettings
+	(*GetWorkSettingsRequest)(nil),             // 21: ariadne.v1.GetWorkSettingsRequest
+	(*GetWorkSettingsResponse)(nil),            // 22: ariadne.v1.GetWorkSettingsResponse
+	(*SaveWorkSettingsRequest)(nil),            // 23: ariadne.v1.SaveWorkSettingsRequest
+	(*SaveWorkSettingsResponse)(nil),           // 24: ariadne.v1.SaveWorkSettingsResponse
+	(*SearchCapabilities)(nil),                 // 25: ariadne.v1.SearchCapabilities
+	(*SearchServiceView)(nil),                  // 26: ariadne.v1.SearchServiceView
+	(*SearchSettings)(nil),                     // 27: ariadne.v1.SearchSettings
+	(*GetSearchSettingsRequest)(nil),           // 28: ariadne.v1.GetSearchSettingsRequest
+	(*GetSearchSettingsResponse)(nil),          // 29: ariadne.v1.GetSearchSettingsResponse
+	(*SaveSearchSettingsRequest)(nil),          // 30: ariadne.v1.SaveSearchSettingsRequest
+	(*SaveSearchSettingsResponse)(nil),         // 31: ariadne.v1.SaveSearchSettingsResponse
+	(*CheckSearchSettingsRequest)(nil),         // 32: ariadne.v1.CheckSearchSettingsRequest
+	(*CheckSearchSettingsResponse)(nil),        // 33: ariadne.v1.CheckSearchSettingsResponse
+	(*ModelPrice)(nil),                         // 34: ariadne.v1.ModelPrice
+	(*ModelKind)(nil),                          // 35: ariadne.v1.ModelKind
+	(*ModelProviderView)(nil),                  // 36: ariadne.v1.ModelProviderView
+	(*ModelProviderInput)(nil),                 // 37: ariadne.v1.ModelProviderInput
+	(*ModelEntry)(nil),                         // 38: ariadne.v1.ModelEntry
+	(*RoleConfig)(nil),                         // 39: ariadne.v1.RoleConfig
+	(*ModelRoles)(nil),                         // 40: ariadne.v1.ModelRoles
+	(*ModelSettings)(nil),                      // 41: ariadne.v1.ModelSettings
+	(*ModelProblem)(nil),                       // 42: ariadne.v1.ModelProblem
+	(*GetModelSettingsRequest)(nil),            // 43: ariadne.v1.GetModelSettingsRequest
+	(*GetModelSettingsResponse)(nil),           // 44: ariadne.v1.GetModelSettingsResponse
+	(*SaveModelSettingsRequest)(nil),           // 45: ariadne.v1.SaveModelSettingsRequest
+	(*SaveModelSettingsResponse)(nil),          // 46: ariadne.v1.SaveModelSettingsResponse
+	(*ModelInfo)(nil),                          // 47: ariadne.v1.ModelInfo
+	(*ListedModel)(nil),                        // 48: ariadne.v1.ListedModel
+	(*ListedModelList)(nil),                    // 49: ariadne.v1.ListedModelList
+	(*DraftModelProviderInput)(nil),            // 50: ariadne.v1.DraftModelProviderInput
+	(*ListProviderModelsRequest)(nil),          // 51: ariadne.v1.ListProviderModelsRequest
+	(*ListProviderModelsResponse)(nil),         // 52: ariadne.v1.ListProviderModelsResponse
+	(*GetModelInfoRequest)(nil),                // 53: ariadne.v1.GetModelInfoRequest
+	(*GetModelInfoResponse)(nil),               // 54: ariadne.v1.GetModelInfoResponse
+	(*FoundSetup)(nil),                         // 55: ariadne.v1.FoundSetup
+	(*ListFoundSetupsRequest)(nil),             // 56: ariadne.v1.ListFoundSetupsRequest
+	(*ListFoundSetupsResponse)(nil),            // 57: ariadne.v1.ListFoundSetupsResponse
+	(*UseFoundSetupRequest)(nil),               // 58: ariadne.v1.UseFoundSetupRequest
+	(*UseFoundSetupResponse)(nil),              // 59: ariadne.v1.UseFoundSetupResponse
+	(*McpServerView)(nil),                      // 60: ariadne.v1.McpServerView
+	(*McpServerInput)(nil),                     // 61: ariadne.v1.McpServerInput
+	(*McpServerInfo)(nil),                      // 62: ariadne.v1.McpServerInfo
+	(*McpToolInfo)(nil),                        // 63: ariadne.v1.McpToolInfo
+	(*McpToolInfoList)(nil),                    // 64: ariadne.v1.McpToolInfoList
+	(*McpServerStatus)(nil),                    // 65: ariadne.v1.McpServerStatus
+	(*GetMcpSettingsRequest)(nil),              // 66: ariadne.v1.GetMcpSettingsRequest
+	(*GetMcpSettingsResponse)(nil),             // 67: ariadne.v1.GetMcpSettingsResponse
+	(*SaveMcpSettingsRequest)(nil),             // 68: ariadne.v1.SaveMcpSettingsRequest
+	(*SaveMcpSettingsResponse)(nil),            // 69: ariadne.v1.SaveMcpSettingsResponse
+	(*CheckMcpServerRequest)(nil),              // 70: ariadne.v1.CheckMcpServerRequest
+	(*CheckMcpServerResponse)(nil),             // 71: ariadne.v1.CheckMcpServerResponse
+	(*PushSubscriptionView)(nil),               // 72: ariadne.v1.PushSubscriptionView
+	(*WebhookView)(nil),                        // 73: ariadne.v1.WebhookView
+	(*WebhookInput)(nil),                       // 74: ariadne.v1.WebhookInput
+	(*NotifierCapabilities)(nil),               // 75: ariadne.v1.NotifierCapabilities
+	(*NotifierServiceView)(nil),                // 76: ariadne.v1.NotifierServiceView
+	(*NotifierServiceInput)(nil),               // 77: ariadne.v1.NotifierServiceInput
+	(*NotificationSettings)(nil),               // 78: ariadne.v1.NotificationSettings
+	(*GetNotificationSettingsRequest)(nil),     // 79: ariadne.v1.GetNotificationSettingsRequest
+	(*GetNotificationSettingsResponse)(nil),    // 80: ariadne.v1.GetNotificationSettingsResponse
+	(*SaveNotificationSettingsRequest)(nil),    // 81: ariadne.v1.SaveNotificationSettingsRequest
+	(*SaveNotificationSettingsResponse)(nil),   // 82: ariadne.v1.SaveNotificationSettingsResponse
+	(*SubscribePushRequest)(nil),               // 83: ariadne.v1.SubscribePushRequest
+	(*SubscribePushResponse)(nil),              // 84: ariadne.v1.SubscribePushResponse
+	(*UnsubscribePushRequest)(nil),             // 85: ariadne.v1.UnsubscribePushRequest
+	(*UnsubscribePushResponse)(nil),            // 86: ariadne.v1.UnsubscribePushResponse
+	(*DeletePushSubscriptionRequest)(nil),      // 87: ariadne.v1.DeletePushSubscriptionRequest
+	(*DeletePushSubscriptionResponse)(nil),     // 88: ariadne.v1.DeletePushSubscriptionResponse
+	(*TestNotificationRequest)(nil),            // 89: ariadne.v1.TestNotificationRequest
+	(*TestNotificationResponse)(nil),           // 90: ariadne.v1.TestNotificationResponse
+	(*ReportNotificationPresenceRequest)(nil),  // 91: ariadne.v1.ReportNotificationPresenceRequest
+	(*ReportNotificationPresenceResponse)(nil), // 92: ariadne.v1.ReportNotificationPresenceResponse
+	nil,                     // 93: ariadne.v1.LocalizedText.ValuesEntry
+	nil,                     // 94: ariadne.v1.SettingsSchema.PropertiesEntry
+	nil,                     // 95: ariadne.v1.InputSettings.KeysEntry
+	nil,                     // 96: ariadne.v1.SaveInputSettingsRequest.KeysEntry
+	nil,                     // 97: ariadne.v1.SaveSearchSettingsRequest.ServicesEntry
+	nil,                     // 98: ariadne.v1.CheckSearchSettingsRequest.ServicesEntry
+	nil,                     // 99: ariadne.v1.McpServerView.ToolsEntry
+	nil,                     // 100: ariadne.v1.McpServerInput.ToolsEntry
+	nil,                     // 101: ariadne.v1.SaveNotificationSettingsRequest.NotifiersEntry
+	(*structpb.Value)(nil),  // 102: google.protobuf.Value
+	(*structpb.Struct)(nil), // 103: google.protobuf.Struct
+	(*LocalizedError)(nil),  // 104: ariadne.v1.LocalizedError
 }
 var file_ariadne_v1_settings_proto_depIdxs = []int32{
-	72,  // 0: ariadne.v1.LocalizedText.values:type_name -> ariadne.v1.LocalizedText.ValuesEntry
+	93,  // 0: ariadne.v1.LocalizedText.values:type_name -> ariadne.v1.LocalizedText.ValuesEntry
 	0,   // 1: ariadne.v1.SettingField.title:type_name -> ariadne.v1.LocalizedText
 	0,   // 2: ariadne.v1.SettingField.description:type_name -> ariadne.v1.LocalizedText
-	80,  // 3: ariadne.v1.SettingField.default_value:type_name -> google.protobuf.Value
-	73,  // 4: ariadne.v1.SettingsSchema.properties:type_name -> ariadne.v1.SettingsSchema.PropertiesEntry
+	102, // 3: ariadne.v1.SettingField.default_value:type_name -> google.protobuf.Value
+	94,  // 4: ariadne.v1.SettingsSchema.properties:type_name -> ariadne.v1.SettingsSchema.PropertiesEntry
 	5,   // 5: ariadne.v1.GetConcurrencyResponse.concurrency:type_name -> ariadne.v1.ConcurrencySettings
 	5,   // 6: ariadne.v1.SaveConcurrencyResponse.concurrency:type_name -> ariadne.v1.ConcurrencySettings
 	10,  // 7: ariadne.v1.InputSettings.snippets:type_name -> ariadne.v1.Snippet
-	74,  // 8: ariadne.v1.InputSettings.keys:type_name -> ariadne.v1.InputSettings.KeysEntry
+	95,  // 8: ariadne.v1.InputSettings.keys:type_name -> ariadne.v1.InputSettings.KeysEntry
 	11,  // 9: ariadne.v1.GetInputSettingsResponse.input:type_name -> ariadne.v1.InputSettings
 	10,  // 10: ariadne.v1.SaveInputSettingsRequest.snippets:type_name -> ariadne.v1.Snippet
-	75,  // 11: ariadne.v1.SaveInputSettingsRequest.keys:type_name -> ariadne.v1.SaveInputSettingsRequest.KeysEntry
+	96,  // 11: ariadne.v1.SaveInputSettingsRequest.keys:type_name -> ariadne.v1.SaveInputSettingsRequest.KeysEntry
 	11,  // 12: ariadne.v1.SaveInputSettingsResponse.input:type_name -> ariadne.v1.InputSettings
 	16,  // 13: ariadne.v1.CommandRuleList.items:type_name -> ariadne.v1.CommandRule
 	16,  // 14: ariadne.v1.WorkSettings.rules:type_name -> ariadne.v1.CommandRule
@@ -4850,21 +6302,21 @@ var file_ariadne_v1_settings_proto_depIdxs = []int32{
 	0,   // 22: ariadne.v1.SearchServiceView.description:type_name -> ariadne.v1.LocalizedText
 	4,   // 23: ariadne.v1.SearchServiceView.settings:type_name -> ariadne.v1.SettingsSchema
 	25,  // 24: ariadne.v1.SearchServiceView.capabilities:type_name -> ariadne.v1.SearchCapabilities
-	81,  // 25: ariadne.v1.SearchServiceView.values:type_name -> google.protobuf.Struct
+	103, // 25: ariadne.v1.SearchServiceView.values:type_name -> google.protobuf.Struct
 	0,   // 26: ariadne.v1.SearchSettings.plugins:type_name -> ariadne.v1.LocalizedText
 	26,  // 27: ariadne.v1.SearchSettings.services:type_name -> ariadne.v1.SearchServiceView
 	27,  // 28: ariadne.v1.GetSearchSettingsResponse.search:type_name -> ariadne.v1.SearchSettings
-	76,  // 29: ariadne.v1.SaveSearchSettingsRequest.services:type_name -> ariadne.v1.SaveSearchSettingsRequest.ServicesEntry
+	97,  // 29: ariadne.v1.SaveSearchSettingsRequest.services:type_name -> ariadne.v1.SaveSearchSettingsRequest.ServicesEntry
 	27,  // 30: ariadne.v1.SaveSearchSettingsResponse.search:type_name -> ariadne.v1.SearchSettings
-	77,  // 31: ariadne.v1.CheckSearchSettingsRequest.services:type_name -> ariadne.v1.CheckSearchSettingsRequest.ServicesEntry
+	98,  // 31: ariadne.v1.CheckSearchSettingsRequest.services:type_name -> ariadne.v1.CheckSearchSettingsRequest.ServicesEntry
 	0,   // 32: ariadne.v1.CheckSearchSettingsResponse.message:type_name -> ariadne.v1.LocalizedText
 	0,   // 33: ariadne.v1.ModelKind.title:type_name -> ariadne.v1.LocalizedText
 	4,   // 34: ariadne.v1.ModelKind.settings:type_name -> ariadne.v1.SettingsSchema
-	81,  // 35: ariadne.v1.ModelProviderView.settings:type_name -> google.protobuf.Struct
-	81,  // 36: ariadne.v1.ModelProviderView.extra_body:type_name -> google.protobuf.Struct
-	81,  // 37: ariadne.v1.ModelProviderInput.settings:type_name -> google.protobuf.Struct
+	103, // 35: ariadne.v1.ModelProviderView.settings:type_name -> google.protobuf.Struct
+	103, // 36: ariadne.v1.ModelProviderView.extra_body:type_name -> google.protobuf.Struct
+	103, // 37: ariadne.v1.ModelProviderInput.settings:type_name -> google.protobuf.Struct
 	2,   // 38: ariadne.v1.ModelProviderInput.headers:type_name -> ariadne.v1.SecretPair
-	81,  // 39: ariadne.v1.ModelProviderInput.extra_body:type_name -> google.protobuf.Struct
+	103, // 39: ariadne.v1.ModelProviderInput.extra_body:type_name -> google.protobuf.Struct
 	34,  // 40: ariadne.v1.ModelEntry.price:type_name -> ariadne.v1.ModelPrice
 	1,   // 41: ariadne.v1.ModelEntry.efforts:type_name -> ariadne.v1.StringList
 	39,  // 42: ariadne.v1.ModelRoles.thread:type_name -> ariadne.v1.RoleConfig
@@ -4875,7 +6327,7 @@ var file_ariadne_v1_settings_proto_depIdxs = []int32{
 	36,  // 47: ariadne.v1.ModelSettings.providers:type_name -> ariadne.v1.ModelProviderView
 	38,  // 48: ariadne.v1.ModelSettings.models:type_name -> ariadne.v1.ModelEntry
 	40,  // 49: ariadne.v1.ModelSettings.roles:type_name -> ariadne.v1.ModelRoles
-	82,  // 50: ariadne.v1.ModelProblem.problem:type_name -> ariadne.v1.LocalizedError
+	104, // 50: ariadne.v1.ModelProblem.problem:type_name -> ariadne.v1.LocalizedError
 	41,  // 51: ariadne.v1.GetModelSettingsResponse.settings:type_name -> ariadne.v1.ModelSettings
 	37,  // 52: ariadne.v1.SaveModelSettingsRequest.providers:type_name -> ariadne.v1.ModelProviderInput
 	38,  // 53: ariadne.v1.SaveModelSettingsRequest.models:type_name -> ariadne.v1.ModelEntry
@@ -4886,7 +6338,7 @@ var file_ariadne_v1_settings_proto_depIdxs = []int32{
 	1,   // 58: ariadne.v1.ModelInfo.efforts:type_name -> ariadne.v1.StringList
 	47,  // 59: ariadne.v1.ListedModel.info:type_name -> ariadne.v1.ModelInfo
 	48,  // 60: ariadne.v1.ListedModelList.items:type_name -> ariadne.v1.ListedModel
-	81,  // 61: ariadne.v1.DraftModelProviderInput.settings:type_name -> google.protobuf.Struct
+	103, // 61: ariadne.v1.DraftModelProviderInput.settings:type_name -> google.protobuf.Struct
 	50,  // 62: ariadne.v1.ListProviderModelsRequest.provider:type_name -> ariadne.v1.DraftModelProviderInput
 	49,  // 63: ariadne.v1.ListProviderModelsResponse.models:type_name -> ariadne.v1.ListedModelList
 	47,  // 64: ariadne.v1.GetModelInfoResponse.info:type_name -> ariadne.v1.ModelInfo
@@ -4894,10 +6346,10 @@ var file_ariadne_v1_settings_proto_depIdxs = []int32{
 	55,  // 66: ariadne.v1.ListFoundSetupsResponse.found:type_name -> ariadne.v1.FoundSetup
 	41,  // 67: ariadne.v1.UseFoundSetupResponse.settings:type_name -> ariadne.v1.ModelSettings
 	42,  // 68: ariadne.v1.UseFoundSetupResponse.problems:type_name -> ariadne.v1.ModelProblem
-	78,  // 69: ariadne.v1.McpServerView.tools:type_name -> ariadne.v1.McpServerView.ToolsEntry
+	99,  // 69: ariadne.v1.McpServerView.tools:type_name -> ariadne.v1.McpServerView.ToolsEntry
 	2,   // 70: ariadne.v1.McpServerInput.env:type_name -> ariadne.v1.SecretPair
 	2,   // 71: ariadne.v1.McpServerInput.headers:type_name -> ariadne.v1.SecretPair
-	79,  // 72: ariadne.v1.McpServerInput.tools:type_name -> ariadne.v1.McpServerInput.ToolsEntry
+	100, // 72: ariadne.v1.McpServerInput.tools:type_name -> ariadne.v1.McpServerInput.ToolsEntry
 	63,  // 73: ariadne.v1.McpToolInfoList.items:type_name -> ariadne.v1.McpToolInfo
 	62,  // 74: ariadne.v1.McpServerStatus.info:type_name -> ariadne.v1.McpServerInfo
 	64,  // 75: ariadne.v1.McpServerStatus.tools:type_name -> ariadne.v1.McpToolInfoList
@@ -4907,50 +6359,86 @@ var file_ariadne_v1_settings_proto_depIdxs = []int32{
 	60,  // 79: ariadne.v1.SaveMcpSettingsResponse.servers:type_name -> ariadne.v1.McpServerView
 	65,  // 80: ariadne.v1.SaveMcpSettingsResponse.status:type_name -> ariadne.v1.McpServerStatus
 	65,  // 81: ariadne.v1.CheckMcpServerResponse.status:type_name -> ariadne.v1.McpServerStatus
-	3,   // 82: ariadne.v1.SettingsSchema.PropertiesEntry.value:type_name -> ariadne.v1.SettingField
-	81,  // 83: ariadne.v1.SaveSearchSettingsRequest.ServicesEntry.value:type_name -> google.protobuf.Struct
-	81,  // 84: ariadne.v1.CheckSearchSettingsRequest.ServicesEntry.value:type_name -> google.protobuf.Struct
-	6,   // 85: ariadne.v1.SettingsService.GetConcurrency:input_type -> ariadne.v1.GetConcurrencyRequest
-	8,   // 86: ariadne.v1.SettingsService.SaveConcurrency:input_type -> ariadne.v1.SaveConcurrencyRequest
-	12,  // 87: ariadne.v1.SettingsService.GetInputSettings:input_type -> ariadne.v1.GetInputSettingsRequest
-	14,  // 88: ariadne.v1.SettingsService.SaveInputSettings:input_type -> ariadne.v1.SaveInputSettingsRequest
-	21,  // 89: ariadne.v1.SettingsService.GetWorkSettings:input_type -> ariadne.v1.GetWorkSettingsRequest
-	23,  // 90: ariadne.v1.SettingsService.SaveWorkSettings:input_type -> ariadne.v1.SaveWorkSettingsRequest
-	28,  // 91: ariadne.v1.SettingsService.GetSearchSettings:input_type -> ariadne.v1.GetSearchSettingsRequest
-	30,  // 92: ariadne.v1.SettingsService.SaveSearchSettings:input_type -> ariadne.v1.SaveSearchSettingsRequest
-	32,  // 93: ariadne.v1.SettingsService.CheckSearchSettings:input_type -> ariadne.v1.CheckSearchSettingsRequest
-	43,  // 94: ariadne.v1.SettingsService.GetModelSettings:input_type -> ariadne.v1.GetModelSettingsRequest
-	45,  // 95: ariadne.v1.SettingsService.SaveModelSettings:input_type -> ariadne.v1.SaveModelSettingsRequest
-	51,  // 96: ariadne.v1.SettingsService.ListProviderModels:input_type -> ariadne.v1.ListProviderModelsRequest
-	53,  // 97: ariadne.v1.SettingsService.GetModelInfo:input_type -> ariadne.v1.GetModelInfoRequest
-	56,  // 98: ariadne.v1.SettingsService.ListFoundSetups:input_type -> ariadne.v1.ListFoundSetupsRequest
-	58,  // 99: ariadne.v1.SettingsService.UseFoundSetup:input_type -> ariadne.v1.UseFoundSetupRequest
-	66,  // 100: ariadne.v1.SettingsService.GetMcpSettings:input_type -> ariadne.v1.GetMcpSettingsRequest
-	68,  // 101: ariadne.v1.SettingsService.SaveMcpSettings:input_type -> ariadne.v1.SaveMcpSettingsRequest
-	70,  // 102: ariadne.v1.SettingsService.CheckMcpServer:input_type -> ariadne.v1.CheckMcpServerRequest
-	7,   // 103: ariadne.v1.SettingsService.GetConcurrency:output_type -> ariadne.v1.GetConcurrencyResponse
-	9,   // 104: ariadne.v1.SettingsService.SaveConcurrency:output_type -> ariadne.v1.SaveConcurrencyResponse
-	13,  // 105: ariadne.v1.SettingsService.GetInputSettings:output_type -> ariadne.v1.GetInputSettingsResponse
-	15,  // 106: ariadne.v1.SettingsService.SaveInputSettings:output_type -> ariadne.v1.SaveInputSettingsResponse
-	22,  // 107: ariadne.v1.SettingsService.GetWorkSettings:output_type -> ariadne.v1.GetWorkSettingsResponse
-	24,  // 108: ariadne.v1.SettingsService.SaveWorkSettings:output_type -> ariadne.v1.SaveWorkSettingsResponse
-	29,  // 109: ariadne.v1.SettingsService.GetSearchSettings:output_type -> ariadne.v1.GetSearchSettingsResponse
-	31,  // 110: ariadne.v1.SettingsService.SaveSearchSettings:output_type -> ariadne.v1.SaveSearchSettingsResponse
-	33,  // 111: ariadne.v1.SettingsService.CheckSearchSettings:output_type -> ariadne.v1.CheckSearchSettingsResponse
-	44,  // 112: ariadne.v1.SettingsService.GetModelSettings:output_type -> ariadne.v1.GetModelSettingsResponse
-	46,  // 113: ariadne.v1.SettingsService.SaveModelSettings:output_type -> ariadne.v1.SaveModelSettingsResponse
-	52,  // 114: ariadne.v1.SettingsService.ListProviderModels:output_type -> ariadne.v1.ListProviderModelsResponse
-	54,  // 115: ariadne.v1.SettingsService.GetModelInfo:output_type -> ariadne.v1.GetModelInfoResponse
-	57,  // 116: ariadne.v1.SettingsService.ListFoundSetups:output_type -> ariadne.v1.ListFoundSetupsResponse
-	59,  // 117: ariadne.v1.SettingsService.UseFoundSetup:output_type -> ariadne.v1.UseFoundSetupResponse
-	67,  // 118: ariadne.v1.SettingsService.GetMcpSettings:output_type -> ariadne.v1.GetMcpSettingsResponse
-	69,  // 119: ariadne.v1.SettingsService.SaveMcpSettings:output_type -> ariadne.v1.SaveMcpSettingsResponse
-	71,  // 120: ariadne.v1.SettingsService.CheckMcpServer:output_type -> ariadne.v1.CheckMcpServerResponse
-	103, // [103:121] is the sub-list for method output_type
-	85,  // [85:103] is the sub-list for method input_type
-	85,  // [85:85] is the sub-list for extension type_name
-	85,  // [85:85] is the sub-list for extension extendee
-	0,   // [0:85] is the sub-list for field type_name
+	2,   // 82: ariadne.v1.WebhookInput.headers:type_name -> ariadne.v1.SecretPair
+	0,   // 83: ariadne.v1.NotifierServiceView.title:type_name -> ariadne.v1.LocalizedText
+	0,   // 84: ariadne.v1.NotifierServiceView.description:type_name -> ariadne.v1.LocalizedText
+	4,   // 85: ariadne.v1.NotifierServiceView.settings:type_name -> ariadne.v1.SettingsSchema
+	75,  // 86: ariadne.v1.NotifierServiceView.capabilities:type_name -> ariadne.v1.NotifierCapabilities
+	103, // 87: ariadne.v1.NotifierServiceView.values:type_name -> google.protobuf.Struct
+	103, // 88: ariadne.v1.NotifierServiceInput.values:type_name -> google.protobuf.Struct
+	72,  // 89: ariadne.v1.NotificationSettings.subscriptions:type_name -> ariadne.v1.PushSubscriptionView
+	73,  // 90: ariadne.v1.NotificationSettings.webhooks:type_name -> ariadne.v1.WebhookView
+	76,  // 91: ariadne.v1.NotificationSettings.notifiers:type_name -> ariadne.v1.NotifierServiceView
+	78,  // 92: ariadne.v1.GetNotificationSettingsResponse.notifications:type_name -> ariadne.v1.NotificationSettings
+	74,  // 93: ariadne.v1.SaveNotificationSettingsRequest.webhooks:type_name -> ariadne.v1.WebhookInput
+	101, // 94: ariadne.v1.SaveNotificationSettingsRequest.notifiers:type_name -> ariadne.v1.SaveNotificationSettingsRequest.NotifiersEntry
+	78,  // 95: ariadne.v1.SaveNotificationSettingsResponse.notifications:type_name -> ariadne.v1.NotificationSettings
+	72,  // 96: ariadne.v1.SubscribePushResponse.subscription:type_name -> ariadne.v1.PushSubscriptionView
+	72,  // 97: ariadne.v1.SubscribePushResponse.subscriptions:type_name -> ariadne.v1.PushSubscriptionView
+	72,  // 98: ariadne.v1.UnsubscribePushResponse.subscriptions:type_name -> ariadne.v1.PushSubscriptionView
+	72,  // 99: ariadne.v1.DeletePushSubscriptionResponse.subscriptions:type_name -> ariadne.v1.PushSubscriptionView
+	74,  // 100: ariadne.v1.TestNotificationRequest.webhook_draft:type_name -> ariadne.v1.WebhookInput
+	77,  // 101: ariadne.v1.TestNotificationRequest.notifier_draft:type_name -> ariadne.v1.NotifierServiceInput
+	0,   // 102: ariadne.v1.TestNotificationResponse.message:type_name -> ariadne.v1.LocalizedText
+	3,   // 103: ariadne.v1.SettingsSchema.PropertiesEntry.value:type_name -> ariadne.v1.SettingField
+	103, // 104: ariadne.v1.SaveSearchSettingsRequest.ServicesEntry.value:type_name -> google.protobuf.Struct
+	103, // 105: ariadne.v1.CheckSearchSettingsRequest.ServicesEntry.value:type_name -> google.protobuf.Struct
+	77,  // 106: ariadne.v1.SaveNotificationSettingsRequest.NotifiersEntry.value:type_name -> ariadne.v1.NotifierServiceInput
+	6,   // 107: ariadne.v1.SettingsService.GetConcurrency:input_type -> ariadne.v1.GetConcurrencyRequest
+	8,   // 108: ariadne.v1.SettingsService.SaveConcurrency:input_type -> ariadne.v1.SaveConcurrencyRequest
+	12,  // 109: ariadne.v1.SettingsService.GetInputSettings:input_type -> ariadne.v1.GetInputSettingsRequest
+	14,  // 110: ariadne.v1.SettingsService.SaveInputSettings:input_type -> ariadne.v1.SaveInputSettingsRequest
+	21,  // 111: ariadne.v1.SettingsService.GetWorkSettings:input_type -> ariadne.v1.GetWorkSettingsRequest
+	23,  // 112: ariadne.v1.SettingsService.SaveWorkSettings:input_type -> ariadne.v1.SaveWorkSettingsRequest
+	28,  // 113: ariadne.v1.SettingsService.GetSearchSettings:input_type -> ariadne.v1.GetSearchSettingsRequest
+	30,  // 114: ariadne.v1.SettingsService.SaveSearchSettings:input_type -> ariadne.v1.SaveSearchSettingsRequest
+	32,  // 115: ariadne.v1.SettingsService.CheckSearchSettings:input_type -> ariadne.v1.CheckSearchSettingsRequest
+	43,  // 116: ariadne.v1.SettingsService.GetModelSettings:input_type -> ariadne.v1.GetModelSettingsRequest
+	45,  // 117: ariadne.v1.SettingsService.SaveModelSettings:input_type -> ariadne.v1.SaveModelSettingsRequest
+	51,  // 118: ariadne.v1.SettingsService.ListProviderModels:input_type -> ariadne.v1.ListProviderModelsRequest
+	53,  // 119: ariadne.v1.SettingsService.GetModelInfo:input_type -> ariadne.v1.GetModelInfoRequest
+	56,  // 120: ariadne.v1.SettingsService.ListFoundSetups:input_type -> ariadne.v1.ListFoundSetupsRequest
+	58,  // 121: ariadne.v1.SettingsService.UseFoundSetup:input_type -> ariadne.v1.UseFoundSetupRequest
+	66,  // 122: ariadne.v1.SettingsService.GetMcpSettings:input_type -> ariadne.v1.GetMcpSettingsRequest
+	68,  // 123: ariadne.v1.SettingsService.SaveMcpSettings:input_type -> ariadne.v1.SaveMcpSettingsRequest
+	70,  // 124: ariadne.v1.SettingsService.CheckMcpServer:input_type -> ariadne.v1.CheckMcpServerRequest
+	79,  // 125: ariadne.v1.SettingsService.GetNotificationSettings:input_type -> ariadne.v1.GetNotificationSettingsRequest
+	81,  // 126: ariadne.v1.SettingsService.SaveNotificationSettings:input_type -> ariadne.v1.SaveNotificationSettingsRequest
+	83,  // 127: ariadne.v1.SettingsService.SubscribePush:input_type -> ariadne.v1.SubscribePushRequest
+	85,  // 128: ariadne.v1.SettingsService.UnsubscribePush:input_type -> ariadne.v1.UnsubscribePushRequest
+	87,  // 129: ariadne.v1.SettingsService.DeletePushSubscription:input_type -> ariadne.v1.DeletePushSubscriptionRequest
+	89,  // 130: ariadne.v1.SettingsService.TestNotification:input_type -> ariadne.v1.TestNotificationRequest
+	91,  // 131: ariadne.v1.SettingsService.ReportNotificationPresence:input_type -> ariadne.v1.ReportNotificationPresenceRequest
+	7,   // 132: ariadne.v1.SettingsService.GetConcurrency:output_type -> ariadne.v1.GetConcurrencyResponse
+	9,   // 133: ariadne.v1.SettingsService.SaveConcurrency:output_type -> ariadne.v1.SaveConcurrencyResponse
+	13,  // 134: ariadne.v1.SettingsService.GetInputSettings:output_type -> ariadne.v1.GetInputSettingsResponse
+	15,  // 135: ariadne.v1.SettingsService.SaveInputSettings:output_type -> ariadne.v1.SaveInputSettingsResponse
+	22,  // 136: ariadne.v1.SettingsService.GetWorkSettings:output_type -> ariadne.v1.GetWorkSettingsResponse
+	24,  // 137: ariadne.v1.SettingsService.SaveWorkSettings:output_type -> ariadne.v1.SaveWorkSettingsResponse
+	29,  // 138: ariadne.v1.SettingsService.GetSearchSettings:output_type -> ariadne.v1.GetSearchSettingsResponse
+	31,  // 139: ariadne.v1.SettingsService.SaveSearchSettings:output_type -> ariadne.v1.SaveSearchSettingsResponse
+	33,  // 140: ariadne.v1.SettingsService.CheckSearchSettings:output_type -> ariadne.v1.CheckSearchSettingsResponse
+	44,  // 141: ariadne.v1.SettingsService.GetModelSettings:output_type -> ariadne.v1.GetModelSettingsResponse
+	46,  // 142: ariadne.v1.SettingsService.SaveModelSettings:output_type -> ariadne.v1.SaveModelSettingsResponse
+	52,  // 143: ariadne.v1.SettingsService.ListProviderModels:output_type -> ariadne.v1.ListProviderModelsResponse
+	54,  // 144: ariadne.v1.SettingsService.GetModelInfo:output_type -> ariadne.v1.GetModelInfoResponse
+	57,  // 145: ariadne.v1.SettingsService.ListFoundSetups:output_type -> ariadne.v1.ListFoundSetupsResponse
+	59,  // 146: ariadne.v1.SettingsService.UseFoundSetup:output_type -> ariadne.v1.UseFoundSetupResponse
+	67,  // 147: ariadne.v1.SettingsService.GetMcpSettings:output_type -> ariadne.v1.GetMcpSettingsResponse
+	69,  // 148: ariadne.v1.SettingsService.SaveMcpSettings:output_type -> ariadne.v1.SaveMcpSettingsResponse
+	71,  // 149: ariadne.v1.SettingsService.CheckMcpServer:output_type -> ariadne.v1.CheckMcpServerResponse
+	80,  // 150: ariadne.v1.SettingsService.GetNotificationSettings:output_type -> ariadne.v1.GetNotificationSettingsResponse
+	82,  // 151: ariadne.v1.SettingsService.SaveNotificationSettings:output_type -> ariadne.v1.SaveNotificationSettingsResponse
+	84,  // 152: ariadne.v1.SettingsService.SubscribePush:output_type -> ariadne.v1.SubscribePushResponse
+	86,  // 153: ariadne.v1.SettingsService.UnsubscribePush:output_type -> ariadne.v1.UnsubscribePushResponse
+	88,  // 154: ariadne.v1.SettingsService.DeletePushSubscription:output_type -> ariadne.v1.DeletePushSubscriptionResponse
+	90,  // 155: ariadne.v1.SettingsService.TestNotification:output_type -> ariadne.v1.TestNotificationResponse
+	92,  // 156: ariadne.v1.SettingsService.ReportNotificationPresence:output_type -> ariadne.v1.ReportNotificationPresenceResponse
+	132, // [132:157] is the sub-list for method output_type
+	107, // [107:132] is the sub-list for method input_type
+	107, // [107:107] is the sub-list for extension type_name
+	107, // [107:107] is the sub-list for extension extendee
+	0,   // [0:107] is the sub-list for field type_name
 }
 
 func init() { file_ariadne_v1_settings_proto_init() }
@@ -4983,13 +6471,19 @@ func file_ariadne_v1_settings_proto_init() {
 	file_ariadne_v1_settings_proto_msgTypes[61].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[63].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[65].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[72].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[74].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[76].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[89].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[90].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[91].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ariadne_v1_settings_proto_rawDesc), len(file_ariadne_v1_settings_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   80,
+			NumMessages:   102,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

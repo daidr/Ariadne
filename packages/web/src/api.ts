@@ -112,17 +112,23 @@ import {
   fromProtoModelInfo,
   fromProtoModelProblems,
   fromProtoModelSettings,
+  fromProtoNotificationSettings,
   fromProtoPluginConfig,
   fromProtoPluginRecord,
+  fromProtoPushSubscriptionView,
   fromProtoSearchCheckResult,
   fromProtoSearchSettings,
   fromProtoSourceKind,
+  fromProtoTestNotificationResult,
   fromProtoUpdateStatus,
   fromProtoWorkSettings,
   toJsonObject,
   toProtoMcpServerInput,
+  toProtoNotifierServiceInput,
   toProtoSaveModelSettingsRequest,
+  toProtoSaveNotificationSettingsRequest,
   toProtoSearchInput,
+  toProtoWebhookInput,
 } from './rpc-settings'
 import { synchronizeServerClock } from './server-clock'
 
@@ -412,6 +418,7 @@ export interface PluginUsage {
   modelRoles: string[]
   searches: string[]
   projects: string[]
+  notifiers: string[]
 }
 
 /** A plugin as the server reports it; see `PluginRecord` in the agent package. */
@@ -429,6 +436,7 @@ export interface PluginRecord {
     dashboards: string[]
     searches: string[]
     links: string[]
+    notifiers: string[]
   }
   usage?: PluginUsage
 }
@@ -538,6 +546,102 @@ export interface SearchCheckResult {
   ok: boolean
   status: number | null
   message?: LocalizedText
+}
+
+export interface PushSubscriptionView {
+  id: string
+  endpoint: string
+  label: string
+  userAgent: string
+  createdAt: number
+  lastUsedAt: number | null
+  lastError: string | null
+}
+
+export interface WebhookView {
+  id: string
+  name: string
+  url: string
+  enabled: boolean
+  secretSet: boolean
+  headers: string[]
+}
+
+export interface WebhookInput {
+  id: string
+  name: string
+  url: string
+  enabled: boolean
+  secret?: string
+  clearSecret?: boolean
+  headers?: { name: string; value: string }[]
+}
+
+export interface NotifierCapabilities {
+  supportsCheck?: boolean
+}
+
+export interface NotifierServiceView {
+  kind: string
+  title: LocalizedText
+  description?: LocalizedText
+  settings: SettingsSchema
+  capabilities?: NotifierCapabilities
+  enabled: boolean
+  values: Record<string, unknown>
+  secretsSet: string[]
+  ready: boolean
+}
+
+export interface NotifierServiceInput {
+  enabled: boolean
+  values: Record<string, unknown>
+}
+
+export interface NotificationSettings {
+  enabled: boolean
+  webPushEnabled: boolean
+  vapidPublicKey: string
+  subscriptions: PushSubscriptionView[]
+  webhooks: WebhookView[]
+  notifiers: NotifierServiceView[]
+}
+
+export interface NotificationSettingsInput {
+  enabled: boolean
+  webPushEnabled: boolean
+  webhooks: WebhookInput[]
+  notifiers: Record<string, NotifierServiceInput>
+}
+
+export interface SubscribePushInput {
+  endpoint: string
+  p256dh: string
+  auth: string
+  label: string
+  userAgent: string
+}
+
+export interface TestNotificationInput {
+  channel: 'webpush' | 'webhook' | 'notifier'
+  targetId?: string
+  webhookDraft?: WebhookInput
+  notifierDraft?: NotifierServiceInput
+}
+
+export interface TestNotificationResult {
+  ok: boolean
+  status: number | null
+  message?: LocalizedText
+  delivered: number
+  failed: number
+}
+
+export interface NotificationPresenceInput {
+  clientId: string
+  focused: boolean
+  projectId?: string | null
+  threadId?: string | null
 }
 
 export interface WorkSettings {
@@ -1030,6 +1134,58 @@ export const api = {
     ),
   checkSearchSettings: async (input: SearchSettingsInput): Promise<SearchCheckResult> =>
     fromProtoSearchCheckResult(await settingsClient.checkSearchSettings(toProtoSearchInput(input))),
+  getNotificationSettings: async (): Promise<NotificationSettings> =>
+    fromProtoNotificationSettings((await settingsClient.getNotificationSettings({})).notifications),
+  saveNotificationSettings: async (
+    input: NotificationSettingsInput,
+  ): Promise<NotificationSettings> =>
+    fromProtoNotificationSettings(
+      (await settingsClient.saveNotificationSettings(toProtoSaveNotificationSettingsRequest(input)))
+        .notifications,
+    ),
+  subscribePush: async (
+    input: SubscribePushInput,
+  ): Promise<{
+    subscription: PushSubscriptionView | null
+    subscriptions: PushSubscriptionView[]
+  }> => {
+    const response = await settingsClient.subscribePush(input)
+    return {
+      subscription: response.subscription
+        ? fromProtoPushSubscriptionView(response.subscription)
+        : null,
+      subscriptions: response.subscriptions.map(fromProtoPushSubscriptionView),
+    }
+  },
+  unsubscribePush: async (endpoint: string): Promise<{ subscriptions: PushSubscriptionView[] }> => {
+    const response = await settingsClient.unsubscribePush({ endpoint })
+    return { subscriptions: response.subscriptions.map(fromProtoPushSubscriptionView) }
+  },
+  deletePushSubscription: async (
+    id: string,
+  ): Promise<{ subscriptions: PushSubscriptionView[] }> => {
+    const response = await settingsClient.deletePushSubscription({ id })
+    return { subscriptions: response.subscriptions.map(fromProtoPushSubscriptionView) }
+  },
+  testNotification: async (input: TestNotificationInput): Promise<TestNotificationResult> =>
+    fromProtoTestNotificationResult(
+      await settingsClient.testNotification({
+        channel: input.channel,
+        ...(input.targetId !== undefined ? { targetId: input.targetId } : {}),
+        ...(input.webhookDraft ? { webhookDraft: toProtoWebhookInput(input.webhookDraft) } : {}),
+        ...(input.notifierDraft
+          ? { notifierDraft: toProtoNotifierServiceInput(input.notifierDraft) }
+          : {}),
+      }),
+    ),
+  reportNotificationPresence: async (input: NotificationPresenceInput): Promise<void> => {
+    await settingsClient.reportNotificationPresence({
+      clientId: input.clientId,
+      focused: input.focused,
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+    })
+  },
   listPlugins: async (): Promise<{ plugins: PluginRecord[] }> => {
     const response = await pluginClient.listPlugins({})
     return { plugins: response.plugins.map(fromProtoPluginRecord) }

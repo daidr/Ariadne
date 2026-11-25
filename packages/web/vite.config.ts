@@ -135,6 +135,9 @@ export default defineConfig({
       ],
     },
     VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       injectRegister: 'auto',
       includeAssets: ['favicon.svg', 'favicon-32x32.png', 'favicon.ico', 'apple-touch-icon.png'],
@@ -169,47 +172,9 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        cleanupOutdatedCaches: true,
-        clientsClaim: true,
-        skipWaiting: true,
+      injectManifest: {
         // Precache only includeAssets + manifest icons instead of all lazy grammar/editor chunks.
         globPatterns: [],
-        // Keep navigation network-first so Go binary self-updates take effect immediately,
-        // while bypassing /api/* (SSE, WebSockets, cookie-authenticated files) completely.
-        navigateFallback: null,
-        runtimeCaching: [
-          {
-            urlPattern: ({ request, url, sameOrigin }) =>
-              sameOrigin && request.mode === 'navigate' && !url.pathname.startsWith('/api/'),
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'ariadne-pages',
-              networkTimeoutSeconds: 5,
-              cacheableResponse: {
-                statuses: [200],
-              },
-              expiration: {
-                maxEntries: 20,
-                maxAgeSeconds: 7 * 24 * 60 * 60,
-              },
-            },
-          },
-          {
-            urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith('/assets/'),
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'ariadne-assets',
-              cacheableResponse: {
-                statuses: [200],
-              },
-              expiration: {
-                maxEntries: 200,
-                maxAgeSeconds: 30 * 24 * 60 * 60,
-              },
-            },
-          },
-        ],
       },
     }),
     precompressStaticAssets(),

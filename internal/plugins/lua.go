@@ -144,6 +144,7 @@ var luaGroups = []struct {
 	{"dashboards", []string{"fetch"}, nil},
 	{"searches", []string{"search"}, []string{"check"}},
 	{"links", []string{"match", "preview"}, nil},
+	{"notifiers", []string{"send"}, []string{"check"}},
 }
 
 func compilePlugin(ctx context.Context, name string, source []byte) (plugin sdk.Plugin, err error) {

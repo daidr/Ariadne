@@ -23,6 +23,7 @@ import {
   type CascaderValue,
 } from 'dou-ui'
 import {
+  BellIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CpuIcon,
@@ -56,6 +57,7 @@ import { coordinatorDefaultEffort, EFFORTS, effortsOf, effortWithin } from '../e
 import { lt, t, tm } from '../i18n'
 import InputSettings from './InputSettings.vue'
 import McpSettings from './McpSettings.vue'
+import NotificationSettings from './NotificationSettings.vue'
 import WorkSettings from './WorkSettings.vue'
 import DataTab from './DataTab.vue'
 import PluginSettings from './PluginSettings.vue'
@@ -391,6 +393,7 @@ export type SettingsTab =
   | 'instructions'
   | 'commands'
   | 'input'
+  | 'notifications'
   | 'mcp'
   | 'plugins'
   | 'data'
@@ -399,6 +402,7 @@ type WorkPart = 'instructions' | 'commands'
 const tab = defineModel<SettingsTab>('tab', { default: 'models' })
 const mcp = ref<InstanceType<typeof McpSettings> | null>(null)
 const input = ref<InstanceType<typeof InputSettings> | null>(null)
+const notificationsTab = ref<InstanceType<typeof NotificationSettings> | null>(null)
 const search = ref<InstanceType<typeof SearchSettings> | null>(null)
 const work = ref<Partial<Record<WorkPart, InstanceType<typeof WorkSettings> | null>>>({})
 const WORK_PARTS: WorkPart[] = ['instructions', 'commands']
@@ -420,6 +424,7 @@ const hasUnsavedChanges = computed(
     !!work.value.instructions?.dirty ||
     !!work.value.commands?.dirty ||
     !!input.value?.dirty ||
+    !!notificationsTab.value?.dirty ||
     !!mcp.value?.dirty,
 )
 const isReadOnlyTab = computed(
@@ -728,6 +733,7 @@ async function saveAll() {
       ['instructions', work.value.instructions?.save],
       ['commands', work.value.commands?.save],
       ['input', input.value?.save],
+      ['notifications', notificationsTab.value?.save],
       ['mcp', mcp.value?.save],
     ]
     for (const [part, save] of parts) {
@@ -1167,6 +1173,13 @@ async function saveModels(): Promise<boolean> {
       </DouTabPanel>
       <DouTabPanel value="input" :label="t('settings.tab.input')" :icon="SlidersIcon">
         <InputSettings v-if="mounted" ref="input" />
+      </DouTabPanel>
+      <DouTabPanel value="notifications" :label="t('settings.tab.notifications')" :icon="BellIcon">
+        <NotificationSettings
+          v-if="mounted"
+          ref="notificationsTab"
+          @open-plugins="tab = 'plugins'"
+        />
       </DouTabPanel>
       <DouTabPanel value="mcp" :label="t('settings.tab.mcp')" :icon="McpServerIcon">
         <McpSettings v-if="mounted" ref="mcp" />

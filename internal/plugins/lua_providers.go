@@ -57,6 +57,9 @@ func (program *luaProgram) install(pc sdk.PluginContext, provider luaProvider) e
 			},
 		})
 		return err
+	case "notifiers":
+		_, err := pc.RegisterNotifier(program.notifier(provider))
+		return err
 	}
 	return errors.New("unknown Lua plugin provider type")
 }
@@ -179,6 +182,86 @@ func decodeLuaSearchCheck(raw json.RawMessage) sdk.SearchCheckResult {
 		}
 	}
 	return sdk.SearchCheckResult{OK: false}
+}
+
+func (program *luaProgram) notifier(provider luaProvider) sdk.NotifierProvider {
+	notifierProvider := sdk.NotifierProvider{
+		Kind:        provider.kind,
+		Title:       provider.title,
+		Description: provider.localizedDesc,
+		Settings:    provider.settings,
+		Send: func(ctx context.Context, settings map[string]any, payload sdk.NotificationPayload) error {
+			var raw json.RawMessage
+			if err := program.result(ctx, provider, "send", settings, &raw, settings, payload); err != nil {
+				return err
+			}
+			return checkLuaNotifierSendResult(raw)
+		},
+	}
+	if provider.hasNetworkOrigin {
+		notifierProvider.ValidateSettings = func(values map[string]any) error {
+			return validateNetworkOriginSettings(provider.settings, values)
+		}
+	}
+	if provider.methods["check"] {
+		notifierProvider.Capabilities.SupportsCheck = true
+		notifierProvider.Check = func(ctx context.Context, settings map[string]any) (sdk.NotifierCheckResult, error) {
+			var raw json.RawMessage
+			if err := program.result(ctx, provider, "check", settings, &raw, settings); err != nil {
+				if errors.Is(ctx.Err(), context.Canceled) {
+					return sdk.NotifierCheckResult{}, err
+				}
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+					return sdk.NotifierCheckResult{OK: false}, nil
+				}
+				return sdk.NotifierCheckResult{
+					OK:      false,
+					Message: sdk.LocalizedText{"zh-CN": err.Error(), "en": err.Error()},
+				}, nil
+			}
+			return decodeLuaNotifierCheck(raw), nil
+		}
+	}
+	return notifierProvider
+}
+
+func checkLuaNotifierSendResult(raw json.RawMessage) error {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("true")) {
+		return nil
+	}
+	if bytes.Equal(trimmed, []byte("false")) {
+		return errors.New("notifier returned false")
+	}
+	if trimmed[0] == '{' {
+		var result struct {
+			OK      *bool             `json:"ok"`
+			Message sdk.LocalizedText `json:"message"`
+			Error   string            `json:"error"`
+		}
+		if err := json.Unmarshal(trimmed, &result); err == nil && result.OK != nil && !*result.OK {
+			if msg := strings.TrimSpace(result.Error); msg != "" {
+				return errors.New(msg)
+			}
+			if msg := strings.TrimSpace(result.Message["zh-CN"]); msg != "" {
+				return errors.New(msg)
+			}
+			if msg := strings.TrimSpace(result.Message["en"]); msg != "" {
+				return errors.New(msg)
+			}
+			return errors.New("notifier delivery failed")
+		}
+	}
+	return nil
+}
+
+func decodeLuaNotifierCheck(raw json.RawMessage) sdk.NotifierCheckResult {
+	res := decodeLuaSearchCheck(raw)
+	return sdk.NotifierCheckResult{
+		OK:      res.OK,
+		Status:  res.Status,
+		Message: res.Message,
+	}
 }
 
 func (program *luaProgram) model(provider luaProvider) sdk.ModelProvider {

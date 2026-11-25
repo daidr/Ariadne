@@ -15,6 +15,7 @@ type PluginContext struct {
 	RegisterDashboard func(DashboardSource) (func(), error)
 	RegisterSearch    func(SearchProvider) (func(), error)
 	RegisterLink      func(LinkProvider) (func(), error)
+	RegisterNotifier  func(NotifierProvider) (func(), error)
 }
 type PluginProvides struct {
 	Models     []string `json:"models,omitempty"`
@@ -22,6 +23,7 @@ type PluginProvides struct {
 	Dashboards []string `json:"dashboards,omitempty"`
 	Searches   []string `json:"searches,omitempty"`
 	Links      []string `json:"links,omitempty"`
+	Notifiers  []string `json:"notifiers,omitempty"`
 }
 
 type Plugin struct {

@@ -32,8 +32,14 @@ import { activePlugin } from './plugin-config'
 import { previewFile } from './files/preview'
 import { douLocale, t } from './i18n'
 import { highlightCodeBlock } from './highlighting/code-block'
-import { onLiveEvent, state } from './store'
+import { closeFull, onLiveEvent, openMain, openProject, openThread, state } from './store'
 import { notifyAbout } from './notify'
+import {
+  navigateToNotificationTarget,
+  refreshPushActiveFromServer,
+  syncAppBadge,
+  watchServiceWorkerNavigation,
+} from './push'
 import { COLOR_MODE_KEY, watchThemeColor } from './color-mode'
 import { sheetOpen, useShortcuts } from './shortcuts'
 import { openSettingsKey } from './open-settings'
@@ -206,7 +212,32 @@ watch(
 watchEffect(() => {
   const waiting = state.projects.reduce((sum, project) => sum + project.needsMe, 0)
   document.title = waiting ? `(${waiting}) ${t('app.name')}` : t('app.name')
+  syncAppBadge(waiting)
 })
+
+watch(
+  () => state.stream,
+  (stream) => {
+    if (stream === 'open') void refreshPushActiveFromServer()
+  },
+  { immediate: true },
+)
+
+onScopeDispose(
+  watchServiceWorkerNavigation((target) => {
+    if (target.projectId || target.threadId) {
+      projectsPopoverOpen.value = false
+    }
+    void navigateToNotificationTarget(target, {
+      currentProjectId: () => state.currentId,
+      hasFullView: () => state.full !== null,
+      openProject,
+      openThread,
+      closeFull,
+      openCoordinator: () => openMain({ kind: 'conversation' }),
+    })
+  }),
+)
 </script>
 
 <template>

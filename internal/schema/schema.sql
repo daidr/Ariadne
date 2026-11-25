@@ -294,6 +294,18 @@ CREATE TABLE prompts (
       PRIMARY KEY (project_id, hash)
     );
 
+CREATE TABLE push_subscriptions (
+      id TEXT PRIMARY KEY,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      user_agent TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER,
+      last_error TEXT
+    );
+
 CREATE TABLE reviews (
       id INTEGER PRIMARY KEY,
       project_id TEXT NOT NULL,

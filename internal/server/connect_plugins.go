@@ -43,13 +43,15 @@ func (h *pluginServiceHandler) pluginRecordsProto(ctx context.Context) []*ariadn
 		}
 	}
 	activeSearch := ""
+	var activeNotifiers []string
 	if h.api.options.Settings != nil {
 		activeSearch = h.api.options.Settings.ActiveSearchProvider()
+		activeNotifiers = h.api.options.Settings.ActiveNotifierKinds()
 	}
 	out := make([]*ariadnev1.PluginRecord, 0, len(records))
 	for _, record := range records {
 		proto := toProtoPluginRecord(record)
-		proto.Usage = h.pluginUsageProto(record.Provides, activeSearch, projects)
+		proto.Usage = h.pluginUsageProto(record.Provides, activeSearch, activeNotifiers, projects)
 		out = append(out, proto)
 	}
 	return out
@@ -58,6 +60,7 @@ func (h *pluginServiceHandler) pluginRecordsProto(ctx context.Context) []*ariadn
 func (h *pluginServiceHandler) pluginUsageProto(
 	provides plugins.Provides,
 	activeSearch string,
+	activeNotifiers []string,
 	projects []core.ProjectView,
 ) *ariadnev1.PluginUsage {
 	usage := &ariadnev1.PluginUsage{}
@@ -66,6 +69,11 @@ func (h *pluginServiceHandler) pluginUsageProto(
 	}
 	if activeSearch != "" && slices.Contains(provides.Searches, activeSearch) {
 		usage.Searches = []string{activeSearch}
+	}
+	for _, kind := range provides.Notifiers {
+		if slices.Contains(activeNotifiers, kind) {
+			usage.Notifiers = append(usage.Notifiers, kind)
+		}
 	}
 	if len(provides.Contexts) > 0 && len(projects) > 0 {
 		for _, project := range projects {
@@ -222,6 +230,7 @@ func toProtoPluginRecord(record plugins.Record) *ariadnev1.PluginRecord {
 			Dashboards: slices.Clone(record.Provides.Dashboards),
 			Searches:   slices.Clone(record.Provides.Searches),
 			Links:      slices.Clone(record.Provides.Links),
+			Notifiers:  slices.Clone(record.Provides.Notifiers),
 		},
 		Configurable: record.Configurable,
 	}

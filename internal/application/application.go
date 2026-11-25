@@ -30,6 +30,7 @@ import (
 	"github.com/daidr/Ariadne/internal/local"
 	"github.com/daidr/Ariadne/internal/mcp"
 	"github.com/daidr/Ariadne/internal/models"
+	"github.com/daidr/Ariadne/internal/notifications"
 	"github.com/daidr/Ariadne/internal/plugins"
 	"github.com/daidr/Ariadne/internal/process"
 	"github.com/daidr/Ariadne/internal/providers"
@@ -145,12 +146,13 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	dashboards := dashboard.New()
 	add(dashboards.Close)
 	searchRegistry := searches.New()
+	notifierRegistry := notifications.NewRegistry()
 	resolver := links.New(links.Options{})
 	addSimple(func() error { resolver.Close(); return nil })
 	agentBridge := agentruntime.NewToolBridge()
 	add(agentBridge.Close)
 	host, err := plugins.New(plugins.Options{
-		DataRoot: filepath.Join(home, "plugins"), ManagedRoot: home, Models: modelRegistry, Sources: registry, Dashboards: dashboards, Searches: searchRegistry, Links: resolver, OnError: onError,
+		DataRoot: filepath.Join(home, "plugins"), ManagedRoot: home, Models: modelRegistry, Sources: registry, Dashboards: dashboards, Searches: searchRegistry, Links: resolver, Notifiers: notifierRegistry, OnError: onError,
 		Settings: user,
 	})
 	if err != nil {
@@ -273,13 +275,23 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	if err != nil {
 		return nil, err
 	}
+	notifierService, err := notifications.NewService(notifications.Options{
+		Repository: repo,
+		Settings:   user,
+		Notifiers:  notifierRegistry,
+		HTTPClient: options.Client,
+		OnError:    onError,
+	})
+	if err != nil {
+		return nil, err
+	}
 	janitor := workspaces.NewJanitor(manager, workspaces.JanitorOptions{OnError: onError})
 	api, err := server.New(server.Options{
 		Repository: repo, Token: cfg.Token, Version: version, Web: options.Web, Scheduler: schedule, State: state,
 		Data: storage, Settings: user, Models: modelRegistry, Sources: registry,
 		Updates: updates, ServiceControl: serviceControl,
 		Links: resolver, MCP: mcpHub, Workspaces: manager, SkillsDirs: skillsDirs, Dashboards: dashboards,
-		Searches: searchRegistry, Plugins: host, HTTPClient: options.Client, OnError: onError,
+		Searches: searchRegistry, Notifiers: notifierRegistry, Notifications: notifierService, Plugins: host, HTTPClient: options.Client, OnError: onError,
 		Rooms:       rooms,
 		FindContext: &sdk.FindContext{Env: env, Home: userHome, Which: func(name string) bool { _, err := exec.LookPath(name); return err == nil }},
 		ModelOf: func(r *http.Request, conversation core.ConversationView) (any, error) {
@@ -330,6 +342,10 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 		return nil, err
 	}
 	add(alarms.Stop)
+	if err := notifierService.Start(life); err != nil {
+		return nil, err
+	}
+	add(notifierService.Stop)
 	if err := janitor.Start(life); err != nil {
 		return nil, err
 	}

@@ -127,6 +127,7 @@ describe('ModelSettings', () => {
           SearchSettings: true,
           WorkSettings: true,
           InputSettings: true,
+          NotificationSettings: true,
           McpSettings: true,
           DataTab: true,
           UpdatesSettings: true,
@@ -198,6 +199,7 @@ describe('ModelSettings', () => {
           SearchSettings: true,
           WorkSettings: true,
           InputSettings: true,
+          NotificationSettings: true,
           McpSettings: true,
           DataTab: true,
           UpdatesSettings: true,
@@ -278,6 +280,7 @@ describe('ModelSettings', () => {
           SearchSettings: true,
           WorkSettings: true,
           InputSettings: true,
+          NotificationSettings: true,
           McpSettings: true,
           DataTab: true,
           UpdatesSettings: true,
@@ -351,6 +354,7 @@ describe('ModelSettings', () => {
           SearchSettings: true,
           WorkSettings: true,
           InputSettings: true,
+          NotificationSettings: true,
           McpSettings: true,
           DataTab: true,
           UpdatesSettings: true,
@@ -364,7 +368,7 @@ describe('ModelSettings', () => {
     await flushPromises()
 
     const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(9)
+    expect(tabs).toHaveLength(10)
     for (const tab of tabs) {
       expect(tab.find('.dou-tabs__icon').exists()).toBe(true)
     }
@@ -416,6 +420,7 @@ describe('ModelSettings', () => {
           SearchSettings: true,
           WorkSettings: true,
           InputSettings: true,
+          NotificationSettings: true,
           McpSettings: McpStub,
           DataTab: true,
           UpdatesSettings: true,

@@ -2,7 +2,8 @@ import type { MessageKey } from '@ariadne/i18n'
 import type { PluginRecord, PluginUsage } from '../api'
 import { t } from '../i18n'
 
-export type PluginCapability = 'models' | 'searches' | 'contexts' | 'links' | 'dashboards'
+export type PluginCapability =
+  'models' | 'searches' | 'contexts' | 'links' | 'dashboards' | 'notifiers'
 
 const CAPABILITY_ORDER: PluginCapability[] = [
   'models',
@@ -10,6 +11,7 @@ const CAPABILITY_ORDER: PluginCapability[] = [
   'contexts',
   'links',
   'dashboards',
+  'notifiers',
 ]
 
 const ROLE_KEYS: Record<string, MessageKey> = {
@@ -43,7 +45,12 @@ export function splitPlugins(records: PluginRecord[]): {
 export function hasPluginUsage(plugin: PluginRecord): boolean {
   const usage = plugin.usage
   if (!usage) return false
-  return usage.modelProviders.length > 0 || usage.searches.length > 0 || usage.projects.length > 0
+  return (
+    usage.modelProviders.length > 0 ||
+    usage.searches.length > 0 ||
+    usage.notifiers.length > 0 ||
+    usage.projects.length > 0
+  )
 }
 
 /** Formats active usage of a plugin into a concise localized summary for rows and confirmations. */
@@ -69,6 +76,10 @@ export function formatPluginUsage(usage?: PluginUsage): string {
 
   if (usage.searches.length > 0) {
     parts.push(t('plugins.usage.search'))
+  }
+
+  if (usage.notifiers.length > 0) {
+    parts.push(t('plugins.usage.notifiers', { names: usage.notifiers.join(sep) }))
   }
 
   if (usage.projects.length === 1) {

@@ -87,6 +87,27 @@ const (
 	// SettingsServiceCheckMcpServerProcedure is the fully-qualified name of the SettingsService's
 	// CheckMcpServer RPC.
 	SettingsServiceCheckMcpServerProcedure = "/ariadne.v1.SettingsService/CheckMcpServer"
+	// SettingsServiceGetNotificationSettingsProcedure is the fully-qualified name of the
+	// SettingsService's GetNotificationSettings RPC.
+	SettingsServiceGetNotificationSettingsProcedure = "/ariadne.v1.SettingsService/GetNotificationSettings"
+	// SettingsServiceSaveNotificationSettingsProcedure is the fully-qualified name of the
+	// SettingsService's SaveNotificationSettings RPC.
+	SettingsServiceSaveNotificationSettingsProcedure = "/ariadne.v1.SettingsService/SaveNotificationSettings"
+	// SettingsServiceSubscribePushProcedure is the fully-qualified name of the SettingsService's
+	// SubscribePush RPC.
+	SettingsServiceSubscribePushProcedure = "/ariadne.v1.SettingsService/SubscribePush"
+	// SettingsServiceUnsubscribePushProcedure is the fully-qualified name of the SettingsService's
+	// UnsubscribePush RPC.
+	SettingsServiceUnsubscribePushProcedure = "/ariadne.v1.SettingsService/UnsubscribePush"
+	// SettingsServiceDeletePushSubscriptionProcedure is the fully-qualified name of the
+	// SettingsService's DeletePushSubscription RPC.
+	SettingsServiceDeletePushSubscriptionProcedure = "/ariadne.v1.SettingsService/DeletePushSubscription"
+	// SettingsServiceTestNotificationProcedure is the fully-qualified name of the SettingsService's
+	// TestNotification RPC.
+	SettingsServiceTestNotificationProcedure = "/ariadne.v1.SettingsService/TestNotification"
+	// SettingsServiceReportNotificationPresenceProcedure is the fully-qualified name of the
+	// SettingsService's ReportNotificationPresence RPC.
+	SettingsServiceReportNotificationPresenceProcedure = "/ariadne.v1.SettingsService/ReportNotificationPresence"
 )
 
 // SettingsServiceClient is a client for the ariadne.v1.SettingsService service.
@@ -109,6 +130,13 @@ type SettingsServiceClient interface {
 	GetMcpSettings(context.Context, *connect.Request[v1.GetMcpSettingsRequest]) (*connect.Response[v1.GetMcpSettingsResponse], error)
 	SaveMcpSettings(context.Context, *connect.Request[v1.SaveMcpSettingsRequest]) (*connect.Response[v1.SaveMcpSettingsResponse], error)
 	CheckMcpServer(context.Context, *connect.Request[v1.CheckMcpServerRequest]) (*connect.Response[v1.CheckMcpServerResponse], error)
+	GetNotificationSettings(context.Context, *connect.Request[v1.GetNotificationSettingsRequest]) (*connect.Response[v1.GetNotificationSettingsResponse], error)
+	SaveNotificationSettings(context.Context, *connect.Request[v1.SaveNotificationSettingsRequest]) (*connect.Response[v1.SaveNotificationSettingsResponse], error)
+	SubscribePush(context.Context, *connect.Request[v1.SubscribePushRequest]) (*connect.Response[v1.SubscribePushResponse], error)
+	UnsubscribePush(context.Context, *connect.Request[v1.UnsubscribePushRequest]) (*connect.Response[v1.UnsubscribePushResponse], error)
+	DeletePushSubscription(context.Context, *connect.Request[v1.DeletePushSubscriptionRequest]) (*connect.Response[v1.DeletePushSubscriptionResponse], error)
+	TestNotification(context.Context, *connect.Request[v1.TestNotificationRequest]) (*connect.Response[v1.TestNotificationResponse], error)
+	ReportNotificationPresence(context.Context, *connect.Request[v1.ReportNotificationPresenceRequest]) (*connect.Response[v1.ReportNotificationPresenceResponse], error)
 }
 
 // NewSettingsServiceClient constructs a client for the ariadne.v1.SettingsService service. By
@@ -230,29 +258,78 @@ func NewSettingsServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(settingsServiceMethods.ByName("CheckMcpServer")),
 			connect.WithClientOptions(opts...),
 		),
+		getNotificationSettings: connect.NewClient[v1.GetNotificationSettingsRequest, v1.GetNotificationSettingsResponse](
+			httpClient,
+			baseURL+SettingsServiceGetNotificationSettingsProcedure,
+			connect.WithSchema(settingsServiceMethods.ByName("GetNotificationSettings")),
+			connect.WithClientOptions(opts...),
+		),
+		saveNotificationSettings: connect.NewClient[v1.SaveNotificationSettingsRequest, v1.SaveNotificationSettingsResponse](
+			httpClient,
+			baseURL+SettingsServiceSaveNotificationSettingsProcedure,
+			connect.WithSchema(settingsServiceMethods.ByName("SaveNotificationSettings")),
+			connect.WithClientOptions(opts...),
+		),
+		subscribePush: connect.NewClient[v1.SubscribePushRequest, v1.SubscribePushResponse](
+			httpClient,
+			baseURL+SettingsServiceSubscribePushProcedure,
+			connect.WithSchema(settingsServiceMethods.ByName("SubscribePush")),
+			connect.WithClientOptions(opts...),
+		),
+		unsubscribePush: connect.NewClient[v1.UnsubscribePushRequest, v1.UnsubscribePushResponse](
+			httpClient,
+			baseURL+SettingsServiceUnsubscribePushProcedure,
+			connect.WithSchema(settingsServiceMethods.ByName("UnsubscribePush")),
+			connect.WithClientOptions(opts...),
+		),
+		deletePushSubscription: connect.NewClient[v1.DeletePushSubscriptionRequest, v1.DeletePushSubscriptionResponse](
+			httpClient,
+			baseURL+SettingsServiceDeletePushSubscriptionProcedure,
+			connect.WithSchema(settingsServiceMethods.ByName("DeletePushSubscription")),
+			connect.WithClientOptions(opts...),
+		),
+		testNotification: connect.NewClient[v1.TestNotificationRequest, v1.TestNotificationResponse](
+			httpClient,
+			baseURL+SettingsServiceTestNotificationProcedure,
+			connect.WithSchema(settingsServiceMethods.ByName("TestNotification")),
+			connect.WithClientOptions(opts...),
+		),
+		reportNotificationPresence: connect.NewClient[v1.ReportNotificationPresenceRequest, v1.ReportNotificationPresenceResponse](
+			httpClient,
+			baseURL+SettingsServiceReportNotificationPresenceProcedure,
+			connect.WithSchema(settingsServiceMethods.ByName("ReportNotificationPresence")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // settingsServiceClient implements SettingsServiceClient.
 type settingsServiceClient struct {
-	getConcurrency      *connect.Client[v1.GetConcurrencyRequest, v1.GetConcurrencyResponse]
-	saveConcurrency     *connect.Client[v1.SaveConcurrencyRequest, v1.SaveConcurrencyResponse]
-	getInputSettings    *connect.Client[v1.GetInputSettingsRequest, v1.GetInputSettingsResponse]
-	saveInputSettings   *connect.Client[v1.SaveInputSettingsRequest, v1.SaveInputSettingsResponse]
-	getWorkSettings     *connect.Client[v1.GetWorkSettingsRequest, v1.GetWorkSettingsResponse]
-	saveWorkSettings    *connect.Client[v1.SaveWorkSettingsRequest, v1.SaveWorkSettingsResponse]
-	getSearchSettings   *connect.Client[v1.GetSearchSettingsRequest, v1.GetSearchSettingsResponse]
-	saveSearchSettings  *connect.Client[v1.SaveSearchSettingsRequest, v1.SaveSearchSettingsResponse]
-	checkSearchSettings *connect.Client[v1.CheckSearchSettingsRequest, v1.CheckSearchSettingsResponse]
-	getModelSettings    *connect.Client[v1.GetModelSettingsRequest, v1.GetModelSettingsResponse]
-	saveModelSettings   *connect.Client[v1.SaveModelSettingsRequest, v1.SaveModelSettingsResponse]
-	listProviderModels  *connect.Client[v1.ListProviderModelsRequest, v1.ListProviderModelsResponse]
-	getModelInfo        *connect.Client[v1.GetModelInfoRequest, v1.GetModelInfoResponse]
-	listFoundSetups     *connect.Client[v1.ListFoundSetupsRequest, v1.ListFoundSetupsResponse]
-	useFoundSetup       *connect.Client[v1.UseFoundSetupRequest, v1.UseFoundSetupResponse]
-	getMcpSettings      *connect.Client[v1.GetMcpSettingsRequest, v1.GetMcpSettingsResponse]
-	saveMcpSettings     *connect.Client[v1.SaveMcpSettingsRequest, v1.SaveMcpSettingsResponse]
-	checkMcpServer      *connect.Client[v1.CheckMcpServerRequest, v1.CheckMcpServerResponse]
+	getConcurrency             *connect.Client[v1.GetConcurrencyRequest, v1.GetConcurrencyResponse]
+	saveConcurrency            *connect.Client[v1.SaveConcurrencyRequest, v1.SaveConcurrencyResponse]
+	getInputSettings           *connect.Client[v1.GetInputSettingsRequest, v1.GetInputSettingsResponse]
+	saveInputSettings          *connect.Client[v1.SaveInputSettingsRequest, v1.SaveInputSettingsResponse]
+	getWorkSettings            *connect.Client[v1.GetWorkSettingsRequest, v1.GetWorkSettingsResponse]
+	saveWorkSettings           *connect.Client[v1.SaveWorkSettingsRequest, v1.SaveWorkSettingsResponse]
+	getSearchSettings          *connect.Client[v1.GetSearchSettingsRequest, v1.GetSearchSettingsResponse]
+	saveSearchSettings         *connect.Client[v1.SaveSearchSettingsRequest, v1.SaveSearchSettingsResponse]
+	checkSearchSettings        *connect.Client[v1.CheckSearchSettingsRequest, v1.CheckSearchSettingsResponse]
+	getModelSettings           *connect.Client[v1.GetModelSettingsRequest, v1.GetModelSettingsResponse]
+	saveModelSettings          *connect.Client[v1.SaveModelSettingsRequest, v1.SaveModelSettingsResponse]
+	listProviderModels         *connect.Client[v1.ListProviderModelsRequest, v1.ListProviderModelsResponse]
+	getModelInfo               *connect.Client[v1.GetModelInfoRequest, v1.GetModelInfoResponse]
+	listFoundSetups            *connect.Client[v1.ListFoundSetupsRequest, v1.ListFoundSetupsResponse]
+	useFoundSetup              *connect.Client[v1.UseFoundSetupRequest, v1.UseFoundSetupResponse]
+	getMcpSettings             *connect.Client[v1.GetMcpSettingsRequest, v1.GetMcpSettingsResponse]
+	saveMcpSettings            *connect.Client[v1.SaveMcpSettingsRequest, v1.SaveMcpSettingsResponse]
+	checkMcpServer             *connect.Client[v1.CheckMcpServerRequest, v1.CheckMcpServerResponse]
+	getNotificationSettings    *connect.Client[v1.GetNotificationSettingsRequest, v1.GetNotificationSettingsResponse]
+	saveNotificationSettings   *connect.Client[v1.SaveNotificationSettingsRequest, v1.SaveNotificationSettingsResponse]
+	subscribePush              *connect.Client[v1.SubscribePushRequest, v1.SubscribePushResponse]
+	unsubscribePush            *connect.Client[v1.UnsubscribePushRequest, v1.UnsubscribePushResponse]
+	deletePushSubscription     *connect.Client[v1.DeletePushSubscriptionRequest, v1.DeletePushSubscriptionResponse]
+	testNotification           *connect.Client[v1.TestNotificationRequest, v1.TestNotificationResponse]
+	reportNotificationPresence *connect.Client[v1.ReportNotificationPresenceRequest, v1.ReportNotificationPresenceResponse]
 }
 
 // GetConcurrency calls ariadne.v1.SettingsService.GetConcurrency.
@@ -345,6 +422,41 @@ func (c *settingsServiceClient) CheckMcpServer(ctx context.Context, req *connect
 	return c.checkMcpServer.CallUnary(ctx, req)
 }
 
+// GetNotificationSettings calls ariadne.v1.SettingsService.GetNotificationSettings.
+func (c *settingsServiceClient) GetNotificationSettings(ctx context.Context, req *connect.Request[v1.GetNotificationSettingsRequest]) (*connect.Response[v1.GetNotificationSettingsResponse], error) {
+	return c.getNotificationSettings.CallUnary(ctx, req)
+}
+
+// SaveNotificationSettings calls ariadne.v1.SettingsService.SaveNotificationSettings.
+func (c *settingsServiceClient) SaveNotificationSettings(ctx context.Context, req *connect.Request[v1.SaveNotificationSettingsRequest]) (*connect.Response[v1.SaveNotificationSettingsResponse], error) {
+	return c.saveNotificationSettings.CallUnary(ctx, req)
+}
+
+// SubscribePush calls ariadne.v1.SettingsService.SubscribePush.
+func (c *settingsServiceClient) SubscribePush(ctx context.Context, req *connect.Request[v1.SubscribePushRequest]) (*connect.Response[v1.SubscribePushResponse], error) {
+	return c.subscribePush.CallUnary(ctx, req)
+}
+
+// UnsubscribePush calls ariadne.v1.SettingsService.UnsubscribePush.
+func (c *settingsServiceClient) UnsubscribePush(ctx context.Context, req *connect.Request[v1.UnsubscribePushRequest]) (*connect.Response[v1.UnsubscribePushResponse], error) {
+	return c.unsubscribePush.CallUnary(ctx, req)
+}
+
+// DeletePushSubscription calls ariadne.v1.SettingsService.DeletePushSubscription.
+func (c *settingsServiceClient) DeletePushSubscription(ctx context.Context, req *connect.Request[v1.DeletePushSubscriptionRequest]) (*connect.Response[v1.DeletePushSubscriptionResponse], error) {
+	return c.deletePushSubscription.CallUnary(ctx, req)
+}
+
+// TestNotification calls ariadne.v1.SettingsService.TestNotification.
+func (c *settingsServiceClient) TestNotification(ctx context.Context, req *connect.Request[v1.TestNotificationRequest]) (*connect.Response[v1.TestNotificationResponse], error) {
+	return c.testNotification.CallUnary(ctx, req)
+}
+
+// ReportNotificationPresence calls ariadne.v1.SettingsService.ReportNotificationPresence.
+func (c *settingsServiceClient) ReportNotificationPresence(ctx context.Context, req *connect.Request[v1.ReportNotificationPresenceRequest]) (*connect.Response[v1.ReportNotificationPresenceResponse], error) {
+	return c.reportNotificationPresence.CallUnary(ctx, req)
+}
+
 // SettingsServiceHandler is an implementation of the ariadne.v1.SettingsService service.
 type SettingsServiceHandler interface {
 	GetConcurrency(context.Context, *connect.Request[v1.GetConcurrencyRequest]) (*connect.Response[v1.GetConcurrencyResponse], error)
@@ -365,6 +477,13 @@ type SettingsServiceHandler interface {
 	GetMcpSettings(context.Context, *connect.Request[v1.GetMcpSettingsRequest]) (*connect.Response[v1.GetMcpSettingsResponse], error)
 	SaveMcpSettings(context.Context, *connect.Request[v1.SaveMcpSettingsRequest]) (*connect.Response[v1.SaveMcpSettingsResponse], error)
 	CheckMcpServer(context.Context, *connect.Request[v1.CheckMcpServerRequest]) (*connect.Response[v1.CheckMcpServerResponse], error)
+	GetNotificationSettings(context.Context, *connect.Request[v1.GetNotificationSettingsRequest]) (*connect.Response[v1.GetNotificationSettingsResponse], error)
+	SaveNotificationSettings(context.Context, *connect.Request[v1.SaveNotificationSettingsRequest]) (*connect.Response[v1.SaveNotificationSettingsResponse], error)
+	SubscribePush(context.Context, *connect.Request[v1.SubscribePushRequest]) (*connect.Response[v1.SubscribePushResponse], error)
+	UnsubscribePush(context.Context, *connect.Request[v1.UnsubscribePushRequest]) (*connect.Response[v1.UnsubscribePushResponse], error)
+	DeletePushSubscription(context.Context, *connect.Request[v1.DeletePushSubscriptionRequest]) (*connect.Response[v1.DeletePushSubscriptionResponse], error)
+	TestNotification(context.Context, *connect.Request[v1.TestNotificationRequest]) (*connect.Response[v1.TestNotificationResponse], error)
+	ReportNotificationPresence(context.Context, *connect.Request[v1.ReportNotificationPresenceRequest]) (*connect.Response[v1.ReportNotificationPresenceResponse], error)
 }
 
 // NewSettingsServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -482,6 +601,48 @@ func NewSettingsServiceHandler(svc SettingsServiceHandler, opts ...connect.Handl
 		connect.WithSchema(settingsServiceMethods.ByName("CheckMcpServer")),
 		connect.WithHandlerOptions(opts...),
 	)
+	settingsServiceGetNotificationSettingsHandler := connect.NewUnaryHandler(
+		SettingsServiceGetNotificationSettingsProcedure,
+		svc.GetNotificationSettings,
+		connect.WithSchema(settingsServiceMethods.ByName("GetNotificationSettings")),
+		connect.WithHandlerOptions(opts...),
+	)
+	settingsServiceSaveNotificationSettingsHandler := connect.NewUnaryHandler(
+		SettingsServiceSaveNotificationSettingsProcedure,
+		svc.SaveNotificationSettings,
+		connect.WithSchema(settingsServiceMethods.ByName("SaveNotificationSettings")),
+		connect.WithHandlerOptions(opts...),
+	)
+	settingsServiceSubscribePushHandler := connect.NewUnaryHandler(
+		SettingsServiceSubscribePushProcedure,
+		svc.SubscribePush,
+		connect.WithSchema(settingsServiceMethods.ByName("SubscribePush")),
+		connect.WithHandlerOptions(opts...),
+	)
+	settingsServiceUnsubscribePushHandler := connect.NewUnaryHandler(
+		SettingsServiceUnsubscribePushProcedure,
+		svc.UnsubscribePush,
+		connect.WithSchema(settingsServiceMethods.ByName("UnsubscribePush")),
+		connect.WithHandlerOptions(opts...),
+	)
+	settingsServiceDeletePushSubscriptionHandler := connect.NewUnaryHandler(
+		SettingsServiceDeletePushSubscriptionProcedure,
+		svc.DeletePushSubscription,
+		connect.WithSchema(settingsServiceMethods.ByName("DeletePushSubscription")),
+		connect.WithHandlerOptions(opts...),
+	)
+	settingsServiceTestNotificationHandler := connect.NewUnaryHandler(
+		SettingsServiceTestNotificationProcedure,
+		svc.TestNotification,
+		connect.WithSchema(settingsServiceMethods.ByName("TestNotification")),
+		connect.WithHandlerOptions(opts...),
+	)
+	settingsServiceReportNotificationPresenceHandler := connect.NewUnaryHandler(
+		SettingsServiceReportNotificationPresenceProcedure,
+		svc.ReportNotificationPresence,
+		connect.WithSchema(settingsServiceMethods.ByName("ReportNotificationPresence")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/ariadne.v1.SettingsService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SettingsServiceGetConcurrencyProcedure:
@@ -520,6 +681,20 @@ func NewSettingsServiceHandler(svc SettingsServiceHandler, opts ...connect.Handl
 			settingsServiceSaveMcpSettingsHandler.ServeHTTP(w, r)
 		case SettingsServiceCheckMcpServerProcedure:
 			settingsServiceCheckMcpServerHandler.ServeHTTP(w, r)
+		case SettingsServiceGetNotificationSettingsProcedure:
+			settingsServiceGetNotificationSettingsHandler.ServeHTTP(w, r)
+		case SettingsServiceSaveNotificationSettingsProcedure:
+			settingsServiceSaveNotificationSettingsHandler.ServeHTTP(w, r)
+		case SettingsServiceSubscribePushProcedure:
+			settingsServiceSubscribePushHandler.ServeHTTP(w, r)
+		case SettingsServiceUnsubscribePushProcedure:
+			settingsServiceUnsubscribePushHandler.ServeHTTP(w, r)
+		case SettingsServiceDeletePushSubscriptionProcedure:
+			settingsServiceDeletePushSubscriptionHandler.ServeHTTP(w, r)
+		case SettingsServiceTestNotificationProcedure:
+			settingsServiceTestNotificationHandler.ServeHTTP(w, r)
+		case SettingsServiceReportNotificationPresenceProcedure:
+			settingsServiceReportNotificationPresenceHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -599,4 +774,32 @@ func (UnimplementedSettingsServiceHandler) SaveMcpSettings(context.Context, *con
 
 func (UnimplementedSettingsServiceHandler) CheckMcpServer(context.Context, *connect.Request[v1.CheckMcpServerRequest]) (*connect.Response[v1.CheckMcpServerResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.SettingsService.CheckMcpServer is not implemented"))
+}
+
+func (UnimplementedSettingsServiceHandler) GetNotificationSettings(context.Context, *connect.Request[v1.GetNotificationSettingsRequest]) (*connect.Response[v1.GetNotificationSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.SettingsService.GetNotificationSettings is not implemented"))
+}
+
+func (UnimplementedSettingsServiceHandler) SaveNotificationSettings(context.Context, *connect.Request[v1.SaveNotificationSettingsRequest]) (*connect.Response[v1.SaveNotificationSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.SettingsService.SaveNotificationSettings is not implemented"))
+}
+
+func (UnimplementedSettingsServiceHandler) SubscribePush(context.Context, *connect.Request[v1.SubscribePushRequest]) (*connect.Response[v1.SubscribePushResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.SettingsService.SubscribePush is not implemented"))
+}
+
+func (UnimplementedSettingsServiceHandler) UnsubscribePush(context.Context, *connect.Request[v1.UnsubscribePushRequest]) (*connect.Response[v1.UnsubscribePushResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.SettingsService.UnsubscribePush is not implemented"))
+}
+
+func (UnimplementedSettingsServiceHandler) DeletePushSubscription(context.Context, *connect.Request[v1.DeletePushSubscriptionRequest]) (*connect.Response[v1.DeletePushSubscriptionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.SettingsService.DeletePushSubscription is not implemented"))
+}
+
+func (UnimplementedSettingsServiceHandler) TestNotification(context.Context, *connect.Request[v1.TestNotificationRequest]) (*connect.Response[v1.TestNotificationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.SettingsService.TestNotification is not implemented"))
+}
+
+func (UnimplementedSettingsServiceHandler) ReportNotificationPresence(context.Context, *connect.Request[v1.ReportNotificationPresenceRequest]) (*connect.Response[v1.ReportNotificationPresenceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.SettingsService.ReportNotificationPresence is not implemented"))
 }
