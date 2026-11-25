@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useLayer } from 'dou-ui'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { t } from '../i18n'
 import {
@@ -239,13 +240,6 @@ function onRootFocusOut(event: FocusEvent) {
   closePeek()
 }
 
-function onEscape(event: KeyboardEvent) {
-  if (!peeking.value) return
-  event.preventDefault()
-  event.stopPropagation()
-  closePeek(true)
-}
-
 function pick(id: string) {
   emit('select', id)
   if (isFloating.value) {
@@ -253,12 +247,18 @@ function pick(id: string) {
   }
 }
 
-function onOutsidePointerDown(event: PointerEvent) {
-  if (!peeking.value) return
-  const target = event.target as Node | null
-  if (target && root.value?.contains(target)) return
-  closePeek()
-}
+useLayer({
+  open: isFloating,
+  elements: () => [root.value],
+  onEscape(event) {
+    event.preventDefault()
+    const focusInsideToc = !!root.value?.contains(document.activeElement)
+    closePeek(focusInsideToc)
+  },
+  onOutside() {
+    closePeek()
+  },
+})
 
 watch([isCollapsed, visible], ([collapsed, shown]) => {
   if (!collapsed || !shown) {
@@ -285,12 +285,6 @@ watch(
   },
   { flush: 'sync' },
 )
-
-watch(peeking, (open, _prev, onCleanup) => {
-  if (!open) return
-  document.addEventListener('pointerdown', onOutsidePointerDown, true)
-  onCleanup(() => document.removeEventListener('pointerdown', onOutsidePointerDown, true))
-})
 
 watch(isHoverPeeking, (hovering, _prev, onCleanup) => {
   if (!hovering) return
@@ -365,7 +359,6 @@ onBeforeUnmount(() => {
   cancelOpenPeek()
   cancelClosePeek()
   clearPointerInsideTimer()
-  document.removeEventListener('pointerdown', onOutsidePointerDown, true)
   document.removeEventListener('pointermove', onHoverPointerMove)
   document.documentElement.removeEventListener('pointerleave', onDocumentPointerLeave)
 })
@@ -402,7 +395,6 @@ defineExpose({ verticalRange })
         @pointerenter="onRailPointerEnter"
         @pointerleave="onRailPointerLeave"
         @click="onRailClick"
-        @keydown.esc="onEscape"
       >
         <span
           v-for="bar in miniBars"
@@ -431,7 +423,6 @@ defineExpose({ verticalRange })
       :aria-hidden="!panelOpen"
       @pointerenter="cancelClosePeek"
       @pointerleave="onPanelPointerLeave"
-      @keydown.esc="onEscape"
       @wheel="onPanelWheel"
     >
       <div class="document-toc__header">{{ t('artifact.document.toc') }}</div>

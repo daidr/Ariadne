@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import type { PartialBlock } from '@dou-ui/editor'
 import { mount } from '@vue/test-utils'
+import { useLayer } from 'dou-ui'
 import { describe, expect, it, vi } from 'vitest'
-import { nextTick } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
 import DocumentBody from './DocumentBody.vue'
 import DocumentToc from './DocumentToc.vue'
 import {
@@ -425,11 +426,44 @@ describe('DocumentToc.vue', () => {
       await nextTick()
       expect(root.classes()).not.toContain('is-peeking')
       await rail.trigger('click', { detail: 1 })
+      await nextTick()
       expect(root.classes()).toContain('is-peeking')
+      expect(document.activeElement).toBe(document.body)
 
-      // Pressing Escape closes peek.
-      await panel.trigger('keydown.esc')
-      expect(root.classes()).not.toContain('is-peeking')
+      // Pressing Escape while focus is on document.body (after mouse/touch open) closes the
+      // floating peek, stops propagation before window shortcuts, and does not steal focus.
+      const windowEsc = vi.fn()
+      window.addEventListener('keydown', windowEsc)
+      try {
+        document.body.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+        )
+        await nextTick()
+        expect(root.classes()).not.toContain('is-peeking')
+        expect(windowEsc).not.toHaveBeenCalled()
+        expect(document.activeElement).toBe(document.body)
+      } finally {
+        window.removeEventListener('keydown', windowEsc)
+      }
+
+      // Pressing Escape while hover-peeking (focus still on document.body) also closes cleanly
+      // without leaking to window.
+      await rail.trigger('pointerenter', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(120)
+      await nextTick()
+      expect(root.classes()).toContain('is-peeking')
+      window.addEventListener('keydown', windowEsc)
+      try {
+        document.body.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+        )
+        await nextTick()
+        expect(root.classes()).not.toContain('is-peeking')
+        expect(windowEsc).not.toHaveBeenCalled()
+        expect(document.activeElement).toBe(document.body)
+      } finally {
+        window.removeEventListener('keydown', windowEsc)
+      }
 
       // When collision clears, docked state restores without peeking.
       await wrapper.setProps({ collided: false })
@@ -467,17 +501,19 @@ describe('DocumentToc.vue', () => {
       expect(document.activeElement).toBe(items[1]!.element)
       expect((rail.element as HTMLElement).inert).toBe(true)
 
-      // Escape closes floating panel without bubbling to outer modals, and returns focus to rail.
-      const outerEsc = vi.fn()
-      document.addEventListener('keydown', outerEsc)
+      // Escape closes floating panel without bubbling to window shortcuts, and returns focus to rail.
+      const windowEsc = vi.fn()
+      window.addEventListener('keydown', windowEsc)
       try {
-        await panel.trigger('keydown.esc')
+        ;(document.activeElement as HTMLElement).dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+        )
         await nextTick()
         expect(root.classes()).not.toContain('is-peeking')
         expect(document.activeElement).toBe(rail.element)
-        expect(outerEsc).not.toHaveBeenCalled()
+        expect(windowEsc).not.toHaveBeenCalled()
       } finally {
-        document.removeEventListener('keydown', outerEsc)
+        window.removeEventListener('keydown', windowEsc)
       }
 
       // Re-open with keyboard, then move focus outside root -> floating panel closes.
@@ -519,9 +555,11 @@ describe('DocumentToc.vue', () => {
       expect(wrapper.get('.document-toc').classes()).toContain('is-peeking')
 
       const pointerDownAdded = addSpy.mock.calls.filter(([type]) => type === 'pointerdown').length
+      const keyDownAdded = addSpy.mock.calls.filter(([type]) => type === 'keydown').length
       expect(pointerDownAdded).toBeGreaterThanOrEqual(1)
+      expect(keyDownAdded).toBeGreaterThanOrEqual(1)
 
-      // Deleting all headings hides TOC while mode stays 'rail'; peeking & listener must reset.
+      // Deleting all headings hides TOC while mode stays 'rail'; peeking & listeners must reset.
       await wrapper.setProps({ headings: [], activeId: null })
       await nextTick()
       expect(wrapper.find('.document-toc').exists()).toBe(false)
@@ -529,7 +567,9 @@ describe('DocumentToc.vue', () => {
       const pointerDownRemoved = removeSpy.mock.calls.filter(
         ([type]) => type === 'pointerdown',
       ).length
+      const keyDownRemoved = removeSpy.mock.calls.filter(([type]) => type === 'keydown').length
       expect(pointerDownRemoved).toBeGreaterThanOrEqual(pointerDownAdded)
+      expect(keyDownRemoved).toBeGreaterThanOrEqual(keyDownAdded)
 
       // When headings reappear later, the floating panel must NOT pop open spontaneously.
       await wrapper.setProps({ headings, activeId: 'h1' })
@@ -541,6 +581,60 @@ describe('DocumentToc.vue', () => {
       wrapper.unmount()
       addSpy.mockRestore()
       removeSpy.mockRestore()
+    }
+  })
+
+  it('coordinates Escape with parent dou-ui layers so floating TOC dismisses before an outer dialog', async () => {
+    const parentEscape = vi.fn()
+    const windowEsc = vi.fn()
+    const Host = defineComponent({
+      setup() {
+        const dialogRef = ref<HTMLElement | null>(null)
+        useLayer({
+          open: () => true,
+          elements: () => [dialogRef.value],
+          onEscape: parentEscape,
+        })
+        return () =>
+          h('div', { ref: dialogRef, class: 'mock-dialog' }, [
+            h(DocumentToc, {
+              headings,
+              activeId: 'h1',
+              mode: 'rail',
+              width: 200,
+              collided: false,
+            }),
+          ])
+      },
+    })
+
+    const wrapper = mount(Host, { attachTo: document.body })
+    window.addEventListener('keydown', windowEsc)
+    try {
+      await wrapper.get('button.document-toc__rail').trigger('click', { detail: 1 })
+      await nextTick()
+      expect(wrapper.get('.document-toc').classes()).toContain('is-peeking')
+      expect(document.activeElement).toBe(document.body)
+
+      // First Escape dismisses only the floating TOC, not the outer dialog or window shortcuts.
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      )
+      await nextTick()
+      expect(wrapper.get('.document-toc').classes()).not.toContain('is-peeking')
+      expect(parentEscape).not.toHaveBeenCalled()
+      expect(windowEsc).not.toHaveBeenCalled()
+
+      // Second Escape reaches the outer dialog layer cleanly.
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      )
+      await nextTick()
+      expect(parentEscape).toHaveBeenCalledTimes(1)
+      expect(windowEsc).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('keydown', windowEsc)
+      wrapper.unmount()
     }
   })
 })
