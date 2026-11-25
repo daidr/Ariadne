@@ -10,6 +10,29 @@ export function effectiveRestartPhase(status: UpdateStatus | null | undefined): 
   return ''
 }
 
+export function isUpdateRestartable(status: UpdateStatus | null | undefined): boolean {
+  return status?.state === 'ready' && Boolean(status.canRestart)
+}
+
+export function hasUpdateIndicator(status: UpdateStatus | null | undefined): boolean {
+  return effectiveRestartPhase(status) !== '' || isUpdateRestartable(status)
+}
+
+export function updateIndicatorTone(
+  status: UpdateStatus | null | undefined,
+): 'primary' | 'warning' {
+  const phase = effectiveRestartPhase(status)
+  return phase === 'draining' || phase === 'restarting' ? 'warning' : 'primary'
+}
+
+export function updateIndicatorLabel(status: UpdateStatus | null | undefined): string {
+  const phase = effectiveRestartPhase(status)
+  if (phase === 'restarting') return t('updates.header.restarting')
+  if (phase === 'draining') return t('updates.header.draining')
+  if (phase === 'waiting_idle') return t('updates.header.waitingIdle')
+  return t('updates.header.ready')
+}
+
 export function hasActiveRestartWork(status: UpdateStatus | null | undefined): boolean {
   if (!status) return false
   return (status.activeTurns ?? 0) > 0 || (status.activeBackground ?? 0) > 0

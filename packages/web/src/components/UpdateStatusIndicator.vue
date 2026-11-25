@@ -8,8 +8,11 @@ import { applyUpdateStatus, state } from '../store'
 import {
   effectiveRestartPhase,
   hasActiveRestartWork,
+  hasUpdateIndicator,
+  isUpdateRestartable,
   restartNowWarningMessage,
   restartStatusMessage,
+  updateIndicatorLabel,
 } from '../update-restart'
 
 defineProps<{ compact?: boolean }>()
@@ -22,10 +25,8 @@ const error = ref<string | null>(null)
 
 const status = computed(() => state.updateStatus)
 const phase = computed(() => effectiveRestartPhase(status.value))
-const restartable = computed(
-  () => status.value?.state === 'ready' && Boolean(status.value?.canRestart),
-)
-const visible = computed(() => phase.value !== '' || restartable.value)
+const restartable = computed(() => isUpdateRestartable(status.value))
+const visible = computed(() => hasUpdateIndicator(status.value))
 const hasActive = computed(() => hasActiveRestartWork(status.value))
 const restartNowHint = computed(() => restartNowWarningMessage(status.value))
 const description = computed(() => {
@@ -36,12 +37,7 @@ const description = computed(() => {
   return t('updates.ready', { version: current.release?.version ?? '' })
 })
 
-const triggerLabel = computed(() => {
-  if (phase.value === 'restarting') return t('updates.header.restarting')
-  if (phase.value === 'draining') return t('updates.header.draining')
-  if (phase.value === 'waiting_idle') return t('updates.header.waitingIdle')
-  return t('updates.header.ready')
-})
+const triggerLabel = computed(() => updateIndicatorLabel(status.value))
 
 const popoverTitle = computed(() => {
   if (phase.value === 'restarting') return t('updates.header.titleRestarting')
