@@ -49,7 +49,7 @@ export function showsHeadline(stage: ThreadStage): boolean {
  * The one line shown for a thread wherever it is listed: its last result, or why it
  * is waiting to continue.
  */
-export function threadLine(thread: ThreadView): string | null {
+export function threadLine(thread: Pick<ThreadView, 'stage' | 'lastHeadline'>): string | null {
   if (!thread.lastHeadline) return null
   return showsHeadline(thread.stage) || thread.stage === 'done' ? thread.lastHeadline : null
 }

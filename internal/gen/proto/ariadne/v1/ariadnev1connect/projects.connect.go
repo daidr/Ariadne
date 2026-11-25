@@ -36,6 +36,9 @@ const (
 	// ProjectServiceListProjectsProcedure is the fully-qualified name of the ProjectService's
 	// ListProjects RPC.
 	ProjectServiceListProjectsProcedure = "/ariadne.v1.ProjectService/ListProjects"
+	// ProjectServiceListAllNeedsMeProcedure is the fully-qualified name of the ProjectService's
+	// ListAllNeedsMe RPC.
+	ProjectServiceListAllNeedsMeProcedure = "/ariadne.v1.ProjectService/ListAllNeedsMe"
 	// ProjectServiceGetProjectProcedure is the fully-qualified name of the ProjectService's GetProject
 	// RPC.
 	ProjectServiceGetProjectProcedure = "/ariadne.v1.ProjectService/GetProject"
@@ -74,6 +77,7 @@ const (
 // ProjectServiceClient is a client for the ariadne.v1.ProjectService service.
 type ProjectServiceClient interface {
 	ListProjects(context.Context, *connect.Request[v1.ListProjectsRequest]) (*connect.Response[v1.ListProjectsResponse], error)
+	ListAllNeedsMe(context.Context, *connect.Request[v1.ListAllNeedsMeRequest]) (*connect.Response[v1.ListAllNeedsMeResponse], error)
 	GetProject(context.Context, *connect.Request[v1.GetProjectRequest]) (*connect.Response[v1.GetProjectResponse], error)
 	CreateProject(context.Context, *connect.Request[v1.CreateProjectRequest]) (*connect.Response[v1.CreateProjectResponse], error)
 	UpdateProject(context.Context, *connect.Request[v1.UpdateProjectRequest]) (*connect.Response[v1.UpdateProjectResponse], error)
@@ -102,6 +106,12 @@ func NewProjectServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			httpClient,
 			baseURL+ProjectServiceListProjectsProcedure,
 			connect.WithSchema(projectServiceMethods.ByName("ListProjects")),
+			connect.WithClientOptions(opts...),
+		),
+		listAllNeedsMe: connect.NewClient[v1.ListAllNeedsMeRequest, v1.ListAllNeedsMeResponse](
+			httpClient,
+			baseURL+ProjectServiceListAllNeedsMeProcedure,
+			connect.WithSchema(projectServiceMethods.ByName("ListAllNeedsMe")),
 			connect.WithClientOptions(opts...),
 		),
 		getProject: connect.NewClient[v1.GetProjectRequest, v1.GetProjectResponse](
@@ -176,6 +186,7 @@ func NewProjectServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 // projectServiceClient implements ProjectServiceClient.
 type projectServiceClient struct {
 	listProjects           *connect.Client[v1.ListProjectsRequest, v1.ListProjectsResponse]
+	listAllNeedsMe         *connect.Client[v1.ListAllNeedsMeRequest, v1.ListAllNeedsMeResponse]
 	getProject             *connect.Client[v1.GetProjectRequest, v1.GetProjectResponse]
 	createProject          *connect.Client[v1.CreateProjectRequest, v1.CreateProjectResponse]
 	updateProject          *connect.Client[v1.UpdateProjectRequest, v1.UpdateProjectResponse]
@@ -192,6 +203,11 @@ type projectServiceClient struct {
 // ListProjects calls ariadne.v1.ProjectService.ListProjects.
 func (c *projectServiceClient) ListProjects(ctx context.Context, req *connect.Request[v1.ListProjectsRequest]) (*connect.Response[v1.ListProjectsResponse], error) {
 	return c.listProjects.CallUnary(ctx, req)
+}
+
+// ListAllNeedsMe calls ariadne.v1.ProjectService.ListAllNeedsMe.
+func (c *projectServiceClient) ListAllNeedsMe(ctx context.Context, req *connect.Request[v1.ListAllNeedsMeRequest]) (*connect.Response[v1.ListAllNeedsMeResponse], error) {
+	return c.listAllNeedsMe.CallUnary(ctx, req)
 }
 
 // GetProject calls ariadne.v1.ProjectService.GetProject.
@@ -252,6 +268,7 @@ func (c *projectServiceClient) RemoveProjectReference(ctx context.Context, req *
 // ProjectServiceHandler is an implementation of the ariadne.v1.ProjectService service.
 type ProjectServiceHandler interface {
 	ListProjects(context.Context, *connect.Request[v1.ListProjectsRequest]) (*connect.Response[v1.ListProjectsResponse], error)
+	ListAllNeedsMe(context.Context, *connect.Request[v1.ListAllNeedsMeRequest]) (*connect.Response[v1.ListAllNeedsMeResponse], error)
 	GetProject(context.Context, *connect.Request[v1.GetProjectRequest]) (*connect.Response[v1.GetProjectResponse], error)
 	CreateProject(context.Context, *connect.Request[v1.CreateProjectRequest]) (*connect.Response[v1.CreateProjectResponse], error)
 	UpdateProject(context.Context, *connect.Request[v1.UpdateProjectRequest]) (*connect.Response[v1.UpdateProjectResponse], error)
@@ -276,6 +293,12 @@ func NewProjectServiceHandler(svc ProjectServiceHandler, opts ...connect.Handler
 		ProjectServiceListProjectsProcedure,
 		svc.ListProjects,
 		connect.WithSchema(projectServiceMethods.ByName("ListProjects")),
+		connect.WithHandlerOptions(opts...),
+	)
+	projectServiceListAllNeedsMeHandler := connect.NewUnaryHandler(
+		ProjectServiceListAllNeedsMeProcedure,
+		svc.ListAllNeedsMe,
+		connect.WithSchema(projectServiceMethods.ByName("ListAllNeedsMe")),
 		connect.WithHandlerOptions(opts...),
 	)
 	projectServiceGetProjectHandler := connect.NewUnaryHandler(
@@ -348,6 +371,8 @@ func NewProjectServiceHandler(svc ProjectServiceHandler, opts ...connect.Handler
 		switch r.URL.Path {
 		case ProjectServiceListProjectsProcedure:
 			projectServiceListProjectsHandler.ServeHTTP(w, r)
+		case ProjectServiceListAllNeedsMeProcedure:
+			projectServiceListAllNeedsMeHandler.ServeHTTP(w, r)
 		case ProjectServiceGetProjectProcedure:
 			projectServiceGetProjectHandler.ServeHTTP(w, r)
 		case ProjectServiceCreateProjectProcedure:
@@ -381,6 +406,10 @@ type UnimplementedProjectServiceHandler struct{}
 
 func (UnimplementedProjectServiceHandler) ListProjects(context.Context, *connect.Request[v1.ListProjectsRequest]) (*connect.Response[v1.ListProjectsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ProjectService.ListProjects is not implemented"))
+}
+
+func (UnimplementedProjectServiceHandler) ListAllNeedsMe(context.Context, *connect.Request[v1.ListAllNeedsMeRequest]) (*connect.Response[v1.ListAllNeedsMeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ProjectService.ListAllNeedsMe is not implemented"))
 }
 
 func (UnimplementedProjectServiceHandler) GetProject(context.Context, *connect.Request[v1.GetProjectRequest]) (*connect.Response[v1.GetProjectResponse], error) {

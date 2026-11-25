@@ -818,3 +818,137 @@ func TestProjectServiceBrowseSourceSecretIsolation(t *testing.T) {
 		t.Fatalf("omitted source_id did not reuse primary secret: got %q, want %q", observedSecrets[1], "primary-secret-value")
 	}
 }
+
+func TestProjectServiceListAllNeedsMeAndGlobalSearch(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	home := t.TempDir()
+	nowMs := int64(1_800_000_000_000)
+	now := func() time.Time {
+		nowMs += 1_000
+		return time.UnixMilli(nowMs)
+	}
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:", Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	settingsStore, err := settings.Open(filepath.Join(home, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := New(Options{
+		Repository: repo,
+		Settings:   settingsStore,
+		Sources:    sources.New(),
+		Token:      "cross-token",
+		Now:        now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	projects := ariadnev1connect.NewProjectServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("cross-token")),
+	)
+
+	nameA, nameB := "Project Alpha", "Project Beta"
+	pA, err := projects.CreateProject(ctx, connect.NewRequest(&ariadnev1.CreateProjectRequest{Name: &nameA}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pB, err := projects.CreateProject(ctx, connect.NewRequest(&ariadnev1.CreateProjectRequest{Name: &nameB}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	idA, idB := pA.Msg.Project.Id, pB.Msg.Project.Id
+
+	thrA, err := repo.CreateThread(ctx, idA, core.NewThread{Title: "全局检索测试 Alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ReportThread(ctx, thrA.ID, core.ThreadReport{Kind: "ready", Headline: "Alpha 交付完成", Summary: "详情"}, nil, core.ReviewOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PostMessage(ctx, idA, core.MessageInput{ConversationID: pA.Msg.Project.CoordinatorId, Author: "user", Content: "rpc_search_needle in Alpha"}); err != nil {
+		t.Fatal(err)
+	}
+
+	thrB, err := repo.CreateThread(ctx, idB, core.NewThread{Title: "全局检索测试 Beta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.OpenAttention(ctx, idB, core.AttentionInput{
+		ThreadID: &thrB.ID,
+		Block: map[string]any{
+			"type":  "confirm",
+			"title": "确认 Beta 发布？",
+			"tone":  "warning",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PostMessage(ctx, idB, core.MessageInput{ConversationID: thrB.ID, Author: "assistant", Content: "rpc_search_needle in Beta"}); err != nil {
+		t.Fatal(err)
+	}
+
+	allNeeds, err := projects.ListAllNeedsMe(ctx, connect.NewRequest(&ariadnev1.ListAllNeedsMeRequest{}))
+	if err != nil {
+		t.Fatalf("ListAllNeedsMe: %v", err)
+	}
+	if len(allNeeds.Msg.Items) != 2 {
+		t.Fatalf("ListAllNeedsMe items = %d, want 2", len(allNeeds.Msg.Items))
+	}
+	if len(allNeeds.Msg.Threads) != 2 {
+		t.Fatalf("ListAllNeedsMe threads = %d, want 2", len(allNeeds.Msg.Threads))
+	}
+	// Beta attention is newer than Alpha report.
+	if allNeeds.Msg.Items[0].ProjectId != idB || allNeeds.Msg.Items[0].ProjectName != "Project Beta" {
+		t.Fatalf("items[0] = %+v, want Beta", allNeeds.Msg.Items[0])
+	}
+	if allNeeds.Msg.Items[1].ProjectId != idA || allNeeds.Msg.Items[1].ProjectName != "Project Alpha" {
+		t.Fatalf("items[1] = %+v, want Alpha", allNeeds.Msg.Items[1])
+	}
+
+	// Global search with prefer_project_id = idA prioritizes Alpha ahead of newer Beta.
+	searchResp, err := projects.SearchProject(ctx, connect.NewRequest(&ariadnev1.SearchProjectRequest{
+		ProjectId:       "",
+		Query:           "全局检索测试",
+		PreferProjectId: &idA,
+	}))
+	if err != nil {
+		t.Fatalf("SearchProject global threads: %v", err)
+	}
+	if len(searchResp.Msg.Threads) != 2 {
+		t.Fatalf("global thread hits = %d, want 2", len(searchResp.Msg.Threads))
+	}
+	if searchResp.Msg.Threads[0].Id != thrA.ID || searchResp.Msg.Threads[0].ProjectId != idA || searchResp.Msg.Threads[0].ProjectName != "Project Alpha" || searchResp.Msg.Threads[0].Stage != "review" {
+		t.Fatalf("threads[0] = %+v, want Alpha review", searchResp.Msg.Threads[0])
+	}
+	if searchResp.Msg.Threads[1].Id != thrB.ID || searchResp.Msg.Threads[1].ProjectId != idB || searchResp.Msg.Threads[1].ProjectName != "Project Beta" || searchResp.Msg.Threads[1].Stage != "answer" {
+		t.Fatalf("threads[1] = %+v, want Beta answer", searchResp.Msg.Threads[1])
+	}
+
+	msgResp, err := projects.SearchProject(ctx, connect.NewRequest(&ariadnev1.SearchProjectRequest{
+		ProjectId:       "",
+		Query:           "rpc_search_needle",
+		PreferProjectId: &idA,
+	}))
+	if err != nil {
+		t.Fatalf("SearchProject global messages: %v", err)
+	}
+	if len(msgResp.Msg.Messages) != 2 {
+		t.Fatalf("global message hits = %d, want 2", len(msgResp.Msg.Messages))
+	}
+	if msgResp.Msg.Messages[0].ProjectId != idA || msgResp.Msg.Messages[0].ProjectName != "Project Alpha" {
+		t.Fatalf("messages[0] = %+v, want Alpha", msgResp.Msg.Messages[0])
+	}
+	if msgResp.Msg.Messages[1].ProjectId != idB || msgResp.Msg.Messages[1].ProjectName != "Project Beta" || msgResp.Msg.Messages[1].Where == nil || *msgResp.Msg.Messages[1].Where != "全局检索测试 Beta" {
+		t.Fatalf("messages[1] = %+v, want Beta thread message", msgResp.Msg.Messages[1])
+	}
+}

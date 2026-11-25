@@ -7,6 +7,7 @@ import {
   GetArtifactResponseSchema,
   GetIssueResponseSchema,
   GetPlanResponseSchema,
+  ListAllNeedsMeResponseSchema,
   ListArtifactsResponseSchema,
   ListArtifactVersionsResponseSchema,
   ListIssuesResponseSchema,
@@ -15,6 +16,8 @@ import {
   ReopenArtifactCommentThreadResponseSchema,
   ReplyArtifactCommentResponseSchema,
   ResolveArtifactCommentThreadResponseSchema,
+  SearchProjectRequestSchema,
+  SearchProjectResponseSchema,
   UpdateProjectRequestSchema,
   UpdateProjectResponseSchema,
 } from '@ariadne/proto'
@@ -523,5 +526,160 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it('decodes ListAllNeedsMe items and thread summaries and sends global SearchProject with preferProjectId', async () => {
+    let capturedSearchBody: Uint8Array | null = null
+    const transport = createAriadneTransport({
+      baseUrl: 'http://ariadne.test/api/rpc',
+      getToken: () => 'tok',
+      fetch: async (input, init) => {
+        const procedure = String(input).split('/').pop() ?? ''
+        if (procedure === 'ListAllNeedsMe') {
+          return protoResponse(ListAllNeedsMeResponseSchema, {
+            items: [
+              {
+                projectId: 'prj_2',
+                projectName: 'Beta',
+                at: 2000n,
+                item: {
+                  item: {
+                    case: 'attention',
+                    value: {
+                      attention: {
+                        id: 'att_2',
+                        projectId: 'prj_2',
+                        threadId: 'thr_2',
+                        joinedBy: [],
+                        block: {
+                          block: {
+                            case: 'confirm',
+                            value: { title: '允许执行？', tone: 'warning' },
+                          },
+                        },
+                        createdAt: 2000n,
+                      },
+                      threadId: 'thr_2',
+                      joinedIds: [],
+                    },
+                  },
+                },
+              },
+              {
+                projectId: 'prj_1',
+                projectName: 'Alpha',
+                at: 1000n,
+                item: {
+                  item: {
+                    case: 'thread',
+                    value: { threadId: 'thr_1' },
+                  },
+                },
+              },
+            ],
+            threads: [
+              {
+                id: 'thr_1',
+                projectId: 'prj_1',
+                title: 'Alpha 审查',
+                stage: 'review',
+                lastHeadline: '已通过单测',
+                lastArtifacts: [{ id: 'art_1', kind: 'document', title: '设计文档' }],
+                review: { reviewerId: 'rev_1', rounds: 2n, reviewing: false },
+              },
+              {
+                id: 'thr_2',
+                projectId: 'prj_2',
+                title: 'Beta 部署',
+                stage: 'answer',
+                lastArtifacts: [],
+              },
+            ],
+          })
+        }
+        if (procedure === 'SearchProject') {
+          const body = init?.body
+          if (body instanceof Uint8Array) capturedSearchBody = body
+          else if (body instanceof ArrayBuffer) capturedSearchBody = new Uint8Array(body)
+          return protoResponse(SearchProjectResponseSchema, {
+            terms: ['部署'],
+            threads: [
+              {
+                id: 'thr_1',
+                title: 'Alpha 部署',
+                snippet: '准备就绪',
+                at: 1000n,
+                projectId: 'prj_1',
+                projectName: 'Alpha',
+                stage: 'review',
+              },
+            ],
+            artifacts: [
+              {
+                id: 'art_2',
+                artifactKind: 'whiteboard',
+                title: 'Beta 部署图',
+                snippet: '架构节点',
+                at: 2000n,
+                projectId: 'prj_2',
+                projectName: 'Beta',
+              },
+            ],
+            messages: [
+              {
+                id: 'msg_2',
+                conversationId: 'crd_2',
+                snippet: '确认部署窗口',
+                at: 2500n,
+                projectId: 'prj_2',
+                projectName: 'Beta',
+              },
+            ],
+          })
+        }
+        throw new Error(`unexpected procedure ${procedure}`)
+      },
+    })
+    const client = createDomain2Api(transport)
+
+    const all = await client.listAllNeedsMe()
+    expect(all.items).toHaveLength(2)
+    expect(all.items[0]?.projectName).toBe('Beta')
+    expect(all.items[0]?.item.kind).toBe('attention')
+    expect(all.items[1]?.item).toEqual({ kind: 'thread', threadId: 'thr_1' })
+    expect(all.threads.thr_1?.stage).toBe('review')
+    expect(all.threads.thr_1?.lastArtifacts).toEqual([
+      { id: 'art_1', kind: 'document', title: '设计文档' },
+    ])
+    expect(all.threads.thr_1?.review).toEqual({
+      reviewerId: 'rev_1',
+      rounds: 2,
+      reviewing: false,
+    })
+
+    const search = await client.searchProject('', '部署', 'prj_1')
+    expect(capturedSearchBody).not.toBeNull()
+    const decodedSearch = fromBinary(SearchProjectRequestSchema, capturedSearchBody!)
+    expect(decodedSearch.projectId).toBe('')
+    expect(decodedSearch.query).toBe('部署')
+    expect(decodedSearch.preferProjectId).toBe('prj_1')
+
+    expect(search.threads[0]).toMatchObject({
+      id: 'thr_1',
+      projectId: 'prj_1',
+      projectName: 'Alpha',
+      stage: 'review',
+    })
+    expect(search.artifacts[0]).toMatchObject({
+      id: 'art_2',
+      projectId: 'prj_2',
+      projectName: 'Beta',
+    })
+    expect(search.messages[0]).toMatchObject({
+      id: 'msg_2',
+      where: null,
+      projectId: 'prj_2',
+      projectName: 'Beta',
+    })
   })
 })

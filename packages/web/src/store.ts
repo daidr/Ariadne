@@ -1,4 +1,5 @@
 import type {
+  AllNeedsMeResult,
   AnyStoredEvent,
   ArtifactKind,
   ArtifactSummary,
@@ -13,6 +14,7 @@ import type {
   BackgroundView,
   MemoryView,
   MessageView,
+  NeedsMeThreadSummary,
   NoticeView,
   PlanView,
   ProjectView,
@@ -200,6 +202,12 @@ interface State {
   focus: MessageFocus | null
   /** The project search is open. */
   searchOpen: boolean
+  /** All open "needs me" entries across every project, refreshed on demand and while open. */
+  allNeedsMe: AllNeedsMeResult | null
+  allNeedsMeLoading: boolean
+  allNeedsMeError: boolean
+  /** The global "needs me" popover in the header is open. */
+  attentionOpen: boolean
   /** The open project's settings dialog is open, and the tab it opens on. */
   projectSettingsOpen: boolean
   projectSettingsTab: ProjectSettingsTab
@@ -249,6 +257,10 @@ export const state = reactive<State>({
   starting: false,
   focus: null,
   searchOpen: false,
+  allNeedsMe: null,
+  allNeedsMeLoading: false,
+  allNeedsMeError: false,
+  attentionOpen: false,
   projectSettingsOpen: false,
   projectSettingsTab: 'source',
   input: { submitOn: 'enter', snippets: [], keys: { ...DEFAULT_KEYS } },
@@ -338,6 +350,25 @@ const refreshProjectList = coalescedRefresh<string | null, number>(async (keys) 
 
 function refreshProjects(ids: Iterable<string | null> = [null]) {
   return refreshProjectList(ids)
+}
+
+const refreshAllNeedsMeTask = coalescedRefresh<null, void>(async () => {
+  state.allNeedsMeLoading = true
+  try {
+    const next = await api.listAllNeedsMe()
+    state.allNeedsMe = reuse(toRaw(state.allNeedsMe), next)
+    state.allNeedsMeError = false
+  } catch (error) {
+    state.allNeedsMeError = true
+    throw error
+  } finally {
+    state.allNeedsMeLoading = false
+  }
+})
+
+/** Fetch the cross-project "needs me" queue; concurrent requests coalesce in order. */
+export function refreshAllNeedsMe(): Promise<void> {
+  return refreshAllNeedsMeTask([null])
 }
 
 /** The parts of the open project the page loads, each refreshed when an event touches it. */
@@ -904,6 +935,48 @@ export function openThreadFrom(event: MouseEvent | KeyboardEvent | undefined, th
   return openThread(threadId, event?.altKey ? { beside: 'horizontal' } : {})
 }
 
+async function ensureProjectOpen(projectId: string): Promise<boolean> {
+  if (projectId !== state.currentId || state.starting || !state.detail) {
+    await openProject(projectId)
+  }
+  return state.currentId === projectId && !!state.detail
+}
+
+/** Open a thread in any project, switching projects first when needed. */
+export async function openProjectThread(
+  projectId: string,
+  threadId: string,
+  options: OpenOptions = {},
+) {
+  if (!(await ensureProjectOpen(projectId))) return
+  if (state.main.kind === 'trace') openMain({ kind: 'conversation' })
+  await openThread(threadId, options)
+}
+
+/** Open a project's coordinator conversation, switching projects first when needed. */
+export async function openProjectConversation(projectId: string) {
+  if (!(await ensureProjectOpen(projectId))) return
+  openMain({ kind: 'conversation' })
+}
+
+/** Open an artifact in any project, switching projects first when needed. */
+export async function openProjectArtifact(projectId: string, artifactId: string) {
+  if (!(await ensureProjectOpen(projectId))) return
+  if (state.main.kind === 'trace') openMain({ kind: 'conversation' })
+  await openView({ kind: 'artifact', id: artifactId })
+}
+
+/** Jump to a message in any project, switching projects first when needed. */
+export async function openProjectMessage(
+  projectId: string,
+  conversationId: string,
+  messageId: string,
+) {
+  if (!(await ensureProjectOpen(projectId))) return
+  if (state.main.kind === 'trace') openMain({ kind: 'conversation' })
+  await openMessage(conversationId, messageId)
+}
+
 export function closePane(key: PaneKey, acrossGroups = false) {
   setSide(side.close(state.side, key, acrossGroups))
 }
@@ -960,6 +1033,16 @@ function forgetProject(id: string) {
   clearBoardThumbnails()
   clearLinkCaches()
   state.projects = state.projects.filter((project) => project.id !== id)
+  if (state.allNeedsMe) {
+    const nextItems = state.allNeedsMe.items.filter((entry) => entry.projectId !== id)
+    if (nextItems.length !== state.allNeedsMe.items.length) {
+      const nextThreads: Record<string, NeedsMeThreadSummary> = {}
+      for (const [threadId, thread] of Object.entries(state.allNeedsMe.threads)) {
+        if (thread.projectId !== id) nextThreads[threadId] = thread
+      }
+      state.allNeedsMe = { items: nextItems, threads: nextThreads }
+    }
+  }
   if (state.currentId !== id) return
   const next = state.projects[0]?.id
   if (next) {
@@ -1072,7 +1155,12 @@ export async function react(messageId: string, emoji: string, remove: boolean) {
 }
 
 export async function retryTurn(conversationId: string) {
-  await api.retryTurn(conversationId).catch(report)
+  try {
+    await api.retryTurn(conversationId)
+    if (state.attentionOpen) void refreshAllNeedsMe().catch(report)
+  } catch (error) {
+    report(error)
+  }
 }
 
 /**
@@ -1404,7 +1492,10 @@ export async function dismissProposal(proposalId: string) {
 /** Whether the answer was taken; a refusal is reported to the user. */
 export async function answerAttention(id: string, answer: BlockAnswer): Promise<boolean> {
   return api.answerAttention(id, answer).then(
-    () => true,
+    () => {
+      if (state.attentionOpen) void refreshAllNeedsMe().catch(report)
+      return true
+    },
     (error: unknown) => {
       report(error)
       return false
@@ -1581,6 +1672,12 @@ function flushEvents() {
   parts.clear()
   if (projects.length) void refreshProjects(projects).catch(report)
   if (currentId !== null && changed.length) void refreshCurrent(changed).catch(report)
+  if (
+    state.attentionOpen &&
+    (projects.length || (currentId !== null && changed.includes('detail')))
+  ) {
+    void refreshAllNeedsMe().catch(report)
+  }
 }
 
 function onEvent(event: AnyStoredEvent) {
@@ -1850,7 +1947,12 @@ export async function keepThreadReference(threadId: string, referenceId: string)
 
 /** The user takes up a thread that was set aside. */
 export async function endAside(threadId: string) {
-  await api.endAside(threadId).catch(report)
+  try {
+    await api.endAside(threadId)
+    if (state.attentionOpen) void refreshAllNeedsMe().catch(report)
+  } catch (error) {
+    report(error)
+  }
 }
 
 /** The user is through with what the thread put up for review. */
