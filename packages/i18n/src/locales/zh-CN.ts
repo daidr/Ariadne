@@ -167,6 +167,8 @@ export const zhCN = {
   'artifact.by.user': '你',
   'artifact.by.coordinator': '协调器',
   'artifact.pending': '待补充',
+  'artifact.document.toc': '目录',
+  'artifact.document.showToc': '展开目录',
   'project.source.kind': '类型',
   'pr.state.merged': '已合并',
   'pr.state.closed': '已关闭',

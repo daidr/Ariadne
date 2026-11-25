@@ -170,6 +170,8 @@ export const en: Record<MessageKey, string> = {
   'artifact.by.user': 'You',
   'artifact.by.coordinator': 'Coordinator',
   'artifact.pending': 'To come',
+  'artifact.document.toc': 'Contents',
+  'artifact.document.showToc': 'Show contents',
   'project.source.kind': 'Kind',
   'pr.state.merged': 'Merged',
   'pr.state.closed': 'Closed',
