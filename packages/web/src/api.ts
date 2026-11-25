@@ -783,6 +783,7 @@ export const api = {
     return { ok: response.ok }
   },
   listProjects: (ids: readonly string[] = []) => domain2Api.listProjects(ids),
+  listAllNeedsMe: () => domain2Api.listAllNeedsMe(),
   /**
    * A new project, with where its files are and the sources it only reads; each is
    * connected first, and the project is made only when all of them can be.
@@ -1493,7 +1494,8 @@ export const api = {
     projectId: string,
     options: { pageSize?: number; pageToken?: string; signal?: AbortSignal } = {},
   ) => domain2Api.listPlanRevisions(projectId, options),
-  search: (projectId: string, q: string) => domain2Api.searchProject(projectId, q),
+  search: (projectId: string, q: string, preferProjectId?: string) =>
+    domain2Api.searchProject(projectId, q, preferProjectId),
   listArtifacts: (
     projectId: string,
     options: { pageSize?: number; pageToken?: string; signal?: AbortSignal } = {},

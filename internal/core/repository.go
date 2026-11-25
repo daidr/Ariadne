@@ -106,7 +106,7 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 			return err
 		}
 	}
-	if version == schema.Version || version == 67 || version == 68 || version == 69 || version == 70 || version == 71 || version == 72 {
+	if version == schema.Version || version == 67 || version == 68 || version == 69 || version == 70 || version == 71 || version == 72 || version == 73 {
 		return schema.Create(ctx, tx)
 	}
 	if err := dropProjectionTables(ctx, tx); err != nil {

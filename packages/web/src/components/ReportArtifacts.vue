@@ -4,11 +4,31 @@ import type { ThreadArtifact } from '@ariadne/core'
 import { kindIcon } from '../artifacts/kinds'
 import { useOpenView } from '../opened-from'
 import { dragArtifact } from '../side/dock'
+import { openProjectArtifact, state } from '../store'
 
 const openView = useOpenView()
 
 /** The artifacts a thread's report points to, opened by their titles. */
-defineProps<{ artifacts: ThreadArtifact[] }>()
+const props = defineProps<{ artifacts: ThreadArtifact[]; projectId?: string }>()
+const emit = defineEmits<{ open: [artifactId: string] }>()
+
+function isOtherProject() {
+  return Boolean(props.projectId && props.projectId !== state.currentId)
+}
+
+function open(artifactId: string) {
+  emit('open', artifactId)
+  if (props.projectId && isOtherProject()) {
+    void openProjectArtifact(props.projectId, artifactId)
+    return
+  }
+  void openView({ kind: 'artifact', id: artifactId })
+}
+
+function onPointerDown(event: PointerEvent, artifactId: string) {
+  if (isOtherProject()) return
+  dragArtifact(event, artifactId)
+}
 </script>
 
 <template>
@@ -19,8 +39,8 @@ defineProps<{ artifacts: ThreadArtifact[] }>()
       :title="artifact.title"
       class="report-artifact"
       underline="none"
-      @click="openView({ kind: 'artifact', id: artifact.id })"
-      @pointerdown="dragArtifact($event, artifact.id)"
+      @click="open(artifact.id)"
+      @pointerdown="onPointerDown($event, artifact.id)"
     >
       <template #leading><component :is="kindIcon[artifact.kind]" /></template>
       {{ artifact.title }}

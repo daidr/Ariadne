@@ -1,10 +1,12 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 
 	"connectrpc.com/connect"
@@ -63,6 +65,40 @@ func (s *projectService) ListProjects(
 	return connect.NewResponse(&ariadnev1.ListProjectsResponse{
 		Projects: out,
 		LastSeq:  seq,
+	}), nil
+}
+
+func (s *projectService) ListAllNeedsMe(
+	ctx context.Context,
+	_ *connect.Request[ariadnev1.ListAllNeedsMeRequest],
+) (*connect.Response[ariadnev1.ListAllNeedsMeResponse], error) {
+	all, err := s.api.options.Repository.ListAllNeedsMe(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]*ariadnev1.AllNeedsMeItem, 0, len(all.Items))
+	for _, entry := range all.Items {
+		converted := toProtoNeedsMeItem(entry.Item)
+		if converted == nil {
+			continue
+		}
+		items = append(items, &ariadnev1.AllNeedsMeItem{
+			ProjectId:   entry.ProjectID,
+			ProjectName: entry.ProjectName,
+			Item:        converted,
+			At:          entry.At,
+		})
+	}
+	threads := make([]*ariadnev1.NeedsMeThreadSummary, 0, len(all.Threads))
+	for _, summary := range all.Threads {
+		threads = append(threads, toProtoNeedsMeThreadSummary(summary))
+	}
+	slices.SortFunc(threads, func(a, b *ariadnev1.NeedsMeThreadSummary) int {
+		return cmp.Compare(a.Id, b.Id)
+	})
+	return connect.NewResponse(&ariadnev1.ListAllNeedsMeResponse{
+		Items:   items,
+		Threads: threads,
 	}), nil
 }
 
@@ -352,7 +388,11 @@ func (s *projectService) SearchProject(
 	ctx context.Context,
 	req *connect.Request[ariadnev1.SearchProjectRequest],
 ) (*connect.Response[ariadnev1.SearchProjectResponse], error) {
-	value, err := s.api.options.Repository.Search(ctx, req.Msg.ProjectId, prefix(req.Msg.Query, 200))
+	prefer := ""
+	if req.Msg.PreferProjectId != nil {
+		prefer = *req.Msg.PreferProjectId
+	}
+	value, err := s.api.options.Repository.Search(ctx, req.Msg.ProjectId, prefix(req.Msg.Query, 200), prefer)
 	if err != nil {
 		return nil, err
 	}
@@ -365,10 +405,13 @@ func (s *projectService) SearchProject(
 	if hits := asMapSlice(value["threads"]); len(hits) > 0 {
 		for _, hit := range hits {
 			resp.Threads = append(resp.Threads, &ariadnev1.ProjectThreadSearchHit{
-				Id:      anyString(hit["id"]),
-				Title:   anyString(hit["title"]),
-				Snippet: anyString(hit["snippet"]),
-				At:      anyInt64(hit["at"]),
+				Id:          anyString(hit["id"]),
+				Title:       anyString(hit["title"]),
+				Snippet:     anyString(hit["snippet"]),
+				At:          anyInt64(hit["at"]),
+				ProjectId:   anyString(hit["projectId"]),
+				ProjectName: anyString(hit["projectName"]),
+				Stage:       anyString(hit["stage"]),
 			})
 		}
 	}
@@ -380,6 +423,8 @@ func (s *projectService) SearchProject(
 				Title:        anyString(hit["title"]),
 				Snippet:      anyString(hit["snippet"]),
 				At:           anyInt64(hit["at"]),
+				ProjectId:    anyString(hit["projectId"]),
+				ProjectName:  anyString(hit["projectName"]),
 			})
 		}
 	}
@@ -391,6 +436,8 @@ func (s *projectService) SearchProject(
 				Where:          anyStringPtr(hit["where"]),
 				Snippet:        anyString(hit["snippet"]),
 				At:             anyInt64(hit["at"]),
+				ProjectId:      anyString(hit["projectId"]),
+				ProjectName:    anyString(hit["projectName"]),
 			})
 		}
 	}
@@ -1171,6 +1218,47 @@ func toProtoProjectThreadView(thread core.ThreadView) *ariadnev1.ProjectThreadVi
 			ReviewerId: thread.Review.ReviewerID,
 			Rounds:     thread.Review.Rounds,
 			Reviewing:  thread.Review.Reviewing,
+		}
+	}
+	return out
+}
+
+func toProtoNeedsMeThreadSummary(summary core.NeedsMeThreadSummary) *ariadnev1.NeedsMeThreadSummary {
+	out := &ariadnev1.NeedsMeThreadSummary{
+		Id:            summary.ID,
+		ProjectId:     summary.ProjectID,
+		Title:         summary.Title,
+		Stage:         summary.Stage,
+		LastHeadline:  anyStringPtr(summary.LastHeadline),
+		AutopilotHeld: anyStringPtr(summary.AutopilotHeld),
+	}
+	for _, m := range asMapSlice(summary.LastArtifacts) {
+		out.LastArtifacts = append(out.LastArtifacts, &ariadnev1.ProjectThreadArtifact{
+			Id:    anyString(m["id"]),
+			Kind:  anyString(m["kind"]),
+			Title: anyString(m["title"]),
+		})
+	}
+	if summary.Aside != nil {
+		out.Aside = &ariadnev1.ProjectAsideView{
+			Until:  summary.Aside.Until,
+			Reason: summary.Aside.Reason,
+			By:     summary.Aside.By,
+			Due:    summary.Aside.Due,
+		}
+	}
+	if summary.Review != nil {
+		out.Review = &ariadnev1.ProjectReviewView{
+			ReviewerId: summary.Review.ReviewerID,
+			Rounds:     summary.Review.Rounds,
+			Reviewing:  summary.Review.Reviewing,
+		}
+	}
+	if summary.Stopped != nil {
+		out.Stopped = &ariadnev1.ProjectStoppedView{
+			Reason: summary.Stopped.Reason,
+			By:     summary.Stopped.By,
+			At:     summary.Stopped.At,
 		}
 	}
 	return out

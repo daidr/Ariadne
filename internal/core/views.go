@@ -106,6 +106,28 @@ type AttentionView struct {
 	ConversationID any      `json:"conversationId"`
 	CreatedAt      int64    `json:"createdAt"`
 }
+type NeedsMeThreadSummary struct {
+	ID            string       `json:"id"`
+	ProjectID     string       `json:"projectId"`
+	Title         string       `json:"title"`
+	Stage         string       `json:"stage"`
+	LastHeadline  any          `json:"lastHeadline"`
+	LastArtifacts any          `json:"lastArtifacts"`
+	Aside         *AsideView   `json:"aside"`
+	Review        *ReviewView  `json:"review"`
+	Stopped       *StoppedView `json:"stopped"`
+	AutopilotHeld any          `json:"autopilotHeld"`
+}
+type AllNeedsMeItem struct {
+	ProjectID   string `json:"projectId"`
+	ProjectName string `json:"projectName"`
+	Item        object `json:"item"`
+	At          int64  `json:"at"`
+}
+type AllNeedsMeResult struct {
+	Items   []AllNeedsMeItem                `json:"items"`
+	Threads map[string]NeedsMeThreadSummary `json:"threads"`
+}
 type ProjectDetail struct {
 	Project ProjectView  `json:"project"`
 	Threads []ThreadView `json:"threads"`
@@ -863,18 +885,381 @@ func (reader Reader) listProjects(ctx context.Context, filterIDsJSON, query stri
 				needsByProject[pid]++
 			}
 		}
-		result = make([]ProjectView, 0, len(rows))
-		for _, row := range rows {
-			pid := row.text("id")
-			usageRow := usageByProject[pid]
-			if usageRow == nil {
-				usageRow = record{}
+			result = make([]ProjectView, 0, len(rows))
+			for _, row := range rows {
+				pid := row.text("id")
+				usageRow := usageByProject[pid]
+				if usageRow == nil {
+					usageRow = record{}
+				}
+				view, err := toProjectWithUsage(row, needsByProject[pid], usageRow)
+				if err != nil {
+					return err
+				}
+				result = append(result, view)
 			}
-			view, err := toProjectWithUsage(row, needsByProject[pid], usageRow)
+			return nil
+		})
+		return
+	}
+
+const needsMeThreadSummaryColumns = `t.project_id, t.id, t.title, t.started, t.last_report, t.last_headline, t.last_artifacts,
+ t.reported_at, t.reported_head, t.merged, t.pull_request, t.check_failures,
+ t.stopped_reason, t.stopped_by, t.stopped_at,
+ t.reviewed_at, t.reviewer_id, t.review_rounds, t.reviewing,
+ t.aside_until, t.aside_reason, t.aside_by, t.aside_due,
+ t.review_of, t.autopilot_held, t.updated_at,
+ c.turn_id, c.pending_seq, c.last_turn_at, c.last_outcome, c.wait_id`
+
+func toNeedsMeThreadSummary(row record, stage string) NeedsMeThreadSummary {
+	summary := NeedsMeThreadSummary{
+		ID:            row.text("id"),
+		ProjectID:     row.text("project_id"),
+		Title:         row.text("title"),
+		Stage:         stage,
+		LastHeadline:  row["last_headline"],
+		LastArtifacts: []any{},
+		AutopilotHeld: row["autopilot_held"],
+	}
+	if row.present("aside_until") {
+		summary.Aside = &AsideView{
+			Until:  row.integer("aside_until"),
+			Reason: row.text("aside_reason"),
+			By:     row.text("aside_by"),
+			Due:    row.flag("aside_due"),
+		}
+	}
+	if row.present("stopped_reason") {
+		by := row.text("stopped_by")
+		if !row.present("stopped_by") {
+			by = "user"
+		}
+		summary.Stopped = &StoppedView{
+			Reason: row.text("stopped_reason"),
+			By:     by,
+			At:     row.integer("stopped_at"),
+		}
+	}
+	if row.text("reviewer_id") != "" {
+		summary.Review = &ReviewView{
+			ReviewerID: row.text("reviewer_id"),
+			Rounds:     row.integer("review_rounds"),
+			Reviewing:  row.flag("reviewing"),
+		}
+	}
+	return summary
+}
+
+func resolveSummaryArtifacts(ctx context.Context, db queryer, summaries map[string]NeedsMeThreadSummary, rawArtifactIDs map[string][]string) error {
+	unique := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, ids := range rawArtifactIDs {
+		for _, id := range ids {
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			unique = append(unique, id)
+		}
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+	type artifactMeta struct {
+		projectID string
+		kind      string
+		title     string
+	}
+	byID := make(map[string]artifactMeta, len(unique))
+	const chunkSize = 200
+	for start := 0; start < len(unique); start += chunkSize {
+		end := min(start+chunkSize, len(unique))
+		chunk := unique[start:end]
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
+			args[i] = id
+		}
+		rows, err := records(ctx, db, "SELECT id, project_id, kind, title FROM artifacts WHERE id IN ("+inPlaceholders(len(chunk))+")", args...)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			byID[row.text("id")] = artifactMeta{
+				projectID: row.text("project_id"),
+				kind:      row.text("kind"),
+				title:     row.text("title"),
+			}
+		}
+	}
+	for threadID, ids := range rawArtifactIDs {
+		summary, ok := summaries[threadID]
+		if !ok {
+			continue
+		}
+		resolved := make([]any, 0, len(ids))
+		for _, id := range ids {
+			meta, exists := byID[id]
+			if !exists || meta.projectID != summary.ProjectID {
+				continue
+			}
+			resolved = append(resolved, object{"id": id, "kind": meta.kind, "title": meta.title})
+		}
+		summary.LastArtifacts = resolved
+		summaries[threadID] = summary
+	}
+	return nil
+}
+
+func needsMeItemSortKey(item AllNeedsMeItem) (kindRank int, id string) {
+	if item.Item["kind"] == "attention" {
+		if att, ok := item.Item["attention"].(AttentionView); ok {
+			return 0, att.ID
+		}
+		return 0, ""
+	}
+	threadID, _ := item.Item["threadId"].(string)
+	return 1, threadID
+}
+
+// ListAllNeedsMe returns every open attention and user-facing thread across all projects
+// in a single consistent snapshot, along with lightweight summaries for referenced threads.
+func (reader Reader) ListAllNeedsMe(ctx context.Context) (result AllNeedsMeResult, err error) {
+	result = AllNeedsMeResult{
+		Items:   []AllNeedsMeItem{},
+		Threads: map[string]NeedsMeThreadSummary{},
+	}
+	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
+		projectRows, err := records(ctx, tx, "SELECT id, name FROM projects")
+		if err != nil {
+			return err
+		}
+		if len(projectRows) == 0 {
+			return nil
+		}
+		projectNames := make(map[string]string, len(projectRows))
+		for _, row := range projectRows {
+			projectNames[row.text("id")] = row.text("name")
+		}
+
+		attRows, err := records(ctx, tx, "SELECT * FROM attentions WHERE closed = 0 ORDER BY created_at DESC, id DESC")
+		if err != nil {
+			return err
+		}
+		waitersByAttention := make(map[string][]string, len(attRows))
+		if len(attRows) > 0 {
+			waiterRows, err := records(ctx, tx, `SELECT w.attention_id, w.thread_id
+			 FROM attention_waiters w
+			 JOIN attentions a ON a.id = w.attention_id
+			 WHERE a.closed = 0
+			 ORDER BY w.rowid`)
 			if err != nil {
 				return err
 			}
-			result = append(result, view)
+			for _, waiter := range waiterRows {
+				attID := waiter.text("attention_id")
+				waitersByAttention[attID] = append(waitersByAttention[attID], waiter.text("thread_id"))
+			}
+		}
+
+		attentions := make([]AttentionView, 0, len(attRows))
+		asked := map[string]bool{}
+		attentionThreadIDs := make([]string, 0)
+		seenAttThread := map[string]bool{}
+		addAttThread := func(id string) {
+			if id == "" || seenAttThread[id] {
+				return
+			}
+			seenAttThread[id] = true
+			attentionThreadIDs = append(attentionThreadIDs, id)
+		}
+		for _, row := range attRows {
+			pid := row.text("project_id")
+			if _, ok := projectNames[pid]; !ok {
+				continue
+			}
+			block, err := row.json("block", nil)
+			if err != nil {
+				return err
+			}
+			attID := row.text("id")
+			ownerID := row.text("thread_id")
+			hasOwner := row.present("thread_id")
+			if hasOwner && ownerID != "" {
+				asked[ownerID] = true
+				addAttThread(ownerID)
+			}
+			joined := []string{}
+			for _, threadID := range waitersByAttention[attID] {
+				if !hasOwner || threadID != ownerID {
+					joined = append(joined, threadID)
+					if threadID != "" {
+						asked[threadID] = true
+						addAttThread(threadID)
+					}
+				}
+			}
+			attentions = append(attentions, AttentionView{
+				ID:             attID,
+				ProjectID:      pid,
+				ThreadID:       row["thread_id"],
+				JoinedBy:       joined,
+				Block:          block,
+				MessageID:      row["message_id"],
+				ConversationID: row["conversation_id"],
+				CreatedAt:      row.integer("created_at"),
+			})
+		}
+
+		candidateRows, err := records(ctx, tx, `SELECT `+needsMeThreadSummaryColumns+`
+		 FROM threads t LEFT JOIN conversations c ON c.id = t.id
+		 WHERE coalesce(t.review_of, '') = ''
+		 AND (t.last_report = 'ready' OR c.last_outcome IN ('completed','cancelled','failed') OR t.aside_due = 1)`)
+		if err != nil {
+			return err
+		}
+
+		summaries := make(map[string]NeedsMeThreadSummary)
+		rawArtifactIDs := make(map[string][]string)
+		type matchedThread struct {
+			id        string
+			projectID string
+			at        int64
+		}
+		matchedThreads := make([]matchedThread, 0)
+
+		for _, row := range candidateRows {
+			pid := row.text("project_id")
+			if _, ok := projectNames[pid]; !ok {
+				continue
+			}
+			id := row.text("id")
+			if asked[id] {
+				continue
+			}
+			merged, err := row.json("merged", nil)
+			if err != nil {
+				return err
+			}
+			pull, err := row.json("pull_request", nil)
+			if err != nil {
+				return err
+			}
+			facts := threadStageFacts(row, asObject(merged), asObject(pull))
+			stage := ThreadStage(facts)
+			asideDue := row.present("aside_until") && row.flag("aside_due")
+			if !facts.needsUser(stage) && !asideDue {
+				continue
+			}
+			summaries[id] = toNeedsMeThreadSummary(row, stage)
+			if rawArtifacts, err := row.json("last_artifacts", []any{}); err != nil {
+				return err
+			} else if list, ok := rawArtifacts.([]any); ok && len(list) > 0 {
+				ids := make([]string, 0, len(list))
+				for _, rawID := range list {
+					if artifactID, ok := rawID.(string); ok && artifactID != "" {
+						ids = append(ids, artifactID)
+					}
+				}
+				if len(ids) > 0 {
+					rawArtifactIDs[id] = ids
+				}
+			}
+			at := max(row.integer("updated_at"), row.integer("reported_at"), row.integer("last_turn_at"))
+			if asideDue {
+				at = max(at, row.integer("aside_until"))
+			}
+			matchedThreads = append(matchedThreads, matchedThread{id: id, projectID: pid, at: at})
+		}
+
+		missingAttThreads := make([]string, 0, len(attentionThreadIDs))
+		for _, id := range attentionThreadIDs {
+			if _, ok := summaries[id]; !ok {
+				missingAttThreads = append(missingAttThreads, id)
+			}
+		}
+		const chunkSize = 200
+		for start := 0; start < len(missingAttThreads); start += chunkSize {
+			end := min(start+chunkSize, len(missingAttThreads))
+			chunk := missingAttThreads[start:end]
+			args := make([]any, len(chunk))
+			for i, id := range chunk {
+				args[i] = id
+			}
+			rows, err := records(ctx, tx, `SELECT `+needsMeThreadSummaryColumns+`, 1 AS open_attentions
+			 FROM threads t LEFT JOIN conversations c ON c.id = t.id
+			 WHERE t.id IN (`+inPlaceholders(len(chunk))+`)`, args...)
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				merged, err := row.json("merged", nil)
+				if err != nil {
+					return err
+				}
+				pull, err := row.json("pull_request", nil)
+				if err != nil {
+					return err
+				}
+				facts := threadStageFacts(row, asObject(merged), asObject(pull))
+				summaries[row.text("id")] = toNeedsMeThreadSummary(row, ThreadStage(facts))
+			}
+		}
+
+		if err := resolveSummaryArtifacts(ctx, tx, summaries, rawArtifactIDs); err != nil {
+			return err
+		}
+
+		items := make([]AllNeedsMeItem, 0, len(attentions)+len(matchedThreads))
+		for _, att := range attentions {
+			var threadID any
+			if ownerID, ok := att.ThreadID.(string); ok {
+				if summary, exists := summaries[ownerID]; exists && summary.ProjectID == att.ProjectID {
+					threadID = ownerID
+				}
+			}
+			joinedIDs := []string{}
+			for _, id := range att.JoinedBy {
+				if summary, exists := summaries[id]; exists && summary.ProjectID == att.ProjectID {
+					joinedIDs = append(joinedIDs, id)
+				}
+			}
+			items = append(items, AllNeedsMeItem{
+				ProjectID:   att.ProjectID,
+				ProjectName: projectNames[att.ProjectID],
+				Item:        object{"kind": "attention", "attention": att, "threadId": threadID, "joinedIds": joinedIDs},
+				At:          att.CreatedAt,
+			})
+		}
+		for _, matched := range matchedThreads {
+			items = append(items, AllNeedsMeItem{
+				ProjectID:   matched.projectID,
+				ProjectName: projectNames[matched.projectID],
+				Item:        object{"kind": "thread", "threadId": matched.id},
+				At:          matched.at,
+			})
+		}
+
+		slices.SortFunc(items, func(a, b AllNeedsMeItem) int {
+			if c := cmp.Compare(b.At, a.At); c != 0 {
+				return c
+			}
+			if c := cmp.Compare(a.ProjectID, b.ProjectID); c != 0 {
+				return c
+			}
+			aRank, aID := needsMeItemSortKey(a)
+			bRank, bID := needsMeItemSortKey(b)
+			if c := cmp.Compare(aRank, bRank); c != 0 {
+				return c
+			}
+			return cmp.Compare(bID, aID)
+		})
+
+		result = AllNeedsMeResult{
+			Items:   items,
+			Threads: summaries,
 		}
 		return nil
 	})
