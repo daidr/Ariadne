@@ -63,6 +63,8 @@ type Controller struct {
 	onStateChange             func(RestartState)
 
 	lastUserActivity atomic.Int64
+	workIdleSince    atomic.Int64
+	wakeCh           chan struct{}
 
 	draining       bool
 	drainMode      string
@@ -115,10 +117,14 @@ func NewController(opts ControllerOptions) *Controller {
 		pollInterval:              poll,
 		onShutdown:                opts.OnShutdown,
 		onStateChange:             opts.OnStateChange,
+		wakeCh:                    make(chan struct{}, 1),
 	}
 	if opts.Scheduler != nil {
 		opts.Scheduler.SetOnActiveChange(func(count int) {
 			c.emitStateChange(count)
+			if count == 0 {
+				c.notifyWatcher()
+			}
 		})
 	}
 	c.emitStateChange(c.activeTurnCount())
@@ -152,6 +158,17 @@ func (c *Controller) LastUserActivity() time.Time {
 // NotifyBackgroundChange pushes updated background command counts to observers.
 func (c *Controller) NotifyBackgroundChange() {
 	c.emitStateChange(c.activeTurnCount())
+	c.notifyWatcher()
+}
+
+func (c *Controller) notifyWatcher() {
+	if c.wakeCh == nil {
+		return
+	}
+	select {
+	case c.wakeCh <- struct{}{}:
+	default:
+	}
 }
 
 func (c *Controller) activeTurnCount() int {
@@ -521,16 +538,16 @@ func (c *Controller) watchAndShutdown(
 						break
 					}
 				}
-					// Stateless HTTP sessions can finish their current tool step cleanly within a short cap.
-					// Stateful local CLI sessions skip draining and resume via interrupted recovery after restart.
-					if !hasStateful {
-						shortCtx, cancel := context.WithTimeout(ctx, c.immediateSafePointTimeout)
-						_ = c.scheduler.WaitIdle(shortCtx)
-						cancel()
-						if ctx.Err() != nil {
-							return
-						}
+				// Stateless HTTP sessions can finish their current tool step cleanly within a short cap.
+				// Stateful local CLI sessions skip draining and resume via interrupted recovery after restart.
+				if !hasStateful {
+					shortCtx, cancel := context.WithTimeout(ctx, c.immediateSafePointTimeout)
+					_ = c.scheduler.WaitIdle(shortCtx)
+					cancel()
+					if ctx.Err() != nil {
+						return
 					}
+				}
 			}
 		}
 		if !c.waitShutdownDelay(ctx) {
@@ -581,13 +598,15 @@ func (c *Controller) watchAndShutdown(
 			}
 		}
 
-			poll := c.pollInterval
-			if quietWindow > 0 && quietWindow/2 < poll {
-				poll = max(quietWindow/2, 5*time.Millisecond)
-			}
-			ticker := time.NewTicker(poll)
-			defer ticker.Stop()
-			var workIdleSince time.Time
+		poll := c.pollInterval
+		if quietWindow > 0 && quietWindow/2 < poll {
+			poll = max(quietWindow/2, 5*time.Millisecond)
+		}
+		ticker := time.NewTicker(poll)
+		defer ticker.Stop()
+		defer c.workIdleSince.Store(0)
+		c.workIdleSince.Store(0)
+		var workIdleSince time.Time
 		lastBg := c.activeBackgroundCount()
 		for {
 			if bg := c.activeBackgroundCount(); bg != lastBg {
@@ -598,6 +617,7 @@ func (c *Controller) watchAndShutdown(
 				now := c.now()
 				if workIdleSince.IsZero() {
 					workIdleSince = now
+					c.workIdleSince.Store(now.UnixNano())
 				}
 				effectiveStart := workIdleSince
 				if lastAct := c.LastUserActivity(); !lastAct.IsZero() && lastAct.After(effectiveStart) {
@@ -608,13 +628,16 @@ func (c *Controller) watchAndShutdown(
 						return
 					}
 					workIdleSince = time.Time{}
+					c.workIdleSince.Store(0)
 				}
 			} else {
 				workIdleSince = time.Time{}
+				c.workIdleSince.Store(0)
 			}
 			select {
 			case <-ctx.Done():
 				return
+			case <-c.wakeCh:
 			case <-ticker.C:
 			}
 		}

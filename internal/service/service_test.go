@@ -530,11 +530,15 @@ func TestControllerWhenIdleNonBlockingAndUserActivityReset(t *testing.T) {
 		t.Fatal("new thread was blocked during waiting_idle")
 	}
 
-	// Finish all active turns, then keep recording user activity so quiet window resets.
+	// Finish all active turns and wait for the idle watcher to latch workIdleSince before
+	// advancing the fake clock, avoiding a scheduling race on slower runners.
 	close(release)
 	deadline := time.Now().Add(5 * time.Second)
-	for sched.ActiveCount() > 0 && time.Now().Before(deadline) {
+	for (sched.ActiveCount() > 0 || ctrl.workIdleSince.Load() == 0) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
+	}
+	if ctrl.workIdleSince.Load() == 0 {
+		t.Fatal("when-idle watcher did not observe idle state after turns finished")
 	}
 	advance(60 * time.Millisecond)
 	ctrl.RecordUserActivity()
@@ -547,6 +551,7 @@ func TestControllerWhenIdleNonBlockingAndUserActivityReset(t *testing.T) {
 
 	// Advance past quiet window after last user activity -> should restart.
 	advance(120 * time.Millisecond)
+	ctrl.notifyWatcher()
 	select {
 	case restart := <-shutdownCh:
 		if !restart {
