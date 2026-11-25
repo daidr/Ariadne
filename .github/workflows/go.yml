@@ -136,8 +136,9 @@ jobs:
           path: |
             ${{ runner.temp }}/gomod
             ${{ runner.temp }}/gobuild
-          key: go-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
+          key: ${{ runner.os == 'Linux' && 'go-native-v2' || 'go-native' }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
           restore-keys: |
+            ${{ runner.os == 'Linux' && 'go-native-v2' || 'go-native' }}-${{ runner.os }}-${{ runner.arch }}-
             go-native-${{ runner.os }}-${{ runner.arch }}-
       # Ubuntu and race run the complete test suite (including heavy multi-repo
       # git matrices). macOS and Windows run with -short across all OS-sensitive
