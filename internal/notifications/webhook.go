@@ -30,6 +30,22 @@ func SignWebhookPayload(secret string, body []byte) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
+func noRedirectClient(client *http.Client, defaultTimeout time.Duration) *http.Client {
+	if client == nil {
+		return &http.Client{
+			Timeout: defaultTimeout,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+	}
+	copied := *client
+	copied.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &copied
+}
+
 // SendWebhook posts a JSON notification payload to a generic Webhook endpoint,
 // signing the body with X-Ariadne-Signature-256 when a secret is configured.
 func SendWebhook(
@@ -38,9 +54,7 @@ func SendWebhook(
 	hook settings.WebhookConfig,
 	payload sdk.NotificationPayload,
 ) (int, error) {
-	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
-	}
+	httpClient := noRedirectClient(client, 10*time.Second)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return 0, err
@@ -62,7 +76,7 @@ func SendWebhook(
 		req.Header.Set(SignatureHeader, SignWebhookPayload(hook.Secret, body))
 	}
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return 0, err
 	}

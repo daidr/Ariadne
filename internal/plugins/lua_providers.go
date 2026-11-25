@@ -37,30 +37,30 @@ func (program *luaProgram) install(pc sdk.PluginContext, provider luaProvider) e
 	case "searches":
 		_, err := pc.RegisterSearch(program.search(provider))
 		return err
-		case "links":
-			_, err := pc.RegisterLink(sdk.LinkProvider{
-				Kind: provider.kind, Title: provider.title,
-				Match: func(address *url.URL) *sdk.LinkMatch {
-					var label *string
-					if err := program.result(context.Background(), provider, "match", nil, &label, address.String()); err != nil || label == nil || *label == "" || len(*label) > 1024 {
-						return nil
-					}
-					return &sdk.LinkMatch{Kind: provider.kind, Label: *label}
-				},
-				Preview: func(ctx context.Context, address *url.URL) (*sdk.PullRequestPreview, error) {
-					var preview *sdk.PullRequestPreview
-					err := program.result(ctx, provider, "preview", nil, &preview, address.String())
-					if preview != nil {
-						preview.Kind = provider.kind
-					}
-					return preview, err
-				},
-			})
-			return err
-		case "notifiers":
-			_, err := pc.RegisterNotifier(program.notifier(provider))
-			return err
-		}
+	case "links":
+		_, err := pc.RegisterLink(sdk.LinkProvider{
+			Kind: provider.kind, Title: provider.title,
+			Match: func(address *url.URL) *sdk.LinkMatch {
+				var label *string
+				if err := program.result(context.Background(), provider, "match", nil, &label, address.String()); err != nil || label == nil || *label == "" || len(*label) > 1024 {
+					return nil
+				}
+				return &sdk.LinkMatch{Kind: provider.kind, Label: *label}
+			},
+			Preview: func(ctx context.Context, address *url.URL) (*sdk.PullRequestPreview, error) {
+				var preview *sdk.PullRequestPreview
+				err := program.result(ctx, provider, "preview", nil, &preview, address.String())
+				if preview != nil {
+					preview.Kind = provider.kind
+				}
+				return preview, err
+			},
+		})
+		return err
+	case "notifiers":
+		_, err := pc.RegisterNotifier(program.notifier(provider))
+		return err
+	}
 	return errors.New("unknown Lua plugin provider type")
 }
 

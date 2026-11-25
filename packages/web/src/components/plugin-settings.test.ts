@@ -33,6 +33,7 @@ function record(partial: Partial<PluginRecord> & { id: string }): PluginRecord {
       modelRoles: [],
       searches: [],
       projects: [],
+      notifiers: [],
     },
     ...partial,
   }
@@ -86,8 +87,21 @@ describe('plugin-settings helpers', () => {
     expect(pluginCapabilities(hybrid)).toEqual(['models', 'searches', 'dashboards', 'notifiers'])
   })
 
-  test('formats usage summaries across model providers, roles, search, and projects', () => {
+  test('formats usage summaries across model providers, roles, search, notifiers, and projects', () => {
     expect(hasPluginUsage(record({ id: 'empty' }))).toBe(false)
+
+    const notifierOnly = record({
+      id: 'lark-notifier',
+      usage: {
+        modelProviders: [],
+        modelRoles: [],
+        searches: [],
+        projects: [],
+        notifiers: ['lark-bot'],
+      },
+    })
+    expect(hasPluginUsage(notifierOnly)).toBe(true)
+    expect(formatPluginUsage(notifierOnly.usage)).toBe('离线通知（lark-bot）')
 
     const used = record({
       id: 'multi',
@@ -96,16 +110,17 @@ describe('plugin-settings helpers', () => {
         modelRoles: ['thread', 'research'],
         searches: ['tavily'],
         projects: ['Ariadne', 'Demo', 'Web', 'CLI'],
+        notifiers: ['lark-bot'],
       },
     })
     expect(hasPluginUsage(used)).toBe(true)
     expect(formatPluginUsage(used.usage)).toBe(
-      '模型提供方 OpenAI、DeepSeek（讨论串默认、子调研）；当前联网搜索；项目 Ariadne、Demo 等 4 个项目',
+      '模型提供方 OpenAI、DeepSeek（讨论串默认、子调研）；当前联网搜索；离线通知（lark-bot）；项目 Ariadne、Demo 等 4 个项目',
     )
 
     locale.value = 'en'
     expect(formatPluginUsage(used.usage)).toBe(
-      'Model provider OpenAI, DeepSeek (Thread default, Research); Current web search; 4 projects (Ariadne, Demo, ...)',
+      'Model provider OpenAI, DeepSeek (Thread default, Research); Current web search; Offline notifications (lark-bot); 4 projects (Ariadne, Demo, ...)',
     )
     expect(
       formatPluginUsage({
@@ -113,6 +128,7 @@ describe('plugin-settings helpers', () => {
         modelRoles: [],
         searches: [],
         projects: ['Ariadne'],
+        notifiers: [],
       }),
     ).toBe('Model provider Claude; Project Ariadne')
   })
@@ -137,6 +153,7 @@ describe('PluginSettings component', () => {
           modelRoles: ['thread'],
           searches: [],
           projects: [],
+          notifiers: [],
         },
       }),
       record({
@@ -155,6 +172,7 @@ describe('PluginSettings component', () => {
           modelRoles: [],
           searches: [],
           projects: [],
+          notifiers: [],
         },
       }),
       record({
@@ -173,6 +191,28 @@ describe('PluginSettings component', () => {
           modelRoles: [],
           searches: [],
           projects: ['Ariadne'],
+          notifiers: [],
+        },
+      }),
+      record({
+        id: 'lark-bot',
+        name: { 'zh-CN': '飞书通知', en: 'Lark Notifier' },
+        source: 'path',
+        path: '/plugins/lark.lua',
+        provides: {
+          models: [],
+          contexts: [],
+          dashboards: [],
+          searches: [],
+          links: [],
+          notifiers: ['lark-bot'],
+        },
+        usage: {
+          modelProviders: [],
+          modelRoles: [],
+          searches: [],
+          projects: [],
+          notifiers: ['lark-bot'],
         },
       }),
     ]
@@ -205,6 +245,7 @@ describe('PluginSettings component', () => {
     expect(text).toContain('链接预览')
     expect(text).toContain('使用中：模型提供方 OpenAI（讨论串默认）')
     expect(text).toContain('使用中：项目 Ariadne')
+    expect(text).toContain('使用中：离线通知（lark-bot）')
     expect(text).not.toContain('openai-compatible')
     expect(text).not.toContain('提供：')
 

@@ -12,7 +12,54 @@ import (
 	"github.com/google/uuid"
 )
 
-const maxWebhooks = 32
+const (
+	maxWebhooks = 32
+	// DefaultVAPIDSubject is a valid routable HTTPS contact URI for RFC 8292 VAPID JWTs.
+	// Push services such as Apple Web Push (web.push.apple.com) reject @localhost subjects with 403.
+	DefaultVAPIDSubject = "https://github.com/daidr/Ariadne"
+)
+
+// NormalizeVAPIDSubject returns subject when it is a valid routable https: or mailto:
+// VAPID subject URI, or falls back to DefaultVAPIDSubject for empty or local/unroutable values
+// (including legacy mailto:*@localhost entries).
+func NormalizeVAPIDSubject(subject string) string {
+	trimmed := textutil.Trim(subject)
+	if trimmed == "" || strings.ContainsAny(trimmed, " \t\r\n") {
+		return DefaultVAPIDSubject
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "mailto:") {
+		addr := trimmed[len("mailto:"):]
+		at := strings.LastIndex(addr, "@")
+		if at <= 0 || at == len(addr)-1 {
+			return DefaultVAPIDSubject
+		}
+		domain := strings.ToLower(strings.TrimSuffix(addr[at+1:], "."))
+		if !isRoutableVAPIDHost(domain) {
+			return DefaultVAPIDSubject
+		}
+		return trimmed
+	}
+	if strings.HasPrefix(lower, "https://") {
+		parsed, err := url.Parse(trimmed)
+		if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.User != nil {
+			return DefaultVAPIDSubject
+		}
+		host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+		if !isRoutableVAPIDHost(host) {
+			return DefaultVAPIDSubject
+		}
+		return trimmed
+	}
+	return DefaultVAPIDSubject
+}
+
+func isRoutableVAPIDHost(host string) bool {
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+		return false
+	}
+	return strings.Contains(host, ".")
+}
 
 var webhookIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
@@ -161,16 +208,28 @@ func (store *Store) Notifications() NotificationConfig {
 	return decodeNotifications(store.snapshot())
 }
 
-// EnsureVAPID returns the persisted VAPID keypair, generating and storing one once when absent.
+// EnsureVAPID returns the persisted VAPID keypair, generating and storing one once when absent,
+// and repairing legacy/unroutable subjects without rotating the existing keypair.
 func (store *Store) EnsureVAPID(generate func() (VAPIDConfig, error)) (VAPIDConfig, error) {
 	current := store.Notifications().VAPID
-	if current.PublicKey != "" && current.PrivateKey != "" {
+	if current.PublicKey != "" && current.PrivateKey != "" && NormalizeVAPIDSubject(current.Subject) == current.Subject {
 		return current, nil
 	}
 	var result VAPIDConfig
 	err := store.update(func(config Object) error {
 		existing := decodeNotifications(config).VAPID
 		if existing.PublicKey != "" && existing.PrivateKey != "" {
+			normalized := NormalizeVAPIDSubject(existing.Subject)
+			if normalized != existing.Subject {
+				existing.Subject = normalized
+				section := cloneMap(object(config["notifications"]))
+				section["vapid"] = Object{
+					"publicKey":  existing.PublicKey,
+					"privateKey": existing.PrivateKey,
+					"subject":    existing.Subject,
+				}
+				config["notifications"] = section
+			}
 			result = existing
 			return nil
 		}
@@ -178,6 +237,7 @@ func (store *Store) EnsureVAPID(generate func() (VAPIDConfig, error)) (VAPIDConf
 		if err != nil {
 			return err
 		}
+		generated.Subject = NormalizeVAPIDSubject(generated.Subject)
 		section := cloneMap(object(config["notifications"]))
 		section["vapid"] = Object{
 			"publicKey":  generated.PublicKey,

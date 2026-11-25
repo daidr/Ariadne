@@ -4,6 +4,7 @@ import {
   arrayBufferToBase64Url,
   defaultDeviceLabel,
   detectPushSupport,
+  navigateToNotificationTarget,
   syncAppBadge,
   urlBase64ToUint8Array,
 } from './push'
@@ -153,5 +154,88 @@ describe('Service Worker parsePushPayload', () => {
     expect(fallback.title).toBe('Ariadne')
     expect(fallback.body).toBe('plain text reminder')
     expect(fallback.url).toBe('/')
+  })
+})
+
+describe('navigateToNotificationTarget', () => {
+  test('switches back to coordinator and closes fullscreen when clicking current project coordinator notification', async () => {
+    let full = true
+    const calls: string[] = []
+    await navigateToNotificationTarget(
+      { projectId: 'prj_1' },
+      {
+        currentProjectId: () => 'prj_1',
+        hasFullView: () => full,
+        openProject: async (id) => {
+          calls.push(`project:${id}`)
+        },
+        openThread: async (id) => {
+          calls.push(`thread:${id}`)
+        },
+        closeFull: () => {
+          full = false
+          calls.push('closeFull')
+        },
+        openCoordinator: () => {
+          calls.push('coordinator')
+        },
+      },
+    )
+    expect(calls).toEqual(['closeFull', 'coordinator'])
+  })
+
+  test('closes fullscreen before opening thread on current project', async () => {
+    let full = true
+    const calls: string[] = []
+    await navigateToNotificationTarget(
+      { projectId: 'prj_1', threadId: 'thr_9' },
+      {
+        currentProjectId: () => 'prj_1',
+        hasFullView: () => full,
+        openProject: async (id) => {
+          calls.push(`project:${id}`)
+        },
+        openThread: async (id) => {
+          calls.push(`thread:${id}`)
+        },
+        closeFull: () => {
+          full = false
+          calls.push('closeFull')
+        },
+        openCoordinator: () => {
+          calls.push('coordinator')
+        },
+      },
+    )
+    expect(calls).toEqual(['closeFull', 'thread:thr_9'])
+  })
+
+  test('switches project then opens coordinator or thread for a different project', async () => {
+    let current: string | null = 'prj_1'
+    const calls: string[] = []
+    const actions = {
+      currentProjectId: () => current,
+      hasFullView: () => false,
+      openProject: async (id: string) => {
+        current = id
+        calls.push(`project:${id}`)
+      },
+      openThread: async (id: string) => {
+        calls.push(`thread:${id}`)
+      },
+      closeFull: () => {
+        calls.push('closeFull')
+      },
+      openCoordinator: () => {
+        calls.push('coordinator')
+      },
+    }
+
+    await navigateToNotificationTarget({ projectId: 'prj_2' }, actions)
+    expect(calls).toEqual(['project:prj_2', 'coordinator'])
+
+    calls.length = 0
+    await navigateToNotificationTarget({ projectId: 'prj_3', threadId: 'thr_7' }, actions)
+    expect(calls).toEqual(['project:prj_3', 'thread:thr_7'])
   })
 })

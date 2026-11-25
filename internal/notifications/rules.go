@@ -166,7 +166,7 @@ func askTitleOf(block eventObject) string {
 }
 
 func truncateRunes(raw string, limit int) string {
-	cleaned := strings.Join(strings.Fields(raw), " ")
+	cleaned := strings.Join(strings.Fields(strings.ToValidUTF8(raw, "")), " ")
 	runes := []rune(cleaned)
 	if len(runes) <= limit {
 		return cleaned

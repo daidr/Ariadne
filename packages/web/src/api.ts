@@ -418,6 +418,7 @@ export interface PluginUsage {
   modelRoles: string[]
   searches: string[]
   projects: string[]
+  notifiers: string[]
 }
 
 /** A plugin as the server reports it; see `PluginRecord` in the agent package. */

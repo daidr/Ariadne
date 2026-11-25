@@ -305,6 +305,38 @@ export interface ServiceWorkerNavigationTarget {
   threadId?: string
 }
 
+export interface NotificationNavigationActions {
+  currentProjectId: () => string | null
+  hasFullView: () => boolean
+  openProject: (projectId: string) => Promise<void>
+  openThread: (threadId: string) => Promise<void>
+  closeFull: () => void
+  openCoordinator: () => void
+}
+
+/**
+ * Route an in-app notification click to its project/thread or back to the coordinator
+ * conversation (closing any full-screen overlay so narrow PWAs reveal the target view).
+ */
+export async function navigateToNotificationTarget(
+  target: ServiceWorkerNavigationTarget,
+  actions: NotificationNavigationActions,
+): Promise<void> {
+  const { projectId, threadId } = target
+  if (projectId && actions.currentProjectId() !== projectId) {
+    await actions.openProject(projectId)
+  }
+  if (threadId) {
+    if (actions.hasFullView()) actions.closeFull()
+    await actions.openThread(threadId)
+    return
+  }
+  if (projectId) {
+    if (actions.hasFullView()) actions.closeFull()
+    actions.openCoordinator()
+  }
+}
+
 /** Listen for navigation messages dispatched by the Service Worker on notification clicks. */
 export function watchServiceWorkerNavigation(
   onNavigate: (target: ServiceWorkerNavigationTarget) => void,

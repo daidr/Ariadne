@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/internal/textutil"
@@ -57,11 +58,34 @@ func decodeBase64URL(raw string) ([]byte, error) {
 	return base64.RawURLEncoding.DecodeString(trimmed)
 }
 
+func sanitizeUTF8Truncate(raw string, maxRunes int) string {
+	cleaned := textutil.Trim(strings.ReplaceAll(strings.ToValidUTF8(raw, ""), "\x00", ""))
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(cleaned)
+	if len(runes) <= maxRunes {
+		return cleaned
+	}
+	return string(runes[:maxRunes])
+}
+
+func sanitizePushSubscription(item PushSubscription) PushSubscription {
+	item.Endpoint = strings.ToValidUTF8(item.Endpoint, "")
+	item.Label = strings.ToValidUTF8(item.Label, "")
+	item.UserAgent = strings.ToValidUTF8(item.UserAgent, "")
+	if item.LastError != nil {
+		cleaned := strings.ToValidUTF8(*item.LastError, "")
+		item.LastError = &cleaned
+	}
+	return item
+}
+
 func validatePushSubscriptionInput(input SubscribeInput, allowInsecure bool) (SubscribeInput, error) {
 	endpoint := textutil.Trim(input.Endpoint)
 	parsed, err := url.Parse(endpoint)
 	validScheme := parsed != nil && (parsed.Scheme == "https" || (allowInsecure && parsed.Scheme == "http"))
-	if err != nil || len(endpoint) > 2048 || strings.ContainsRune(endpoint, 0) ||
+	if err != nil || !utf8.ValidString(endpoint) || len(endpoint) > 2048 || strings.ContainsRune(endpoint, 0) ||
 		!validScheme || parsed.Host == "" || parsed.User != nil {
 		return SubscribeInput{}, domainerr.New("error.invalidInput", map[string]any{"field": "endpoint"})
 	}
@@ -75,14 +99,8 @@ func validatePushSubscriptionInput(input SubscribeInput, allowInsecure bool) (Su
 	if err != nil || len(authBytes) != 16 {
 		return SubscribeInput{}, domainerr.New("error.invalidInput", map[string]any{"field": "auth"})
 	}
-	label := textutil.Trim(input.Label)
-	if len(label) > 120 {
-		label = label[:120]
-	}
-	ua := textutil.Trim(input.UserAgent)
-	if len(ua) > 512 {
-		ua = ua[:512]
-	}
+	label := sanitizeUTF8Truncate(input.Label, 120)
+	ua := sanitizeUTF8Truncate(input.UserAgent, 512)
 	return SubscribeInput{
 		Endpoint:  endpoint,
 		P256DH:    p256dhRaw,
@@ -118,7 +136,7 @@ func (store *SubscriptionStore) List(ctx context.Context) ([]PushSubscription, e
 			v := lastErr.String
 			item.LastError = &v
 		}
-		out = append(out, item)
+		out = append(out, sanitizePushSubscription(item))
 	}
 	return out, rows.Err()
 }
@@ -148,7 +166,7 @@ func (store *SubscriptionStore) GetByID(ctx context.Context, id string) (PushSub
 		v := lastErr.String
 		item.LastError = &v
 	}
-	return item, true, nil
+	return sanitizePushSubscription(item), true, nil
 }
 
 func (store *SubscriptionStore) Upsert(ctx context.Context, raw SubscribeInput) (PushSubscription, error) {
@@ -238,10 +256,7 @@ func (store *SubscriptionStore) MarkError(ctx context.Context, id string, messag
 	if store == nil || store.db == nil {
 		return nil
 	}
-	message = textutil.Trim(message)
-	if len(message) > 500 {
-		message = message[:500]
-	}
+	message = sanitizeUTF8Truncate(message, 500)
 	_, err := store.db.ExecContext(ctx, `UPDATE push_subscriptions SET last_error = ? WHERE id = ?`, message, id)
 	return err
 }

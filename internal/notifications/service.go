@@ -92,8 +92,8 @@ func NewService(options Options) (*Service, error) {
 }
 
 func (service *Service) Subscriptions() *SubscriptionStore { return service.subscriptions }
-func (service *Service) Presence() *PresenceTracker      { return service.presence }
-func (service *Service) Notifiers() *Registry            { return service.notifiers }
+func (service *Service) Presence() *PresenceTracker        { return service.presence }
+func (service *Service) Notifiers() *Registry              { return service.notifiers }
 
 func (service *Service) EnsureVAPID() (settings.VAPIDConfig, error) {
 	return service.options.Settings.EnsureVAPID(GenerateVAPIDKeys)
@@ -275,8 +275,12 @@ func (service *Service) Dispatch(ctx context.Context, payload sdk.NotificationPa
 								}
 								return
 							}
-							_ = service.subscriptions.MarkError(ctx, sub.ID, err.Error())
-							service.reportError(fmt.Errorf("web push %s: %w", sub.ID, err))
+							if errors.Is(err, context.Canceled) {
+								return
+							}
+							redacted := secrets.Redact(err.Error(), webPushSecretValues(cfg.VAPID, sub))
+							_ = service.subscriptions.MarkError(ctx, sub.ID, redacted)
+							service.reportError(fmt.Errorf("web push %s: %s", sub.ID, redacted))
 							return
 						}
 						_ = service.subscriptions.MarkUsed(ctx, sub.ID, service.now().UnixMilli())
@@ -296,7 +300,11 @@ func (service *Service) Dispatch(ctx context.Context, payload sdk.NotificationPa
 			sendCtx, cancel := context.WithTimeout(ctx, deliveryTimeout)
 			defer cancel()
 			if _, err := SendWebhook(sendCtx, service.client, hook, payload); err != nil {
-				service.reportError(fmt.Errorf("webhook %s: %w", hook.ID, err))
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				redacted := secrets.Redact(err.Error(), webhookSecretValues(hook))
+				service.reportError(fmt.Errorf("webhook %s: %s", hook.ID, redacted))
 			}
 		}(hook)
 	}
@@ -307,14 +315,18 @@ func (service *Service) Dispatch(ctx context.Context, payload sdk.NotificationPa
 			continue
 		}
 		wg.Add(1)
-		go func(kind string, values map[string]any) {
+		go func(info sdk.NotifierProviderInfo, values map[string]any) {
 			defer wg.Done()
 			sendCtx, cancel := context.WithTimeout(ctx, deliveryTimeout)
 			defer cancel()
-			if err := service.notifiers.Send(sendCtx, kind, values, payload); err != nil {
-				service.reportError(fmt.Errorf("notifier %s: %w", kind, err))
+			if err := service.notifiers.Send(sendCtx, info.Kind, values, payload); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				redacted := secrets.Redact(err.Error(), notifierSecretValues(info.Settings, values))
+				service.reportError(fmt.Errorf("notifier %s: %s", info.Kind, redacted))
 			}
-		}(info.Kind, values)
+		}(info, values)
 	}
 
 	wg.Wait()
@@ -388,11 +400,11 @@ func (service *Service) Test(ctx context.Context, req TestRequest) (TestResult, 
 			}
 			if err != nil {
 				failed++
-				lastErr = secrets.Redact(err.Error(), []string{vapid.PrivateKey, sub.Auth})
+				lastErr = secrets.Redact(err.Error(), webPushSecretValues(vapid, sub))
 				if errors.Is(err, ErrSubscriptionGone) {
 					_ = service.subscriptions.DeleteByID(ctx, sub.ID)
 				} else {
-					_ = service.subscriptions.MarkError(ctx, sub.ID, err.Error())
+					_ = service.subscriptions.MarkError(ctx, sub.ID, lastErr)
 				}
 				continue
 			}
@@ -498,13 +510,14 @@ func (service *Service) Test(ctx context.Context, req TestRequest) (TestResult, 
 			_, resolved := service.options.Settings.EffectiveNotifierSettings(provider.Info())
 			values = resolved
 		}
+		secretVals := notifierSecretValues(provider.Settings, values)
 		if provider.Check != nil {
 			result, err := service.notifiers.Check(sendCtx, kind, values)
 			if err != nil {
 				if errors.Is(sendCtx.Err(), context.Canceled) {
 					return TestResult{}, err
 				}
-				redacted := secrets.Redact(err.Error(), notifierSecretValues(provider.Settings, values))
+				redacted := secrets.Redact(err.Error(), secretVals)
 				return TestResult{
 					OK:      false,
 					Failed:  1,
@@ -514,7 +527,7 @@ func (service *Service) Test(ctx context.Context, req TestRequest) (TestResult, 
 			out := TestResult{
 				OK:      result.OK,
 				Status:  result.Status,
-				Message: result.Message,
+				Message: redactLocalizedText(result.Message, secretVals),
 			}
 			if result.OK {
 				out.Delivered = 1
@@ -527,7 +540,7 @@ func (service *Service) Test(ctx context.Context, req TestRequest) (TestResult, 
 			if errors.Is(sendCtx.Err(), context.Canceled) {
 				return TestResult{}, err
 			}
-			redacted := secrets.Redact(err.Error(), notifierSecretValues(provider.Settings, values))
+			redacted := secrets.Redact(err.Error(), secretVals)
 			return TestResult{
 				OK:      false,
 				Failed:  1,
@@ -543,6 +556,28 @@ func (service *Service) Test(ctx context.Context, req TestRequest) (TestResult, 
 	default:
 		return TestResult{}, domainerr.New("error.invalidInput", map[string]any{"field": "channel"})
 	}
+}
+
+func webPushSecretValues(vapid settings.VAPIDConfig, sub PushSubscription) []string {
+	out := make([]string, 0, 2)
+	if vapid.PrivateKey != "" {
+		out = append(out, vapid.PrivateKey)
+	}
+	if sub.Auth != "" {
+		out = append(out, sub.Auth)
+	}
+	return out
+}
+
+func redactLocalizedText(text sdk.LocalizedText, secretVals []string) sdk.LocalizedText {
+	if len(text) == 0 {
+		return nil
+	}
+	out := make(sdk.LocalizedText, len(text))
+	for lang, msg := range text {
+		out[lang] = secrets.Redact(msg, secretVals)
+	}
+	return out
 }
 
 func webhookSecretValues(hook settings.WebhookConfig) []string {

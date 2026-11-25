@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	defaultVAPIDSubject = "mailto:ariadne@localhost"
+	defaultVAPIDSubject = settings.DefaultVAPIDSubject
 	webPushRecordSize   = 4096
 	webPushTTLSeconds   = 86400
 	maxPlaintextBytes   = 3800
@@ -251,10 +251,7 @@ func buildVAPIDAuthHeader(endpoint string, vapid settings.VAPIDConfig, now time.
 		return "", errors.New("invalid push endpoint URL")
 	}
 	audience := parsed.Scheme + "://" + parsed.Host
-	subject := strings.TrimSpace(vapid.Subject)
-	if subject == "" {
-		subject = defaultVAPIDSubject
-	}
+	subject := settings.NormalizeVAPIDSubject(vapid.Subject)
 	privKey, pubBytes, err := vapidECDSAPrivateKey(vapid)
 	if err != nil {
 		return "", err
@@ -299,9 +296,7 @@ func SendWebPush(
 	payload []byte,
 	now time.Time,
 ) (int, error) {
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
-	}
+	httpClient := noRedirectClient(client, 15*time.Second)
 	uaPublic, err := decodeBase64URL(sub.P256DH)
 	if err != nil {
 		return 0, fmt.Errorf("decode p256dh: %w", err)
@@ -328,7 +323,7 @@ func SendWebPush(
 	req.Header.Set("TTL", strconv.Itoa(webPushTTLSeconds))
 	req.Header.Set("Urgency", "high")
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -339,7 +334,7 @@ func SendWebPush(
 		return resp.StatusCode, fmt.Errorf("%w (HTTP %d)", ErrSubscriptionGone, resp.StatusCode)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		detail := strings.TrimSpace(secrets.Redact(string(bodyBytes), []string{vapid.PrivateKey, sub.Auth}))
+		detail := strings.TrimSpace(secrets.Redact(string(bodyBytes), []string{vapid.PrivateKey, sub.Auth, authHeader}))
 		if detail != "" {
 			return resp.StatusCode, fmt.Errorf("push endpoint HTTP %d: %s", resp.StatusCode, detail)
 		}

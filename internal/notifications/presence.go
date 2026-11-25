@@ -10,7 +10,7 @@ const (
 	DefaultHeartbeatTTL = 45 * time.Second
 	// DefaultLeaveGrace suppresses pushes briefly after blur/hide to avoid noisy flaps
 	// while ensuring offline pushes still arrive quickly once the user steps away.
-	DefaultLeaveGrace = 10 * time.Second
+	DefaultLeaveGrace  = 10 * time.Second
 	maxPresenceClients = 128
 )
 

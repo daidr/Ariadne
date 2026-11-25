@@ -606,6 +606,7 @@ export function fromProtoPluginRecord(record: ProtoPluginRecord): PluginRecord {
             modelRoles: [...record.usage.modelRoles],
             searches: [...record.usage.searches],
             projects: [...record.usage.projects],
+            notifiers: [...record.usage.notifiers],
           },
         }
       : {}),

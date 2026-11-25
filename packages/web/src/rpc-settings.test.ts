@@ -392,6 +392,7 @@ describe('Domain 1 ConnectRPC mappers', () => {
           modelRoles: ['thread'],
           searches: [],
           projects: [],
+          notifiers: ['lark-bot'],
         },
       }),
     )
@@ -402,6 +403,7 @@ describe('Domain 1 ConnectRPC mappers', () => {
       modelRoles: ['thread'],
       searches: [],
       projects: [],
+      notifiers: ['lark-bot'],
     })
 
     const cfg = fromProtoPluginConfig(

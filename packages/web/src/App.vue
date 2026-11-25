@@ -32,9 +32,14 @@ import { activePlugin } from './plugin-config'
 import { previewFile } from './files/preview'
 import { douLocale, t } from './i18n'
 import { highlightCodeBlock } from './highlighting/code-block'
-import { onLiveEvent, openProject, openThread, state } from './store'
+import { closeFull, onLiveEvent, openMain, openProject, openThread, state } from './store'
 import { notifyAbout } from './notify'
-import { refreshPushActiveFromServer, syncAppBadge, watchServiceWorkerNavigation } from './push'
+import {
+  navigateToNotificationTarget,
+  refreshPushActiveFromServer,
+  syncAppBadge,
+  watchServiceWorkerNavigation,
+} from './push'
 import { COLOR_MODE_KEY, watchThemeColor } from './color-mode'
 import { sheetOpen, useShortcuts } from './shortcuts'
 import { openSettingsKey } from './open-settings'
@@ -219,15 +224,18 @@ watch(
 )
 
 onScopeDispose(
-  watchServiceWorkerNavigation(({ projectId, threadId }) => {
-    void (async () => {
-      if (projectId && state.currentId !== projectId) {
-        await openProject(projectId)
-      }
-      if (threadId) {
-        await openThread(threadId)
-      }
-    })()
+  watchServiceWorkerNavigation((target) => {
+    if (target.projectId || target.threadId) {
+      projectsPopoverOpen.value = false
+    }
+    void navigateToNotificationTarget(target, {
+      currentProjectId: () => state.currentId,
+      hasFullView: () => state.full !== null,
+      openProject,
+      openThread,
+      closeFull,
+      openCoordinator: () => openMain({ kind: 'conversation' }),
+    })
   }),
 )
 </script>
