@@ -6,7 +6,7 @@ import { computed } from 'vue'
 import { t } from '../i18n'
 
 /** How many rounds the thread's latest delivery was reviewed, as an icon and a number. */
-const props = defineProps<{ thread: ThreadView }>()
+const props = defineProps<{ thread: Pick<ThreadView, 'review'> }>()
 
 const rounds = computed(() =>
   props.thread.review && !props.thread.review.reviewing ? props.thread.review.rounds : 0,

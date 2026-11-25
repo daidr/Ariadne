@@ -145,8 +145,27 @@ func searchTerms(query string) []string {
 	return terms
 }
 
-func searchRows(ctx context.Context, db queryer, projectID, kind string, terms []string, limit int) ([]record, error) {
-	if len(terms) == 0 {
+func buildSearchMatchFilters(long, short []string) ([]string, []any) {
+	where := make([]string, 0, len(short)+1)
+	args := make([]any, 0, len(short)*2+1)
+	if len(long) > 0 {
+		where = append(where, "search_text MATCH ?")
+		quoted := make([]string, 0, len(long))
+		for _, term := range long {
+			quoted = append(quoted, `"`+strings.ReplaceAll(term, `"`, `""`)+`"`)
+		}
+		args = append(args, strings.Join(quoted, " AND "))
+	}
+	for _, term := range short {
+		like := "%" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(term) + "%"
+		where = append(where, `(t.title LIKE ? ESCAPE '\' OR t.body LIKE ? ESCAPE '\')`)
+		args = append(args, like, like)
+	}
+	return where, args
+}
+
+func searchRows(ctx context.Context, db queryer, projectID, preferProjectID, kind string, terms []string, limit int) ([]record, error) {
+	if len(terms) == 0 || limit <= 0 {
 		return []record{}, nil
 	}
 	long := []string{}
@@ -158,23 +177,41 @@ func searchRows(ctx context.Context, db queryer, projectID, kind string, terms [
 			short = append(short, term)
 		}
 	}
-	where := []string{"d.project_id = ?", "d.kind = ?"}
-	args := []any{projectID, kind}
-	if len(long) > 0 {
-		where = append(where, "search_text MATCH ?")
-		quoted := []string{}
-		for _, term := range long {
-			quoted = append(quoted, `"`+strings.ReplaceAll(term, `"`, `""`)+`"`)
+	matchWhere, matchArgs := buildSearchMatchFilters(long, short)
+	const baseSelect = "SELECT d.project_id, d.kind, d.ref_id, d.conversation_id, d.at, t.title, t.body FROM search_text t JOIN search_docs d ON d.id = t.rowid WHERE "
+
+	runQuery := func(extraWhere []string, extraArgs []any, orderBy string, orderArgs []any, rowLimit int) ([]record, error) {
+		where := make([]string, 0, len(extraWhere)+len(matchWhere))
+		where = append(where, extraWhere...)
+		where = append(where, matchWhere...)
+		args := make([]any, 0, len(extraArgs)+len(matchArgs)+len(orderArgs)+1)
+		args = append(args, extraArgs...)
+		args = append(args, matchArgs...)
+		args = append(args, orderArgs...)
+		args = append(args, rowLimit)
+		return records(ctx, db, baseSelect+strings.Join(where, " AND ")+" ORDER BY "+orderBy+" LIMIT ?", args...)
+	}
+
+	if projectID != "" {
+		return runQuery([]string{"d.project_id = ?", "d.kind = ?"}, []any{projectID, kind}, "d.at DESC", nil, limit)
+	}
+	if preferProjectID == "" {
+		return runQuery([]string{"d.kind = ?"}, []any{kind}, "d.at DESC", nil, limit)
+	}
+	// Short-term-only queries skip FTS5 MATCH; split preferred vs. other projects so both
+	// scans follow search_docs_project / search_docs_kind_at in index order without sorting.
+	if len(long) == 0 {
+		preferred, err := runQuery([]string{"d.project_id = ?", "d.kind = ?"}, []any{preferProjectID, kind}, "d.at DESC", nil, limit)
+		if err != nil || len(preferred) >= limit {
+			return preferred, err
 		}
-		args = append(args, strings.Join(quoted, " AND "))
+		others, err := runQuery([]string{"d.kind = ?", "d.project_id != ?"}, []any{kind, preferProjectID}, "d.at DESC", nil, limit-len(preferred))
+		if err != nil {
+			return nil, err
+		}
+		return append(preferred, others...), nil
 	}
-	for _, term := range short {
-		like := "%" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(term) + "%"
-		where = append(where, `(t.title LIKE ? ESCAPE '\' OR t.body LIKE ? ESCAPE '\')`)
-		args = append(args, like, like)
-	}
-	args = append(args, limit)
-	return records(ctx, db, "SELECT d.kind, d.ref_id, d.conversation_id, d.at, t.title, t.body FROM search_text t JOIN search_docs d ON d.id = t.rowid WHERE "+strings.Join(where, " AND ")+" ORDER BY d.at DESC LIMIT ?", args...)
+	return runQuery([]string{"d.kind = ?"}, []any{kind}, "(d.project_id = ?) DESC, d.at DESC", []any{preferProjectID}, limit)
 }
 
 var plainHeading = regexp.MustCompile(`(?m)^` + jsSpace + `{0,3}(?:#{1,6}|>|[-+*]|[0-9]+\.)` + jsSpace + `+`)
@@ -233,16 +270,45 @@ func inPlaceholders(count int) string {
 	return strings.Repeat("?,", count-1) + "?"
 }
 
+func lookupProjectNames(ctx context.Context, db queryer, ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := records(ctx, db, "SELECT id, name FROM projects WHERE id IN ("+inPlaceholders(len(ids))+")", args...)
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]string, len(rows))
+	for _, row := range rows {
+		names[row.text("id")] = row.text("name")
+	}
+	return names, nil
+}
+
 func lookupThreadTitles(ctx context.Context, db queryer, projectID string, ids []string) (map[string]string, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	args := make([]any, 0, len(ids)+1)
-	args = append(args, projectID)
+	var (
+		query string
+		args  []any
+	)
+	if projectID != "" {
+		args = make([]any, 0, len(ids)+1)
+		args = append(args, projectID)
+		query = "SELECT id, title FROM threads WHERE project_id = ? AND id IN (" + inPlaceholders(len(ids)) + ")"
+	} else {
+		args = make([]any, 0, len(ids))
+		query = "SELECT id, title FROM threads WHERE id IN (" + inPlaceholders(len(ids)) + ")"
+	}
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	rows, err := records(ctx, db, "SELECT id, title FROM threads WHERE project_id = ? AND id IN ("+inPlaceholders(len(ids))+")", args...)
+	rows, err := records(ctx, db, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -257,12 +323,22 @@ func lookupArtifactKinds(ctx context.Context, db queryer, projectID string, ids 
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	args := make([]any, 0, len(ids)+1)
-	args = append(args, projectID)
+	var (
+		query string
+		args  []any
+	)
+	if projectID != "" {
+		args = make([]any, 0, len(ids)+1)
+		args = append(args, projectID)
+		query = "SELECT id, kind FROM artifacts WHERE project_id = ? AND id IN (" + inPlaceholders(len(ids)) + ")"
+	} else {
+		args = make([]any, 0, len(ids))
+		query = "SELECT id, kind FROM artifacts WHERE id IN (" + inPlaceholders(len(ids)) + ")"
+	}
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	rows, err := records(ctx, db, "SELECT id, kind FROM artifacts WHERE project_id = ? AND id IN ("+inPlaceholders(len(ids))+")", args...)
+	rows, err := records(ctx, db, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -273,28 +349,112 @@ func lookupArtifactKinds(ctx context.Context, db queryer, projectID string, ids 
 	return kinds, nil
 }
 
-func (reader Reader) Search(ctx context.Context, projectID, query string) (result object, err error) {
-	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
-		projects, err := records(ctx, tx, "SELECT id FROM projects WHERE id = ?", projectID)
+func lookupThreadStages(ctx context.Context, db queryer, projectID string, ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var (
+		where string
+		args  []any
+	)
+	if projectID != "" {
+		args = make([]any, 0, len(ids)+1)
+		args = append(args, projectID)
+		where = "t.project_id = ? AND t.id IN (" + inPlaceholders(len(ids)) + ")"
+	} else {
+		args = make([]any, 0, len(ids))
+		where = "t.id IN (" + inPlaceholders(len(ids)) + ")"
+	}
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := records(ctx, db, `SELECT t.id, t.started, t.last_report, t.reported_at, t.reported_head,
+	 t.merged, t.pull_request, t.check_failures, t.stopped_reason, t.reviewed_at, t.reviewing, t.review_of,
+	 c.turn_id, c.pending_seq, c.last_turn_at, c.last_outcome, c.wait_id,
+	 (SELECT count(*) FROM attentions a WHERE a.closed = 0 AND (a.thread_id = t.id OR EXISTS
+	  (SELECT 1 FROM attention_waiters w WHERE w.attention_id = a.id AND w.thread_id = t.id))) AS open_attentions
+	 FROM threads t LEFT JOIN conversations c ON c.id = t.id
+	 WHERE `+where, args...)
+	if err != nil {
+		return nil, err
+	}
+	stages := make(map[string]string, len(rows))
+	for _, row := range rows {
+		merged, err := row.json("merged", nil)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if len(projects) == 0 {
-			return domainerr.NotFound(projectID)
+		pull, err := row.json("pull_request", nil)
+		if err != nil {
+			return nil, err
 		}
-		terms := searchTerms(query)
-		result = object{"terms": terms}
-		for _, kind := range []string{"thread", "artifact", "message"} {
-			limit := 5
-			if kind == "message" {
-				limit = 30
-			}
-			rows, err := searchRows(ctx, tx, projectID, kind, terms, limit)
+		stages[row.text("id")] = ThreadStage(threadStageFacts(row, asObject(merged), asObject(pull)))
+	}
+	return stages, nil
+}
+
+func (reader Reader) Search(ctx context.Context, projectID, query string, preferProjectID ...string) (result object, err error) {
+	prefer := ""
+	if len(preferProjectID) > 0 {
+		prefer = preferProjectID[0]
+	}
+	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
+		projectNames := map[string]string{}
+		if projectID != "" {
+			projects, err := records(ctx, tx, "SELECT id, name FROM projects WHERE id = ?", projectID)
 			if err != nil {
 				return err
 			}
-			var titles, kinds map[string]string
+			if len(projects) == 0 {
+				return domainerr.NotFound(projectID)
+			}
+			projectNames[projectID] = projects[0].text("name")
+		}
+		terms := searchTerms(query)
+		result = object{
+			"terms":     terms,
+			"threads":   []object{},
+			"artifacts": []object{},
+			"messages":  []object{},
+		}
+		if len(terms) == 0 {
+			return nil
+		}
+		searchKinds := []string{"thread", "artifact", "message"}
+		rowsByKind := make(map[string][]record, len(searchKinds))
+		var allRows []record
+		for _, kind := range searchKinds {
+			limit := 5
+			if kind == "message" {
+				limit = 30
+			} else if projectID == "" {
+				limit = 10
+			}
+			rows, err := searchRows(ctx, tx, projectID, prefer, kind, terms, limit)
+			if err != nil {
+				return err
+			}
+			rowsByKind[kind] = rows
+			allRows = append(allRows, rows...)
+		}
+		if projectID == "" {
+			names, err := lookupProjectNames(ctx, tx, uniqueColumnValues(allRows, "project_id"))
+			if err != nil {
+				return err
+			}
+			if names != nil {
+				projectNames = names
+			}
+		}
+		for _, kind := range searchKinds {
+			rows := rowsByKind[kind]
+			var titles, kinds, stages map[string]string
 			switch kind {
+			case "thread":
+				stages, err = lookupThreadStages(ctx, tx, projectID, uniqueColumnValues(rows, "ref_id"))
+				if err != nil {
+					return err
+				}
 			case "message":
 				titles, err = lookupThreadTitles(ctx, tx, projectID, uniqueColumnValues(rows, "conversation_id"))
 				if err != nil {
@@ -308,7 +468,15 @@ func (reader Reader) Search(ctx context.Context, projectID, query string) (resul
 			}
 			hits := make([]object, 0, len(rows))
 			for _, row := range rows {
-				hit := object{"kind": kind, "id": row["ref_id"], "snippet": snippet(row.text("body"), terms), "at": row["at"]}
+				pid := row.text("project_id")
+				hit := object{
+					"kind":        kind,
+					"id":          row["ref_id"],
+					"snippet":     snippet(row.text("body"), terms),
+					"at":          row["at"],
+					"projectId":   pid,
+					"projectName": projectNames[pid],
+				}
 				if kind == "message" {
 					conversationID := row.text("conversation_id")
 					hit["conversationId"] = conversationID
@@ -318,7 +486,9 @@ func (reader Reader) Search(ctx context.Context, projectID, query string) (resul
 					}
 				} else {
 					hit["title"] = row["title"]
-					if kind == "artifact" {
+					if kind == "thread" {
+						hit["stage"] = stages[row.text("ref_id")]
+					} else if kind == "artifact" {
 						artifactKind := kinds[row.text("ref_id")]
 						if artifactKind == "" {
 							artifactKind = "document"

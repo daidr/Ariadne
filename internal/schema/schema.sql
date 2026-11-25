@@ -454,6 +454,8 @@ CREATE INDEX reviews_thread ON reviews (thread_id, id);
 
 CREATE INDEX search_docs_project ON search_docs (project_id, kind, at);
 
+CREATE INDEX search_docs_kind_at ON search_docs (kind, at DESC);
+
 CREATE INDEX threads_project ON threads (project_id, id);
 
 CREATE INDEX threads_project_changed ON threads (project_id, changed_seq);

@@ -152,9 +152,9 @@ watch(showMediumProjectPopover, (allowed) => {
       </div>
       <div v-if="!unauthorized" class="header-actions">
         <ProjectSearch />
+        <AttentionBar :compact="actionsCompact" />
         <template v-if="state.detail && (!isNarrow || !atProjects)">
           <AutopilotSwitch :compact="actionsCompact" />
-          <AttentionBar :compact="actionsCompact" />
           <DouButton
             variant="ghost"
             size="sm"

@@ -1,4 +1,6 @@
 import type {
+  AllNeedsMeItem,
+  AllNeedsMeResult,
   ArtifactCommentAction,
   ArtifactCommentAnchor,
   ArtifactCommentThreadView,
@@ -10,11 +12,13 @@ import type {
   ArtifactVersionView,
   ArtifactView,
   AskBlock,
+  DocumentAskBaseline,
   FileSource,
   FileSourceSet,
   FormField,
   FormValue,
   NeedsMeItem,
+  NeedsMeThreadSummary,
   PlanNodeView,
   PlanOp,
   PlanPreview,
@@ -28,6 +32,7 @@ import type {
   ProjectSource,
   ProjectView,
   SearchResult,
+  ThreadStage,
   ThreadView,
   UsageTotals,
 } from '@ariadne/core'
@@ -44,6 +49,7 @@ import {
   type ArtifactSummary as ProtoArtifactSummary,
   type ArtifactVersionView as ProtoArtifactVersionView,
   type ArtifactView as ProtoArtifactView,
+  type DocumentAskBaseline as ProtoDocumentAskBaseline,
   type ErrorParamValue,
   type FileSource as ProtoFileSource,
   type FileSourceSet as ProtoFileSourceSet,
@@ -51,6 +57,7 @@ import {
   type IssueSummary as ProtoIssueSummary,
   type LocalizedError,
   type NeedsMeItem as ProtoNeedsMeItem,
+  type NeedsMeThreadSummary as ProtoNeedsMeThreadSummary,
   type PlanNodeView as ProtoPlanNodeView,
   type PlanOp as ProtoPlanOp,
   type PlanPreview as ProtoPlanPreview,
@@ -150,6 +157,7 @@ export interface ArtifactDetailResult {
   comments: ArtifactCommentThreadView[]
   nextVersionPageToken?: string
   hasMoreVersions?: boolean
+  askBaseline?: DocumentAskBaseline | null
 }
 
 export interface PlanPageResult {
@@ -611,6 +619,44 @@ function fromProtoAskBlock(block?: ProjectAskBlock): AskBlock {
   }
 }
 
+function fromProtoNeedsMeThreadSummary(thread: ProtoNeedsMeThreadSummary): NeedsMeThreadSummary {
+  return {
+    id: thread.id,
+    projectId: thread.projectId,
+    title: thread.title,
+    stage: thread.stage as ThreadStage,
+    lastHeadline: thread.lastHeadline ?? null,
+    lastArtifacts: thread.lastArtifacts.map((art) => ({
+      id: art.id,
+      kind: art.kind as ArtifactKind,
+      title: art.title,
+    })),
+    aside: thread.aside
+      ? {
+          until: Number(thread.aside.until),
+          reason: thread.aside.reason,
+          by: thread.aside.by,
+          due: thread.aside.due,
+        }
+      : null,
+    review: thread.review
+      ? {
+          reviewerId: thread.review.reviewerId,
+          rounds: Number(thread.review.rounds),
+          reviewing: thread.review.reviewing,
+        }
+      : null,
+    stopped: thread.stopped
+      ? {
+          reason: thread.stopped.reason,
+          by: thread.stopped.by,
+          at: Number(thread.stopped.at),
+        }
+      : null,
+    autopilotHeld: thread.autopilotHeld ?? null,
+  }
+}
+
 function fromProtoNeedsMeItem(item: ProtoNeedsMeItem): NeedsMeItem | null {
   switch (item.item.case) {
     case 'attention': {
@@ -960,6 +1006,18 @@ function fromProtoArtifactVersion(version: ProtoArtifactVersionView): ArtifactVe
   }
 }
 
+function fromProtoDocumentAskBaseline(item?: ProtoDocumentAskBaseline): DocumentAskBaseline | null {
+  if (!item) return null
+  return {
+    version: Number(item.version),
+    asks: item.asks.map((ask) => ({
+      id: ask.id,
+      selected: [...ask.selected],
+      note: ask.note,
+    })),
+  }
+}
+
 function fromProtoArtifactCommentAnchor(
   anchor?: ProtoArtifactCommentAnchor,
 ): ArtifactCommentAnchor | null {
@@ -1214,6 +1272,26 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
       }
     },
 
+    async listAllNeedsMe(): Promise<AllNeedsMeResult> {
+      const response = await clients.projects.listAllNeedsMe({})
+      const items: AllNeedsMeItem[] = []
+      for (const entry of response.items) {
+        const item = entry.item ? fromProtoNeedsMeItem(entry.item) : null
+        if (!item) continue
+        items.push({
+          projectId: entry.projectId,
+          projectName: entry.projectName,
+          item,
+          at: Number(entry.at),
+        })
+      }
+      const threads: Record<string, NeedsMeThreadSummary> = {}
+      for (const thread of response.threads) {
+        threads[thread.id] = fromProtoNeedsMeThreadSummary(thread)
+      }
+      return { items, threads }
+    },
+
     async getProject(id: string, since?: string): Promise<ProjectDetailData> {
       const response = await clients.projects.getProject({
         projectId: id,
@@ -1342,8 +1420,16 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
       }
     },
 
-    async searchProject(projectId: string, q: string): Promise<SearchResult> {
-      const response = await clients.projects.searchProject({ projectId, query: q })
+    async searchProject(
+      projectId: string,
+      q: string,
+      preferProjectId?: string,
+    ): Promise<SearchResult> {
+      const response = await clients.projects.searchProject({
+        projectId,
+        query: q,
+        ...(preferProjectId ? { preferProjectId } : {}),
+      })
       return {
         terms: [...response.terms],
         threads: response.threads.map((hit) => ({
@@ -1352,6 +1438,9 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
           title: hit.title,
           snippet: hit.snippet,
           at: Number(hit.at),
+          projectId: hit.projectId,
+          projectName: hit.projectName,
+          stage: (hit.stage || null) as ThreadStage | null,
         })),
         artifacts: response.artifacts.map((hit) => ({
           kind: 'artifact' as const,
@@ -1360,6 +1449,8 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
           title: hit.title,
           snippet: hit.snippet,
           at: Number(hit.at),
+          projectId: hit.projectId,
+          projectName: hit.projectName,
         })),
         messages: response.messages.map((hit) => ({
           kind: 'message' as const,
@@ -1368,6 +1459,8 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
           where: hit.where ?? null,
           snippet: hit.snippet,
           at: Number(hit.at),
+          projectId: hit.projectId,
+          projectName: hit.projectName,
         })),
       }
     },
@@ -1599,6 +1692,7 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
         comments: response.comments.map(fromProtoArtifactCommentThread),
         nextVersionPageToken: response.nextVersionPageToken,
         hasMoreVersions: response.hasMoreVersions,
+        askBaseline: fromProtoDocumentAskBaseline(response.askBaseline),
       }
     },
 

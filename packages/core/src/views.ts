@@ -468,6 +468,35 @@ export type NeedsMeItem =
     }
   | { kind: 'thread'; threadId: string }
 
+/** Lightweight thread fields needed to render a cross-project "needs me" item. */
+export type NeedsMeThreadSummary = Pick<
+  ThreadView,
+  | 'id'
+  | 'projectId'
+  | 'title'
+  | 'stage'
+  | 'lastHeadline'
+  | 'lastArtifacts'
+  | 'aside'
+  | 'review'
+  | 'stopped'
+  | 'autopilotHeld'
+>
+
+/** One cross-project "needs me" entry with its project metadata and trigger timestamp. */
+export interface AllNeedsMeItem {
+  projectId: string
+  projectName: string
+  item: NeedsMeItem
+  at: number
+}
+
+/** Snapshot of all "needs me" entries across every project and their referenced thread summaries. */
+export interface AllNeedsMeResult {
+  items: AllNeedsMeItem[]
+  threads: Record<string, NeedsMeThreadSummary>
+}
+
 export type ConversationRole = 'coordinator' | 'thread'
 
 /** The agent side of a conversation: is it working, and how did its last turn end. */
@@ -887,6 +916,17 @@ export interface ArtifactVersionView {
   createdAt: number
 }
 
+export interface DocumentAskAnswerBaseline {
+  id: string
+  selected: string[]
+  note: string
+}
+
+export interface DocumentAskBaseline {
+  version: number
+  asks: DocumentAskAnswerBaseline[]
+}
+
 /**
  * One turn of a conversation as the trace shows it, rebuilt from the event log: every
  * model request with its output, the tool calls and their results, retries and timing.
@@ -1034,8 +1074,19 @@ export type SearchHit =
       where: string | null
       snippet: string
       at: number
+      projectId: string
+      projectName: string
     }
-  | { kind: 'thread'; id: string; title: string; snippet: string; at: number }
+  | {
+      kind: 'thread'
+      id: string
+      title: string
+      snippet: string
+      at: number
+      projectId: string
+      projectName: string
+      stage: ThreadStage | null
+    }
   | {
       kind: 'artifact'
       id: string
@@ -1043,6 +1094,8 @@ export type SearchHit =
       title: string
       snippet: string
       at: number
+      projectId: string
+      projectName: string
     }
 
 /** What the project search found, by kind; `terms` are the words it looked for. */

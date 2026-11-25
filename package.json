@@ -1,6 +1,6 @@
 {
   "name": "ariadne-monorepo",
-  "version": "0.1.0-alpha.22",
+  "version": "0.1.0-alpha.23",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.4",

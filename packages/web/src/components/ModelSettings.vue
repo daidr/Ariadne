@@ -873,8 +873,8 @@ async function saveModels(): Promise<boolean> {
             <DouEmpty v-if="!providers.length" size="sm" :description="t('settings.noProviders')" />
             <DouCard v-for="provider in providers" :key="provider.id" padding="sm">
               <DouForm layout="vertical" size="sm">
-                <div class="settings-row">
-                  <DouFormItem :label="t('settings.kind')" class="settings-grow">
+                <div class="settings-provider-head" :class="{ 'is-named': named(provider) }">
+                  <DouFormItem :label="t('settings.kind')" class="settings-provider-kind">
                     <DouSelect
                       :model-value="provider.kind"
                       :options="kindOptionsFor(provider.kind)"
@@ -884,7 +884,7 @@ async function saveModels(): Promise<boolean> {
                   <DouFormItem
                     v-if="named(provider)"
                     :label="t('settings.name')"
-                    class="settings-grow"
+                    class="settings-provider-name"
                   >
                     <DouInput v-model="provider.name" />
                   </DouFormItem>
@@ -910,10 +910,11 @@ async function saveModels(): Promise<boolean> {
                 <DouText v-else size="sm" variant="secondary">
                   {{ t('settings.providerDisabled') }}
                 </DouText>
-                <DouFormItem :label="t('settings.models')">
+                <div class="settings-models-field">
+                  <span class="settings-field-label">{{ t('settings.models') }}</span>
                   <div class="settings-models">
                     <div v-for="model in modelsOf(provider)" :key="model.id" class="settings-model">
-                      <div class="settings-row" @focusout="describe(model)">
+                      <div class="settings-model-row" @focusout="describe(model)">
                         <DouAutocomplete
                           v-model="model.model"
                           :fetch="(typed: string) => suggest(provider, typed)"
@@ -921,7 +922,6 @@ async function saveModels(): Promise<boolean> {
                           :placeholder="t('settings.modelName')"
                           :aria-label="t('settings.modelName')"
                           spellcheck="false"
-                          class="settings-grow"
                           @select="describe(model)"
                         >
                           <template v-if="listProblems[provider.id]" #empty>
@@ -930,54 +930,64 @@ async function saveModels(): Promise<boolean> {
                             }}</DouText>
                           </template>
                         </DouAutocomplete>
-                        <DouButton
-                          size="sm"
-                          variant="ghost"
-                          :aria-expanded="model.open"
-                          :aria-label="t('settings.modelMore')"
-                          :title="t('settings.modelMore')"
-                          @click="model.open = !model.open"
-                        >
-                          <ChevronDownIcon v-if="model.open" />
-                          <ChevronRightIcon v-else />
-                        </DouButton>
-                        <DouButton
-                          size="sm"
-                          variant="ghost"
-                          tone="danger"
-                          :aria-label="t('settings.remove')"
-                          :title="t('settings.remove')"
-                          @click="removeModel(model.id)"
-                        >
-                          <TrashIcon />
-                        </DouButton>
+                        <div class="settings-model-actions">
+                          <DouButton
+                            size="sm"
+                            variant="ghost"
+                            :aria-expanded="model.open"
+                            :aria-label="t('settings.modelMore')"
+                            :title="t('settings.modelMore')"
+                            @click="model.open = !model.open"
+                          >
+                            <ChevronDownIcon v-if="model.open" />
+                            <ChevronRightIcon v-else />
+                          </DouButton>
+                          <DouButton
+                            size="sm"
+                            variant="ghost"
+                            tone="danger"
+                            :aria-label="t('settings.remove')"
+                            :title="t('settings.remove')"
+                            @click="removeModel(model.id)"
+                          >
+                            <TrashIcon />
+                          </DouButton>
+                        </div>
                       </div>
                       <DouText v-if="problemOf(model)" tone="danger" size="sm">
                         {{ tm(problemOf(model)!) }}
                       </DouText>
                       <div v-if="model.open" class="settings-model-more">
-                        <div class="settings-row">
-                          <DouFormItem :label="t('settings.contextTokens')" class="settings-narrow">
+                        <div class="settings-model-grid">
+                          <DouFormItem :label="t('settings.contextTokens')">
                             <DouInputNumber
                               v-model="model.contextK"
+                              class="settings-number"
                               :min="8"
                               :max="10000"
                               :step="8"
                               placeholder="128"
                             />
                           </DouFormItem>
-                          <DouFormItem :label="t('settings.maxTokens')" class="settings-narrow">
+                          <DouFormItem :label="t('settings.maxTokens')">
                             <DouInputNumber
                               v-model="model.maxTokens"
+                              class="settings-number"
                               :min="256"
                               :max="1000000"
                               :step="1024"
                               :placeholder="t('settings.maxTokensDefault')"
                             />
                           </DouFormItem>
-                          <DouFormItem :label="t('settings.modelImages')">
-                            <DouSwitch v-model="model.images" />
-                          </DouFormItem>
+                        </div>
+                        <div class="settings-model-toggle">
+                          <span class="settings-field-label">
+                            {{ t('settings.modelImages') }}
+                          </span>
+                          <DouSwitch
+                            v-model="model.images"
+                            :aria-label="t('settings.modelImages')"
+                          />
                         </div>
                         <DouFormItem v-if="several" :label="t('settings.modelNote')">
                           <DouInput
@@ -986,32 +996,55 @@ async function saveModels(): Promise<boolean> {
                             :placeholder="t('settings.modelNotePlaceholder')"
                           />
                         </DouFormItem>
-                        <div class="settings-row">
-                          <DouFormItem :label="t('settings.currency')" class="settings-currency">
-                            <DouSelect v-model="model.currency" :options="currencyOptions" />
-                          </DouFormItem>
-                          <DouFormItem :label="t('usage.input')" class="settings-grow">
-                            <DouInputNumber v-model="model.priceInput" :min="0" :step="0.1" />
-                          </DouFormItem>
-                          <DouFormItem :label="t('usage.output')" class="settings-grow">
-                            <DouInputNumber v-model="model.priceOutput" :min="0" :step="0.1" />
-                          </DouFormItem>
-                          <DouFormItem :label="t('usage.cacheRead')" class="settings-grow">
-                            <DouInputNumber
-                              v-model="model.priceCacheRead"
-                              :min="0"
-                              :step="0.01"
-                              :placeholder="t('settings.sameAsInput')"
-                            />
-                          </DouFormItem>
-                          <DouFormItem :label="t('usage.cacheWrite')" class="settings-grow">
-                            <DouInputNumber
-                              v-model="model.priceCacheWrite"
-                              :min="0"
-                              :step="0.1"
-                              :placeholder="t('settings.sameAsInput')"
-                            />
-                          </DouFormItem>
+                        <div class="settings-price-section">
+                          <div class="settings-price-head">
+                            <DouText size="sm" weight="medium" variant="secondary">
+                              {{ t('settings.price') }}
+                            </DouText>
+                            <div class="settings-currency">
+                              <DouSelect
+                                v-model="model.currency"
+                                :options="currencyOptions"
+                                :aria-label="t('settings.currency')"
+                              />
+                            </div>
+                          </div>
+                          <div class="settings-model-grid">
+                            <DouFormItem :label="t('usage.input')">
+                              <DouInputNumber
+                                v-model="model.priceInput"
+                                class="settings-number"
+                                :min="0"
+                                :step="0.1"
+                              />
+                            </DouFormItem>
+                            <DouFormItem :label="t('usage.output')">
+                              <DouInputNumber
+                                v-model="model.priceOutput"
+                                class="settings-number"
+                                :min="0"
+                                :step="0.1"
+                              />
+                            </DouFormItem>
+                            <DouFormItem :label="t('usage.cacheRead')">
+                              <DouInputNumber
+                                v-model="model.priceCacheRead"
+                                class="settings-number"
+                                :min="0"
+                                :step="0.01"
+                                :placeholder="t('settings.sameAsInput')"
+                              />
+                            </DouFormItem>
+                            <DouFormItem :label="t('usage.cacheWrite')">
+                              <DouInputNumber
+                                v-model="model.priceCacheWrite"
+                                class="settings-number"
+                                :min="0"
+                                :step="0.1"
+                                :placeholder="t('settings.sameAsInput')"
+                              />
+                            </DouFormItem>
+                          </div>
                         </div>
                         <div class="settings-price-actions">
                           <DouButton
@@ -1039,7 +1072,7 @@ async function saveModels(): Promise<boolean> {
                       {{ t('settings.addModel') }}
                     </DouButton>
                   </div>
-                </DouFormItem>
+                </div>
                 <DouButton
                   v-if="!kindOf(provider.kind)?.program"
                   size="sm"
@@ -1179,6 +1212,7 @@ async function saveModels(): Promise<boolean> {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  container-type: inline-size;
 }
 
 .settings-section {
@@ -1193,15 +1227,16 @@ async function saveModels(): Promise<boolean> {
   justify-content: space-between;
 }
 
-.settings-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+.settings-provider-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
 }
 
-.settings-grow {
-  flex: 1 1 180px;
-  min-width: 0;
+.settings-provider-head.is-named {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  column-gap: 12px;
 }
 
 .settings-role-fields {
@@ -1210,27 +1245,46 @@ async function saveModels(): Promise<boolean> {
   gap: 12px;
 }
 
-@media (max-width: 520px) {
-  .settings-role-fields {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@media (max-width: 580px) {
-  .settings-role-fields {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 .settings-currency {
   flex: none;
   width: 100px;
 }
 
+.settings-price-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--dou-color-border-subtle);
+}
+
+.settings-price-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
 .settings-price-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
+}
+
+.settings-models-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-field-label {
+  color: var(--dou-color-text);
+  font-size: var(--dou-font-size-sm);
+  font-weight: var(--dou-font-weight-medium);
+  line-height: 1.4;
 }
 
 .settings-models {
@@ -1246,11 +1300,44 @@ async function saveModels(): Promise<boolean> {
   gap: 8px;
 }
 
+.settings-model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-model-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .settings-model-more {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-block: 4px 8px;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--dou-color-border-subtle);
+  border-radius: var(--dou-radius-control);
+  background: color-mix(in oklab, var(--dou-color-text) 2%, var(--dou-color-bg-surface));
+}
+
+.settings-model-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.settings-model-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-number {
+  width: 100%;
 }
 
 .settings-narrow {
@@ -1282,6 +1369,38 @@ async function saveModels(): Promise<boolean> {
 
 .settings-remove {
   flex: none;
-  align-self: flex-start;
+}
+
+@container (max-width: 440px) {
+  .settings-provider-head.is-named {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 8px;
+    row-gap: 12px;
+  }
+
+  .settings-provider-head.is-named .settings-provider-kind {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .settings-provider-head.is-named .settings-remove {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .settings-provider-head.is-named .settings-provider-name {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .settings-role-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container (max-width: 340px) {
+  .settings-model-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

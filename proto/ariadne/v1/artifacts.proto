@@ -200,12 +200,24 @@ message GetArtifactRequest {
   string version_page_token = 5;
 }
 
+message DocumentAskAnswerBaseline {
+  string id = 1;
+  repeated string selected = 2;
+  string note = 3;
+}
+
+message DocumentAskBaseline {
+  int64 version = 1 [jstype = JS_NUMBER];
+  repeated DocumentAskAnswerBaseline asks = 2;
+}
+
 message GetArtifactResponse {
   ArtifactView artifact = 1;
   repeated ArtifactVersionView versions = 2;
   repeated ArtifactCommentThreadView comments = 3;
   string next_version_page_token = 4;
   bool has_more_versions = 5;
+  optional DocumentAskBaseline ask_baseline = 6;
 }
 
 message ListArtifactVersionsRequest {

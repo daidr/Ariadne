@@ -177,3 +177,100 @@ func TestWithdrawArtifactFeedbackRPC(t *testing.T) {
 		t.Fatal("expected withdrawn=false after turn started")
 	}
 }
+
+func TestGetArtifactDocumentAskBaselineRPC(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	clock := time.UnixMilli(1901000000000)
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:", Now: func() time.Time { return clock }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	project, err := repo.CreateProject(ctx, new("Fixture"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1Doc := "# Spec\n\n```ask\n{\"id\":\"ask-1\",\"question\":\"DB?\",\"pick\":\"one\",\"options\":[{\"id\":\"pg\",\"label\":\"PostgreSQL\"},{\"id\":\"sqlite\",\"label\":\"SQLite\"}]}\n```\n"
+	a, err := repo.CreateArtifact(ctx, project.ID, core.NewArtifact{
+		Kind:    "document",
+		Title:   "Spec",
+		Author:  project.CoordinatorID,
+		Content: v1Doc,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := New(Options{Repository: repo, Token: "fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	server := httptest.NewServer(api)
+	defer server.Close()
+	client := ariadnev1connect.NewArtifactServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("fixture")),
+	)
+
+	// Before answering: baseline is v1 with empty selection.
+	got1, err := client.GetArtifact(ctx, connect.NewRequest(&ariadnev1.GetArtifactRequest{ArtifactId: a.ID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := got1.Msg.GetAskBaseline(); b == nil || b.GetVersion() != 1 || len(b.GetAsks()) != 1 || len(b.GetAsks()[0].GetSelected()) != 0 {
+		t.Fatalf("unexpected initial ask baseline: %+v", b)
+	}
+
+	// User answers without submitting -> baseline stays at v1.
+	v2Doc := "# Spec\n\n```ask\n{\"id\":\"ask-1\",\"question\":\"DB?\",\"pick\":\"one\",\"options\":[{\"id\":\"pg\",\"label\":\"PostgreSQL\"},{\"id\":\"sqlite\",\"label\":\"SQLite\"}],\"selected\":[\"pg\"],\"note\":\"multi-node\"}\n```\n"
+	clock = clock.Add(time.Second)
+	if _, err := repo.ReviseArtifact(ctx, a.ID, core.ArtifactRevision{
+		Author: "user", BaseVersion: &a.Version, Content: v2Doc, Shared: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got2, err := client.GetArtifact(ctx, connect.NewRequest(&ariadnev1.GetArtifactRequest{ArtifactId: a.ID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := got2.Msg.GetAskBaseline(); b == nil || b.GetVersion() != 1 || len(b.GetAsks()[0].GetSelected()) != 0 {
+		t.Fatalf("expected unsubmitted baseline to remain v1, got %+v", b)
+	}
+
+	// Submit feedback -> baseline advances to v2 with submitted answer.
+	clock = clock.Add(time.Second)
+	sent, err := client.SendArtifactFeedback(ctx, connect.NewRequest(&ariadnev1.SendArtifactFeedbackRequest{ArtifactId: a.ID}))
+	if err != nil || sent.Msg.GetFeedback() == nil {
+		t.Fatalf("SendArtifactFeedback failed: err=%v fb=%+v", err, sent)
+	}
+	got3, err := client.GetArtifact(ctx, connect.NewRequest(&ariadnev1.GetArtifactRequest{ArtifactId: a.ID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := got3.Msg.GetAskBaseline()
+	if b == nil || b.GetVersion() != 2 || len(b.GetAsks()) != 1 {
+		t.Fatalf("expected v2 baseline after submit, got %+v", b)
+	}
+	if ans := b.GetAsks()[0]; ans.GetId() != "ask-1" || len(ans.GetSelected()) != 1 || ans.GetSelected()[0] != "pg" || ans.GetNote() != "multi-node" {
+		t.Fatalf("unexpected submitted ask baseline entry: %+v", ans)
+	}
+
+	// Withdraw -> baseline reverts to v1.
+	clock = clock.Add(time.Second)
+	if _, err := client.WithdrawArtifactFeedback(ctx, connect.NewRequest(&ariadnev1.WithdrawArtifactFeedbackRequest{
+		ArtifactId: a.ID,
+		Round:      sent.Msg.GetFeedback().GetRound(),
+	})); err != nil {
+		t.Fatal(err)
+	}
+	got4, err := client.GetArtifact(ctx, connect.NewRequest(&ariadnev1.GetArtifactRequest{ArtifactId: a.ID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := got4.Msg.GetAskBaseline(); b == nil || b.GetVersion() != 1 || len(b.GetAsks()[0].GetSelected()) != 0 {
+		t.Fatalf("expected baseline to revert to v1 after withdraw, got %+v", b)
+	}
+}

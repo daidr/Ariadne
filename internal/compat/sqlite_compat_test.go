@@ -207,6 +207,11 @@ func TestLegacyV67StaticSQLiteUpgradesAndPreservesData(t *testing.T) {
 		}
 	}
 
+	var hasSearchKindAtIndex int
+	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'search_docs_kind_at'").Scan(&hasSearchKindAtIndex); err != nil || hasSearchKindAtIndex != 1 {
+		t.Fatalf("search_docs_kind_at index missing after v67 upgrade: has=%d err=%v", hasSearchKindAtIndex, err)
+	}
+
 	var payloadLen int
 	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT length(payload) FROM transcript WHERE seq = 4").Scan(&payloadLen); err != nil || payloadLen > 300 {
 		t.Fatalf("large inline tool output not compacted on v67 upgrade: length=%d err=%v", payloadLen, err)
