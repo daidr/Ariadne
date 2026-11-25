@@ -320,11 +320,12 @@ describe('DocumentToc.vue', () => {
     wrapper.unmount()
   })
 
-  it('collapses leftward on table collision, supports hover/click peek, and restores cleanly', async () => {
+  it('collapses leftward on table collision, handles hover without premature close, and pins on hover-then-click', async () => {
     vi.useFakeTimers()
     try {
       const wrapper = mount(DocumentToc, {
         props: { headings, activeId: 'h1', mode: 'docked', width: 200, collided: true },
+        attachTo: document.body,
       })
       const root = wrapper.get('.document-toc')
       const panel = wrapper.get('.document-toc__panel')
@@ -333,22 +334,97 @@ describe('DocumentToc.vue', () => {
       expect(root.classes()).toContain('is-collapsed')
       expect(root.classes()).toContain('is-collided')
       expect(panel.attributes('aria-hidden')).toBe('true')
+      expect((panel.element as HTMLElement).inert).toBe(true)
       expect(rail.attributes('aria-hidden')).toBe('false')
+      expect((rail.element as HTMLElement).inert).toBe(false)
 
+      // Leaving the rail before hover-intent delay cancels opening.
       await rail.trigger('pointerenter', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(40)
+      await rail.trigger('pointerleave', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(300)
+      await nextTick()
+      expect(root.classes()).not.toContain('is-peeking')
+
+      // Hovering past intent delay opens floating peek; synthetic rail pointerleave after rail
+      // becomes inert must NOT auto-close the panel while it slides in.
+      await rail.trigger('pointerenter', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(120)
+      await nextTick()
       expect(root.classes()).toContain('is-peeking')
       expect(root.classes()).toContain('is-floating')
       expect(panel.attributes('aria-hidden')).toBe('false')
+      expect((panel.element as HTMLElement).inert).toBe(false)
+      expect((rail.element as HTMLElement).inert).toBe(true)
+
+      await rail.trigger('pointerleave', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(500)
+      await nextTick()
+      expect(root.classes()).toContain('is-peeking')
+
+      // Moving pointer away from the panel closes hover-peek after the close delay.
+      await panel.trigger('pointerleave', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(200)
+      await nextTick()
+      expect(root.classes()).not.toContain('is-peeking')
+
+      // Moving pointer outside the floating zone via document pointermove also closes hover-peek
+      // even if the pointer never entered the sliding panel.
+      await rail.trigger('pointerenter', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(120)
+      await nextTick()
+      expect(root.classes()).toContain('is-peeking')
+      document.body.dispatchEvent(
+        new PointerEvent('pointermove', {
+          bubbles: true,
+          pointerType: 'mouse',
+          clientX: 480,
+          clientY: 120,
+        }),
+      )
+      vi.advanceTimersByTime(200)
+      await nextTick()
+      expect(root.classes()).not.toContain('is-peeking')
+
+      // Hovering and clicking (either before hover-open or via the rail shield after hover-open)
+      // pins the floating panel open instead of toggling it closed.
+      await rail.trigger('pointerenter', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(120)
+      await nextTick()
+      expect(root.classes()).toContain('is-peeking')
+      await wrapper.get('.document-toc__rail-shield').trigger('click')
+      await nextTick()
+      expect(root.classes()).toContain('is-peeking')
+
+      // Mouse leaving a pinned panel keeps it open.
+      await panel.trigger('pointerleave', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(500)
+      await nextTick()
+      expect(root.classes()).toContain('is-peeking')
 
       // Clicking a heading closes the floating peek and emits select.
       await wrapper.findAll('button.document-toc__item')[1]!.trigger('click')
       expect(wrapper.emitted('select')).toEqual([['h2']])
       expect(root.classes()).not.toContain('is-peeking')
 
+      // Hover then immediate rail click pins open rather than closing.
+      await rail.trigger('pointerenter', { pointerType: 'mouse' })
+      await rail.trigger('click', { detail: 1 })
+      vi.advanceTimersByTime(300)
+      await nextTick()
+      expect(root.classes()).toContain('is-peeking')
+
+      // Outside pointerdown closes pinned peek.
+      document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+      await nextTick()
+      expect(root.classes()).not.toContain('is-peeking')
+
       // Touch click toggles peek without pointerenter conflict.
       await rail.trigger('pointerenter', { pointerType: 'touch' })
+      vi.advanceTimersByTime(200)
+      await nextTick()
       expect(root.classes()).not.toContain('is-peeking')
-      await rail.trigger('click')
+      await rail.trigger('click', { detail: 1 })
       expect(root.classes()).toContain('is-peeking')
 
       // Pressing Escape closes peek.
@@ -359,9 +435,112 @@ describe('DocumentToc.vue', () => {
       await wrapper.setProps({ collided: false })
       expect(root.classes()).not.toContain('is-collapsed')
       expect(panel.attributes('aria-hidden')).toBe('false')
+      expect((panel.element as HTMLElement).inert).toBe(false)
       wrapper.unmount()
     } finally {
       vi.useRealTimers()
+    }
+  })
+
+  it('manages keyboard focus cleanly when opening via keyboard, leaving focus, or collapsing on collision', async () => {
+    const outsideButton = document.createElement('button')
+    outsideButton.type = 'button'
+    document.body.appendChild(outsideButton)
+
+    const wrapper = mount(DocumentToc, {
+      props: { headings, activeId: 'h2', mode: 'rail', width: 200, collided: false },
+      attachTo: document.body,
+    })
+
+    try {
+      const root = wrapper.get('.document-toc')
+      const panel = wrapper.get('.document-toc__panel')
+      const rail = wrapper.get('button.document-toc__rail')
+      const items = wrapper.findAll('button.document-toc__item')
+
+      // Keyboard activation on focused rail opens panel and moves focus to active heading item.
+      ;(rail.element as HTMLButtonElement).focus()
+      expect(document.activeElement).toBe(rail.element)
+      await rail.trigger('click', { detail: 0 })
+      await nextTick()
+      expect(root.classes()).toContain('is-peeking')
+      expect(document.activeElement).toBe(items[1]!.element)
+      expect((rail.element as HTMLElement).inert).toBe(true)
+
+      // Escape closes floating panel without bubbling to outer modals, and returns focus to rail.
+      const outerEsc = vi.fn()
+      document.addEventListener('keydown', outerEsc)
+      try {
+        await panel.trigger('keydown.esc')
+        await nextTick()
+        expect(root.classes()).not.toContain('is-peeking')
+        expect(document.activeElement).toBe(rail.element)
+        expect(outerEsc).not.toHaveBeenCalled()
+      } finally {
+        document.removeEventListener('keydown', outerEsc)
+      }
+
+      // Re-open with keyboard, then move focus outside root -> floating panel closes.
+      await rail.trigger('click', { detail: 0 })
+      await nextTick()
+      expect(document.activeElement).toBe(items[1]!.element)
+      await root.trigger('focusout', { relatedTarget: outsideButton })
+      await nextTick()
+      expect(root.classes()).not.toContain('is-peeking')
+
+      // In docked mode, when a focused heading item collapses due to table collision,
+      // focus is evicted before the panel becomes inert/aria-hidden.
+      await wrapper.setProps({ mode: 'docked', collided: false })
+      await nextTick()
+      ;(items[0]!.element as HTMLButtonElement).focus()
+      expect(document.activeElement).toBe(items[0]!.element)
+      await wrapper.setProps({ collided: true })
+      await nextTick()
+      expect(panel.element.contains(document.activeElement)).toBe(false)
+      expect((panel.element as HTMLElement).inert).toBe(true)
+      expect(panel.attributes('aria-hidden')).toBe('true')
+    } finally {
+      wrapper.unmount()
+      outsideButton.remove()
+    }
+  })
+
+  it('resets peeking state and cleans up document listeners when headings become empty in rail mode', async () => {
+    const addSpy = vi.spyOn(document, 'addEventListener')
+    const removeSpy = vi.spyOn(document, 'removeEventListener')
+    const wrapper = mount(DocumentToc, {
+      props: { headings, activeId: 'h1', mode: 'rail', width: 200, collided: false },
+      attachTo: document.body,
+    })
+
+    try {
+      await wrapper.get('button.document-toc__rail').trigger('click', { detail: 1 })
+      await nextTick()
+      expect(wrapper.get('.document-toc').classes()).toContain('is-peeking')
+
+      const pointerDownAdded = addSpy.mock.calls.filter(([type]) => type === 'pointerdown').length
+      expect(pointerDownAdded).toBeGreaterThanOrEqual(1)
+
+      // Deleting all headings hides TOC while mode stays 'rail'; peeking & listener must reset.
+      await wrapper.setProps({ headings: [], activeId: null })
+      await nextTick()
+      expect(wrapper.find('.document-toc').exists()).toBe(false)
+
+      const pointerDownRemoved = removeSpy.mock.calls.filter(
+        ([type]) => type === 'pointerdown',
+      ).length
+      expect(pointerDownRemoved).toBeGreaterThanOrEqual(pointerDownAdded)
+
+      // When headings reappear later, the floating panel must NOT pop open spontaneously.
+      await wrapper.setProps({ headings, activeId: 'h1' })
+      await nextTick()
+      const root = wrapper.get('.document-toc')
+      expect(root.classes()).not.toContain('is-peeking')
+      expect(root.classes()).not.toContain('is-floating')
+    } finally {
+      wrapper.unmount()
+      addSpy.mockRestore()
+      removeSpy.mockRestore()
     }
   })
 })
@@ -378,6 +557,12 @@ function makeRect(left: number, top: number, width: number, height: number): DOM
     bottom: top + height,
     toJSON: () => ({}),
   } as DOMRect
+}
+
+function mockHeadingRect(block: HTMLElement, fn: () => DOMRect) {
+  const content = block.querySelector<HTMLElement>(':scope > .dou-editor__content') ?? block
+  vi.spyOn(block, 'getBoundingClientRect').mockImplementation(fn)
+  vi.spyOn(content, 'getBoundingClientRect').mockImplementation(fn)
 }
 
 describe('DocumentBody.vue TOC integration', () => {
@@ -493,6 +678,124 @@ describe('DocumentBody.vue TOC integration', () => {
       // Clicking a heading scrolls the document container smoothly.
       await items[2]!.trigger('click')
       expect(scrollToSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      wrapper.unmount()
+      rafSpy.mockRestore()
+      cancelSpy.mockRestore()
+    }
+  })
+
+  it('expands collapsed toggle blocks before scrolling in readonly mode and skips zero-height targets', async () => {
+    let nextFrameId = 1
+    const frames = new Map<number, FrameRequestCallback>()
+    const rafSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb: FrameRequestCallback) => {
+        const id = nextFrameId++
+        frames.set(id, cb)
+        return id
+      })
+    const cancelSpy = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id: number) => {
+      frames.delete(id)
+    })
+    const flushFrames = () => {
+      const pending = Array.from(frames.entries())
+      frames.clear()
+      for (const [, cb] of pending) cb(0)
+    }
+
+    const md = [
+      '# 顶部标题',
+      '',
+      '<details>',
+      '<summary>更多细节</summary>',
+      '',
+      '## 折叠内标题',
+      '',
+      '折叠正文。',
+      '',
+      '</details>',
+      '',
+      '## 隐藏测试标题',
+    ].join('\n')
+
+    const wrapper = mount(DocumentBody, {
+      props: {
+        content: md,
+        projectId: 'prj_test',
+        readonly: true,
+        label: '只读折叠文档',
+      },
+      attachTo: document.body,
+    })
+
+    try {
+      await nextTick()
+      const shell = wrapper.get('.document-shell').element as HTMLElement
+      const scrollEl = wrapper.get('.document').element as HTMLElement
+      const surface = wrapper.get('.dou-editor__surface').element as HTMLElement
+
+      surface.style.paddingLeft = '288px'
+      vi.spyOn(shell, 'getBoundingClientRect').mockImplementation(() => makeRect(0, 0, 1440, 900))
+      vi.spyOn(scrollEl, 'getBoundingClientRect').mockImplementation(() =>
+        makeRect(0, 0, 1440, 900),
+      )
+      vi.spyOn(surface, 'getBoundingClientRect').mockImplementation(() =>
+        makeRect(48, 0, 1344, 1400),
+      )
+
+      const toggleBlock = scrollEl.querySelector<HTMLElement>('.dou-editor__block.is-collapsed')
+      expect(toggleBlock).not.toBeNull()
+
+      const headingBlocks = Array.from(
+        scrollEl.querySelectorAll<HTMLElement>('.dou-editor__content--heading'),
+      ).map((el) => el.closest<HTMLElement>('[data-block-id]')!)
+      expect(headingBlocks).toHaveLength(3)
+
+      const [topBlock, nestedBlock, hiddenBlock] = headingBlocks as [
+        HTMLElement,
+        HTMLElement,
+        HTMLElement,
+      ]
+
+      mockHeadingRect(topBlock, () => makeRect(336, 40, 768, 40))
+      // Mimic real browser display:none behavior: rect is 0x0 while ancestor toggle is collapsed,
+      // and becomes visible once expanded.
+      mockHeadingRect(nestedBlock, () =>
+        nestedBlock.parentElement?.closest('.dou-editor__block.is-collapsed')
+          ? makeRect(0, 0, 0, 0)
+          : makeRect(336, 420, 768, 36),
+      )
+      // Simulate a permanently zero-height target to verify we never scroll to a bogus offset.
+      mockHeadingRect(hiddenBlock, () => makeRect(0, 0, 0, 0))
+
+      const scrollToSpy = vi.fn()
+      scrollEl.scrollTo = scrollToSpy
+      scrollEl.scrollTop = 200
+
+      scrollEl.dispatchEvent(new Event('scroll'))
+      flushFrames()
+      await nextTick()
+
+      const items = wrapper.findAll('button.document-toc__item')
+      expect(items.map((item) => item.text())).toEqual(['顶部标题', '折叠内标题', '隐藏测试标题'])
+
+      // Clicking the heading inside the collapsed toggle expands it in readonly mode and scrolls
+      // to its expanded position instead of scrolling with a 0x0 rect.
+      await items[1]!.trigger('click')
+      await nextTick()
+      expect(toggleBlock!.classList.contains('is-collapsed')).toBe(false)
+      expect(scrollToSpy).toHaveBeenCalledTimes(1)
+      expect(scrollToSpy).toHaveBeenCalledWith({
+        top: 200 + 420 - 24,
+        behavior: 'smooth',
+      })
+
+      // Clicking a heading whose rendered rect remains 0-height does not scroll.
+      scrollToSpy.mockClear()
+      await items[2]!.trigger('click')
+      await nextTick()
+      expect(scrollToSpy).not.toHaveBeenCalled()
     } finally {
       wrapper.unmount()
       rafSpy.mockRestore()

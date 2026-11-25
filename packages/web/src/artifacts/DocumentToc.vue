@@ -22,22 +22,44 @@ const emit = defineEmits<{
   'wheel-passthrough': [event: WheelEvent]
 }>()
 
+type PeekMode = 'closed' | 'hover' | 'pinned'
+
+const HOVER_OPEN_DELAY_MS = 100
+const HOVER_CLOSE_DELAY_MS = 180
+
 const root = useTemplateRef<HTMLElement>('root')
+const railSlot = useTemplateRef<HTMLElement>('railSlot')
 const panel = useTemplateRef<HTMLElement>('panel')
 const scrollBox = useTemplateRef<HTMLElement>('scrollBox')
 const track = useTemplateRef<HTMLElement>('track')
 const railButton = useTemplateRef<HTMLButtonElement>('railButton')
 
-const peeking = ref(false)
+const peekMode = ref<PeekMode>('closed')
+let openTimer: ReturnType<typeof setTimeout> | null = null
 let closeTimer: ReturnType<typeof setTimeout> | null = null
+let pointerInsideTimer: ReturnType<typeof setTimeout> | null = null
+let transferringFocus = false
+let pointerInsideRoot = false
 
 const visible = computed(() => props.mode !== 'hidden' && props.headings.length > 0)
 const isCollapsed = computed(() => props.mode === 'rail' || props.collided)
-const panelOpen = computed(() => (props.mode === 'docked' && !props.collided) || peeking.value)
-const isFloating = computed(() => isCollapsed.value && peeking.value)
-const showRail = computed(() => isCollapsed.value && !peeking.value)
+const peeking = computed(() => peekMode.value !== 'closed')
+const isHoverPeeking = computed(
+  () => visible.value && isCollapsed.value && peekMode.value === 'hover',
+)
+const panelOpen = computed(
+  () => visible.value && ((props.mode === 'docked' && !props.collided) || peeking.value),
+)
+const isFloating = computed(() => visible.value && isCollapsed.value && peeking.value)
+const showRail = computed(() => visible.value && isCollapsed.value && !peeking.value)
 const panelWidth = computed(() => (props.width > 0 ? props.width : TOC_PEEK_WIDTH))
 const miniBars = computed(() => sampleTocMiniBars(props.headings, props.activeId))
+
+function cancelOpenPeek() {
+  if (!openTimer) return
+  clearTimeout(openTimer)
+  openTimer = null
+}
 
 function cancelClosePeek() {
   if (!closeTimer) return
@@ -45,44 +67,183 @@ function cancelClosePeek() {
   closeTimer = null
 }
 
-function openPeek() {
-  cancelClosePeek()
-  if (!isCollapsed.value) return
-  peeking.value = true
+function clearPointerInsideTimer() {
+  if (!pointerInsideTimer) return
+  clearTimeout(pointerInsideTimer)
+  pointerInsideTimer = null
+}
+
+function blurIfInside(container: HTMLElement | null) {
+  const active = document.activeElement
+  if (active instanceof HTMLElement && container?.contains(active)) {
+    transferringFocus = true
+    try {
+      active.blur()
+    } finally {
+      transferringFocus = false
+    }
+  }
+}
+
+function focusPanelItem() {
+  void nextTick(() => {
+    if (!panelOpen.value) return
+    const target =
+      panel.value?.querySelector<HTMLButtonElement>('.document-toc__item.is-active') ??
+      panel.value?.querySelector<HTMLButtonElement>('.document-toc__item')
+    target?.focus({ preventScroll: true })
+  })
 }
 
 function closePeek(returnFocus = false) {
+  cancelOpenPeek()
   cancelClosePeek()
-  if (!peeking.value) return
-  peeking.value = false
+  if (peekMode.value === 'closed') return
+  blurIfInside(panel.value)
+  peekMode.value = 'closed'
   if (returnFocus) {
-    nextTick(() => railButton.value?.focus({ preventScroll: true }))
+    void nextTick(() => {
+      if (showRail.value) {
+        railButton.value?.focus({ preventScroll: true })
+      }
+    })
   }
+}
+
+function resetPeek() {
+  cancelOpenPeek()
+  cancelClosePeek()
+  if (peekMode.value === 'closed') return
+  blurIfInside(panel.value)
+  peekMode.value = 'closed'
 }
 
 function scheduleClosePeek(event?: PointerEvent) {
   if (event?.pointerType === 'touch') return
-  cancelClosePeek()
+  if (!isHoverPeeking.value || closeTimer) return
   closeTimer = setTimeout(() => {
     closeTimer = null
-    peeking.value = false
-  }, 180)
+    if (!isHoverPeeking.value) return
+    if (panel.value?.contains(document.activeElement)) return
+    blurIfInside(panel.value)
+    peekMode.value = 'closed'
+  }, HOVER_CLOSE_DELAY_MS)
 }
 
 function onRailPointerEnter(event: PointerEvent) {
   if (event.pointerType === 'touch') return
-  openPeek()
+  if (!visible.value || !isCollapsed.value || peekMode.value !== 'closed') return
+  cancelClosePeek()
+  cancelOpenPeek()
+  openTimer = setTimeout(() => {
+    openTimer = null
+    if (!visible.value || !isCollapsed.value || peekMode.value !== 'closed') return
+    peekMode.value = 'hover'
+  }, HOVER_OPEN_DELAY_MS)
+}
+
+function onRailPointerLeave(event: PointerEvent) {
+  if (event.pointerType === 'touch') return
+  cancelOpenPeek()
 }
 
 function onPanelPointerLeave(event: PointerEvent) {
-  if (!isFloating.value || event.pointerType === 'touch') return
+  if (!isHoverPeeking.value || event.pointerType === 'touch') return
+  const next = event.relatedTarget as Node | null
+  if (next && root.value?.contains(next)) return
   scheduleClosePeek(event)
 }
 
-function togglePeek() {
-  if (!isCollapsed.value) return
+function isPointInFloatingZone(x: number, y: number): boolean {
+  const rootEl = root.value
+  if (!rootEl) return false
+  const rootRect = rootEl.getBoundingClientRect()
+  const railRect = railSlot.value?.getBoundingClientRect()
+  const panelEl = panel.value
+  const panelLeft = rootRect.left + 6
+  const panelRight = panelLeft + (panelEl?.offsetWidth || panelWidth.value)
+  const panelTop = rootRect.top
+  const panelHeight = panelEl?.offsetHeight ?? 0
+  const panelBottom = panelTop + panelHeight
+  const inPanelTarget =
+    panelHeight > 0 && x >= rootRect.left && x <= panelRight && y >= panelTop && y <= panelBottom
+  const inRail =
+    !!railRect &&
+    railRect.width > 0 &&
+    railRect.height > 0 &&
+    x >= railRect.left &&
+    x <= railRect.right &&
+    y >= railRect.top &&
+    y <= railRect.bottom
+  return inPanelTarget || inRail
+}
+
+function onHoverPointerMove(event: PointerEvent) {
+  if (!isHoverPeeking.value || event.pointerType === 'touch') return
+  const target = event.target as Node | null
+  if (
+    (target && root.value?.contains(target)) ||
+    isPointInFloatingZone(event.clientX, event.clientY)
+  ) {
+    cancelClosePeek()
+    return
+  }
+  scheduleClosePeek(event)
+}
+
+function onDocumentPointerLeave(event: PointerEvent) {
+  if (!isHoverPeeking.value || event.pointerType === 'touch') return
+  scheduleClosePeek(event)
+}
+
+function pinPeek() {
+  if (!visible.value || !isCollapsed.value) return
+  cancelOpenPeek()
   cancelClosePeek()
-  peeking.value = !peeking.value
+  peekMode.value = 'pinned'
+}
+
+function onRailClick(event: MouseEvent) {
+  if (!visible.value || !isCollapsed.value) return
+  cancelOpenPeek()
+  cancelClosePeek()
+  const wasFocused = document.activeElement === railButton.value
+  const keyboardActivated = wasFocused && event.detail === 0
+  if (peekMode.value === 'pinned') {
+    closePeek(keyboardActivated)
+    return
+  }
+  if (wasFocused) {
+    blurIfInside(railButton.value)
+  }
+  peekMode.value = 'pinned'
+  if (keyboardActivated) {
+    focusPanelItem()
+  }
+}
+
+function onRootPointerDown() {
+  pointerInsideRoot = true
+  clearPointerInsideTimer()
+  pointerInsideTimer = setTimeout(() => {
+    pointerInsideRoot = false
+    pointerInsideTimer = null
+  }, 0)
+}
+
+function onRootFocusOut(event: FocusEvent) {
+  if (transferringFocus || !isFloating.value) return
+  const next = event.relatedTarget as Node | null
+  if (next && root.value?.contains(next)) return
+  if (!next && pointerInsideRoot) return
+  closePeek()
+}
+
+function onEscape(event: KeyboardEvent) {
+  if (!peeking.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  closePeek(true)
 }
 
 function pick(id: string) {
@@ -99,17 +260,46 @@ function onOutsidePointerDown(event: PointerEvent) {
   closePeek()
 }
 
-watch(isCollapsed, (collapsed) => {
-  if (!collapsed) {
-    cancelClosePeek()
-    peeking.value = false
+watch([isCollapsed, visible], ([collapsed, shown]) => {
+  if (!collapsed || !shown) {
+    resetPeek()
   }
 })
+
+watch(
+  panelOpen,
+  (open) => {
+    if (!open) {
+      blurIfInside(panel.value)
+    }
+  },
+  { flush: 'sync' },
+)
+
+watch(
+  showRail,
+  (shown) => {
+    if (!shown) {
+      blurIfInside(railButton.value)
+    }
+  },
+  { flush: 'sync' },
+)
 
 watch(peeking, (open, _prev, onCleanup) => {
   if (!open) return
   document.addEventListener('pointerdown', onOutsidePointerDown, true)
   onCleanup(() => document.removeEventListener('pointerdown', onOutsidePointerDown, true))
+})
+
+watch(isHoverPeeking, (hovering, _prev, onCleanup) => {
+  if (!hovering) return
+  document.addEventListener('pointermove', onHoverPointerMove, { passive: true })
+  document.documentElement.addEventListener('pointerleave', onDocumentPointerLeave)
+  onCleanup(() => {
+    document.removeEventListener('pointermove', onHoverPointerMove)
+    document.documentElement.removeEventListener('pointerleave', onDocumentPointerLeave)
+  })
 })
 
 const marker = ref<{ top: number; height: number } | null>(null)
@@ -172,8 +362,12 @@ function verticalRange(): VerticalRange | null {
 }
 
 onBeforeUnmount(() => {
+  cancelOpenPeek()
   cancelClosePeek()
+  clearPointerInsideTimer()
   document.removeEventListener('pointerdown', onOutsidePointerDown, true)
+  document.removeEventListener('pointermove', onHoverPointerMove)
+  document.documentElement.removeEventListener('pointerleave', onDocumentPointerLeave)
 })
 
 defineExpose({ verticalRange })
@@ -191,39 +385,53 @@ defineExpose({ verticalRange })
       'is-floating': isFloating,
     }"
     :style="{ '--toc-width': `${panelWidth}px` }"
+    @pointerdown.capture="onRootPointerDown"
+    @focusout="onRootFocusOut"
   >
-    <button
-      ref="railButton"
-      type="button"
-      class="document-toc__rail"
-      :tabindex="showRail ? 0 : -1"
-      :aria-hidden="!showRail"
-      :aria-label="t('artifact.document.showToc')"
-      :aria-expanded="peeking"
-      :title="t('artifact.document.showToc')"
-      @pointerenter="onRailPointerEnter"
-      @pointerleave="scheduleClosePeek"
-      @click="togglePeek"
-      @keydown.esc="closePeek(true)"
-    >
-      <span
-        v-for="bar in miniBars"
-        :key="bar.id"
-        class="document-toc__rail-bar"
-        :class="{ 'is-active': bar.active }"
-        :style="{ '--toc-depth': bar.depth }"
+    <div ref="railSlot" class="document-toc__rail-slot">
+      <button
+        ref="railButton"
+        type="button"
+        class="document-toc__rail"
+        :inert="!showRail"
+        :tabindex="showRail ? 0 : -1"
+        :aria-hidden="!showRail"
+        :aria-label="t('artifact.document.showToc')"
+        :aria-expanded="peeking"
+        :title="t('artifact.document.showToc')"
+        @pointerenter="onRailPointerEnter"
+        @pointerleave="onRailPointerLeave"
+        @click="onRailClick"
+        @keydown.esc="onEscape"
+      >
+        <span
+          v-for="bar in miniBars"
+          :key="bar.id"
+          class="document-toc__rail-bar"
+          :class="{ 'is-active': bar.active }"
+          :style="{ '--toc-depth': bar.depth }"
+          aria-hidden="true"
+        />
+      </button>
+      <div
+        v-if="isFloating"
+        class="document-toc__rail-shield"
         aria-hidden="true"
+        @pointerenter="cancelClosePeek"
+        @pointerleave="onPanelPointerLeave"
+        @click.stop="pinPeek"
       />
-    </button>
+    </div>
 
     <nav
       ref="panel"
       class="document-toc__panel"
+      :inert="!panelOpen"
       :aria-label="t('artifact.document.toc')"
       :aria-hidden="!panelOpen"
       @pointerenter="cancelClosePeek"
       @pointerleave="onPanelPointerLeave"
-      @keydown.esc="closePeek(true)"
+      @keydown.esc="onEscape"
       @wheel="onPanelWheel"
     >
       <div class="document-toc__header">{{ t('artifact.document.toc') }}</div>
@@ -274,10 +482,16 @@ defineExpose({ verticalRange })
   z-index: 10;
 }
 
-.document-toc__rail {
+.document-toc__rail-slot {
   position: absolute;
   top: 2px;
   left: 6px;
+  display: flex;
+  max-height: calc(100% - 2px);
+  pointer-events: none;
+}
+
+.document-toc__rail {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -296,6 +510,13 @@ defineExpose({ verticalRange })
     opacity var(--dou-motion-duration-normal) var(--dou-motion-easing),
     transform var(--dou-motion-duration-normal) var(--dou-motion-easing),
     background-color var(--dou-motion-duration-fast) var(--dou-motion-easing);
+}
+
+.document-toc__rail-shield {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .document-toc.is-collapsed:not(.is-peeking) .document-toc__rail {

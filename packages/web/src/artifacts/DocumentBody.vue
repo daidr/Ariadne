@@ -273,20 +273,64 @@ function onEditorChange(next: EditorDocument) {
   void nextTick(scheduleMeasure)
 }
 
+function expandCollapsedAncestors(scrollEl: HTMLElement, blockEl: HTMLElement): boolean {
+  const collapsedAncestors: HTMLElement[] = []
+  let current = blockEl.parentElement
+  while (current && scrollEl.contains(current)) {
+    const ancestor = current.closest<HTMLElement>('.dou-editor__block.is-collapsed')
+    if (!ancestor || !scrollEl.contains(ancestor)) break
+    collapsedAncestors.push(ancestor)
+    current = ancestor.parentElement
+  }
+  if (!collapsedAncestors.length) return false
+  let expanded = false
+  for (let i = collapsedAncestors.length - 1; i >= 0; i--) {
+    const ancestor = collapsedAncestors[i]!
+    const button = ancestor.querySelector<HTMLButtonElement>(
+      ':scope > .dou-editor__content .dou-editor-toggle__button',
+    )
+    if (button && button.getAttribute('aria-expanded') !== 'true') {
+      button.click()
+      expanded = true
+    }
+  }
+  return expanded
+}
+
 async function scrollToHeading(id: string) {
   const scrollEl = scrollArea.value
   if (!scrollEl) return
   const selector = `[data-block-id="${escapeSelector(id)}"]`
   let blockEl = scrollEl.querySelector<HTMLElement>(selector)
-  if (blockEl && blockEl.getBoundingClientRect().height <= 0 && !props.readonly) {
-    editor.value?.focusBlock(id, 'start')
-    await nextTick()
-    blockEl = scrollEl.querySelector<HTMLElement>(selector)
-  }
   if (!blockEl) return
-  const targetEl = blockEl.querySelector<HTMLElement>(':scope > .dou-editor__content') ?? blockEl
+
+  let targetEl = blockEl.querySelector<HTMLElement>(':scope > .dou-editor__content') ?? blockEl
+  let targetRect = targetEl.getBoundingClientRect()
+
+  if (targetRect.height <= 0 || blockEl.parentElement?.closest('.dou-editor__block.is-collapsed')) {
+    const expanded = expandCollapsedAncestors(scrollEl, blockEl)
+    if (expanded) {
+      await nextTick()
+      if (scrollArea.value !== scrollEl) return
+      blockEl = scrollEl.querySelector<HTMLElement>(selector)
+      if (!blockEl) return
+      targetEl = blockEl.querySelector<HTMLElement>(':scope > .dou-editor__content') ?? blockEl
+      targetRect = targetEl.getBoundingClientRect()
+    }
+    if (targetRect.height <= 0 && !props.readonly) {
+      editor.value?.focusBlock(id, 'start')
+      await nextTick()
+      if (scrollArea.value !== scrollEl) return
+      blockEl = scrollEl.querySelector<HTMLElement>(selector)
+      if (!blockEl) return
+      targetEl = blockEl.querySelector<HTMLElement>(':scope > .dou-editor__content') ?? blockEl
+      targetRect = targetEl.getBoundingClientRect()
+    }
+  }
+
+  if (targetRect.height <= 0) return
+
   const scrollRect = scrollEl.getBoundingClientRect()
-  const targetRect = targetEl.getBoundingClientRect()
   const targetTop = Math.max(0, scrollEl.scrollTop + (targetRect.top - scrollRect.top) - 24)
   pinHeading(id)
   scrollEl.scrollTo({
