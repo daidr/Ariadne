@@ -1,25 +1,43 @@
 // @vitest-environment happy-dom
-import type { ArtifactView, DocumentAskAnswerBaseline, DocumentAskBaseline } from '@ariadne/core'
+import type {
+  ArtifactVersionView,
+  ArtifactView,
+  DocumentAskAnswerBaseline,
+  DocumentAskBaseline,
+} from '@ariadne/core'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { defineComponent, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { defineComponent, onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
 import * as Y from 'yjs'
 import { api } from '../api'
 import { setLocale } from '../i18n'
 import { state } from '../store'
+import type { AskBlockProps } from './document-block-data'
 import {
   applyRecommendedDocumentAsks,
   readSharedDocumentAsks,
   snapshotDocumentAsks,
 } from './document-asks'
-import { clearPendingArtifactFeedback } from './feedback-pending'
+import { clearPendingArtifactFeedback, getPendingArtifactFeedback } from './feedback-pending'
 
 let currentSharedDoc: Y.Doc | null = null
 let currentSharedReady = ref(true)
+const sharedByArtifact = new Map<string, { doc: Y.Doc; ready: Ref<boolean> }>()
+const readonlyAsksByContent = new Map<string, AskBlockProps[]>()
 const fakeProvider = { awareness: null, destroy: () => {} }
 
 vi.mock('./shared', () => ({
-  useSharedArtifact: () => {
+  useSharedArtifact: (artifactId: string) => {
+    const entry = sharedByArtifact.get(artifactId)
+    if (entry) {
+      return {
+        doc: entry.doc,
+        awareness: null,
+        ready: entry.ready,
+        connected: ref(true),
+        provider: shallowRef(fakeProvider),
+      }
+    }
     const doc = currentSharedDoc ?? new Y.Doc()
     currentSharedDoc = doc
     return {
@@ -46,7 +64,7 @@ vi.mock('./DocumentBody.vue', () => ({
       const readAsks = () =>
         props.shared
           ? readSharedDocumentAsks(props.shared.doc.getMap('document')).map((e) => e.ask)
-          : []
+          : (readonlyAsksByContent.get(props.content) ?? [])
       const emitAsks = () => emit('asks', readAsks())
 
       if (props.shared) {
@@ -61,6 +79,8 @@ vi.mock('./DocumentBody.vue', () => ({
           { immediate: true },
         )
         onBeforeUnmount(() => root.unobserveDeep(onChange))
+      } else {
+        watch(() => props.content, emitAsks, { immediate: true })
       }
 
       expose({
@@ -73,6 +93,16 @@ vi.mock('./DocumentBody.vue', () => ({
     },
   }),
 }))
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
 
 import ArtifactEditor from './ArtifactEditor.vue'
 
@@ -114,7 +144,12 @@ function seedDoc(
   return { doc, propsById, paraText }
 }
 
-function docDetail(id: string, version: number, askBaseline: DocumentAskBaseline | null) {
+function docDetail(
+  id: string,
+  version: number,
+  askBaseline: DocumentAskBaseline | null,
+  options: { content?: string; versions?: ArtifactVersionView[] } = {},
+) {
   return {
     artifact: {
       id,
@@ -130,9 +165,9 @@ function docDetail(id: string, version: number, askBaseline: DocumentAskBaseline
       preview: { kind: 'document' as const, excerpt: '' },
       openComments: 0,
       commentedAt: 0,
-      content: '# 方案评审',
+      content: options.content ?? '# 方案评审',
     } as ArtifactView,
-    versions: [],
+    versions: options.versions ?? [],
     comments: [],
     askBaseline,
   }
@@ -182,14 +217,20 @@ describe('ArtifactEditor inline ask submit button visibility', () => {
     setLocale('zh-CN')
     currentSharedReady = ref(true)
     currentSharedDoc = null
+    sharedByArtifact.clear()
+    readonlyAsksByContent.clear()
     state.artifacts = []
     clearPendingArtifactFeedback('art_doc_1')
+    clearPendingArtifactFeedback('art_doc_2')
   })
 
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+    sharedByArtifact.clear()
+    readonlyAsksByContent.clear()
     clearPendingArtifactFeedback('art_doc_1')
+    clearPendingArtifactFeedback('art_doc_2')
   })
 
   test('hides submit bar after all asks are submitted and unchanged, and restores on edits or withdraw', async () => {
@@ -448,6 +489,475 @@ describe('ArtifactEditor inline ask submit button visibility', () => {
     await flushPromises()
     vi.advanceTimersByTime(61_000)
     await flushPromises()
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  test('does not let in-flight sendFeedback from a previous artifact overwrite baseline or state after switching tabs', async () => {
+    const doc1 = seedDoc([
+      {
+        key: 'b1',
+        id: 'ask-1',
+        question: '文档一问题？',
+        pick: 'one',
+        options: [
+          { id: 'redis', label: 'Redis' },
+          { id: 'mem', label: '内存' },
+        ],
+        selected: ['redis'],
+      },
+    ])
+    const doc2 = seedDoc([
+      {
+        key: 'b1',
+        id: 'ask-2',
+        question: '文档二问题？',
+        pick: 'one',
+        options: [
+          { id: 'docker', label: 'Docker' },
+          { id: 'bin', label: '单二进制' },
+        ],
+        selected: ['docker'],
+      },
+    ])
+    sharedByArtifact.set('art_doc_1', { doc: doc1.doc, ready: ref(true) })
+    sharedByArtifact.set('art_doc_2', { doc: doc2.doc, ready: ref(true) })
+
+    const doc2DetailDeferred = createDeferred<ReturnType<typeof docDetail>>()
+    vi.spyOn(api, 'getArtifact').mockImplementation((id) => {
+      if (id === 'art_doc_1') {
+        return Promise.resolve(
+          docDetail('art_doc_1', 1, {
+            version: 1,
+            asks: [{ id: 'ask-1', selected: [], note: '' }],
+          }),
+        )
+      }
+      return doc2DetailDeferred.promise
+    })
+
+    const sendDeferred = createDeferred<NonNullable<Awaited<ReturnType<typeof api.sendFeedback>>>>()
+    vi.spyOn(api, 'sendFeedback').mockImplementation(() => sendDeferred.promise)
+
+    const wrapper = mount(ArtifactEditor, {
+      props: { id: 'art_doc_1', place: 'full' },
+      global: {
+        stubs: {
+          ViewActions: true,
+          ArtifactHistory: true,
+          CommentList: true,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    // Start submitting art_doc_1 while it is still pending.
+    expect(wrapper.find('.artifact-feedback-bar').text()).toContain('提交回答')
+    const clickPromise = wrapper.find('.artifact-feedback-bar button').trigger('click')
+    await flushPromises()
+
+    // Switch tab to art_doc_2 before art_doc_1's sendFeedback resolves.
+    await wrapper.setProps({ id: 'art_doc_2' })
+    await flushPromises()
+
+    // Now art_doc_1's sendFeedback finishes while art_doc_2's getArtifact is still in flight.
+    sendDeferred.resolve({
+      feedback: {
+        artifactId: 'art_doc_1',
+        round: 1,
+        version: 2,
+        notify: 'thr_1',
+        items: [],
+        images: [],
+        doneBy: null,
+        doneAt: null,
+        summary: null,
+        createdAt: Date.now(),
+      },
+    })
+    await clickPromise
+    await flushPromises()
+
+    // art_doc_2 should not inherit art_doc_1's sent round banner or bumped baseline epoch.
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+
+    // art_doc_2's load completes with its already-submitted baseline -> submit bar stays hidden.
+    doc2DetailDeferred.resolve(
+      docDetail('art_doc_2', 2, {
+        version: 2,
+        asks: [{ id: 'ask-2', selected: ['docker'], note: '' }],
+      }),
+    )
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  test('persists failed sendFeedback pending count to the original artifact without polluting the newly opened tab', async () => {
+    const doc1 = seedDoc([
+      {
+        key: 'b1',
+        id: 'ask-1',
+        question: '文档一问题？',
+        pick: 'one',
+        options: [{ id: 'redis', label: 'Redis' }],
+        selected: ['redis'],
+      },
+    ])
+    const doc2 = seedDoc([
+      {
+        key: 'b1',
+        id: 'ask-2',
+        question: '文档二问题？',
+        pick: 'one',
+        options: [{ id: 'docker', label: 'Docker' }],
+        selected: ['docker'],
+      },
+    ])
+    sharedByArtifact.set('art_doc_1', { doc: doc1.doc, ready: ref(true) })
+    sharedByArtifact.set('art_doc_2', { doc: doc2.doc, ready: ref(true) })
+
+    vi.spyOn(api, 'getArtifact').mockImplementation((id) => {
+      if (id === 'art_doc_1') {
+        return Promise.resolve(
+          docDetail('art_doc_1', 1, {
+            version: 1,
+            asks: [{ id: 'ask-1', selected: [], note: '' }],
+          }),
+        )
+      }
+      return Promise.resolve(
+        docDetail('art_doc_2', 2, {
+          version: 2,
+          asks: [{ id: 'ask-2', selected: ['docker'], note: '' }],
+        }),
+      )
+    })
+
+    const sendDeferred = createDeferred<NonNullable<Awaited<ReturnType<typeof api.sendFeedback>>>>()
+    vi.spyOn(api, 'sendFeedback').mockImplementation(() => sendDeferred.promise)
+
+    const wrapper = mount(ArtifactEditor, {
+      props: { id: 'art_doc_1', place: 'full' },
+      global: {
+        stubs: {
+          ViewActions: true,
+          ArtifactHistory: true,
+          CommentList: true,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    // Make a prose edit on art_doc_1 so initialPending > 0, then click submit.
+    doc1.doc.transact(() => doc1.paraText.insert(doc1.paraText.length, ' 补充内容'))
+    await flushPromises()
+    const clickPromise = wrapper.find('.artifact-feedback-bar button').trigger('click')
+    await flushPromises()
+
+    // Switch to art_doc_2 before sendFeedback fails.
+    await wrapper.setProps({ id: 'art_doc_2' })
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+
+    sendDeferred.reject(new Error('network error'))
+    await clickPromise
+    await flushPromises()
+
+    // art_doc_2 stays clean while art_doc_1 keeps its restored pending count in store.
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+    expect(getPendingArtifactFeedback('art_doc_1')).toEqual({
+      pendingChanges: 1,
+      pendingNotes: 0,
+      paused: true,
+    })
+
+    wrapper.unmount()
+  })
+
+  test('does not let in-flight withdrawSentFeedback overwrite the new artifact baseline or pending state after switching tabs', async () => {
+    const doc1 = seedDoc([
+      {
+        key: 'b1',
+        id: 'ask-1',
+        question: '文档一问题？',
+        pick: 'one',
+        options: [{ id: 'redis', label: 'Redis' }],
+        selected: ['redis'],
+      },
+    ])
+    const doc2 = seedDoc([
+      {
+        key: 'b1',
+        id: 'ask-2',
+        question: '文档二问题？',
+        pick: 'one',
+        options: [{ id: 'docker', label: 'Docker' }],
+        selected: ['docker'],
+      },
+    ])
+    sharedByArtifact.set('art_doc_1', { doc: doc1.doc, ready: ref(true) })
+    sharedByArtifact.set('art_doc_2', { doc: doc2.doc, ready: ref(true) })
+
+    const doc2DetailDeferred = createDeferred<ReturnType<typeof docDetail>>()
+    vi.spyOn(api, 'getArtifact').mockImplementation((id) => {
+      if (id === 'art_doc_1') {
+        return Promise.resolve(
+          docDetail('art_doc_1', 1, {
+            version: 1,
+            asks: [{ id: 'ask-1', selected: [], note: '' }],
+          }),
+        )
+      }
+      return doc2DetailDeferred.promise
+    })
+    vi.spyOn(api, 'sendFeedback').mockResolvedValue({
+      feedback: {
+        artifactId: 'art_doc_1',
+        round: 1,
+        version: 2,
+        notify: 'thr_1',
+        items: [],
+        images: [],
+        doneBy: null,
+        doneAt: null,
+        summary: null,
+        createdAt: Date.now(),
+      },
+    })
+    const withdrawDeferred = createDeferred<{ withdrawn: boolean }>()
+    vi.spyOn(api, 'withdrawFeedback').mockImplementation(() => withdrawDeferred.promise)
+
+    const wrapper = mount(ArtifactEditor, {
+      props: { id: 'art_doc_1', place: 'full' },
+      global: {
+        stubs: {
+          ViewActions: true,
+          ArtifactHistory: true,
+          CommentList: true,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    // Edit prose + submit art_doc_1 so hadPending = 1, then trigger withdraw.
+    doc1.doc.transact(() => doc1.paraText.insert(doc1.paraText.length, ' 补充内容'))
+    await flushPromises()
+    await wrapper.find('.artifact-feedback-bar button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.artifact-feedback-bar').text()).toContain('第 1 轮')
+
+    const withdrawPromise = wrapper.find('.artifact-feedback-bar button').trigger('click')
+    await flushPromises()
+
+    // Switch tab to art_doc_2 while withdraw is still in flight.
+    await wrapper.setProps({ id: 'art_doc_2' })
+    await flushPromises()
+
+    withdrawDeferred.resolve({ withdrawn: true })
+    await withdrawPromise
+    await flushPromises()
+
+    // Resolve art_doc_2 load after art_doc_1 withdraw settled: art_doc_2 keeps its real baseline and no pending bar.
+    doc2DetailDeferred.resolve(
+      docDetail('art_doc_2', 2, {
+        version: 2,
+        asks: [{ id: 'ask-2', selected: ['docker'], note: '' }],
+      }),
+    )
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+    expect(getPendingArtifactFeedback('art_doc_1')).toEqual({
+      pendingChanges: 1,
+      pendingNotes: 0,
+      paused: true,
+    })
+
+    wrapper.unmount()
+  })
+
+  test('clears stale historical asks when returning from an older version before the live Y.Doc becomes ready', async () => {
+    const liveReady = ref(true)
+    const { doc, propsById } = seedDoc([
+      {
+        key: 'b1',
+        id: 'ask-1',
+        question: '缓存选型？',
+        pick: 'one',
+        options: [
+          { id: 'redis', label: 'Redis' },
+          { id: 'mem', label: '内存' },
+        ],
+        selected: ['redis'],
+      },
+    ])
+    sharedByArtifact.set('art_doc_1', { doc, ready: liveReady })
+    readonlyAsksByContent.set('# 旧版本 v1', [
+      {
+        id: 'ask-1',
+        question: '缓存选型？',
+        description: '',
+        pick: 'one',
+        options: [
+          { id: 'redis', label: 'Redis' },
+          { id: 'mem', label: '内存' },
+        ],
+        allowNote: true,
+        selected: [],
+        note: '',
+        confirmed: false,
+      },
+    ])
+
+    const versions: ArtifactVersionView[] = [
+      { version: 2, title: '方案评审', author: 'user', reason: 'answered', createdAt: 2000 },
+      { version: 1, title: '方案评审', author: 'agent', reason: 'initial', createdAt: 1000 },
+    ]
+    vi.spyOn(api, 'listArtifactVersions').mockResolvedValue({ versions })
+    vi.spyOn(api, 'getArtifact').mockImplementation((_id, opts) => {
+      if (opts?.version === 1) {
+        return Promise.resolve(
+          docDetail('art_doc_1', 1, null, { content: '# 旧版本 v1', versions }),
+        )
+      }
+      return Promise.resolve(
+        docDetail('art_doc_1', 2, {
+          version: 2,
+          asks: [{ id: 'ask-1', selected: ['redis'], note: '' }],
+        }),
+      )
+    })
+
+    const DouPopoverStub = defineComponent({
+      name: 'DouPopover',
+      props: { open: Boolean },
+      emits: ['update:open'],
+      template: '<div><slot /><slot name="content" :close="() => {}" /></div>',
+    })
+    const ArtifactHistoryStub = defineComponent({
+      name: 'ArtifactHistory',
+      emits: ['select', 'retry'],
+      template: '<button class="pick-v1" @click="$emit(\'select\', 1)">v1</button>',
+    })
+
+    const wrapper = mount(ArtifactEditor, {
+      props: { id: 'art_doc_1', place: 'full' },
+      global: {
+        stubs: {
+          ViewActions: true,
+          CommentList: true,
+          DouPopover: DouPopoverStub,
+          ArtifactHistory: ArtifactHistoryStub,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    // Latest version is fully submitted -> bar hidden.
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+
+    // Switch to historical version 1 (read-only DocumentBody emits unanswered ask-1).
+    await wrapper.find('.artifact-menu-item').trigger('click')
+    await flushPromises()
+    await wrapper.find('.pick-v1').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.find('.history-context').exists()).toBe(true)
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+
+    // Return to latest while the new Yjs room is still syncing (ready === false).
+    liveReady.value = false
+    const returnLatestBtn = wrapper.find('.history-actions button')
+    await returnLatestBtn.trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    // No stale historical ask bar may flash before live Y.Doc finishes syncing.
+    expect(wrapper.find('.history-context').exists()).toBe(false)
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+
+    // Once Y.Doc becomes ready, latest answered asks match baseline -> bar stays hidden.
+    liveReady.value = true
+    await flushPromises()
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+
+    // Editing the live ask now shows the submit bar as expected.
+    doc.transact(() => propsById.get('ask-1')!.set('selected', ['mem']))
+    await flushPromises()
+    expect(wrapper.find('.artifact-feedback-bar').text()).toContain('提交回答')
+
+    wrapper.unmount()
+  })
+
+  test('syncs askBaseline from server when explicit document submit returns empty feedback after retry', async () => {
+    const { doc } = seedDoc([
+      {
+        key: 'b1',
+        id: 'ask-1',
+        question: '缓存选型？',
+        pick: 'one',
+        options: [
+          { id: 'redis', label: 'Redis' },
+          { id: 'mem', label: '内存' },
+        ],
+        selected: ['redis'],
+      },
+    ])
+
+    let serverBaseline: DocumentAskAnswerBaseline[] = [{ id: 'ask-1', selected: [], note: '' }]
+    const getArtifact = vi
+      .spyOn(api, 'getArtifact')
+      .mockImplementation(() =>
+        Promise.resolve(docDetail('art_doc_1', 2, { version: 2, asks: serverBaseline })),
+      )
+    const sendFeedback = vi.spyOn(api, 'sendFeedback').mockResolvedValue({ feedback: null })
+    currentSharedDoc = doc
+
+    const wrapper = mount(ArtifactEditor, {
+      props: { id: 'art_doc_1', place: 'full' },
+      global: {
+        stubs: {
+          ViewActions: true,
+          ArtifactHistory: true,
+          CommentList: true,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('.artifact-feedback-bar').text()).toContain('提交回答')
+
+    // Case 1: WebSocket update has not reached server yet -> server still has old baseline -> bar remains visible.
+    const firstClick = wrapper.find('.artifact-feedback-bar button').trigger('click')
+    await vi.advanceTimersByTimeAsync(260)
+    await firstClick
+    await flushPromises()
+    expect(sendFeedback).toHaveBeenCalledTimes(2)
+    expect(getArtifact).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.artifact-feedback-bar').text()).toContain('提交回答')
+    expect(
+      (wrapper.find('.artifact-feedback-bar button').element as HTMLButtonElement).disabled,
+    ).toBe(false)
+
+    // Case 2: Already submitted elsewhere / previous request landed on server -> server baseline matches -> bar hides.
+    serverBaseline = [{ id: 'ask-1', selected: ['redis'], note: '' }]
+    const secondClick = wrapper.find('.artifact-feedback-bar button').trigger('click')
+    await vi.advanceTimersByTimeAsync(260)
+    await secondClick
+    await flushPromises()
+    expect(sendFeedback).toHaveBeenCalledTimes(4)
+    expect(getArtifact).toHaveBeenCalledTimes(3)
     expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
 
     wrapper.unmount()
