@@ -39,6 +39,7 @@ import {
   setSide,
   splitPane,
   state,
+  threadsById,
 } from '../store'
 import { sideDock } from './dock'
 import * as side from './layout'
@@ -59,10 +60,9 @@ const lists: Record<string, { label: () => string; icon: Component }> = {
   artifacts: { label: () => t('panel.artifacts'), icon: PackageIcon },
 }
 
-const threadById = computed(() => new Map((state.detail?.threads ?? []).map((th) => [th.id, th])))
 const threadAt = (key: PaneKey | undefined) => {
   const id = key && side.threadOf(key)
-  return id ? (threadById.value.get(id) ?? null) : null
+  return id ? (threadsById.value.get(id) ?? null) : null
 }
 const artifactById = computed(() => new Map(state.artifacts.map((a) => [a.id, a])))
 
@@ -74,7 +74,7 @@ function viewLabel(key: PaneKey): { label: string; icon: Component } | null {
     const artifact = artifactById.value.get(view.id)
     return { label: artifact?.title ?? '', icon: kindIcon[artifact?.kind ?? 'document'] }
   }
-  const title = threadById.value.get(view.threadId)?.title ?? ''
+  const title = threadsById.value.get(view.threadId)?.title ?? ''
   const label =
     view.kind === 'turn' ? `${title} · ${t('changes.turn')}` : t('view.changesOf', { title })
   return { label, icon: FileDiffIcon }

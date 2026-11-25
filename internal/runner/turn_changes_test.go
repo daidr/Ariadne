@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -636,5 +637,241 @@ func TestTurnChangesMultiRepoOuterAndEmbedded(t *testing.T) {
 	}
 	if !core.SameChangeTotals(updated.Changes, core.ChangeTotals{Files: 2, Added: 3, Removed: 0}) {
 		t.Fatalf("expected aggregated totals {2, 3, 0}, got %#v", updated.Changes)
+	}
+}
+
+func testFileURL(p string) string {
+	p = filepath.ToSlash(p)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return (&url.URL{Scheme: "file", Path: p}).String()
+}
+
+func TestTurnChangesMidTurnCreatedWorktreeRecordsForkBaselineAndCommits(t *testing.T) {
+	ctx := t.Context()
+
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		res := local.NewGit(dir, "file")(ctx, args, local.GitOptions{})
+		if res.ExitCode != 0 {
+			t.Fatalf("git %v in %s failed: %s", args, dir, res.Stderr)
+		}
+		return strings.TrimSpace(res.Stdout)
+	}
+
+	// Build outer umbrella repo.
+	outerDir := initTestRemoteRepo(t)
+	if err := os.WriteFile(filepath.Join(outerDir, ".gitignore"), []byte("nested-worktrees/\nsubrepos/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(outerDir, "add", ".gitignore")
+	runGit(outerDir, "commit", "-q", "-m", "ignore nested-worktrees and subrepos")
+
+	// Build external bare remote with an unrelated orphan branch "vendor-orphan" and a "main" branch
+	// referencing itself as submodule "vendor-bundle" tracking "vendor-orphan".
+	bareRemote := filepath.Join(t.TempDir(), "remote.git")
+	if err := os.MkdirAll(bareRemote, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(bareRemote, "init", "--bare", "-q", "-b", "main")
+	bareURL := testFileURL(bareRemote)
+
+	orphanSeed := t.TempDir()
+	runGit(orphanSeed, "init", "-q", "-b", "vendor-orphan")
+	runGit(orphanSeed, "config", "user.name", "Test")
+	runGit(orphanSeed, "config", "user.email", "test@example.invalid")
+	if err := os.WriteFile(filepath.Join(orphanSeed, "bundle.js"), []byte("export const v = 1;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(orphanSeed, "add", "bundle.js")
+	runGit(orphanSeed, "commit", "-q", "-m", "orphan init")
+	runGit(orphanSeed, "remote", "add", "origin", bareURL)
+	runGit(orphanSeed, "push", "-q", "origin", "vendor-orphan")
+
+	hostRepo := t.TempDir()
+	runGit(hostRepo, "init", "-q", "-b", "main")
+	runGit(hostRepo, "config", "user.name", "Test")
+	runGit(hostRepo, "config", "user.email", "test@example.invalid")
+	if err := os.WriteFile(filepath.Join(hostRepo, "pkg.go"), []byte("package pkg\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(hostRepo, "add", "pkg.go")
+	runGit(hostRepo, "commit", "-q", "-m", "host init")
+	runGit(hostRepo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", "-b", "vendor-orphan", bareURL, "vendor-bundle")
+	runGit(hostRepo, "commit", "-q", "-m", "add orphan submodule")
+	runGit(hostRepo, "remote", "add", "origin", bareURL)
+	runGit(hostRepo, "push", "-q", "-u", "origin", "main")
+	forkSHA := runGit(hostRepo, "rev-parse", "HEAD")
+
+	// Set up Ariadne core + workspaces + runner.
+	dataDir, err := os.MkdirTemp("", "ad-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dataDir) })
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "repo.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	hosts := sources.New()
+	if _, err := hosts.Register(local.DirectoryProvider(dataDir, nil, true)); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: hosts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background())
+
+	project, err := repo.CreateProject(ctx, new("MidTurnEmbedded"), core.ProjectStart{
+		Source: core.Source{Kind: "local-directory", Settings: map[string]any{"path": outerDir}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Mid-turn worktrees and clone"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := manager.ForThread(ctx, project.ID, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workDir := ws.Info().Label
+
+	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
+		ConversationID: thread.ID, Author: "user", Content: "Create nested worktrees mid-turn",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	turnID, err := repo.StartScheduledTurn(ctx, thread.ID, "mock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runnerInstance := &Runner{Repository: repo, Workspaces: manager}
+	conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+	tc := newTurnChanges(runnerInstance, conv)
+	tc.begin(ctx, thread)
+
+	// 1. Mid-turn created worktree + commit C1 (clean working tree).
+	mid1Dir := filepath.Join(workDir, "nested-worktrees", "feat-mid1")
+	if err := os.MkdirAll(filepath.Dir(mid1Dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(hostRepo, "worktree", "add", "-qb", "feat/mid1", mid1Dir, forkSHA)
+	if err := os.WriteFile(filepath.Join(mid1Dir, "pkg.go"), []byte("package pkg\n\nfunc Mid1() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(mid1Dir, "add", "pkg.go")
+	runGit(mid1Dir, "commit", "-q", "-m", "mid1 commit")
+	mid1Head := runGit(mid1Dir, "rev-parse", "HEAD")
+
+	// 2. Mid-turn created worktree + commit C1 + uncommitted edit.
+	mid2Dir := filepath.Join(workDir, "nested-worktrees", "feat-mid2")
+	runGit(hostRepo, "worktree", "add", "-qb", "feat/mid2", mid2Dir, forkSHA)
+	if err := os.WriteFile(filepath.Join(mid2Dir, "pkg.go"), []byte("package pkg\n\nfunc Mid2() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(mid2Dir, "add", "pkg.go")
+	runGit(mid2Dir, "commit", "-q", "-m", "mid2 commit")
+	if err := os.WriteFile(filepath.Join(mid2Dir, "wip.go"), []byte("package pkg\n// wip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Mid-turn clean git clone + initialized clean orphan submodule inside it -> must produce 0 turn-changes and 0 baselines.
+	cleanCloneDir := filepath.Join(workDir, "subrepos", "clean-clone")
+	if err := os.MkdirAll(filepath.Dir(cleanCloneDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(filepath.Dir(cleanCloneDir), "clone", "-q", bareURL, cleanCloneDir)
+	runGit(cleanCloneDir, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q", "vendor-bundle")
+
+	tc.record(ctx, turnID)
+	if err := repo.FinishTurn(ctx, thread.ID, turnID, "completed", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify baselines: recorded for feat-mid1 and feat-mid2 at forkSHA (NOT mid1Head/mid2Head),
+	// and NOT recorded for clean-clone or its clean orphan submodule.
+	baselines, err := repo.RepoBaselines(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baselineByPath := map[string]core.RepoBaseline{}
+	for _, b := range baselines {
+		baselineByPath[b.RepoPath] = b
+	}
+	if len(baselines) != 2 {
+		t.Fatalf("expected exactly 2 baselines (feat-mid1 and feat-mid2), got %+v", baselines)
+	}
+	if b := baselineByPath["nested-worktrees/feat-mid1"]; b.BaseHead != forkSHA {
+		t.Fatalf("expected feat-mid1 baseline at forkSHA %s (not %s), got %+v", forkSHA, mid1Head, b)
+	}
+	if b := baselineByPath["nested-worktrees/feat-mid2"]; b.BaseHead != forkSHA {
+		t.Fatalf("expected feat-mid2 baseline at forkSHA %s, got %+v", forkSHA, b)
+	}
+
+	// Verify turn-changes notice contains exactly feat-mid1 (pkg.go) and feat-mid2 (pkg.go + wip.go).
+	notices, err := repo.ListNotices(ctx, thread.ID, core.NoticeRange{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var turnNotice map[string]any
+	for _, n := range notices {
+		if n["kind"] == "turn-changes" {
+			turnNotice = n
+		}
+	}
+	if turnNotice == nil {
+		t.Fatalf("expected turn-changes notice, got %+v", notices)
+	}
+	reposRaw, ok := turnNotice["repos"].([]any)
+	if !ok || len(reposRaw) != 2 {
+		t.Fatalf("expected 2 repos in turn-changes notice (no clean-clone or orphan submodule), got %#v", turnNotice["repos"])
+	}
+	turnRepoByPath := map[string]map[string]any{}
+	for _, item := range reposRaw {
+		m, _ := item.(map[string]any)
+		p, _ := m["repoPath"].(string)
+		turnRepoByPath[p] = m
+	}
+	mid1Turn := turnRepoByPath["nested-worktrees/feat-mid1"]
+	if mid1Turn == nil || mid1Turn["from"] != forkSHA || mid1Turn["to"] != mid1Head {
+		t.Fatalf("unexpected feat-mid1 turn-changes entry: %#v", mid1Turn)
+	}
+	if files, _ := mid1Turn["files"].([]any); len(files) != 1 {
+		t.Fatalf("expected 1 changed file for feat-mid1, got %#v", mid1Turn["files"])
+	}
+	mid2Turn := turnRepoByPath["nested-worktrees/feat-mid2"]
+	if mid2Turn == nil || mid2Turn["from"] != forkSHA {
+		t.Fatalf("unexpected feat-mid2 turn-changes entry: %#v", mid2Turn)
+	}
+	if files, _ := mid2Turn["files"].([]any); len(files) != 2 {
+		t.Fatalf("expected 2 changed files (committed pkg.go + uncommitted wip.go) for feat-mid2, got %#v", mid2Turn["files"])
+	}
+
+	// Verify subsequent ThreadChanges preserves committed C1 for both feat-mid1 and feat-mid2
+	// and reports 0 changes for clean-clone and its orphan submodule.
+	changes, err := manager.ThreadChanges(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes.Repos) != 2 {
+		t.Fatalf("expected 2 active repos in ThreadChanges, got %+v", changes.Repos)
+	}
+	for _, r := range changes.Repos {
+		if r.RepoPath != "nested-worktrees/feat-mid1" && r.RepoPath != "nested-worktrees/feat-mid2" {
+			t.Fatalf("unexpected active repo %s in ThreadChanges", r.RepoPath)
+		}
+		if r.Changes == nil || r.Changes.From != forkSHA || len(r.Changes.Files) != 1 || r.Changes.Files[0].Path != "pkg.go" {
+			t.Fatalf("expected committed pkg.go change relative to forkSHA %s for %s, got %+v", forkSHA, r.RepoPath, r.Changes)
+		}
+		if r.RepoPath == "nested-worktrees/feat-mid2" && (len(r.Changes.Uncommitted) != 1 || r.Changes.Uncommitted[0] != "wip.go") {
+			t.Fatalf("expected uncommitted wip.go for feat-mid2, got %+v", r.Changes)
+		}
 	}
 }

@@ -5,7 +5,15 @@ import { computed } from 'vue'
 import { t } from '../i18n'
 import type { AttentionView, ThreadView } from '@ariadne/core'
 import { threadLine } from '../stage'
-import { endAside, openMain, openThread, openThreadFrom, retryTurn, state } from '../store'
+import {
+  endAside,
+  openMain,
+  openThread,
+  openThreadFrom,
+  retryTurn,
+  state,
+  threadsById,
+} from '../store'
 import AskBlock from '../blocks/AskBlock.vue'
 import ReportArtifacts from './ReportArtifacts.vue'
 import ReviewMark from '../review/ReviewMark.vue'
@@ -18,7 +26,7 @@ type ResolvedNeedsMeItem =
 
 // The server builds the list; the badge is its length, so the two cannot disagree.
 const items = computed<ResolvedNeedsMeItem[]>(() => {
-  const byId = new Map((state.detail?.threads ?? []).map((thread) => [thread.id, thread]))
+  const byId = threadsById.value
   const resolved: ResolvedNeedsMeItem[] = []
   for (const item of state.detail?.needsMe ?? []) {
     if (item.kind === 'attention') {

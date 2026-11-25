@@ -75,9 +75,9 @@ const body = ref<{
   revealComment?: (id: string) => void
   markedPictures?: () => Promise<Blob[]>
   markHeard?: () => void
-  getHeard?: () => string
-  setHeard?: (snapshot: string) => void
-  currentSnapshot?: () => string
+  getHeard?: () => unknown
+  setHeard?: (snapshot: unknown) => void
+  currentSnapshot?: () => unknown
   applyRecommendedPicks?: () => number
 } | null>(null)
 /** The newest version; an older one is shown read-only. */
@@ -183,7 +183,7 @@ const sentRound = ref<{
   round: number
   hadPending: number
   hadNotes: number
-  previousHeard?: string
+  previousHeard?: unknown
 } | null>(null)
 const decisionSummary = ref<DecisionGroupSummary | null>(null)
 const askSummary = ref<DocumentAskSummary | null>(null)

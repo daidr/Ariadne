@@ -4,7 +4,7 @@ import { DouButton, DouLink, DouTag, DouText, DouTextarea } from 'dou-ui'
 import { AlertTriangleIcon, FileDiffIcon, PlayIcon, SendIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
-import { openMain, openThreadFrom, sendMessage, state } from '../store'
+import { openMain, openThreadFrom, sendMessage, state, threadsById } from '../store'
 import { kindIcon } from '../artifacts/kinds'
 import { groupNameOf, startedAhead } from './helpers'
 import PullRequestTag from '../components/PullRequestTag.vue'
@@ -27,15 +27,14 @@ const groupName = computed(() => groupNameOf(props.node))
 
 /** The artifacts a thread waiting on the user pointed to in its last report. */
 const reportArtifacts = (threadId: string) => {
-  const thread = state.detail?.threads.find((item) => item.id === threadId)
+  const thread = threadsById.value.get(threadId)
   return thread && showsHeadline(thread.stage) ? thread.lastArtifacts : []
 }
 
 /** Whether the thread has a branch whose changes can be shown. */
-const changesOf = (threadId: string) =>
-  branchChanges(state.detail?.threads.find((thread) => thread.id === threadId))
+const changesOf = (threadId: string) => branchChanges(threadsById.value.get(threadId))
 const hasBranch = (threadId: string) => {
-  const workspace = state.detail?.threads.find((thread) => thread.id === threadId)?.workspace
+  const workspace = threadsById.value.get(threadId)?.workspace
   return !!workspace?.branch && !!workspace.base
 }
 
@@ -78,7 +77,7 @@ async function decide() {
 function linkedBy(by: string): string {
   if (by === 'user') return t('plan.linkedByUser')
   if (by === state.detail?.project.coordinatorId) return t('plan.linkedByCoordinator')
-  return state.detail?.threads.find((thread) => thread.id === by)?.title ?? by
+  return threadsById.value.get(by)?.title ?? by
 }
 </script>
 

@@ -25,6 +25,7 @@ import {
   showWorkspace,
   startNewProject,
   state,
+  threadsById,
   touchedConversationsOf,
   type ConversationState,
 } from './store'
@@ -335,5 +336,33 @@ describe('patchThreads', () => {
   test('gives up on a thread it was never sent', () => {
     expect(patchThreads(had, [row('c')], undefined)).toBeNull()
     expect(patchThreads(had, [], ['a', 'b', 'c'])).toBeNull()
+  })
+})
+
+describe('threadsById', () => {
+  test('stays in sync with state.detail.threads', () => {
+    const previous = state.detail
+    try {
+      state.detail = {
+        project: { id: 'prj_idx', name: 'Idx', coordinatorId: 'crd_idx' },
+        threads: [row('t1', 'First'), row('t2', 'Second')],
+        needsMe: [],
+      } as unknown as typeof state.detail
+
+      expect(threadsById.value.size).toBe(2)
+      expect(threadsById.value.get('t1')?.title).toBe('First')
+      expect(threadsById.value.get('t2')?.title).toBe('Second')
+      expect(threadsById.value.get('missing')).toBeUndefined()
+
+      state.detail = {
+        ...state.detail!,
+        threads: [row('t2', 'Renamed'), row('t3', 'Third')],
+      }
+      expect(threadsById.value.has('t1')).toBe(false)
+      expect(threadsById.value.get('t2')?.title).toBe('Renamed')
+      expect(threadsById.value.get('t3')?.title).toBe('Third')
+    } finally {
+      state.detail = previous
+    }
   })
 })

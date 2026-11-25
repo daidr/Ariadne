@@ -346,4 +346,67 @@ describe('ProjectList activity popover behavior', () => {
     await nextTick()
     expect(onSelect).toHaveBeenCalledTimes(1)
   })
+
+  test('virtualizes long project lists above 40 items and keeps keyboard reordering working', async () => {
+    state.projects = Array.from({ length: 60 }, (_, index) =>
+      makeProjectSummary(`prj_${index + 1}`, `Project ${index + 1}`),
+    )
+
+    const { wrapper } = mountProjectList({ compact: false, active: true })
+    expect(wrapper.find('.dou-virtual-list').exists()).toBe(true)
+
+    const renderedButtons = wrapper.findAll('button[data-project-id]')
+    expect(renderedButtons.length).toBeGreaterThan(0)
+    expect(renderedButtons.length).toBeLessThan(60)
+
+    const first = wrapper.find<HTMLButtonElement>('button[data-project-id="prj_1"]')
+    await first.trigger('keydown', { key: 'ArrowDown', altKey: true })
+    await nextTick()
+
+    expect(state.projects[0]?.id).toBe('prj_2')
+    expect(state.projects[1]?.id).toBe('prj_1')
+  })
+
+  test('clears inspecting popover when virtualized project list scrolls away and back', async () => {
+    state.projects = Array.from({ length: 60 }, (_, index) =>
+      makeProjectSummary(`prj_${index + 1}`, `Project ${index + 1}`),
+    )
+
+    const { wrapper } = mountProjectList({ compact: false, active: true })
+    const virtualEl = wrapper.find<HTMLElement>('.projects-virtual').element
+    Object.defineProperty(virtualEl, 'clientHeight', { value: 240, configurable: true })
+    Object.defineProperty(virtualEl, 'scrollHeight', { value: 2400, configurable: true })
+
+    const first = wrapper.find<HTMLButtonElement>('button[data-project-id="prj_1"]')
+    first.element.dispatchEvent(
+      new PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }),
+    )
+    vi.advanceTimersByTime(450)
+    await flushPromises()
+
+    expect(visiblePopovers()).toHaveLength(1)
+    expect(getProjectActivity).toHaveBeenCalledTimes(1)
+
+    // Scroll away so prj_1 unmounts from the virtual window.
+    virtualEl.scrollTop = 1600
+    virtualEl.dispatchEvent(new Event('scroll'))
+    vi.advanceTimersByTime(50)
+    await nextTick()
+    await flushPromises()
+
+    expect(visiblePopovers()).toHaveLength(0)
+    expect(wrapper.find('button[data-project-id="prj_1"]').exists()).toBe(false)
+
+    // Scroll back to top: prj_1 remounts without a stale auto-opened skeleton popover.
+    virtualEl.scrollTop = 0
+    virtualEl.dispatchEvent(new Event('scroll'))
+    vi.advanceTimersByTime(50)
+    await nextTick()
+    await flushPromises()
+
+    const remounted = wrapper.find<HTMLButtonElement>('button[data-project-id="prj_1"]')
+    expect(remounted.exists()).toBe(true)
+    expect(visiblePopovers()).toHaveLength(0)
+    expect(document.querySelectorAll('.dou-popover .dou-skeleton')).toHaveLength(0)
+  })
 })

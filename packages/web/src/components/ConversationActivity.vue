@@ -3,7 +3,7 @@ import type { LiveCommand as Command, ThreadView } from '@ariadne/core'
 import { DouButton, DouShimmer, DouStatusDot, DouText } from 'dou-ui'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { openThread, state } from '../store'
+import { openThread, threadsById } from '../store'
 import LiveCommand from './LiveCommand.vue'
 import WaitStatus from './WaitStatus.vue'
 
@@ -24,7 +24,7 @@ const reviewingText = computed(() =>
 )
 const reviewerId = computed(() => {
   const id = props.reviewing?.reviewing ? props.reviewing.reviewerId : null
-  return id && state.detail?.threads.some((item) => item.id === id) ? id : null
+  return id && threadsById.value.has(id) ? id : null
 })
 </script>
 

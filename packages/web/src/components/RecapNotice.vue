@@ -4,7 +4,7 @@ import { DouButton, DouMenu, DouText, type MenuOption } from 'dou-ui'
 import { ChevronDownIcon, ChevronRightIcon, HelpCircleIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
-import { openMain, openMessage, openThread, state } from '../store'
+import { openMain, openMessage, openThread, state, threadsById } from '../store'
 import PullRequestTag from './PullRequestTag.vue'
 import ThreadRow from './ThreadRow.vue'
 
@@ -17,8 +17,7 @@ const props = defineProps<{ notice: Extract<NoticeView, { kind: 'recap' }> }>()
 
 const open = ref(false)
 
-const byId = computed(() => new Map((state.detail?.threads ?? []).map((item) => [item.id, item])))
-const threadsOf = (ids: string[]) => ids.flatMap((id) => byId.value.get(id) ?? [])
+const threadsOf = (ids: string[]) => ids.flatMap((id) => threadsById.value.get(id) ?? [])
 
 // Still waiting now: the thread is on the "needs me" list, alone or behind a card.
 const needing = computed(() => {
@@ -118,7 +117,10 @@ function select(key: string | number) {
       @select="select"
     >
       <template #label="{ item }">
-        <ThreadRow v-if="byId.get(String(item.key))" :thread="byId.get(String(item.key))!" />
+        <ThreadRow
+          v-if="threadsById.get(String(item.key))"
+          :thread="threadsById.get(String(item.key))!"
+        />
         <span v-else class="recap-ask">
           <DouText tone="warning" class="recap-ask-icon">
             <HelpCircleIcon aria-hidden="true" />
@@ -128,8 +130,8 @@ function select(key: string | number) {
       </template>
       <template #actions="{ item }">
         <PullRequestTag
-          v-if="byId.get(String(item.key))?.pullRequest"
-          :thread="byId.get(String(item.key))"
+          v-if="threadsById.get(String(item.key))?.pullRequest"
+          :thread="threadsById.get(String(item.key))"
         />
       </template>
     </DouMenu>

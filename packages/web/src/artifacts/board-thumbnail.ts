@@ -4,6 +4,56 @@ import { api } from '../api'
 export const THUMBNAIL_LIMIT = 64
 export const THUMBNAIL_TTL_MS = 5 * 60_000
 export const MAX_THUMBNAIL_CHARS = 256_000
+export const THUMBNAIL_ROOT_MARGIN = '120px 0px'
+
+const visibilityListeners = new Map<Element, () => void>()
+let visibilityObserver: IntersectionObserver | null = null
+
+function ensureVisibilityObserver(): IntersectionObserver | null {
+  if (typeof IntersectionObserver === 'undefined') return null
+  if (!visibilityObserver) {
+    visibilityObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue
+          const listener = visibilityListeners.get(entry.target)
+          if (!listener) continue
+          visibilityListeners.delete(entry.target)
+          visibilityObserver?.unobserve(entry.target)
+          listener()
+        }
+        if (visibilityListeners.size === 0 && visibilityObserver) {
+          visibilityObserver.disconnect()
+          visibilityObserver = null
+        }
+      },
+      { rootMargin: THUMBNAIL_ROOT_MARGIN },
+    )
+  }
+  return visibilityObserver
+}
+
+/**
+ * Notify once when `element` enters or approaches the viewport. Shares a single
+ * IntersectionObserver across all whiteboard cards; falls back immediately when unavailable.
+ */
+export function observeThumbnailVisibility(element: Element, onVisible: () => void): () => void {
+  const observer = ensureVisibilityObserver()
+  if (!observer) {
+    onVisible()
+    return () => {}
+  }
+  visibilityListeners.set(element, onVisible)
+  observer.observe(element)
+  return () => {
+    visibilityListeners.delete(element)
+    visibilityObserver?.unobserve(element)
+    if (visibilityListeners.size === 0 && visibilityObserver) {
+      visibilityObserver.disconnect()
+      visibilityObserver = null
+    }
+  }
+}
 interface Thumbnail {
   key: string
   colorMode: 'light' | 'dark'

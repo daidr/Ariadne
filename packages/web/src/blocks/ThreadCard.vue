@@ -9,15 +9,13 @@ import { t } from '../i18n'
 import ReviewMark from '../review/ReviewMark.vue'
 import { branchChanges } from '../review/merge-offered'
 import { questionOf, statusLine } from '../stage'
-import { activeThreadId, openThreadFrom, state } from '../store'
+import { activeThreadId, openThreadFrom, state, threadsById } from '../store'
 import { dragThread } from '../side/dock'
 
 /** An entry to a thread an agent put in a message; follows the thread as it moves on. */
 const props = defineProps<{ threadId: string }>()
 
-const thread = computed(
-  () => state.detail?.threads.find((item) => item.id === props.threadId) ?? null,
-)
+const thread = computed(() => threadsById.value.get(props.threadId) ?? null)
 function open(event: MouseEvent) {
   openThreadFrom(event, props.threadId)
 }
