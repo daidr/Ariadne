@@ -193,58 +193,206 @@ var worktreeConfigCache struct {
 	expires time.Time
 }
 
-func configFileFingerprint(path string) string {
+type configIncludeEntry struct {
+	fingerprint string
+	hasInclude  bool
+}
+
+var configIncludeCache struct {
+	mu      sync.RWMutex
+	entries map[string]configIncludeEntry
+}
+
+func isNullConfigPath(path string) bool {
+	if path == "/dev/null" {
+		return true
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(path, "NUL") || strings.EqualFold(path, `\\.\NUL`)
+	}
+	return false
+}
+
+func defaultSystemGitConfigPaths() []string {
+	if runtime.GOOS != "windows" {
+		return []string{"/etc/gitconfig"}
+	}
+	var paths []string
+	if pd := os.Getenv("ProgramData"); pd != "" {
+		paths = append(paths, filepath.Join(pd, "Git", "config"))
+	}
+	exe := gitExecutable(nil)
+	if filepath.IsAbs(exe) {
+		dir := filepath.Dir(exe)
+		parent := filepath.Dir(dir)
+		baseDir := strings.ToLower(filepath.Base(dir))
+		baseParent := strings.ToLower(filepath.Base(parent))
+		var root string
+		switch {
+		case baseDir == "cmd" || baseDir == "bin":
+			if baseParent == "mingw64" || baseParent == "mingw32" || baseParent == "clangarm64" {
+				root = filepath.Dir(parent)
+			} else {
+				root = parent
+			}
+		}
+		if root != "" {
+			paths = append(paths, filepath.Join(root, "etc", "gitconfig"))
+		}
+	}
+	return paths
+}
+
+// inspectConfigFileForGlobalCache returns a fingerprint for path and whether
+// it is safe to share across repositories (i.e. absent/null or a readable
+// regular file without include/includeIf directives).
+func inspectConfigFileForGlobalCache(path string) (string, bool) {
 	if path == "" {
-		return ""
+		return "", true
+	}
+	if isNullConfigPath(path) {
+		return "null", true
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return "-"
+		if os.IsNotExist(err) {
+			return "-", true
+		}
+		return "", false
 	}
-	return strconv.FormatInt(info.Size(), 10) + ":" + strconv.FormatInt(info.ModTime().UnixNano(), 10)
+	if !info.Mode().IsRegular() {
+		return "", false
+	}
+	fp := strconv.FormatInt(info.Size(), 10) + ":" + strconv.FormatInt(info.ModTime().UnixNano(), 10)
+
+	configIncludeCache.mu.RLock()
+	entry, hit := configIncludeCache.entries[path]
+	configIncludeCache.mu.RUnlock()
+	if hit && entry.fingerprint == fp {
+		if entry.hasInclude {
+			return "", false
+		}
+		return fp, true
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	hasInclude := strings.Contains(strings.ToLower(string(raw)), "include")
+
+	configIncludeCache.mu.Lock()
+	if configIncludeCache.entries == nil || len(configIncludeCache.entries) >= 64 {
+		configIncludeCache.entries = make(map[string]configIncludeEntry)
+	}
+	configIncludeCache.entries[path] = configIncludeEntry{fingerprint: fp, hasInclude: hasInclude}
+	configIncludeCache.mu.Unlock()
+
+	if hasInclude {
+		return "", false
+	}
+	return fp, true
 }
 
-func globalWorktreeConfigKey() string {
+func globalWorktreeConfigKey() (string, bool) {
 	home := os.Getenv("HOME")
 	userProfile := os.Getenv("USERPROFILE")
 	xdg := os.Getenv("XDG_CONFIG_HOME")
 	globalCfg := os.Getenv("GIT_CONFIG_GLOBAL")
 	systemCfg := os.Getenv("GIT_CONFIG_SYSTEM")
 	noSystem := os.Getenv("GIT_CONFIG_NOSYSTEM")
+
+	// Note: worktreeConfigArgs runs git with ForThread: true, which strips
+	// GIT_CONFIG_* variables via process.ThreadEnv. Always inspect the default
+	// system, HOME/USERPROFILE, and XDG config files in addition to any explicit
+	// GIT_CONFIG_* paths so conditional includes can never leak across repos.
 	var b strings.Builder
-	b.Grow(192)
+	b.Grow(256)
 	b.WriteString(noSystem)
 	b.WriteByte('|')
 	b.WriteString(systemCfg)
 	b.WriteByte('|')
-	b.WriteString(configFileFingerprint(systemCfg))
+	if systemCfg != "" {
+		if !isNullConfigPath(systemCfg) && !filepath.IsAbs(systemCfg) {
+			return "", false
+		}
+		fp, ok := inspectConfigFileForGlobalCache(systemCfg)
+		if !ok {
+			return "", false
+		}
+		b.WriteString(fp)
+	}
+	b.WriteByte('|')
+	for i, path := range defaultSystemGitConfigPaths() {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fp, ok := inspectConfigFileForGlobalCache(path)
+		if !ok {
+			return "", false
+		}
+		b.WriteString(path)
+		b.WriteByte('=')
+		b.WriteString(fp)
+	}
+
 	b.WriteByte('|')
 	b.WriteString(globalCfg)
 	b.WriteByte('|')
-	b.WriteString(configFileFingerprint(globalCfg))
+	if globalCfg != "" {
+		if !isNullConfigPath(globalCfg) && !filepath.IsAbs(globalCfg) {
+			return "", false
+		}
+		fp, ok := inspectConfigFileForGlobalCache(globalCfg)
+		if !ok {
+			return "", false
+		}
+		b.WriteString(fp)
+	}
+
 	b.WriteByte('|')
 	b.WriteString(home)
 	b.WriteByte('|')
 	if home != "" {
-		b.WriteString(configFileFingerprint(filepath.Join(home, ".gitconfig")))
+		fp1, ok := inspectConfigFileForGlobalCache(filepath.Join(home, ".gitconfig"))
+		if !ok {
+			return "", false
+		}
+		fp2, ok := inspectConfigFileForGlobalCache(filepath.Join(home, ".config", "git", "config"))
+		if !ok {
+			return "", false
+		}
+		b.WriteString(fp1)
 		b.WriteByte(',')
-		b.WriteString(configFileFingerprint(filepath.Join(home, ".config", "git", "config")))
+		b.WriteString(fp2)
 	}
 	b.WriteByte('|')
 	b.WriteString(userProfile)
 	b.WriteByte('|')
 	if userProfile != "" && userProfile != home {
-		b.WriteString(configFileFingerprint(filepath.Join(userProfile, ".gitconfig")))
+		fp1, ok := inspectConfigFileForGlobalCache(filepath.Join(userProfile, ".gitconfig"))
+		if !ok {
+			return "", false
+		}
+		fp2, ok := inspectConfigFileForGlobalCache(filepath.Join(userProfile, ".config", "git", "config"))
+		if !ok {
+			return "", false
+		}
+		b.WriteString(fp1)
 		b.WriteByte(',')
-		b.WriteString(configFileFingerprint(filepath.Join(userProfile, ".config", "git", "config")))
+		b.WriteString(fp2)
 	}
 	b.WriteByte('|')
 	b.WriteString(xdg)
 	b.WriteByte('|')
 	if xdg != "" {
-		b.WriteString(configFileFingerprint(filepath.Join(xdg, "git", "config")))
+		fp, ok := inspectConfigFileForGlobalCache(filepath.Join(xdg, "git", "config"))
+		if !ok {
+			return "", false
+		}
+		b.WriteString(fp)
 	}
-	return b.String()
+	return b.String(), true
 }
 
 func findLocalGitDir(cwd string) (string, bool) {
@@ -326,15 +474,17 @@ func worktreeConfigArgs(ctx context.Context, cwd string) []string {
 	hasLocalOverride, inspectedLocal := localGitConfigHasLineEndingOverride(cwd)
 	cacheKey := ""
 	if inspectedLocal && !hasLocalOverride {
-		cacheKey = globalWorktreeConfigKey()
-		now := time.Now()
-		worktreeConfigCache.mu.RLock()
-		if worktreeConfigCache.key == cacheKey && now.Before(worktreeConfigCache.expires) {
-			cached := slices.Clone(worktreeConfigCache.args)
+		if key, ok := globalWorktreeConfigKey(); ok {
+			cacheKey = key
+			now := time.Now()
+			worktreeConfigCache.mu.RLock()
+			if worktreeConfigCache.key == cacheKey && now.Before(worktreeConfigCache.expires) {
+				cached := slices.Clone(worktreeConfigCache.args)
+				worktreeConfigCache.mu.RUnlock()
+				return cached
+			}
 			worktreeConfigCache.mu.RUnlock()
-			return cached
 		}
-		worktreeConfigCache.mu.RUnlock()
 	}
 	result := process.Run(ctx, []string{gitExecutable(nil), "config", "--get-regexp", `^core\.(autocrlf|eol)$`}, process.RunOptions{
 		Directory: cwd,

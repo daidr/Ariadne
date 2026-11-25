@@ -5,10 +5,10 @@ package browser
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -87,9 +87,40 @@ func TestTerminateBrowserTreeKillsDescendants(t *testing.T) {
 	}
 	childPID := uint32(childPID64)
 
-	descendants := collectDescendantPIDs(uint32(parent.Process.Pid))
-	if !slices.Contains(descendants, childPID) {
-		t.Fatalf("collectDescendantPIDs(%d) = %v, missing child %d", parent.Process.Pid, descendants, childPID)
+	parentHandle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(parent.Process.Pid))
+	if err != nil {
+		t.Fatalf("open parent: %v", err)
+	}
+	parentCreated, ok := processCreationTime(parentHandle)
+	_ = windows.CloseHandle(parentHandle)
+	if !ok {
+		t.Fatal("failed to query parent creation time")
+	}
+
+	// Verify creation-time guard rejects candidates created earlier than the claimed parent.
+	futureDescendants := collectDescendants([]processAnchor{{pid: uint32(parent.Process.Pid), created: math.MaxUint64}}, nil)
+	closeDescendants(futureDescendants)
+	if len(futureDescendants) != 0 {
+		t.Fatalf("expected 0 descendants when parent creation time is in the future, got %d", len(futureDescendants))
+	}
+
+	// Verify current process is never collected or traversed.
+	selfDescendants := collectDescendants([]processAnchor{{pid: uint32(os.Getpid()), created: 0}}, nil)
+	closeDescendants(selfDescendants)
+	if len(selfDescendants) != 0 {
+		t.Fatalf("expected 0 descendants when anchor is self PID, got %d", len(selfDescendants))
+	}
+
+	descendants := collectDescendants([]processAnchor{{pid: uint32(parent.Process.Pid), created: parentCreated}}, nil)
+	foundChild := false
+	for _, d := range descendants {
+		if d.pid == childPID {
+			foundChild = true
+		}
+	}
+	closeDescendants(descendants)
+	if !foundChild {
+		t.Fatalf("collectDescendants(%d) missed child %d", parent.Process.Pid, childPID)
 	}
 
 	childHandle, openErr := windows.OpenProcess(windows.SYNCHRONIZE, false, childPID)
@@ -102,13 +133,15 @@ func TestTerminateBrowserTreeKillsDescendants(t *testing.T) {
 	}
 	_ = parent.Wait()
 
+	// terminateBrowserTree already waited for verified descendants to exit, so
+	// childHandle must be signaled immediately and lockPath removable without extra waiting.
 	if openErr == nil {
-		event, err := windows.WaitForSingleObject(childHandle, 5000)
+		event, err := windows.WaitForSingleObject(childHandle, 0)
 		if err != nil || event != windows.WAIT_OBJECT_0 {
-			t.Fatalf("child process %d did not exit after terminateBrowserTree (event=%d, err=%v)", childPID, event, err)
+			t.Fatalf("child process %d still running after terminateBrowserTree returned (event=%d, err=%v)", childPID, event, err)
 		}
 	}
 	if err := os.Remove(lockPath); err != nil {
-		t.Fatalf("lock file still held after terminateBrowserTree: %v", err)
+		t.Fatalf("lock file still held immediately after terminateBrowserTree: %v", err)
 	}
 }

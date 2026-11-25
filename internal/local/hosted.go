@@ -173,8 +173,17 @@ func safeGitConfigPlainValue(value string) bool {
 }
 
 func hostedOriginConfigMatches(configPath, remoteURL string) bool {
+	if !safeGitConfigPlainValue(remoteURL) {
+		return false
+	}
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
+		return false
+	}
+	text := string(raw)
+	// Fail closed on backslash escapes/line continuations or NUL bytes so
+	// ensureOriginConfig falls back to `git config`.
+	if strings.ContainsRune(text, '\\') || strings.ContainsRune(text, 0) {
 		return false
 	}
 	const wantFetch = "+refs/heads/*:refs/remotes/origin/*"
@@ -182,20 +191,41 @@ func hostedOriginConfigMatches(configPath, remoteURL string) bool {
 	originSections := 0
 	urls, fetches, pushurls := 0, 0, 0
 	urlOK, fetchOK, pushurlOK := false, false, false
-	for _, rawLine := range strings.Split(string(raw), "\n") {
+	for _, rawLine := range strings.Split(text, "\n") {
 		line := strings.TrimSpace(strings.TrimSuffix(rawLine, "\r"))
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
 		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			header := strings.TrimSpace(line[1 : len(line)-1])
-			if strings.EqualFold(header, `remote "origin"`) {
-				inOrigin = true
-				originSections++
-			} else {
-				inOrigin = false
+		if strings.HasPrefix(line, "[") {
+			// Reject trailing comments, inline key-values, or multiple headers on one line.
+			if !strings.HasSuffix(line, "]") {
+				return false
 			}
+			rawInner := line[1 : len(line)-1]
+			inner := strings.TrimSpace(rawInner)
+			if strings.ContainsAny(inner, "[]") {
+				return false
+			}
+			lower := strings.ToLower(inner)
+			if strings.HasPrefix(lower, "include") {
+				return false
+			}
+			if lower == "remote" || (strings.HasPrefix(lower, "remote") && len(lower) > len("remote") && !isGitSectionIdentChar(lower[len("remote")])) {
+				// Git section names are case-insensitive while subsection names are
+				// case-sensitive; reject any variant other than exact `remote "origin"`.
+				if len(rawInner) == len(`remote "origin"`) && strings.EqualFold(rawInner[:6], "remote") && rawInner[6:] == ` "origin"` {
+					inOrigin = true
+					originSections++
+					continue
+				}
+				return false
+			}
+			inOrigin = false
 			continue
+		}
+		// Reject quoted values (which in Git config can span lines without `\`).
+		if strings.ContainsRune(line, '"') {
+			return false
 		}
 		if !inOrigin {
 			continue
@@ -206,6 +236,9 @@ func hostedOriginConfigMatches(configPath, remoteURL string) bool {
 		}
 		key = strings.ToLower(strings.TrimSpace(key))
 		val = strings.TrimSpace(val)
+		if key == "" || strings.ContainsAny(key, "#;[]") || strings.ContainsAny(val, "#;") {
+			return false
+		}
 		switch key {
 		case "url":
 			urls++
@@ -221,22 +254,29 @@ func hostedOriginConfigMatches(configPath, remoteURL string) bool {
 	return originSections == 1 && urls == 1 && fetches == 1 && pushurls == 1 && urlOK && fetchOK && pushurlOK
 }
 
+func isGitSectionIdentChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '-'
+}
+
 func (host *Hosted) ensureOriginConfig(ctx context.Context, freshBare bool) error {
 	configPath := filepath.Join(host.bare, "config")
 	if freshBare && safeGitConfigPlainValue(host.options.RemoteURL) {
-		if raw, err := os.ReadFile(configPath); err == nil && !strings.Contains(string(raw), `[remote "origin"]`) {
-			var b strings.Builder
-			b.Write(raw)
-			if len(raw) > 0 && raw[len(raw)-1] != '\n' {
+		if raw, err := os.ReadFile(configPath); err == nil {
+			lower := strings.ToLower(string(raw))
+			if !strings.Contains(lower, "remote") && !strings.Contains(lower, "include") {
+				var b strings.Builder
+				b.Write(raw)
+				if len(raw) > 0 && raw[len(raw)-1] != '\n' {
+					b.WriteByte('\n')
+				}
+				b.WriteString("[remote \"origin\"]\n\turl = ")
+				b.WriteString(host.options.RemoteURL)
+				b.WriteString("\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n\tpushurl = ")
+				b.WriteString(noPushURL)
 				b.WriteByte('\n')
-			}
-			b.WriteString("[remote \"origin\"]\n\turl = ")
-			b.WriteString(host.options.RemoteURL)
-			b.WriteString("\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n\tpushurl = ")
-			b.WriteString(noPushURL)
-			b.WriteByte('\n')
-			if err := os.WriteFile(configPath, []byte(b.String()), 0600); err == nil {
-				return nil
+				if err := os.WriteFile(configPath, []byte(b.String()), 0600); err == nil {
+					return nil
+				}
 			}
 		}
 	} else if !freshBare && hostedOriginConfigMatches(configPath, host.options.RemoteURL) {

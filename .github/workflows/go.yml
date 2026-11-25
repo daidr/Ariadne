@@ -247,11 +247,16 @@ jobs:
           }
           go test -vet=off -short -count=1 -p=4 -parallel=4 -timeout=180s @pkgs
           exit $LASTEXITCODE
-      - if: matrix.os == 'ubuntu-latest'
+      - name: Vet (Linux, Windows, macOS)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
         env:
           GOMODCACHE: ${{ runner.temp }}/gomod
           GOCACHE: ${{ runner.temp }}/gobuild
-        run: go vet ./...
+        run: |
+          go vet ./...
+          GOOS=windows GOARCH=amd64 go vet ./...
+          GOOS=darwin GOARCH=arm64 go vet ./...
 
   race:
     timeout-minutes: 15
