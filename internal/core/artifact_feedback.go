@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -269,6 +270,64 @@ func describeDocumentAskChanges(previous, current string) ([]object, string, str
 	return answers, prevNorm, currNorm
 }
 
+type DocumentAskBaselineEntry struct {
+	ID       string
+	Selected []string
+	Note     string
+}
+
+type DocumentAskBaseline struct {
+	Version int64
+	Asks    []DocumentAskBaselineEntry
+}
+
+func artifactFeedbackBaseline(w *projectionWriter, artifactID string) (int64, record, error) {
+	round := w.one("SELECT version, created_at, fingerprints FROM artifact_feedback WHERE artifact_id = ? AND withdrawn_at IS NULL ORDER BY round DESC LIMIT 1", artifactID)
+	agent := w.one("SELECT version, created_at FROM artifact_versions WHERE artifact_id = ? AND author != 'user' ORDER BY version DESC LIMIT 1", artifactID)
+	if w.err != nil {
+		return 0, nil, w.err
+	}
+	since := agent
+	if round.integer("version") >= agent.integer("version") {
+		since = round
+	}
+	return max(1, since.integer("version")), round, nil
+}
+
+func documentAskBaseline(ctx context.Context, tx *sql.Tx, artifact ArtifactView) (*DocumentAskBaseline, error) {
+	if artifact.Kind != "document" {
+		return nil, nil
+	}
+	w := &projectionWriter{ctx: ctx, tx: tx}
+	baselineVersion, _, err := artifactFeedbackBaseline(w, artifact.ID)
+	if err != nil {
+		return nil, err
+	}
+	baseContent := artifact.Content
+	if baselineVersion != artifact.Version {
+		base, err := getArtifact(ctx, tx, artifact.ID, &baselineVersion)
+		if err != nil {
+			return nil, err
+		}
+		baseContent = base.Content
+	}
+	parsed, _ := parseDocumentAsks(baseContent)
+	asks := make([]DocumentAskBaselineEntry, 0, len(parsed))
+	for _, ask := range parsed {
+		selected := slices.Clone(ask.selected)
+		slices.Sort(selected)
+		asks = append(asks, DocumentAskBaselineEntry{
+			ID:       ask.id,
+			Selected: selected,
+			Note:     ask.note,
+		})
+	}
+	return &DocumentAskBaseline{
+		Version: baselineVersion,
+		Asks:    asks,
+	}, nil
+}
+
 // Document edits start from the latest known version. Comments use content
 // fingerprints so edited comments and user-reopened threads trigger feedback
 // idempotently while user-resolved threads stay quiet.
@@ -276,16 +335,10 @@ func pendingArtifactFeedback(w *projectionWriter, artifact ArtifactView) ([]any,
 	if artifact.Kind != "document" && artifact.Kind != "whiteboard" {
 		return nil, nil, nil
 	}
-	round := w.one("SELECT version, created_at, fingerprints FROM artifact_feedback WHERE artifact_id = ? AND withdrawn_at IS NULL ORDER BY round DESC LIMIT 1", artifact.ID)
-	agent := w.one("SELECT version, created_at FROM artifact_versions WHERE artifact_id = ? AND author != 'user' ORDER BY version DESC LIMIT 1", artifact.ID)
-	if w.err != nil {
-		return nil, nil, w.err
+	version, round, err := artifactFeedbackBaseline(w, artifact.ID)
+	if err != nil {
+		return nil, nil, err
 	}
-	since := agent
-	if round.integer("version") >= agent.integer("version") {
-		since = round
-	}
-	version := max(1, since.integer("version"))
 	created := round.integer("created_at")
 	seen := map[string]bool{}
 	seenCommentPrefix := map[string]bool{}

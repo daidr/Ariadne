@@ -887,6 +887,17 @@ export interface ArtifactVersionView {
   createdAt: number
 }
 
+export interface DocumentAskAnswerBaseline {
+  id: string
+  selected: string[]
+  note: string
+}
+
+export interface DocumentAskBaseline {
+  version: number
+  asks: DocumentAskAnswerBaseline[]
+}
+
 /**
  * One turn of a conversation as the trace shows it, rebuilt from the event log: every
  * model request with its output, the tool calls and their results, retries and timing.

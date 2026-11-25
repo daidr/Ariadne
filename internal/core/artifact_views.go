@@ -39,6 +39,7 @@ type ArtifactDetail struct {
 	Comments             []object
 	NextVersionPageToken string
 	HasMoreVersions      bool
+	AskBaseline          *DocumentAskBaseline
 }
 
 func normalizePageSize(pageSize, fallback int) (int, error) {
@@ -274,12 +275,20 @@ func (reader Reader) GetArtifactDetail(ctx context.Context, id string, version *
 		if err != nil {
 			return err
 		}
+		var askBaseline *DocumentAskBaseline
+		if version == nil && artifact.Kind == "document" {
+			askBaseline, err = documentAskBaseline(ctx, tx, artifact)
+			if err != nil {
+				return err
+			}
+		}
 		result = ArtifactDetail{
 			Artifact:             artifact,
 			Versions:             versions,
 			Comments:             comments,
 			NextVersionPageToken: nextVersionPageToken,
 			HasMoreVersions:      hasMoreVersions,
+			AskBaseline:          askBaseline,
 		}
 		return nil
 	})

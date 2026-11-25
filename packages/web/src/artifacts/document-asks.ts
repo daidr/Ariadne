@@ -1,4 +1,5 @@
-import type * as Y from 'yjs'
+import type { DocumentAskAnswerBaseline } from '@ariadne/core'
+import * as Y from 'yjs'
 import { normalizeAskProps, type AskBlockProps } from './document-block-data'
 
 export interface DocumentAskSummary {
@@ -12,17 +13,89 @@ export interface DocumentAskSummary {
   remainingAsks: number
   /** True when the document has at least one active inline ask block. */
   hasActiveAsks: boolean
+  /**
+   * True when at least one active ask differs from the submitted/agent baseline
+   * (or, when no baseline is provided, at least one active ask has an answer).
+   */
+  hasUnsentChanges: boolean
+  /**
+   * True when the document still needs inline-ask submission: either at least one
+   * active ask is unanswered, or at least one active ask has unsent changes.
+   * False when all active asks are answered, already submitted, and unchanged.
+   */
+  needsSubmit: boolean
 }
 
-export function summarizeDocumentAsks(asks: readonly AskBlockProps[]): DocumentAskSummary {
+function normalizeAskSelected(selected: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of selected) {
+    const trimmed = item.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    out.push(trimmed)
+  }
+  out.sort()
+  return out
+}
+
+function sameStringList(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+/** Captures a canonical answer snapshot matching backend `documentAskBaseline`. */
+export function snapshotDocumentAsks(asks: readonly AskBlockProps[]): DocumentAskAnswerBaseline[] {
+  return asks.map((ask) => ({
+    id: ask.id,
+    selected: normalizeAskSelected(ask.selected),
+    note: ask.note.trim(),
+  }))
+}
+
+export function summarizeDocumentAsks(
+  asks: readonly AskBlockProps[],
+  baseline?: readonly DocumentAskAnswerBaseline[] | null,
+): DocumentAskSummary {
   let totalAsks = 0
   let answeredAsks = 0
   let recommendedFallbackAsks = 0
   let remainingAsks = 0
+  let hasUnsentChanges = false
+
+  let baselineById: Map<string, { selected: string[]; note: string }> | null = null
+  if (baseline != null) {
+    baselineById = new Map()
+    for (const entry of baseline) {
+      baselineById.set(entry.id, {
+        selected: normalizeAskSelected(entry.selected),
+        note: entry.note.trim(),
+      })
+    }
+  }
+
   for (const ask of asks) {
     if (ask.confirmed) continue
     totalAsks++
-    const answered = ask.selected.length > 0 || ask.note.trim().length > 0
+    const currSelected = normalizeAskSelected(ask.selected)
+    const currNote = ask.note.trim()
+    const answered = currSelected.length > 0 || currNote.length > 0
+    if (baselineById) {
+      const prev = baselineById.get(ask.id)
+      if (prev) {
+        if (!sameStringList(currSelected, prev.selected) || currNote !== prev.note) {
+          hasUnsentChanges = true
+        }
+      } else if (answered) {
+        hasUnsentChanges = true
+      }
+    } else if (answered) {
+      hasUnsentChanges = true
+    }
+
     if (answered) {
       answeredAsks++
       continue
@@ -31,13 +104,41 @@ export function summarizeDocumentAsks(asks: readonly AskBlockProps[]): DocumentA
     if (hasRecommended) recommendedFallbackAsks++
     else remainingAsks++
   }
+
+  const hasActiveAsks = totalAsks > 0
+  const allAnswered = hasActiveAsks && answeredAsks === totalAsks
+  const needsSubmit = hasActiveAsks && (!allAnswered || hasUnsentChanges)
+
   return {
     totalAsks,
     answeredAsks,
     recommendedFallbackAsks,
     remainingAsks,
-    hasActiveAsks: totalAsks > 0,
+    hasActiveAsks,
+    hasUnsentChanges,
+    needsSubmit,
   }
+}
+
+const ASK_ANSWER_PROP_KEYS = new Set(['selected', 'note'])
+
+/**
+ * Reports whether a Yjs transaction only modified user answer fields (`selected` / `note`)
+ * on `ask` blocks inside the shared `document` map.
+ */
+export function isAskAnswerOnlyTransaction(doc: Y.Doc, tr: Y.Transaction | undefined): boolean {
+  if (!tr || tr.changed.size === 0) return false
+  const root = doc.getMap('document')
+  for (const [target, keys] of tr.changed) {
+    if (keys.size === 0) return false
+    const block = target.parent
+    if (!(block instanceof Y.Map) || block.parent !== root) return false
+    if (block.get('type') !== 'ask' || block.get('props') !== target) return false
+    for (const key of keys) {
+      if (key === null || !ASK_ANSWER_PROP_KEYS.has(key)) return false
+    }
+  }
+  return true
 }
 
 /** Reads all normalized ask blocks currently stored in a shared document's Yjs map. */

@@ -10,6 +10,7 @@ import type {
   ArtifactVersionView,
   ArtifactView,
   AskBlock,
+  DocumentAskBaseline,
   FileSource,
   FileSourceSet,
   FormField,
@@ -44,6 +45,7 @@ import {
   type ArtifactSummary as ProtoArtifactSummary,
   type ArtifactVersionView as ProtoArtifactVersionView,
   type ArtifactView as ProtoArtifactView,
+  type DocumentAskBaseline as ProtoDocumentAskBaseline,
   type ErrorParamValue,
   type FileSource as ProtoFileSource,
   type FileSourceSet as ProtoFileSourceSet,
@@ -150,6 +152,7 @@ export interface ArtifactDetailResult {
   comments: ArtifactCommentThreadView[]
   nextVersionPageToken?: string
   hasMoreVersions?: boolean
+  askBaseline?: DocumentAskBaseline | null
 }
 
 export interface PlanPageResult {
@@ -960,6 +963,18 @@ function fromProtoArtifactVersion(version: ProtoArtifactVersionView): ArtifactVe
   }
 }
 
+function fromProtoDocumentAskBaseline(item?: ProtoDocumentAskBaseline): DocumentAskBaseline | null {
+  if (!item) return null
+  return {
+    version: Number(item.version),
+    asks: item.asks.map((ask) => ({
+      id: ask.id,
+      selected: [...ask.selected],
+      note: ask.note,
+    })),
+  }
+}
+
 function fromProtoArtifactCommentAnchor(
   anchor?: ProtoArtifactCommentAnchor,
 ): ArtifactCommentAnchor | null {
@@ -1599,6 +1614,7 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
         comments: response.comments.map(fromProtoArtifactCommentThread),
         nextVersionPageToken: response.nextVersionPageToken,
         hasMoreVersions: response.hasMoreVersions,
+        askBaseline: fromProtoDocumentAskBaseline(response.askBaseline),
       }
     },
 

@@ -177,3 +177,151 @@ func TestFallbackAskIDDeterministicUTF8FNV1a(t *testing.T) {
 		}
 	}
 }
+
+func TestGetArtifactDetailDocumentAskBaselineLifecycle(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	clock := time.UnixMilli(1923000000000)
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return clock }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	project, err := repo.CreateProject(ctx, new("Fixture"), ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v1Doc := "# 方案评审\n\n" +
+		"```ask\n{\"id\":\"ask-1\",\"question\":\"缓存选型？\",\"pick\":\"one\",\"options\":[{\"id\":\"redis\",\"label\":\"Redis\",\"recommended\":true},{\"id\":\"mem\",\"label\":\"内存\"}]}\n```\n\n" +
+		"```ask\n{\"id\":\"ask-2\",\"question\":\"需要哪些能力？\",\"pick\":\"many\",\"options\":[{\"id\":\"b\",\"label\":\"B\"},{\"id\":\"a\",\"label\":\"A\"}]}\n```\n"
+	artifact, err := repo.CreateArtifact(ctx, project.ID, NewArtifact{
+		Kind:    "document",
+		Title:   "方案评审",
+		Author:  project.CoordinatorID,
+		Content: v1Doc,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Initial AI document -> baseline is v1 with empty answers.
+	detail, err := repo.GetArtifactDetail(ctx, artifact.ID, nil, false, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.AskBaseline == nil || detail.AskBaseline.Version != 1 || len(detail.AskBaseline.Asks) != 2 {
+		t.Fatalf("expected v1 baseline with 2 asks, got %+v", detail.AskBaseline)
+	}
+	if len(detail.AskBaseline.Asks[0].Selected) != 0 || detail.AskBaseline.Asks[0].Note != "" {
+		t.Fatalf("expected empty v1 baseline answers, got %+v", detail.AskBaseline.Asks)
+	}
+
+	// 2. User answers both asks without submitting -> baseline stays at v1 (empty).
+	v2Doc := "# 方案评审\n\n" +
+		"```ask\n{\"id\":\"ask-1\",\"question\":\"缓存选型？\",\"pick\":\"one\",\"options\":[{\"id\":\"redis\",\"label\":\"Redis\",\"recommended\":true},{\"id\":\"mem\",\"label\":\"内存\"}],\"selected\":[\"redis\"],\"note\":\"  优先多实例  \"}\n```\n\n" +
+		"```ask\n{\"id\":\"ask-2\",\"question\":\"需要哪些能力？\",\"pick\":\"many\",\"options\":[{\"id\":\"b\",\"label\":\"B\"},{\"id\":\"a\",\"label\":\"A\"}],\"selected\":[\"b\",\"a\"]}\n```\n"
+	clock = clock.Add(time.Second)
+	if _, err := repo.ReviseArtifact(ctx, artifact.ID, ArtifactRevision{
+		Content:     v2Doc,
+		BaseVersion: new(int64(1)),
+		Author:      "user",
+		Reason:      "answer asks",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	detail, err = repo.GetArtifactDetail(ctx, artifact.ID, nil, false, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.AskBaseline == nil || detail.AskBaseline.Version != 1 || len(detail.AskBaseline.Asks[0].Selected) != 0 {
+		t.Fatalf("expected unsubmitted answers to keep v1 baseline, got %+v", detail.AskBaseline)
+	}
+
+	// 3. User submits feedback round 1 -> baseline advances to v2 with normalized answers.
+	clock = clock.Add(time.Second)
+	fb, err := repo.SendPendingArtifactFeedback(ctx, artifact.ID, nil)
+	if err != nil || fb == nil {
+		t.Fatalf("SendPendingArtifactFeedback failed: fb=%+v err=%v", fb, err)
+	}
+	detail, err = repo.GetArtifactDetail(ctx, artifact.ID, nil, false, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.AskBaseline == nil || detail.AskBaseline.Version != 2 || len(detail.AskBaseline.Asks) != 2 {
+		t.Fatalf("expected v2 baseline after submit, got %+v", detail.AskBaseline)
+	}
+	if got := detail.AskBaseline.Asks[0]; got.ID != "ask-1" || len(got.Selected) != 1 || got.Selected[0] != "redis" || got.Note != "优先多实例" {
+		t.Fatalf("unexpected ask-1 baseline after submit: %+v", got)
+	}
+	if got := detail.AskBaseline.Asks[1]; got.ID != "ask-2" || len(got.Selected) != 2 || got.Selected[0] != "a" || got.Selected[1] != "b" {
+		t.Fatalf("expected sorted selected IDs for ask-2, got %+v", got)
+	}
+
+	// 4. Withdrawing round 1 reverts baseline back to v1.
+	clock = clock.Add(time.Second)
+	withdrawn, err := repo.WithdrawArtifactFeedback(ctx, artifact.ID, 1)
+	if err != nil || !withdrawn {
+		t.Fatalf("expected withdraw to succeed, withdrawn=%v err=%v", withdrawn, err)
+	}
+	detail, err = repo.GetArtifactDetail(ctx, artifact.ID, nil, false, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.AskBaseline == nil || detail.AskBaseline.Version != 1 || len(detail.AskBaseline.Asks[0].Selected) != 0 {
+		t.Fatalf("expected baseline to revert to v1 after withdraw, got %+v", detail.AskBaseline)
+	}
+
+	// 5. Re-submit round 2, then user edits ask-1 without submitting -> baseline stays at v2.
+	clock = clock.Add(time.Second)
+	if fb2, err := repo.SendPendingArtifactFeedback(ctx, artifact.ID, nil); err != nil || fb2 == nil {
+		t.Fatalf("expected round 2 feedback, fb=%+v err=%v", fb2, err)
+	}
+	v3Doc := "# 方案评审\n\n" +
+		"```ask\n{\"id\":\"ask-1\",\"question\":\"缓存选型？\",\"pick\":\"one\",\"options\":[{\"id\":\"redis\",\"label\":\"Redis\",\"recommended\":true},{\"id\":\"mem\",\"label\":\"内存\"}],\"selected\":[\"mem\"]}\n```\n\n" +
+		"```ask\n{\"id\":\"ask-2\",\"question\":\"需要哪些能力？\",\"pick\":\"many\",\"options\":[{\"id\":\"b\",\"label\":\"B\"},{\"id\":\"a\",\"label\":\"A\"}],\"selected\":[\"b\",\"a\"]}\n```\n"
+	clock = clock.Add(time.Second)
+	if _, err := repo.ReviseArtifact(ctx, artifact.ID, ArtifactRevision{
+		Content:     v3Doc,
+		BaseVersion: new(int64(2)),
+		Author:      "user",
+		Reason:      "change ask-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	detail, err = repo.GetArtifactDetail(ctx, artifact.ID, nil, false, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.AskBaseline == nil || detail.AskBaseline.Version != 2 || detail.AskBaseline.Asks[0].Selected[0] != "redis" {
+		t.Fatalf("expected baseline to stay at v2 before submitting v3, got %+v", detail.AskBaseline)
+	}
+
+	// 6. Agent revises doc to v4 keeping answered asks unconfirmed -> baseline advances to v4.
+	clock = clock.Add(time.Second)
+	if _, err := repo.ReviseArtifact(ctx, artifact.ID, ArtifactRevision{
+		Content:     v3Doc + "\n补充结论。\n",
+		BaseVersion: new(int64(3)),
+		Author:      project.CoordinatorID,
+		Reason:      "agent update",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	detail, err = repo.GetArtifactDetail(ctx, artifact.ID, nil, false, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.AskBaseline == nil || detail.AskBaseline.Version != 4 || detail.AskBaseline.Asks[0].Selected[0] != "mem" {
+		t.Fatalf("expected baseline to advance to agent v4, got %+v", detail.AskBaseline)
+	}
+
+	// 7. Historical version queries omit AskBaseline.
+	hist, err := repo.GetArtifactDetail(ctx, artifact.ID, new(int64(1)), false, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hist.AskBaseline != nil {
+		t.Fatalf("expected nil AskBaseline for historical version, got %+v", hist.AskBaseline)
+	}
+}
