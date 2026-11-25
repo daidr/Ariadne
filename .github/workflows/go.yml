@@ -85,20 +85,49 @@ jobs:
     env:
       CGO_ENABLED: '0'
     steps:
-      - name: Exclude workspace and build paths from Windows Defender
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          try {
-            Add-MpPreference `
-              -ExclusionPath @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, 'C:\hostedtoolcache', 'C:\Program Files\Git') `
-              -ExclusionProcess @('go.exe', 'git.exe', 'compile.exe', 'link.exe', 'asm.exe', 'chrome.exe', 'msedge.exe') `
-              -ErrorAction SilentlyContinue
-          } catch {}
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Prepare Go and Windows Defender
+        id: go-fast-win
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ver = (Get-Content -Raw .go-version).Trim()
+          $arch = $env:RUNNER_ARCH.ToLowerInvariant()
+          $goRoot = Join-Path $env:RUNNER_TOOL_CACHE "go\$ver\$arch"
+          $goBin = Join-Path $goRoot 'bin'
+          if (Test-Path (Join-Path $goBin 'go.exe')) {
+            Add-Content -Path $env:GITHUB_PATH -Value $goBin
+            Add-Content -Path $env:GITHUB_ENV -Value "GOROOT=$goRoot"
+            Add-Content -Path $env:GITHUB_OUTPUT -Value 'found=true'
+          } else {
+            Add-Content -Path $env:GITHUB_OUTPUT -Value 'found=false'
+          }
+          try {
+            Add-MpPreference `
+              -ExclusionPath @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, $env:RUNNER_TOOL_CACHE, 'C:\Program Files\Git') `
+              -ExclusionProcess @('go.exe', 'git.exe', 'compile.exe', 'link.exe', 'asm.exe', 'chrome.exe', 'msedge.exe', 'tar.exe', 'zstd.exe') `
+              -ErrorAction SilentlyContinue
+          } catch {}
+      - name: Prepare Go from toolcache (macOS)
+        id: go-fast-mac
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          ver="$(tr -d ' \r\n' < .go-version)"
+          arch="$(printf '%s' "$RUNNER_ARCH" | tr '[:upper:]' '[:lower:]')"
+          go_root="${RUNNER_TOOL_CACHE}/go/${ver}/${arch}"
+          go_bin="${go_root}/bin"
+          if [ -x "${go_bin}/go" ]; then
+            printf '%s\n' "$go_bin" >> "$GITHUB_PATH"
+            printf 'GOROOT=%s\n' "$go_root" >> "$GITHUB_ENV"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-go@v6
+        if: steps.go-fast-win.outputs.found != 'true' && steps.go-fast-mac.outputs.found != 'true'
         with:
           go-version-file: .go-version
           cache: false
@@ -110,9 +139,10 @@ jobs:
           key: go-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', 'go.sum') }}
           restore-keys: |
             go-native-${{ runner.os }}-${{ runner.arch }}-
-      # Ubuntu runs the complete test suite; macOS and Windows compile every
-      # library package and run all OS-sensitive / integration packages so every
-      # platform stays fast without losing cross-OS behavioral coverage.
+      # Ubuntu and race run the complete test suite (including heavy multi-repo
+      # git matrices). macOS and Windows run with -short across all OS-sensitive
+      # and integration packages (which transitively compile every internal and
+      # sdk package) to keep cross-OS CI under one minute.
       - name: Test (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -151,53 +181,44 @@ jobs:
           GOMODCACHE: ${{ runner.temp }}/gomod
           GOCACHE: ${{ runner.temp }}/gobuild
         run: |
-          go build ./internal/... ./sdk/...
-          listed="$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}} {{.GoFiles}} {{.TestGoFiles}} {{.XTestGoFiles}}{{end}}' ./... | grep -v '^$')"
-          all="$(printf '%s\n' "$listed" | awk '{print $1}')"
-          os_tagged="$(printf '%s\n' "$listed" | grep -E '_darwin|_unix' | awk '{print $1}' || true)"
-          pkgs=()
-          add_pkg() {
-            local p="$1"
-            printf '%s\n' "$all" | grep -qx "$p" || return 0
-            local existing
-            for existing in ${pkgs[@]+"${pkgs[@]}"}; do
-              [ "$existing" = "$p" ] && return 0
+          pkgs=(
+            ./internal/browser
+            ./internal/runner
+            ./internal/local
+            ./internal/server
+            ./internal/workspaces
+            ./internal/core
+            ./internal/process
+            ./internal/repowatch
+            ./internal/update
+            ./internal/background
+            ./internal/service
+            ./internal/sources
+            ./internal/providers/antigravity
+            ./internal/providers/codex
+            ./internal/application
+            ./internal/providers/acp
+            ./internal/agentruntime
+            ./internal/data
+            ./internal/settings
+            ./internal/plugins
+            ./internal/modelhttp
+            ./internal/trace
+            ./internal/eventstore
+            ./cmd/ariadne
+            ./internal/providers/claudecode
+            ./internal/fsutil
+          )
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            dir="./$(dirname "${f#./}")"
+            seen=0
+            for existing in "${pkgs[@]}"; do
+              [ "$existing" = "$dir" ] && seen=1 && break
             done
-            pkgs+=("$p")
-          }
-          for p in \
-            github.com/daidr/Ariadne/internal/browser \
-            github.com/daidr/Ariadne/internal/runner \
-            github.com/daidr/Ariadne/internal/local \
-            github.com/daidr/Ariadne/internal/server \
-            github.com/daidr/Ariadne/internal/workspaces \
-            github.com/daidr/Ariadne/internal/application \
-            github.com/daidr/Ariadne/internal/service \
-            github.com/daidr/Ariadne/cmd/ariadne \
-            github.com/daidr/Ariadne/internal/process \
-            github.com/daidr/Ariadne/internal/update \
-            github.com/daidr/Ariadne/internal/core \
-            github.com/daidr/Ariadne/internal/sources \
-            github.com/daidr/Ariadne/internal/agentruntime \
-            github.com/daidr/Ariadne/internal/fsutil \
-            github.com/daidr/Ariadne/internal/plugins \
-            github.com/daidr/Ariadne/internal/repowatch \
-            github.com/daidr/Ariadne/internal/background \
-            github.com/daidr/Ariadne/internal/providers/acp \
-            github.com/daidr/Ariadne/internal/providers/antigravity \
-            github.com/daidr/Ariadne/internal/providers/claudecode \
-            github.com/daidr/Ariadne/internal/providers/codex \
-            github.com/daidr/Ariadne/internal/eventstore \
-            github.com/daidr/Ariadne/internal/settings \
-            github.com/daidr/Ariadne/internal/trace \
-            github.com/daidr/Ariadne/internal/modelhttp \
-            github.com/daidr/Ariadne/internal/data; do
-            add_pkg "$p"
-          done
-          while IFS= read -r p; do
-            [ -n "$p" ] && add_pkg "$p"
-          done <<< "$os_tagged"
-          go test -vet=off -count=1 -p=4 -parallel=4 -timeout=180s "${pkgs[@]}"
+            [ "$seen" -eq 0 ] && pkgs+=("$dir")
+          done < <(find ./cmd ./internal ./sdk -type f \( -name '*_darwin*.go' -o -name '*_unix*.go' \) 2>/dev/null)
+          go test -vet=off -short -count=1 -p=3 -parallel=3 -timeout=180s "${pkgs[@]}"
       - name: Test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -211,47 +232,42 @@ jobs:
           $env:TEMP = $testTmp
           $env:TMP = $testTmp
           $env:GOTMPDIR = $testTmp
-          go build ./internal/... ./sdk/...
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $listed = @(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}} {{.GoFiles}} {{.TestGoFiles}} {{.XTestGoFiles}}{{end}}' ./... | Where-Object { $_ -ne '' })
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $all = @($listed | ForEach-Object { ($_ -split ' ')[0] })
-          $osTagged = @($listed | Where-Object { $_ -match '_windows' } | ForEach-Object { ($_ -split ' ')[0] })
-          $core = @(
-            'github.com/daidr/Ariadne/internal/local',
-            'github.com/daidr/Ariadne/internal/runner',
-            'github.com/daidr/Ariadne/internal/browser',
-            'github.com/daidr/Ariadne/internal/workspaces',
-            'github.com/daidr/Ariadne/internal/server',
-            'github.com/daidr/Ariadne/internal/application',
-            'github.com/daidr/Ariadne/internal/service',
-            'github.com/daidr/Ariadne/cmd/ariadne',
-            'github.com/daidr/Ariadne/internal/core',
-            'github.com/daidr/Ariadne/internal/sources',
-            'github.com/daidr/Ariadne/internal/process',
-            'github.com/daidr/Ariadne/internal/update',
-            'github.com/daidr/Ariadne/internal/agentruntime',
-            'github.com/daidr/Ariadne/internal/fsutil',
-            'github.com/daidr/Ariadne/internal/plugins',
-            'github.com/daidr/Ariadne/internal/repowatch',
-            'github.com/daidr/Ariadne/internal/background',
-            'github.com/daidr/Ariadne/internal/providers/acp',
-            'github.com/daidr/Ariadne/internal/providers/antigravity',
-            'github.com/daidr/Ariadne/internal/providers/claudecode',
-            'github.com/daidr/Ariadne/internal/providers/codex',
-            'github.com/daidr/Ariadne/internal/eventstore',
-            'github.com/daidr/Ariadne/internal/settings',
-            'github.com/daidr/Ariadne/internal/trace',
-            'github.com/daidr/Ariadne/internal/modelhttp',
-            'github.com/daidr/Ariadne/internal/data'
+          $pkgs = [System.Collections.Generic.List[string]]@(
+            './internal/browser',
+            './internal/local',
+            './internal/runner',
+            './internal/workspaces',
+            './internal/sources',
+            './internal/core',
+            './internal/process',
+            './internal/server',
+            './internal/application',
+            './internal/service',
+            './internal/update',
+            './internal/providers/acp',
+            './internal/providers/antigravity',
+            './internal/providers/codex',
+            './internal/providers/claudecode',
+            './internal/repowatch',
+            './internal/background',
+            './internal/settings',
+            './internal/trace',
+            './internal/modelhttp',
+            './internal/data',
+            './internal/eventstore',
+            './internal/agentruntime',
+            './internal/plugins',
+            './internal/fsutil',
+            './cmd/ariadne'
           )
-          $pkgs = [System.Collections.Generic.List[string]]::new()
-          foreach ($p in ($core + $osTagged)) {
-            if (($p -in $all) -and -not $pkgs.Contains($p)) {
-              $pkgs.Add($p)
+          $root = (Get-Location).Path
+          foreach ($f in Get-ChildItem -Path cmd,internal,sdk -Recurse -File -Filter '*_windows*.go' -ErrorAction SilentlyContinue) {
+            $rel = './' + [System.IO.Path]::GetRelativePath($root, $f.DirectoryName).Replace('\', '/')
+            if (-not $pkgs.Contains($rel)) {
+              $pkgs.Add($rel)
             }
           }
-          go test -vet=off -count=1 -p=4 -parallel=4 -timeout=180s @pkgs
+          go test -vet=off -short -count=1 -p=4 -parallel=4 -timeout=180s @pkgs
           exit $LASTEXITCODE
       - if: matrix.os == 'ubuntu-latest'
         env:

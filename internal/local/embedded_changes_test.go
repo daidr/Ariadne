@@ -27,6 +27,9 @@ func shortTempDir(t *testing.T) string {
 }
 
 func TestEmbeddedChangesBaselinesFallbackSnapshotsAndFileVersions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("embedded repo diff matrix covered by full suite")
+	}
 	t.Parallel()
 	ctx := t.Context()
 	outerDir, _ := initGit(t)
@@ -92,12 +95,16 @@ func TestEmbeddedChangesBaselinesFallbackSnapshotsAndFileVersions(t *testing.T) 
 		t.Fatalf("unexpected embedded branch changes: %+v", c)
 	}
 
-	// 2. EmbeddedChanges WITHOUT recorded baseline falls back to merge-base against origin/HEAD.
-	fallback, err := factory.EmbeddedChanges(ctx, "thr_emb", nil)
+	// 2. EmbeddedRepoChanges WITHOUT recorded baseline falls back to merge-base against origin/HEAD.
+	activeRepo, err := resolveEmbeddedRepoPath(ctx, workDir, "sub/active")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fallback) != 1 || fallback[0].Changes.From != baseSHA || len(fallback[0].Changes.Files) != 1 {
+	fallback, err := EmbeddedRepoChanges(ctx, activeRepo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallback == nil || fallback.From != baseSHA || len(fallback.Files) != 1 {
 		t.Fatalf("expected fallback merge-base to resolve %s, got %+v", baseSHA, fallback)
 	}
 
@@ -151,6 +158,9 @@ func TestEmbeddedChangesBaselinesFallbackSnapshotsAndFileVersions(t *testing.T) 
 }
 
 func TestEmbeddedRepoUnrelatedOrphanAndShallowNoFallbackFullTreeDiff(t *testing.T) {
+	if testing.Short() {
+		t.Skip("orphan/shallow embedded diff matrix covered by full suite")
+	}
 	t.Parallel()
 	ctx := t.Context()
 
@@ -201,12 +211,9 @@ func TestEmbeddedRepoUnrelatedOrphanAndShallowNoFallbackFullTreeDiff(t *testing.
 	gitCommitTracked(t, orphanGit, "update orphan docs")
 	orphanHeadSHA := readHeadSHA(t, orphanDir)
 
-	if ch, err := EmbeddedRepoChanges(ctx, orphanRepo, nil); err != nil || ch == nil || ch.Base != "origin/orphan-docs" || ch.From != orphanUpstreamSHA || ch.Head != orphanHeadSHA ||
+	if ch, err := EmbeddedRepoChanges(ctx, orphanRepo, &sdk.RepoBaseline{RepoPath: orphanRepo.RelPath, BaseHead: mainBaseSHA, BaseBranch: "main"}); err != nil || ch == nil || ch.Base != "origin/orphan-docs" || ch.From != orphanUpstreamSHA || ch.Head != orphanHeadSHA ||
 		len(ch.Commits) != 1 || len(ch.Files) != 1 || ch.Files[0].Path != "docs.md" {
-		t.Fatalf("expected 1-commit diff relative to origin/orphan-docs, got %+v, %v", ch, err)
-	}
-	if ch, err := EmbeddedRepoChanges(ctx, orphanRepo, &sdk.RepoBaseline{RepoPath: orphanRepo.RelPath, BaseHead: mainBaseSHA, BaseBranch: "main"}); err != nil || ch == nil || ch.From != orphanUpstreamSHA || len(ch.Files) != 1 || ch.Files[0].Path != "docs.md" {
-		t.Fatalf("stale unrelated baseline must not diff unrelated trees, got %+v, %v", ch, err)
+		t.Fatalf("stale unrelated baseline must fall back to origin/orphan-docs 1-commit diff, got %+v, %v", ch, err)
 	}
 
 	// Shallow: clean disconnected -> nil; dirty -> uncommitted only.

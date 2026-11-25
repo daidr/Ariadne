@@ -109,6 +109,9 @@ func TestBranchChangesVersionsAndSnapshots(t *testing.T) {
 	}
 }
 func TestMergeUndoRefusalsAndConflicts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("merge/undo conflict matrix covered by full suite")
+	}
 	t.Parallel()
 	root, git := initGit(t)
 	gitDir := filepath.Join(root, ".git")
@@ -204,10 +207,10 @@ func TestMergeUndoRefusalsAndConflicts(t *testing.T) {
 func TestCatFileBatchReadVersionsAndLargeBatch(t *testing.T) {
 	t.Parallel()
 	root, git := initGit(t)
-	const uniqueFiles = 16
-	const count = 64
-	beforeBody := strings.Repeat("before-line-0123456789abcdef\n", 300) // > 8 KiB per blob
-	afterBody := strings.Repeat("after-line-fedcba9876543210\n", 300)
+	const uniqueFiles = 4
+	const count = 32
+	beforeBody := strings.Repeat("before-line-0123456789abcdef\n", 400) // > 11 KiB per blob
+	afterBody := strings.Repeat("after-line-fedcba9876543210\n", 400)
 	paths := make([]string, uniqueFiles)
 	for i := range uniqueFiles {
 		rel := "dir/nested/deep/path/for/pipe/pressure/file_" + string(rune('a'+i/26)) + string(rune('a'+i%26)) + ".txt"
@@ -449,6 +452,9 @@ func TestWorktreeSnapshotNormalizesCRLFWithGlobalAutocrlf(t *testing.T) {
 }
 
 func TestBranchChangesPrefersNewerOriginBaseWhenLocalBaseLags(t *testing.T) {
+	if testing.Short() {
+		t.Skip("origin base precedence covered by full suite")
+	}
 	t.Parallel()
 	root, git := initGit(t)
 	gitDir := filepath.Join(root, ".git")

@@ -74,6 +74,9 @@ func gitHTTPBackend(t *testing.T, repository string) http.Handler {
 	})
 }
 func TestHostedGitHTTPFetchPushAndRedirectCredentialBoundary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("HTTP git backend credential boundary covered by full suite")
+	}
 	t.Parallel()
 	remote, _ := initGit(t)
 	server := httptest.NewServer(gitHTTPBackend(t, remote))

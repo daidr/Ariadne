@@ -12,6 +12,9 @@ import (
 )
 
 func TestGitTreeReadsCommittedBinaryAndSearches(t *testing.T) {
+	if testing.Short() {
+		t.Skip("git tree read/search covered by full suite")
+	}
 	t.Parallel()
 	root, git := initGit(t)
 	binary := []byte{0xff, 0, 0xef, 0xbb, 0xbf, 1, 2, 3}

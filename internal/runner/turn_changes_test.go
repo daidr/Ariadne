@@ -380,6 +380,9 @@ func TestTurnChangesRecordedForHostedRepository(t *testing.T) {
 }
 
 func TestTurnChangesAfterMergingOriginMainMatchesBranchChangesAndReconcilesStaleTotals(t *testing.T) {
+	if testing.Short() {
+		t.Skip("origin merge turn-changes reconciliation covered by full suite")
+	}
 	t.Parallel()
 	ctx := t.Context()
 
@@ -511,6 +514,9 @@ func TestTurnChangesAfterMergingOriginMainMatchesBranchChangesAndReconcilesStale
 }
 
 func TestTurnChangesMultiRepoOuterAndEmbedded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-repo embedded turn-changes matrix covered by full suite")
+	}
 	t.Parallel()
 	ctx := t.Context()
 	runGit := func(dir string, args ...string) string {

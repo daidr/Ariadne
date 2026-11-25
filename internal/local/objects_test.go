@@ -26,6 +26,9 @@ func objects(t *testing.T, directory string) *ObjectStore {
 	return store
 }
 func TestGitObjectsStreamRoundTripIncrementalAndAtomicRefs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("git bundle stream round-trip covered by full suite")
+	}
 	t.Parallel()
 	root, git := initGit(t)
 	source := objects(t, root)

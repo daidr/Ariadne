@@ -112,6 +112,9 @@ func commitInWorkspace(t *testing.T, ws sdk.Workspace, file, content, message st
 }
 
 func TestThreadChangesAndSyncPullRequestBackfillTotals(t *testing.T) {
+	if testing.Short() {
+		t.Skip("PR totals backfill matrix covered by full suite")
+	}
 	t.Parallel()
 	ctx := t.Context()
 	repo, manager, project, prInfo := initHostedChangesRepo(t)
