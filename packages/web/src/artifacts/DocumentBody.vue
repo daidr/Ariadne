@@ -6,8 +6,17 @@ import { whiteboardBlock } from '@dou-ui/editor/flow'
 import { markdownToBlocks } from '@dou-ui/editor/markdown'
 import '@dou-ui/editor/style.css'
 import '@dou-ui/flow/style.css'
-import type { CommentAction, CommentThread } from 'dou-ui'
-import { computed, onBeforeUnmount, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { useReducedMotion, type CommentAction, type CommentThread } from 'dou-ui'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  useTemplateRef,
+  watch,
+} from 'vue'
 import { anchoredIds, anchorQuotes, commentTarget } from './comment-anchors'
 import { commentAuthor, toCommentThread } from './comment-threads'
 import { api } from '../api'
@@ -21,6 +30,18 @@ import {
 } from './document-asks'
 import { documentCodeLanguages, highlightDocumentCode } from './document-code'
 import { documentLocks } from './document-locks'
+import {
+  computeDocumentTocLayout,
+  extractDocumentHeadings,
+  isTocCollidingWithTables,
+  pickActiveHeadingId,
+  sameDocumentHeadings,
+  type DocumentTocHeading,
+  type DocumentTocLayout,
+  type HeadingPosition,
+  type TableCollisionBox,
+} from './document-toc'
+import DocumentToc from './DocumentToc.vue'
 import { pendingDocumentBlock } from './pending-block'
 import { refDocumentBlock } from './ref-block'
 import type { SharedArtifact } from './shared'
@@ -75,7 +96,251 @@ const extensions = props.shared
 const doc = shallowRef<EditorDocument<PartialBlock>>({ version: 1, blocks: [] })
 // Bumped to remount the editor when content is replaced from outside.
 const generation = ref(0)
+const shell = useTemplateRef<HTMLElement>('shell')
+const scrollArea = useTemplateRef<HTMLElement>('scrollArea')
 const editor = useTemplateRef<InstanceType<typeof DouEditor>>('editor')
+const tocRef = useTemplateRef<InstanceType<typeof DocumentToc>>('tocRef')
+const reducedMotion = useReducedMotion()
+
+const headings = shallowRef<DocumentTocHeading[]>([])
+const activeHeadingId = ref<string | null>(null)
+const tocLayout = shallowRef<DocumentTocLayout>({ mode: 'hidden', width: 0, dockedRight: 0 })
+const tocCollided = ref(false)
+
+let measureFrame = 0
+let pinnedHeadingId: string | null = null
+let pinnedSettleTimer: ReturnType<typeof setTimeout> | null = null
+let pinnedMaxTimer: ReturnType<typeof setTimeout> | null = null
+let layoutObserver: ResizeObserver | null = null
+let observedSurface: HTMLElement | null = null
+
+const escapeSelector = (id: string) =>
+  typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(id)
+    : id.replace(/["\\]/g, '\\$&')
+
+function clearPinnedHeading() {
+  pinnedHeadingId = null
+  if (pinnedSettleTimer) {
+    clearTimeout(pinnedSettleTimer)
+    pinnedSettleTimer = null
+  }
+  if (pinnedMaxTimer) {
+    clearTimeout(pinnedMaxTimer)
+    pinnedMaxTimer = null
+  }
+}
+
+function pinHeading(id: string) {
+  clearPinnedHeading()
+  pinnedHeadingId = id
+  activeHeadingId.value = id
+  pinnedSettleTimer = setTimeout(() => {
+    clearPinnedHeading()
+    scheduleMeasure()
+  }, 160)
+  pinnedMaxTimer = setTimeout(() => {
+    clearPinnedHeading()
+    scheduleMeasure()
+  }, 900)
+}
+
+function syncHeadings(sourceBlocks?: readonly PartialBlock[]) {
+  const next = extractDocumentHeadings(sourceBlocks ?? editor.value?.getBlocks() ?? [])
+  if (!sameDocumentHeadings(headings.value, next)) {
+    headings.value = next
+    if (activeHeadingId.value && !next.some((item) => item.id === activeHeadingId.value)) {
+      activeHeadingId.value = next[0]?.id ?? null
+    }
+  }
+  scheduleMeasure()
+}
+
+function attachSurfaceObserver() {
+  if (!layoutObserver) return
+  const nextSurface = scrollArea.value?.querySelector<HTMLElement>('.dou-editor__surface') ?? null
+  if (nextSurface === observedSurface) return
+  if (observedSurface) layoutObserver.unobserve(observedSurface)
+  observedSurface = nextSurface
+  if (observedSurface) layoutObserver.observe(observedSurface)
+}
+
+function measureToc() {
+  measureFrame = 0
+  const shellEl = shell.value
+  const scrollEl = scrollArea.value
+  if (!shellEl || !scrollEl) return
+
+  attachSurfaceObserver()
+
+  const shellRect = shellEl.getBoundingClientRect()
+  const surface = observedSurface ?? scrollEl.querySelector<HTMLElement>('.dou-editor__surface')
+  const surfaceStyle = surface ? getComputedStyle(surface) : null
+  const readingLeft = surface
+    ? surface.getBoundingClientRect().left +
+      (Number.parseFloat(surfaceStyle?.paddingLeft || surfaceStyle?.paddingInlineStart || '') ||
+        0) -
+      shellRect.left
+    : 0
+
+  const nextLayout = computeDocumentTocLayout(readingLeft)
+  if (
+    nextLayout.mode !== tocLayout.value.mode ||
+    nextLayout.width !== tocLayout.value.width ||
+    nextLayout.dockedRight !== tocLayout.value.dockedRight
+  ) {
+    tocLayout.value = nextLayout
+  }
+
+  if (!headings.value.length || nextLayout.mode === 'hidden') {
+    tocCollided.value = false
+    return
+  }
+
+  const scrollRect = scrollEl.getBoundingClientRect()
+
+  if (!pinnedHeadingId) {
+    const positions: HeadingPosition[] = []
+    for (const heading of headings.value) {
+      const blockEl = scrollEl.querySelector<HTMLElement>(
+        `[data-block-id="${escapeSelector(heading.id)}"]`,
+      )
+      if (!blockEl) continue
+      const targetEl =
+        blockEl.querySelector<HTMLElement>(':scope > .dou-editor__content') ?? blockEl
+      const rect = targetEl.getBoundingClientRect()
+      if (rect.height <= 0) continue
+      positions.push({ id: heading.id, relativeTop: rect.top - scrollRect.top })
+    }
+    activeHeadingId.value = pickActiveHeadingId({
+      headings: positions,
+      scrollTop: scrollEl.scrollTop,
+      clientHeight: scrollEl.clientHeight,
+      scrollHeight: scrollEl.scrollHeight,
+    })
+  }
+
+  if (nextLayout.mode !== 'docked') {
+    tocCollided.value = false
+    return
+  }
+
+  const tables: TableCollisionBox[] = []
+  for (const frame of scrollEl.querySelectorAll<HTMLElement>('.dou-editor__content--table')) {
+    const tableEl = frame.querySelector<HTMLElement>(':scope > table.dou-editor-table, table')
+    if (!tableEl) continue
+    const frameRect = frame.getBoundingClientRect()
+    const tableRect = tableEl.getBoundingClientRect()
+    tables.push({
+      visibleLeft: Math.max(frameRect.left, tableRect.left),
+      top: frameRect.top,
+      bottom: frameRect.bottom,
+      height: frameRect.height,
+    })
+  }
+
+  tocCollided.value = isTocCollidingWithTables({
+    dockedTocRight: shellRect.left + nextLayout.dockedRight,
+    viewport: { top: scrollRect.top, bottom: scrollRect.bottom },
+    tocVertical: tocRef.value?.verticalRange() ?? null,
+    tables,
+    currentlyCollided: tocCollided.value,
+  })
+}
+
+function scheduleMeasure() {
+  if (measureFrame) return
+  measureFrame = requestAnimationFrame(measureToc)
+}
+
+function onAnyScroll(event: Event) {
+  if (event.target === scrollArea.value && pinnedHeadingId) {
+    if (pinnedSettleTimer) clearTimeout(pinnedSettleTimer)
+    pinnedSettleTimer = setTimeout(() => {
+      clearPinnedHeading()
+      scheduleMeasure()
+    }, 140)
+  }
+  scheduleMeasure()
+}
+
+function onManualScrollInput() {
+  if (pinnedHeadingId) clearPinnedHeading()
+}
+
+function onEditorChange(next: EditorDocument) {
+  syncHeadings(next.blocks)
+  void nextTick(scheduleMeasure)
+}
+
+async function scrollToHeading(id: string) {
+  const scrollEl = scrollArea.value
+  if (!scrollEl) return
+  const selector = `[data-block-id="${escapeSelector(id)}"]`
+  let blockEl = scrollEl.querySelector<HTMLElement>(selector)
+  if (blockEl && blockEl.getBoundingClientRect().height <= 0 && !props.readonly) {
+    editor.value?.focusBlock(id, 'start')
+    await nextTick()
+    blockEl = scrollEl.querySelector<HTMLElement>(selector)
+  }
+  if (!blockEl) return
+  const targetEl = blockEl.querySelector<HTMLElement>(':scope > .dou-editor__content') ?? blockEl
+  const scrollRect = scrollEl.getBoundingClientRect()
+  const targetRect = targetEl.getBoundingClientRect()
+  const targetTop = Math.max(0, scrollEl.scrollTop + (targetRect.top - scrollRect.top) - 24)
+  pinHeading(id)
+  scrollEl.scrollTo({
+    top: targetTop,
+    behavior: reducedMotion.value ? 'auto' : 'smooth',
+  })
+}
+
+function onTocWheelPassthrough(event: WheelEvent) {
+  const scrollEl = scrollArea.value
+  if (!scrollEl || event.deltaY === 0) return
+  event.preventDefault()
+  clearPinnedHeading()
+  const deltaPx =
+    event.deltaMode === 1
+      ? event.deltaY * 16
+      : event.deltaMode === 2
+        ? event.deltaY * scrollEl.clientHeight
+        : event.deltaY
+  scrollEl.scrollTop += deltaPx
+}
+
+onMounted(() => {
+  const scrollEl = scrollArea.value
+  const shellEl = shell.value
+  if (scrollEl) {
+    scrollEl.addEventListener('scroll', onAnyScroll, { capture: true, passive: true })
+    scrollEl.addEventListener('wheel', onManualScrollInput, { passive: true })
+    scrollEl.addEventListener('touchstart', onManualScrollInput, { passive: true })
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    layoutObserver = new ResizeObserver(scheduleMeasure)
+    if (shellEl) layoutObserver.observe(shellEl)
+    attachSurfaceObserver()
+  }
+  scheduleMeasure()
+})
+
+onBeforeUnmount(() => {
+  clearPinnedHeading()
+  if (measureFrame) {
+    cancelAnimationFrame(measureFrame)
+    measureFrame = 0
+  }
+  const scrollEl = scrollArea.value
+  if (scrollEl) {
+    scrollEl.removeEventListener('scroll', onAnyScroll, true)
+    scrollEl.removeEventListener('wheel', onManualScrollInput)
+    scrollEl.removeEventListener('touchstart', onManualScrollInput)
+  }
+  layoutObserver?.disconnect()
+  layoutObserver = null
+  observedSurface = null
+})
 
 /** The threads as the editor shows them; changes here show at once, before the server. */
 const threads = ref<CommentThread[]>([])
@@ -95,6 +360,20 @@ function load() {
 watch(() => props.content, load, { immediate: true })
 
 const ready = computed(() => !props.shared || props.shared.ready.value)
+
+watch(
+  [editor, ready, generation],
+  ([instance, isReady]) => {
+    if (!instance || !isReady) {
+      headings.value = []
+      activeHeadingId.value = null
+      tocCollided.value = false
+      return
+    }
+    syncHeadings(instance.getBlocks())
+  },
+  { immediate: true, flush: 'post' },
+)
 
 function emitAskSummary() {
   if (props.shared) {
@@ -177,26 +456,45 @@ defineExpose({ quotes, anchored, revealComment, applyRecommendedPicks })
 </script>
 
 <template>
-  <div class="document">
-    <DouEditor
-      v-if="ready"
-      ref="editor"
-      :key="generation"
-      v-model="doc"
-      v-model:active-comment="active"
-      :readonly="readonly"
-      :extensions="extensions"
-      :aria-label="label"
-      :comments="comments ? threads : undefined"
-      :author="comments ? me : undefined"
-      class="document-text"
-      @update:comments="(next: CommentThread[]) => (threads = next)"
-      @comment-action="onComment"
+  <div ref="shell" class="document-shell">
+    <div ref="scrollArea" class="document">
+      <DouEditor
+        v-if="ready"
+        ref="editor"
+        :key="generation"
+        v-model="doc"
+        v-model:active-comment="active"
+        :readonly="readonly"
+        :extensions="extensions"
+        :aria-label="label"
+        :comments="comments ? threads : undefined"
+        :author="comments ? me : undefined"
+        class="document-text"
+        @change="onEditorChange"
+        @update:comments="(next: CommentThread[]) => (threads = next)"
+        @comment-action="onComment"
+      />
+    </div>
+    <DocumentToc
+      ref="tocRef"
+      :headings="headings"
+      :active-id="activeHeadingId"
+      :mode="tocLayout.mode"
+      :width="tocLayout.width"
+      :collided="tocCollided"
+      @select="scrollToHeading"
+      @wheel-passthrough="onTocWheelPassthrough"
     />
   </div>
 </template>
 
 <style scoped>
+.document-shell {
+  position: relative;
+  height: 100%;
+  overflow: clip;
+}
+
 .document {
   height: 100%;
   overflow-y: auto;
