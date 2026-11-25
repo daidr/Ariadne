@@ -451,4 +451,60 @@ describe('ModelSettings', () => {
     expect(mcpMounted).toHaveBeenCalledTimes(2)
     expect(getModelSettings).toHaveBeenCalledTimes(2)
   })
+
+  test('keeps model row controls grouped and renders aligned model detail grid with distinct currency label', async () => {
+    const initial = makeModelSettings(true)
+    initial.models[0] = {
+      ...initial.models[0]!,
+      maxTokens: 32768,
+      price: { currency: 'USD', input: 2, output: 10, cacheRead: 0.1 },
+    }
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(initial)
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+
+    const wrapper = mount(ModelSettingsDialog, {
+      props: { open: false, tab: 'models' },
+      global: {
+        stubs: {
+          PluginSettings: true,
+          SearchSettings: true,
+          WorkSettings: true,
+          InputSettings: true,
+          McpSettings: true,
+          DataTab: true,
+          UpdatesSettings: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+
+    const modelRows = wrapper.findAll('.settings-model-row')
+    expect(modelRows).toHaveLength(2)
+    for (const row of modelRows) {
+      expect(row.find('.settings-model-actions').findAll('button')).toHaveLength(2)
+    }
+
+    // Expand the first model and verify detail layout sections and accessible labels.
+    await modelRows[0]!.find('.settings-model-actions button').trigger('click')
+    await flushPromises()
+
+    const detail = wrapper.find('.settings-model-more')
+    expect(detail.exists()).toBe(true)
+    expect(detail.findAll('.settings-model-grid')).toHaveLength(2)
+    expect(detail.findAll('.settings-number')).toHaveLength(6)
+    expect(detail.text()).toContain('价格（每 1M token）')
+
+    const currencySelect = detail.find('.settings-currency [role="combobox"]')
+    expect(currencySelect.exists()).toBe(true)
+    expect(currencySelect.attributes('aria-label')).toBe('币种')
+    expect(currencySelect.attributes('aria-labelledby')).toBeUndefined()
+
+    const imageSwitch = detail.find('[role="switch"]')
+    expect(imageSwitch.exists()).toBe(true)
+    expect(imageSwitch.attributes('aria-label')).toBe('看图片')
+  })
 })
