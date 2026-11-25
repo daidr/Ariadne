@@ -81,8 +81,8 @@ export function useUpdatesSettings() {
     return null
   })
 
-  watch([restartPhase, hasActiveWork], ([nextPhase, active]) => {
-    if (nextPhase === 'restarting' || !active) {
+  watch([restartPhase, hasActiveWork, restartable], ([nextPhase, active, canRestartNow]) => {
+    if (nextPhase === 'restarting' || !active || !canRestartNow) {
       confirmingRestartNow.value = false
     }
   })

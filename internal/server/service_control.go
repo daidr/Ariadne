@@ -44,6 +44,12 @@ func (api *API) registerServiceControl() {
 		}
 		return snap, http.StatusOK, nil
 	})
+	api.add(http.MethodPost, "/api/service/renew-drain", func(r *http.Request) (any, int, error) {
+		if api.options.ServiceControl == nil {
+			return nil, 0, domainerr.NotFound("service")
+		}
+		return api.options.ServiceControl.RenewDrain(r.Context()), http.StatusOK, nil
+	})
 	api.add(http.MethodPost, "/api/service/cancel-drain", func(r *http.Request) (any, int, error) {
 		if api.options.ServiceControl == nil {
 			return nil, 0, domainerr.NotFound("service")

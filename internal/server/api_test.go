@@ -164,6 +164,7 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 		"POST /api/projects/:projectId/files",
 		"POST /api/service/cancel-drain",
 		"POST /api/service/drain",
+		"POST /api/service/renew-drain",
 		"POST /api/service/shutdown",
 	}
 	gotNativeRoutes := slices.Clone(api.routes)

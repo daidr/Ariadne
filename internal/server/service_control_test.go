@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -278,5 +279,129 @@ func TestIsUserWriteProcedureClassification(t *testing.T) {
 		if isUserWriteProcedure(proc) {
 			t.Fatalf("expected %q NOT to count as user write activity", proc)
 		}
+	}
+}
+
+func TestServiceStatusReadOnlyAndExplicitRenewDrain(t *testing.T) {
+	t.Parallel()
+	repo, err := core.Open(t.Context(), core.Options{Path: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	slots, reserved := 1, 0
+	sched, err := scheduler.New(scheduler.Options{
+		Repository:    repo,
+		Slots:         &slots,
+		ReservedSlots: &reserved,
+		Run:           func(ctx context.Context, conv core.ConversationView) error { return nil },
+		OnError:       func(err error) { t.Error(err) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sched.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(ctx)
+	}()
+
+	var nowMu sync.Mutex
+	fakeNow := time.Date(2026, 11, 26, 4, 0, 0, 0, time.UTC)
+	advance := func(d time.Duration) {
+		nowMu.Lock()
+		fakeNow = fakeNow.Add(d)
+		nowMu.Unlock()
+	}
+	getNow := func() time.Time {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		return fakeNow
+	}
+
+	ctrl := service.NewController(service.ControllerOptions{
+		Runtime:       service.RuntimeInfo{PID: 23456, Version: "0.2.0", Host: "127.0.0.1", Port: 7428, ManagedBy: service.ManagedDirect},
+		Scheduler:     sched,
+		Repository:    repo,
+		Now:           getNow,
+		DrainLeaseTTL: 100 * time.Millisecond,
+		PollInterval:  20 * time.Millisecond,
+	})
+	defer ctrl.Close()
+
+	api, err := New(Options{
+		Repository:     repo,
+		Token:          "secret-token",
+		ServiceControl: ctrl,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	client := service.NewClient(srv.URL, "secret-token")
+	client.HTTP = srv.Client()
+
+	if _, err := client.BeginDrain(t.Context(), service.DrainRequest{
+		Mode:         service.DrainModeSafePoint,
+		Action:       service.ActionRestart,
+		AutoShutdown: false,
+		LeaseMs:      100,
+	}); err != nil {
+		t.Fatalf("BeginDrain: %v", err)
+	}
+
+	// Explicit RenewDrain at t+70ms extends the lease to t+170ms.
+	advance(70 * time.Millisecond)
+	renewed, err := client.RenewDrain(t.Context())
+	if err != nil || !renewed.Draining {
+		t.Fatalf("RenewDrain: snap=%+v err=%v", renewed, err)
+	}
+	advance(70 * time.Millisecond) // t+140ms (< t+170ms)
+	time.Sleep(40 * time.Millisecond)
+	if !sched.IsDraining() {
+		t.Fatal("expected drain active after RenewDrain")
+	}
+
+	// Read-only GET /api/service/status at t+140ms must NOT extend the lease to t+240ms.
+	cur, err := client.Status(t.Context())
+	if err != nil || !cur.Draining {
+		t.Fatalf("Status: snap=%+v err=%v", cur, err)
+	}
+	advance(50 * time.Millisecond) // t+190ms (>= t+170ms, < t+240ms)
+	deadline := time.Now().Add(2 * time.Second)
+	for sched.IsDraining() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if sched.IsDraining() {
+		t.Fatal("expected drain lease to expire despite read-only GET /api/service/status calls")
+	}
+
+	// Verify Client.RenewDrain gracefully falls back to GET /api/service/status on older servers returning 404.
+	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/service/renew-drain" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == "/api/service/status" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"pid":99,"version":"0.1.0-alpha.23","draining":true}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer legacy.Close()
+	legacyClient := service.NewClient(legacy.URL, "secret-token")
+	legacyClient.HTTP = legacy.Client()
+	fallback, err := legacyClient.RenewDrain(t.Context())
+	if err != nil || fallback == nil || fallback.PID != 99 || !fallback.Draining {
+		t.Fatalf("expected 404 fallback to Status, got snap=%+v err=%v", fallback, err)
 	}
 }

@@ -47,6 +47,10 @@ type ControllerOptions struct {
 // Controller coordinates non-blocking idle-watch restart, immediate restart,
 // leased external drain, and controlled shutdown/restart for a running Ariadne server.
 type Controller struct {
+	// transitionMu serializes Controller drain/shutdown state transitions with
+	// Scheduler drain synchronization. Always acquire transitionMu before mu and
+	// never acquire transitionMu inside callbacks or read-only helpers.
+	transitionMu              sync.Mutex
 	mu                        sync.Mutex
 	runtime                   RuntimeInfo
 	canRestart                bool
@@ -63,7 +67,6 @@ type Controller struct {
 	onStateChange             func(RestartState)
 
 	lastUserActivity atomic.Int64
-	workIdleSince    atomic.Int64
 	wakeCh           chan struct{}
 
 	draining       bool
@@ -75,6 +78,7 @@ type Controller struct {
 	watchCancel    context.CancelFunc
 	leaseTTL       time.Duration
 	leaseExpiresAt time.Time
+	workIdleSince  time.Time
 	shuttingDown   bool
 }
 
@@ -182,7 +186,27 @@ func (c *Controller) activeBackgroundCount() int {
 	if c.background == nil {
 		return 0
 	}
-	return len(c.background.ListRunning())
+	count := 0
+	for _, cmd := range c.background.ListRunning() {
+		if !cmd.Keep {
+			count++
+		}
+	}
+	return count
+}
+
+func (c *Controller) setWorkIdleSince(gen uint64, t time.Time) {
+	c.mu.Lock()
+	if c.watchGen == gen {
+		c.workIdleSince = t
+	}
+	c.mu.Unlock()
+}
+
+func (c *Controller) getWorkIdleSince() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.workIdleSince
 }
 
 func (c *Controller) phaseLocked() string {
@@ -232,11 +256,18 @@ func (c *Controller) emitStateChange(activeTurns int) {
 	}
 }
 
-func (c *Controller) Snapshot(ctx context.Context) StatusSnapshot {
+// RenewDrain explicitly extends an active client-held drain lease and returns the latest snapshot.
+func (c *Controller) RenewDrain(ctx context.Context) StatusSnapshot {
 	c.mu.Lock()
-	if c.draining && !c.autoShutdown && c.leaseTTL > 0 {
+	if c.draining && !c.autoShutdown && !c.shuttingDown && c.leaseTTL > 0 {
 		c.leaseExpiresAt = c.now().Add(c.leaseTTL)
 	}
+	c.mu.Unlock()
+	return c.Snapshot(ctx)
+}
+
+func (c *Controller) Snapshot(ctx context.Context) StatusSnapshot {
+	c.mu.Lock()
 	snap := StatusSnapshot{
 		PID:              c.runtime.PID,
 		Version:          c.runtime.Version,
@@ -295,6 +326,7 @@ func (c *Controller) Snapshot(ctx context.Context) StatusSnapshot {
 				ID:        cmd.ID,
 				ThreadID:  cmd.ThreadID,
 				Command:   cmd.Command,
+				Keep:      cmd.Keep,
 				StartedAt: cmd.StartedAt,
 			})
 		}
@@ -333,9 +365,11 @@ func (c *Controller) BeginDrain(ctx context.Context, req DrainRequest) (StatusSn
 		leaseTTL = time.Duration(req.LeaseMs) * time.Millisecond
 	}
 
+	c.transitionMu.Lock()
 	c.mu.Lock()
 	if c.shuttingDown {
 		c.mu.Unlock()
+		c.transitionMu.Unlock()
 		return c.Snapshot(ctx), nil
 	}
 	if c.watchCancel != nil {
@@ -351,6 +385,7 @@ func (c *Controller) BeginDrain(ctx context.Context, req DrainRequest) (StatusSn
 	c.autoShutdown = autoShutdown
 	c.leaseTTL = 0
 	c.leaseExpiresAt = time.Time{}
+	c.workIdleSince = time.Time{}
 
 	var watchCtx context.Context
 	if c.autoShutdown {
@@ -377,8 +412,6 @@ func (c *Controller) BeginDrain(ctx context.Context, req DrainRequest) (StatusSn
 			sched.CancelDrain()
 		}
 	}
-	c.emitStateChange(c.activeTurnCount())
-
 	if watchCtx != nil {
 		if autoShutdown {
 			go c.watchAndShutdown(watchCtx, gen, mode, action, waitBg, quietWindow, req.ImmediateIfIdle)
@@ -386,6 +419,9 @@ func (c *Controller) BeginDrain(ctx context.Context, req DrainRequest) (StatusSn
 			go c.watchDrainLease(watchCtx, gen)
 		}
 	}
+	c.transitionMu.Unlock()
+
+	c.emitStateChange(c.activeTurnCount())
 	return c.Snapshot(ctx), nil
 }
 
@@ -395,9 +431,11 @@ func (c *Controller) CancelDrain(ctx context.Context) StatusSnapshot {
 }
 
 func (c *Controller) cancelDrainGen(expectedGen uint64) bool {
+	c.transitionMu.Lock()
 	c.mu.Lock()
-	if expectedGen != 0 && c.watchGen != expectedGen {
+	if c.shuttingDown || (expectedGen != 0 && c.watchGen != expectedGen) {
 		c.mu.Unlock()
+		c.transitionMu.Unlock()
 		return false
 	}
 	if c.watchCancel != nil {
@@ -412,12 +450,46 @@ func (c *Controller) cancelDrainGen(expectedGen uint64) bool {
 	c.autoShutdown = false
 	c.leaseTTL = 0
 	c.leaseExpiresAt = time.Time{}
+	c.workIdleSince = time.Time{}
 	sched := c.scheduler
 	c.mu.Unlock()
 
 	if sched != nil {
 		sched.CancelDrain()
 	}
+	c.transitionMu.Unlock()
+	c.emitStateChange(c.activeTurnCount())
+	return true
+}
+
+func (c *Controller) expireDrainLease(gen uint64) bool {
+	c.transitionMu.Lock()
+	c.mu.Lock()
+	if c.watchGen != gen || !c.draining || c.autoShutdown || c.shuttingDown || c.leaseExpiresAt.IsZero() || c.now().Before(c.leaseExpiresAt) {
+		c.mu.Unlock()
+		c.transitionMu.Unlock()
+		return false
+	}
+	if c.watchCancel != nil {
+		c.watchCancel()
+		c.watchCancel = nil
+	}
+	c.watchGen++
+	c.draining = false
+	c.drainMode = ""
+	c.drainAction = ""
+	c.waitBackground = false
+	c.autoShutdown = false
+	c.leaseTTL = 0
+	c.leaseExpiresAt = time.Time{}
+	c.workIdleSince = time.Time{}
+	sched := c.scheduler
+	c.mu.Unlock()
+
+	if sched != nil {
+		sched.CancelDrain()
+	}
+	c.transitionMu.Unlock()
 	c.emitStateChange(c.activeTurnCount())
 	return true
 }
@@ -428,36 +500,45 @@ func (c *Controller) RequestShutdown(req ShutdownRequest) error {
 			return ErrBusy
 		}
 	}
-	c.triggerShutdown(req.Restart)
+	c.triggerShutdownGen(0, req.Restart)
 	return nil
 }
 
 func (c *Controller) Close() {
+	c.transitionMu.Lock()
 	c.mu.Lock()
+	c.watchGen++
 	if c.watchCancel != nil {
 		c.watchCancel()
 		c.watchCancel = nil
 	}
+	c.workIdleSince = time.Time{}
 	c.mu.Unlock()
+	c.transitionMu.Unlock()
 }
 
 func (c *Controller) markRestarting(gen uint64) bool {
+	c.transitionMu.Lock()
 	c.mu.Lock()
 	if c.watchGen != gen || c.shuttingDown {
 		c.mu.Unlock()
+		c.transitionMu.Unlock()
 		return false
 	}
 	c.drainMode = DrainModeNow
 	c.mu.Unlock()
+	c.transitionMu.Unlock()
 	c.emitStateChange(c.activeTurnCount())
 	return true
 }
 
-func (c *Controller) triggerShutdown(restart bool) {
+func (c *Controller) triggerShutdownGen(expectedGen uint64, restart bool) bool {
+	c.transitionMu.Lock()
 	c.mu.Lock()
-	if c.shuttingDown {
+	if c.shuttingDown || (expectedGen != 0 && c.watchGen != expectedGen) {
 		c.mu.Unlock()
-		return
+		c.transitionMu.Unlock()
+		return false
 	}
 	c.shuttingDown = true
 	if c.watchCancel != nil {
@@ -466,10 +547,12 @@ func (c *Controller) triggerShutdown(restart bool) {
 	}
 	cb := c.onShutdown
 	c.mu.Unlock()
+	c.transitionMu.Unlock()
 	c.emitStateChange(c.activeTurnCount())
 	if cb != nil {
 		cb(restart)
 	}
+	return true
 }
 
 func (c *Controller) watchDrainLease(ctx context.Context, gen uint64) {
@@ -495,8 +578,7 @@ func (c *Controller) watchDrainLease(ctx context.Context, gen uint64) {
 			c.mu.Lock()
 			expired := c.watchGen == gen && c.draining && !c.autoShutdown && !c.leaseExpiresAt.IsZero() && !c.now().Before(c.leaseExpiresAt)
 			c.mu.Unlock()
-			if expired {
-				c.cancelDrainGen(gen)
+			if expired && c.expireDrainLease(gen) {
 				return
 			}
 		}
@@ -553,47 +635,55 @@ func (c *Controller) watchAndShutdown(
 		if !c.waitShutdownDelay(ctx) {
 			return
 		}
-		c.triggerShutdown(restart)
+		c.triggerShutdownGen(gen, restart)
 		return
 	}
 
 	if mode == DrainModeWhenIdle {
 		tryLockAndRestart := func(checkUserActivity bool) bool {
+			// Phase 1: atomically verify generation ownership, lock the scheduler if idle,
+			// re-check work/user activity, and transition drainMode to DrainModeNow.
+			c.transitionMu.Lock()
+			c.mu.Lock()
+			valid := c.watchGen == gen && !c.shuttingDown && ctx.Err() == nil
+			c.mu.Unlock()
+			if !valid {
+				c.transitionMu.Unlock()
+				return false
+			}
 			if c.scheduler != nil && !c.scheduler.TryDrainIfIdle(scheduler.DrainSafePoint) {
+				c.transitionMu.Unlock()
 				return false
 			}
-			if !c.isWorkIdle(ctx, waitBackground) {
+			if !c.isWorkIdle(ctx, waitBackground) || (checkUserActivity && !c.LastUserActivity().IsZero() && c.now().Sub(c.LastUserActivity()) < quietWindow) || ctx.Err() != nil {
 				if c.scheduler != nil {
 					c.scheduler.CancelDrain()
 				}
+				c.transitionMu.Unlock()
 				return false
 			}
-			if checkUserActivity {
-				if lastAct := c.LastUserActivity(); !lastAct.IsZero() && c.now().Sub(lastAct) < quietWindow {
-					if c.scheduler != nil {
-						c.scheduler.CancelDrain()
-					}
-					return false
-				}
-			}
-			if !c.markRestarting(gen) {
-				if c.scheduler != nil {
-					c.scheduler.CancelDrain()
-				}
+			c.mu.Lock()
+			if c.watchGen != gen || c.shuttingDown {
+				c.mu.Unlock()
+				c.transitionMu.Unlock()
 				return false
 			}
+			c.drainMode = DrainModeNow
+			c.mu.Unlock()
+			c.transitionMu.Unlock()
+			c.emitStateChange(c.activeTurnCount())
+
+			// Phase 2: brief grace delay for UI status broadcast; only roll back if
+			// this generation is still active (never clobber a newer BeginDrain).
 			if !c.waitShutdownDelay(ctx) {
-				if c.scheduler != nil {
-					c.scheduler.CancelDrain()
-				}
+				c.cancelDrainGen(gen)
 				return false
 			}
-			c.triggerShutdown(restart)
-			return true
+			return c.triggerShutdownGen(gen, restart)
 		}
 
 		if immediateIfIdle && c.isWorkIdle(ctx, waitBackground) {
-			if tryLockAndRestart(false) {
+			if tryLockAndRestart(false) || ctx.Err() != nil {
 				return
 			}
 		}
@@ -604,8 +694,8 @@ func (c *Controller) watchAndShutdown(
 		}
 		ticker := time.NewTicker(poll)
 		defer ticker.Stop()
-		defer c.workIdleSince.Store(0)
-		c.workIdleSince.Store(0)
+		defer c.setWorkIdleSince(gen, time.Time{})
+		c.setWorkIdleSince(gen, time.Time{})
 		var workIdleSince time.Time
 		lastBg := c.activeBackgroundCount()
 		for {
@@ -617,22 +707,22 @@ func (c *Controller) watchAndShutdown(
 				now := c.now()
 				if workIdleSince.IsZero() {
 					workIdleSince = now
-					c.workIdleSince.Store(now.UnixNano())
+					c.setWorkIdleSince(gen, now)
 				}
 				effectiveStart := workIdleSince
 				if lastAct := c.LastUserActivity(); !lastAct.IsZero() && lastAct.After(effectiveStart) {
 					effectiveStart = lastAct
 				}
 				if now.Sub(effectiveStart) >= quietWindow {
-					if tryLockAndRestart(true) {
+					if tryLockAndRestart(true) || ctx.Err() != nil {
 						return
 					}
 					workIdleSince = time.Time{}
-					c.workIdleSince.Store(0)
+					c.setWorkIdleSince(gen, time.Time{})
 				}
 			} else {
 				workIdleSince = time.Time{}
-				c.workIdleSince.Store(0)
+				c.setWorkIdleSince(gen, time.Time{})
 			}
 			select {
 			case <-ctx.Done():
@@ -643,7 +733,7 @@ func (c *Controller) watchAndShutdown(
 		}
 	}
 
-	// Safe-point or turn drain: wait until active turns (and optional background commands) drain to 0.
+	// Safe-point or turn drain: wait until active turns (and optional non-keep background commands) drain to 0.
 	if c.scheduler != nil {
 		if err := c.scheduler.WaitIdle(ctx); err != nil {
 			return
@@ -653,15 +743,16 @@ func (c *Controller) watchAndShutdown(
 		ticker := time.NewTicker(c.pollInterval)
 		defer ticker.Stop()
 		lastBg := c.activeBackgroundCount()
-		for len(c.background.ListRunning()) > 0 {
-			if bg := c.activeBackgroundCount(); bg != lastBg {
-				lastBg = bg
-				c.emitStateChange(c.activeTurnCount())
-			}
+		for lastBg > 0 {
 			select {
 			case <-ctx.Done():
 				return
+			case <-c.wakeCh:
 			case <-ticker.C:
+			}
+			if bg := c.activeBackgroundCount(); bg != lastBg {
+				lastBg = bg
+				c.emitStateChange(c.activeTurnCount())
 			}
 		}
 	}
@@ -674,14 +765,14 @@ func (c *Controller) watchAndShutdown(
 	if !c.waitShutdownDelay(ctx) {
 		return
 	}
-	c.triggerShutdown(restart)
+	c.triggerShutdownGen(gen, restart)
 }
 
 func (c *Controller) isWorkIdle(ctx context.Context, waitBackground bool) bool {
 	if c.scheduler != nil && c.scheduler.ActiveCount() > 0 {
 		return false
 	}
-	if waitBackground && c.background != nil && len(c.background.ListRunning()) > 0 {
+	if waitBackground && c.activeBackgroundCount() > 0 {
 		return false
 	}
 	if c.repository != nil {

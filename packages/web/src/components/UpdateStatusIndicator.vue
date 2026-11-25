@@ -47,7 +47,9 @@ const popoverTitle = computed(() => {
   if (phase.value === 'restarting') return t('updates.header.titleRestarting')
   if (phase.value === 'draining') return t('updates.header.titleDraining')
   const version = status.value?.release?.version
-  if (version) return t('updates.header.titleReady', { version })
+  if (status.value?.state === 'ready' && version) {
+    return t('updates.header.titleReady', { version })
+  }
   return triggerLabel.value
 })
 
@@ -58,8 +60,8 @@ watch(open, (opened) => {
   }
 })
 
-watch([phase, hasActive], ([nextPhase, active]) => {
-  if (nextPhase === 'restarting' || !active) {
+watch([phase, hasActive, restartable], ([nextPhase, active, canRestartNow]) => {
+  if (nextPhase === 'restarting' || !active || !canRestartNow) {
     confirmingNow.value = false
   }
 })
@@ -102,6 +104,7 @@ function restartWhenIdle() {
 }
 
 function requestRestartNow() {
+  if (!restartable.value) return
   if (hasActive.value && !confirmingNow.value) {
     confirmingNow.value = true
     error.value = null
@@ -204,6 +207,7 @@ function openUpdateSettings() {
           </template>
           <template v-else-if="phase === 'waiting_idle'">
             <DouButton
+              v-if="restartable"
               size="sm"
               tone="primary"
               :loading="busy === 'now'"

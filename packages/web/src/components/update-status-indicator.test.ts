@@ -160,4 +160,42 @@ describe('UpdateStatusIndicator', () => {
     await flushPromises()
     expect(cancelSpy).toHaveBeenCalledTimes(1)
   })
+
+  test('hides restartNow in waiting_idle when not restartable and only shows titleReady when state is ready', async () => {
+    // Case 1: waiting_idle triggered via CLI while an available (not yet installed) update exists.
+    state.updateStatus = makeStatus({
+      state: 'available',
+      canRestart: true,
+      restarting: true,
+      restartPhase: 'waiting_idle',
+      activeTurns: 1,
+    })
+
+    const { wrapper } = mountIndicator()
+    await nextTick()
+
+    await wrapper.get('button').trigger('click')
+    await nextTick()
+
+    const popover = document.body.querySelector('.dou-popover')
+    expect(popover).toBeTruthy()
+    expect(popover!.textContent).toContain(t('updates.header.waitingIdle'))
+    expect(popover!.textContent).not.toContain(
+      t('updates.header.titleReady', { version: '0.1.0-alpha.24' }),
+    )
+    expect(findPopoverButton(t('updates.restartNow'))).toBeUndefined()
+    expect(findPopoverButton(t('updates.cancelRestart'))).toBeTruthy()
+
+    // Case 2: ready update on a direct (non-restartable) instance in waiting_idle (e.g. CLI stop --when-idle).
+    state.updateStatus = makeStatus({
+      state: 'ready',
+      canRestart: false,
+      restarting: true,
+      restartPhase: 'waiting_idle',
+      activeTurns: 0,
+    })
+    await nextTick()
+    expect(findPopoverButton(t('updates.restartNow'))).toBeUndefined()
+    expect(findPopoverButton(t('updates.cancelRestart'))).toBeTruthy()
+  })
 })

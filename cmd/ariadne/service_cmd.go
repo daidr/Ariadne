@@ -443,7 +443,7 @@ func drainBeforeShutdown(ctx context.Context, client *service.Client, action str
 				cancelDrain()
 				return nil, fmt.Errorf("timed out after %s waiting for active sessions to drain; scheduling resumed (use --when-idle or --force)", timeout)
 			}
-			cur, err := client.Status(ctx)
+			cur, err := client.RenewDrain(ctx)
 			if err != nil {
 				// Server may have exited externally.
 				return nil, fmt.Errorf("lost connection to Ariadne while draining: %w", err)
