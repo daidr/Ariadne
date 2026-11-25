@@ -1,5 +1,13 @@
 # 更新日志
 
+## 0.1.0-alpha.23 (2026-11-25)
+
+- Merge pull request #248 from daidr/ariadne/5ef7c6071e43
+- fix(web): 修复设置弹窗模型行按钮换行与展开详情表单排版
+- chore(web): 升级 DouUI 至 0.1.0-alpha.27 并接入 Dock 合并与按需截断提示 (#246)
+- feat(runner,local,agentruntime,settings): 落地 7 项 Agent Harness 工具与运行时优化 (#245)
+- Merge pull request #230 from daidr/release/alpha
+
 ## 0.1.0-alpha.22 (2026-11-24)
 
 - fix(local,runner,workspaces): 修复多仓内嵌 Submodule 与无共同祖先场景 Diff 及清理异常 (#244)
