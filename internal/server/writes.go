@@ -10,6 +10,9 @@ import (
 
 func (api *API) registerWrites() {
 	api.add("POST", "/api/projects/:projectId/files", func(r *http.Request) (any, int, error) {
+		if api.options.ServiceControl != nil {
+			api.options.ServiceControl.RecordUserActivity()
+		}
 		forMessage := r.URL.Query().Get("for") == "message"
 		limit := files.MaxImageBytes
 		if forMessage {

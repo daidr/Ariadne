@@ -34,6 +34,7 @@ describe('useStreamStatusToast', () => {
   afterEach(() => {
     toast.closeAll()
     state.stream = 'connecting'
+    state.updateStatus = null
     setLocale('zh-CN')
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
@@ -194,5 +195,31 @@ describe('useStreamStatusToast', () => {
     wrapper.unmount()
     await nextTick()
     expect(toastItems()).toHaveLength(0)
+  })
+
+  test('shows restarting message instead of connection error while server is restarting', async () => {
+    state.updateStatus = {
+      version: '0.1.0-alpha.23',
+      preferences: { channel: 'preview', automatic: true },
+      canInstall: true,
+      canRestart: true,
+      restarting: true,
+      restartPhase: 'restarting',
+      activeTurns: 0,
+      activeBackground: 0,
+      state: 'ready',
+      downloadPercent: 0,
+      release: null,
+    }
+    const { wrapper } = mountHost()
+    state.stream = 'lost'
+    await nextTick()
+
+    const items = toastItems()
+    expect(items).toHaveLength(1)
+    expect(items[0]?.classList.contains('dou-toast--primary')).toBe(true)
+    expect(items[0]?.textContent).toContain(t('updates.restarting'))
+
+    wrapper.unmount()
   })
 })

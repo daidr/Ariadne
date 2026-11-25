@@ -2,7 +2,8 @@
 import type { ArtifactSummary, BackgroundView } from '@ariadne/core'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { api } from '../api'
+import { nextTick } from 'vue'
+import { api, type UpdateStatus } from '../api'
 import { locale } from '../i18n'
 import { openThread, state, stopBackground } from '../store'
 import BackgroundCommand from './BackgroundCommand.vue'
@@ -17,6 +18,7 @@ vi.mock('../store', async () => {
   const mockState = reactive({
     stream: 'open',
     detail: null as { threads: { id: string }[] } | null,
+    updateStatus: null as UpdateStatus | null,
   })
   return {
     state: mockState,
@@ -362,4 +364,50 @@ test('shows reviewing status in the activity slot with reviewer shortcut and low
   await wrapper.setProps({ queued: false })
   expect(wrapper.text()).toContain('AI 审阅中 · 第 2 轮')
   expect(wrapper.find('button').exists()).toBe(false)
+})
+
+test('distinguishes draining and restarting queue reasons from concurrency slot queuing', async () => {
+  state.updateStatus = null
+  const wrapper = mount(ConversationActivity, {
+    props: {
+      conversationId: 'thr-1',
+      working: false,
+      queued: true,
+      live: null,
+      activity: '',
+      elapsed: '',
+      escArmed: false,
+      wait: null,
+    },
+    global,
+  })
+  wrappers.push(wrapper)
+
+  expect(wrapper.text()).toContain('排队中，有空位就开始')
+
+  state.updateStatus = {
+    version: '0.1.0',
+    preferences: { channel: 'stable', automatic: true },
+    canInstall: true,
+    canRestart: true,
+    restarting: true,
+    restartPhase: 'waiting_idle',
+    activeTurns: 1,
+    activeBackground: 0,
+    state: 'ready',
+    downloadPercent: 0,
+    release: null,
+  }
+  await nextTick()
+  expect(wrapper.text()).toContain('排队中，有空位就开始')
+
+  state.updateStatus = { ...state.updateStatus, restartPhase: 'draining' }
+  await nextTick()
+  expect(wrapper.text()).toContain('服务正在排空等待重启')
+
+  state.updateStatus = { ...state.updateStatus, restartPhase: 'restarting' }
+  await nextTick()
+  expect(wrapper.text()).toContain('服务正在重启')
+
+  state.updateStatus = null
 })

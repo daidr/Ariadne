@@ -23,12 +23,17 @@ const {
   installable,
   installLabel,
   restartable,
-  restarting,
+  restartPhase,
+  hasActiveWork,
+  confirmingRestartNow,
+  restartNowWarning,
   check,
   setChannel,
   setAutomatic,
   install,
   restart,
+  requestRestartNow,
+  dismissRestartNowConfirm,
   cancelRestart,
   load,
 } = useUpdatesSettings()
@@ -79,7 +84,7 @@ function releaseNoteURL(address: string, kind: MarkdownUrlKind) {
           @update:model-value="setAutomatic"
         />
       </div>
-      <div v-if="status.state !== 'ready'" class="update-actions">
+      <div v-if="status.state !== 'ready' && restartPhase === ''" class="update-actions">
         <DouButton
           class="update-action"
           size="sm"
@@ -101,27 +106,100 @@ function releaseNoteURL(address: string, kind: MarkdownUrlKind) {
           <span aria-live="polite">{{ installLabel }}</span>
         </DouButton>
       </div>
-      <div v-else-if="restartable" class="update-actions">
-        <DouButton
-          v-if="!restarting"
-          class="update-action"
-          size="sm"
-          tone="primary"
-          :disabled="busy"
-          @click="restart"
-        >
-          {{ t('updates.restart') }}
-        </DouButton>
-        <DouButton
-          v-else
-          class="update-action"
-          size="sm"
-          :disabled="pending === 'cancelRestart'"
-          :loading="pending === 'cancelRestart'"
-          @click="cancelRestart"
-        >
-          {{ t('updates.cancelRestart') }}
-        </DouButton>
+      <div
+        v-else-if="restartable || restartPhase === 'draining' || restartPhase === 'waiting_idle'"
+        class="update-restart-section"
+      >
+        <div v-if="confirmingRestartNow && restartNowWarning" class="update-confirm-box">
+          <DouText size="sm">{{ restartNowWarning }}</DouText>
+          <div class="update-actions">
+            <DouButton
+              class="update-action"
+              size="sm"
+              tone="danger"
+              :disabled="busy"
+              :loading="pending === 'restartNow'"
+              @click="restart('now')"
+            >
+              {{ t('updates.restartNowConfirm') }}
+            </DouButton>
+            <DouButton
+              class="update-action"
+              size="sm"
+              variant="ghost"
+              :disabled="busy"
+              @click="dismissRestartNowConfirm"
+            >
+              {{ t('settings.cancel') }}
+            </DouButton>
+          </div>
+        </div>
+        <div v-else-if="restartPhase === 'draining'" class="update-actions">
+          <DouButton
+            class="update-action"
+            size="sm"
+            tone="primary"
+            :disabled="pending === 'cancelRestart'"
+            :loading="pending === 'cancelRestart'"
+            @click="cancelRestart"
+          >
+            {{ t('updates.cancelDrain') }}
+          </DouButton>
+          <DouButton
+            v-if="restartable"
+            class="update-action"
+            size="sm"
+            :disabled="busy"
+            :loading="pending === 'restartNow'"
+            @click="requestRestartNow"
+          >
+            {{ t('updates.restartNow') }}
+          </DouButton>
+        </div>
+        <div v-else-if="restartPhase === 'waiting_idle'" class="update-actions">
+          <DouButton
+            v-if="restartable"
+            class="update-action"
+            size="sm"
+            tone="primary"
+            :disabled="busy"
+            :loading="pending === 'restartNow'"
+            @click="requestRestartNow"
+          >
+            {{ t('updates.restartNow') }}
+          </DouButton>
+          <DouButton
+            class="update-action"
+            size="sm"
+            :disabled="pending === 'cancelRestart'"
+            :loading="pending === 'cancelRestart'"
+            @click="cancelRestart"
+          >
+            {{ t('updates.cancelRestart') }}
+          </DouButton>
+        </div>
+        <div v-else-if="restartPhase === '' && restartable" class="update-actions">
+          <DouButton
+            class="update-action"
+            size="sm"
+            tone="primary"
+            :disabled="busy"
+            :loading="pending === 'restart'"
+            @click="restart('when-idle')"
+          >
+            {{ hasActiveWork ? t('updates.restart') : t('updates.restartApply') }}
+          </DouButton>
+          <DouButton
+            v-if="hasActiveWork"
+            class="update-action"
+            size="sm"
+            :disabled="busy"
+            :loading="pending === 'restartNow'"
+            @click="requestRestartNow"
+          >
+            {{ t('updates.restartNow') }}
+          </DouButton>
+        </div>
       </div>
     </template>
     <DouText
@@ -168,8 +246,23 @@ function releaseNoteURL(address: string, kind: MarkdownUrlKind) {
 .update-row,
 .update-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.update-restart-section,
+.update-confirm-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.update-confirm-box {
+  padding: 10px 12px;
+  border: 1px solid var(--dou-color-border-subtle);
+  border-radius: var(--dou-radius-control);
+  background: var(--dou-color-bg-muted);
 }
 
 .update-row {

@@ -3,7 +3,8 @@ import type { LiveCommand as Command, ThreadView } from '@ariadne/core'
 import { DouButton, DouShimmer, DouStatusDot, DouText } from 'dou-ui'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { openThread, threadsById } from '../store'
+import { openThread, state, threadsById } from '../store'
+import { effectiveRestartPhase } from '../update-restart'
 import LiveCommand from './LiveCommand.vue'
 import WaitStatus from './WaitStatus.vue'
 
@@ -26,6 +27,12 @@ const reviewerId = computed(() => {
   const id = props.reviewing?.reviewing ? props.reviewing.reviewerId : null
   return id && threadsById.value.has(id) ? id : null
 })
+const restartPhase = computed(() => effectiveRestartPhase(state.updateStatus))
+const queuedMessage = computed(() => {
+  if (restartPhase.value === 'draining') return t('conversation.queuedDraining')
+  if (restartPhase.value === 'restarting') return t('conversation.queuedRestarting')
+  return t('conversation.queued')
+})
 </script>
 
 <template>
@@ -42,8 +49,13 @@ const reviewerId = computed(() => {
         {{ t('conversation.escAgain') }}
       </DouText>
     </div>
-    <DouText v-else-if="queued" variant="secondary" size="sm" role="status">
-      {{ t('conversation.queued') }}
+    <DouText v-else-if="queued" variant="secondary" size="sm" class="activity-main" role="status">
+      <DouStatusDot
+        v-if="restartPhase === 'draining' || restartPhase === 'restarting'"
+        tone="warning"
+        :ripple="restartPhase === 'restarting'"
+      />
+      <span>{{ queuedMessage }}</span>
     </DouText>
     <WaitStatus v-else-if="wait && conversationId" :conversation-id="conversationId" :wait="wait" />
     <div v-else-if="reviewing?.reviewing" class="activity-row" role="status">

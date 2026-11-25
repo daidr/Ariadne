@@ -12,12 +12,15 @@ import { computed, watch } from 'vue'
 import { t } from '../i18n'
 import { useSourceStatus } from '../source-status'
 import { openProjectSettings, showWorkspace, state } from '../store'
+import { hasUpdateIndicator, updateIndicatorLabel, updateIndicatorTone } from '../update-restart'
 import type { WorkspaceLayoutMode } from '../workspace-layout'
 import AriadneLogo from './AriadneLogo.vue'
 import AttentionBar from './AttentionBar.vue'
 import AutopilotSwitch from './AutopilotSwitch.vue'
+import type { SettingsTab } from './ModelSettings.vue'
 import ProjectList from './ProjectList.vue'
 import ProjectSearch from './ProjectSearch.vue'
+import UpdateStatusIndicator from './UpdateStatusIndicator.vue'
 
 const props = defineProps<{
   layoutMode: WorkspaceLayoutMode
@@ -26,7 +29,11 @@ const props = defineProps<{
   sideCollapsed?: boolean
   unauthorized?: boolean
 }>()
-const emit = defineEmits<{ toggleProjects: []; toggleSide: []; openSettings: [] }>()
+const emit = defineEmits<{
+  toggleProjects: []
+  toggleSide: []
+  openSettings: [tab?: SettingsTab]
+}>()
 const projectsPopoverOpen = defineModel<boolean>('projectsPopoverOpen', { default: false })
 
 const { summary } = useSourceStatus()
@@ -74,6 +81,19 @@ const hasSidePane = computed(
     !state.starting &&
     state.main.kind !== 'trace' &&
     !(state.main.kind === 'plan' && state.planWide),
+)
+const mergeUpdateIntoSettings = computed(() => isNarrow.value && !atProjects.value)
+const showSettingsUpdateBadge = computed(
+  () => mergeUpdateIntoSettings.value && hasUpdateIndicator(state.updateStatus),
+)
+const settingsUpdateTone = computed(() => updateIndicatorTone(state.updateStatus))
+const settingsButtonLabel = computed(() =>
+  showSettingsUpdateBadge.value
+    ? `${t('settings.open')} · ${updateIndicatorLabel(state.updateStatus)}`
+    : t('settings.open'),
+)
+const updateIndicatorCompact = computed(
+  () => actionsCompact.value && !(isNarrow.value && atProjects.value),
 )
 
 watch(showMediumProjectPopover, (allowed) => {
@@ -168,14 +188,21 @@ watch(showMediumProjectPopover, (allowed) => {
           </DouButton>
           <DouDivider v-if="!isNarrow" direction="vertical" />
         </template>
+        <UpdateStatusIndicator
+          v-if="!mergeUpdateIntoSettings"
+          :compact="updateIndicatorCompact"
+          @open-settings="emit('openSettings', 'updates')"
+        />
         <DouButton
           variant="ghost"
           size="sm"
-          :aria-label="t('settings.open')"
-          :title="t('settings.open')"
+          :aria-label="settingsButtonLabel"
+          :title="settingsButtonLabel"
           @click="emit('openSettings')"
         >
-          <SettingsIcon aria-hidden="true" />
+          <DouBadge dot :tone="settingsUpdateTone" :hidden="!showSettingsUpdateBadge">
+            <SettingsIcon aria-hidden="true" />
+          </DouBadge>
         </DouButton>
         <DouButton
           v-if="

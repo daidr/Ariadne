@@ -150,19 +150,21 @@ func (x *UpdateRelease) GetInstallable() bool {
 }
 
 type UpdateStatus struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Version         string                 `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
-	Preferences     *UpdatePreferences     `protobuf:"bytes,2,opt,name=preferences,proto3" json:"preferences,omitempty"`
-	CanInstall      bool                   `protobuf:"varint,3,opt,name=can_install,json=canInstall,proto3" json:"can_install,omitempty"`
-	State           string                 `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
-	Release         *UpdateRelease         `protobuf:"bytes,5,opt,name=release,proto3,oneof" json:"release,omitempty"`
-	Failure         *string                `protobuf:"bytes,6,opt,name=failure,proto3,oneof" json:"failure,omitempty"`
-	DownloadPercent int32                  `protobuf:"varint,7,opt,name=download_percent,json=downloadPercent,proto3" json:"download_percent,omitempty"`
-	CanRestart      bool                   `protobuf:"varint,8,opt,name=can_restart,json=canRestart,proto3" json:"can_restart,omitempty"`
-	Restarting      bool                   `protobuf:"varint,9,opt,name=restarting,proto3" json:"restarting,omitempty"`
-	ActiveTurns     int32                  `protobuf:"varint,10,opt,name=active_turns,json=activeTurns,proto3" json:"active_turns,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Version          string                 `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
+	Preferences      *UpdatePreferences     `protobuf:"bytes,2,opt,name=preferences,proto3" json:"preferences,omitempty"`
+	CanInstall       bool                   `protobuf:"varint,3,opt,name=can_install,json=canInstall,proto3" json:"can_install,omitempty"`
+	State            string                 `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
+	Release          *UpdateRelease         `protobuf:"bytes,5,opt,name=release,proto3,oneof" json:"release,omitempty"`
+	Failure          *string                `protobuf:"bytes,6,opt,name=failure,proto3,oneof" json:"failure,omitempty"`
+	DownloadPercent  int32                  `protobuf:"varint,7,opt,name=download_percent,json=downloadPercent,proto3" json:"download_percent,omitempty"`
+	CanRestart       bool                   `protobuf:"varint,8,opt,name=can_restart,json=canRestart,proto3" json:"can_restart,omitempty"`
+	Restarting       bool                   `protobuf:"varint,9,opt,name=restarting,proto3" json:"restarting,omitempty"`
+	ActiveTurns      int32                  `protobuf:"varint,10,opt,name=active_turns,json=activeTurns,proto3" json:"active_turns,omitempty"`
+	RestartPhase     string                 `protobuf:"bytes,11,opt,name=restart_phase,json=restartPhase,proto3" json:"restart_phase,omitempty"`
+	ActiveBackground int32                  `protobuf:"varint,12,opt,name=active_background,json=activeBackground,proto3" json:"active_background,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *UpdateStatus) Reset() {
@@ -261,6 +263,20 @@ func (x *UpdateStatus) GetRestarting() bool {
 func (x *UpdateStatus) GetActiveTurns() int32 {
 	if x != nil {
 		return x.ActiveTurns
+	}
+	return 0
+}
+
+func (x *UpdateStatus) GetRestartPhase() string {
+	if x != nil {
+		return x.RestartPhase
+	}
+	return ""
+}
+
+func (x *UpdateStatus) GetActiveBackground() int32 {
+	if x != nil {
+		return x.ActiveBackground
 	}
 	return 0
 }
@@ -611,6 +627,7 @@ func (x *InstallUpdateResponse) GetStatus() *UpdateStatus {
 
 type RestartToApplyUpdateRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Mode          string                 `protobuf:"bytes,1,opt,name=mode,proto3" json:"mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -643,6 +660,13 @@ func (x *RestartToApplyUpdateRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RestartToApplyUpdateRequest.ProtoReflect.Descriptor instead.
 func (*RestartToApplyUpdateRequest) Descriptor() ([]byte, []int) {
 	return file_ariadne_v1_updates_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *RestartToApplyUpdateRequest) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
 }
 
 type RestartToApplyUpdateResponse struct {
@@ -785,7 +809,7 @@ const file_ariadne_v1_updates_proto_rawDesc = "" +
 	"\n" +
 	"prerelease\x18\x04 \x01(\bR\n" +
 	"prerelease\x12 \n" +
-	"\vinstallable\x18\x05 \x01(\bR\vinstallable\"\xa0\x03\n" +
+	"\vinstallable\x18\x05 \x01(\bR\vinstallable\"\xf2\x03\n" +
 	"\fUpdateStatus\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12?\n" +
 	"\vpreferences\x18\x02 \x01(\v2\x1d.ariadne.v1.UpdatePreferencesR\vpreferences\x12\x1f\n" +
@@ -801,7 +825,9 @@ const file_ariadne_v1_updates_proto_rawDesc = "" +
 	"restarting\x18\t \x01(\bR\n" +
 	"restarting\x12!\n" +
 	"\factive_turns\x18\n" +
-	" \x01(\x05R\vactiveTurnsB\n" +
+	" \x01(\x05R\vactiveTurns\x12#\n" +
+	"\rrestart_phase\x18\v \x01(\tR\frestartPhase\x12+\n" +
+	"\x11active_background\x18\f \x01(\x05R\x10activeBackgroundB\n" +
 	"\n" +
 	"\b_releaseB\n" +
 	"\n" +
@@ -820,8 +846,9 @@ const file_ariadne_v1_updates_proto_rawDesc = "" +
 	"\x14InstallUpdateRequest\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\"I\n" +
 	"\x15InstallUpdateResponse\x120\n" +
-	"\x06status\x18\x01 \x01(\v2\x18.ariadne.v1.UpdateStatusR\x06status\"\x1d\n" +
-	"\x1bRestartToApplyUpdateRequest\"P\n" +
+	"\x06status\x18\x01 \x01(\v2\x18.ariadne.v1.UpdateStatusR\x06status\"1\n" +
+	"\x1bRestartToApplyUpdateRequest\x12\x12\n" +
+	"\x04mode\x18\x01 \x01(\tR\x04mode\"P\n" +
 	"\x1cRestartToApplyUpdateResponse\x120\n" +
 	"\x06status\x18\x01 \x01(\v2\x18.ariadne.v1.UpdateStatusR\x06status\"\x16\n" +
 	"\x14CancelRestartRequest\"I\n" +

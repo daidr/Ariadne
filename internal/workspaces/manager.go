@@ -35,8 +35,9 @@ type Options struct {
 	State        *realtime.State
 	CacheTTL     time.Duration
 	Now          func() time.Time
-	CommandRules func(project string) []commandpolicy.Rule
-	SetupTimeout func(project string) time.Duration
+	CommandRules       func(project string) []commandpolicy.Rule
+	SetupTimeout       func(project string) time.Duration
+	OnBackgroundChange func()
 }
 type connection struct{ caps sdk.Capabilities }
 
@@ -108,6 +109,9 @@ func New(options Options) (*Manager, error) {
 	state := options.State
 	repo := options.Repository
 	manager.Background = background.New(background.Options{OnChange: func(thread string) {
+		if options.OnBackgroundChange != nil {
+			options.OnBackgroundChange()
+		}
 		if state == nil {
 			return
 		}

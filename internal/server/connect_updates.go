@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -108,7 +109,7 @@ func (h *updateServiceHandler) InstallUpdate(
 
 func (h *updateServiceHandler) RestartToApplyUpdate(
 	ctx context.Context,
-	_ *connect.Request[ariadnev1.RestartToApplyUpdateRequest],
+	req *connect.Request[ariadnev1.RestartToApplyUpdateRequest],
 ) (*connect.Response[ariadnev1.RestartToApplyUpdateResponse], error) {
 	updates, err := h.service()
 	if err != nil {
@@ -122,11 +123,28 @@ func (h *updateServiceHandler) RestartToApplyUpdate(
 	if view.State != "ready" {
 		return nil, updateDomainError(update.ErrUnavailable)
 	}
-	if _, err := ctrl.BeginDrain(ctx, service.DrainRequest{
-		Mode:         service.DrainModeSafePoint,
-		Action:       service.ActionRestart,
-		AutoShutdown: true,
-	}); err != nil {
+	mode := textutil.Trim(req.Msg.GetMode())
+	var drainReq service.DrainRequest
+	switch mode {
+	case "", service.DrainModeWhenIdle:
+		drainReq = service.DrainRequest{
+			Mode:            service.DrainModeWhenIdle,
+			Action:          service.ActionRestart,
+			WaitBackground:  true,
+			AutoShutdown:    true,
+			QuietWindowMs:   int64(service.DefaultManualIdleQuietWindow / time.Millisecond),
+			ImmediateIfIdle: true,
+		}
+	case service.DrainModeNow:
+		drainReq = service.DrainRequest{
+			Mode:         service.DrainModeNow,
+			Action:       service.ActionRestart,
+			AutoShutdown: true,
+		}
+	default:
+		return nil, badInput("mode")
+	}
+	if _, err := ctrl.BeginDrain(ctx, drainReq); err != nil {
 		if errors.Is(err, service.ErrCannotRestart) {
 			return nil, domainerr.New("updates.error.cannotRestart", nil)
 		}
@@ -160,12 +178,14 @@ func toProtoUpdateStatus(view update.View) *ariadnev1.UpdateStatus {
 			Channel:   view.Preferences.Channel,
 			Automatic: view.Preferences.Automatic,
 		},
-		CanInstall:      view.CanInstall,
-		State:           view.State,
-		DownloadPercent: int32(view.DownloadPercent),
-		CanRestart:      view.CanRestart,
-		Restarting:      view.Restarting,
-		ActiveTurns:     int32(view.ActiveTurns),
+		CanInstall:       view.CanInstall,
+		State:            view.State,
+		DownloadPercent:  int32(view.DownloadPercent),
+		CanRestart:       view.CanRestart,
+		Restarting:       view.Restarting,
+		ActiveTurns:      int32(view.ActiveTurns),
+		RestartPhase:     view.RestartPhase,
+		ActiveBackground: int32(view.ActiveBackground),
 	}
 	if view.Release != nil {
 		out.Release = &ariadnev1.UpdateRelease{

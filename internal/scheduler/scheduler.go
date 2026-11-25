@@ -1,5 +1,5 @@
 // Package scheduler starts at most one turn per conversation. Only workers
-// consume global or project slots; coordinators have independent capacity.
+// consume global slots; coordinators have independent capacity.
 package scheduler
 
 import (
@@ -274,33 +274,9 @@ func (scheduler *Scheduler) fill() error {
 	if err != nil {
 		return err
 	}
-	caps := map[string]*int{}
 	for _, conversation := range pending {
 		if active[conversation.ID] {
 			continue
-		}
-		if conversation.Role != "coordinator" {
-			if _, known := caps[conversation.ProjectID]; !known {
-				project, err := repo.GetProject(scheduler.ctx, conversation.ProjectID)
-				if err != nil {
-					var domain *domainerr.Error
-					if !errors.As(err, &domain) || domain.Key != "error.notFound" {
-						return err
-					}
-					continue
-				}
-				var cap *int
-				if project.Slots != nil {
-					if value, ok := project.Slots.(int64); ok {
-						n := int(value)
-						cap = &n
-					} else if value, ok := project.Slots.(float64); ok {
-						n := int(value)
-						cap = &n
-					}
-				}
-				caps[conversation.ProjectID] = cap
-			}
 		}
 		user := false
 		if conversation.Role != "coordinator" {
@@ -320,7 +296,7 @@ func (scheduler *Scheduler) fill() error {
 		}
 		reserved := false
 		if conversation.Role != "coordinator" {
-			general, extra, projectUsed := 0, 0, 0
+			general, extra := 0, 0
 			for _, run := range scheduler.running {
 				if run.role == "coordinator" {
 					continue
@@ -329,13 +305,9 @@ func (scheduler *Scheduler) fill() error {
 					extra++
 				} else {
 					general++
-					if run.projectID == conversation.ProjectID {
-						projectUsed++
-					}
 				}
 			}
-			full := caps[conversation.ProjectID] != nil && projectUsed >= *caps[conversation.ProjectID]
-			if general >= scheduler.slots || full {
+			if general >= scheduler.slots {
 				if extra >= scheduler.reservedSlots || !user {
 					scheduler.mu.Unlock()
 					continue

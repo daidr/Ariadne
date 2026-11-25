@@ -177,10 +177,11 @@ func TestCoordinatorsStartWithEveryWorkerSlotOccupied(t *testing.T) {
 		}
 	}
 }
-func TestProjectWorkerCapAndRuntimeSlotChanges(t *testing.T) {
+func TestLegacyProjectSlotsIgnoredAndRuntimeSlotChangesApply(t *testing.T) {
 	t.Parallel()
 	repo := testRepository(t)
 	p := project(t, repo, "P")
+	// Legacy per-project slots values persisted in old databases must not silently cap a project.
 	if _, err := repo.SetProjectSlots(t.Context(), p.ID, intPointer(1)); err != nil {
 		t.Fatal(err)
 	}
@@ -188,23 +189,41 @@ func TestProjectWorkerCapAndRuntimeSlotChanges(t *testing.T) {
 	a, b := worker(t, repo, p.ID, "coordinator"), worker(t, repo, p.ID, "coordinator")
 	starts := make(chan started, 10)
 	scheduler := start(t, repo, 2, 0, blockedRunner(repo, starts))
-	initial := await(t, starts, 2)
-	if initial[a.ID].id == "" || initial[p.CoordinatorID].id == "" || scheduler.IsRunning(b.ID) {
+	initial := await(t, starts, 3)
+	if initial[a.ID].id == "" || initial[b.ID].id == "" || initial[p.CoordinatorID].id == "" {
 		t.Fatal(initial)
 	}
-	if _, err := repo.SetProjectSlots(t.Context(), p.ID, nil); err != nil {
-		t.Fatal(err)
-	}
-	if next := await(t, starts, 1); next[b.ID].id == "" {
-		t.Fatal(next)
-	}
 	c := worker(t, repo, p.ID, "coordinator")
+	if scheduler.IsRunning(c.ID) {
+		t.Fatal("third worker should queue while global slots=2")
+	}
 	if err := scheduler.SetSlots(3, 0); err != nil {
 		t.Fatal(err)
 	}
 	if next := await(t, starts, 1); next[c.ID].id == "" {
 		t.Fatal(next)
 	}
+}
+
+func TestManualRetryUsesReservedSlot(t *testing.T) {
+	t.Parallel()
+	repo := testRepository(t)
+	p := project(t, repo, "P")
+	general := worker(t, repo, p.ID, "coordinator")
+	retried, err := repo.CreateThread(t.Context(), p.ID, core.NewThread{Title: "重试线程"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RequestTurn(t.Context(), retried.ID); err != nil {
+		t.Fatal(err)
+	}
+	starts := make(chan started, 10)
+	scheduler := start(t, repo, 1, 1, blockedRunner(repo, starts))
+	initial := await(t, starts, 2)
+	if initial[general.ID].id == "" || initial[retried.ID].id == "" {
+		t.Fatalf("expected manual retry thread to use reserved slot, got %+v", initial)
+	}
+	_ = scheduler
 }
 func TestHeldProjectInterruptsAndResumesCoordinatorWithZeroWorkerSlots(t *testing.T) {
 	t.Parallel()

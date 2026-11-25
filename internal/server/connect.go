@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -154,8 +155,35 @@ func (i *connectServerInterceptor) applyResponseHeaders(ctx context.Context, hea
 	}
 }
 
+func isUserWriteProcedure(procedure string) bool {
+	idx := strings.LastIndexByte(procedure, '/')
+	if idx < 0 || idx+1 >= len(procedure) {
+		return false
+	}
+	serviceName := procedure[:idx]
+	method := procedure[idx+1:]
+	if serviceName == "/ariadne.v1.UpdateService" && (method == "RestartToApplyUpdate" || method == "CancelRestart") {
+		return false
+	}
+	if method == "MarkRead" {
+		return false
+	}
+	for _, prefix := range []string{
+		"Get", "List", "Search", "Ping", "Browse",
+		"Summarize", "Preview", "Measure", "Stream", "Check",
+	} {
+		if strings.HasPrefix(method, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
 func (i *connectServerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		if i.api.options.ServiceControl != nil && isUserWriteProcedure(req.Spec().Procedure) {
+			i.api.options.ServiceControl.RecordUserActivity()
+		}
 		resp, err := next(ctx, req)
 		if err != nil {
 			return nil, i.api.toConnectError(err)

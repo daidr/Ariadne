@@ -2,9 +2,9 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { defineComponent, h, ref } from 'vue'
-import { api, type ModelSettings, type ModelSettingsInput } from '../api'
+import { api, type ModelSettings, type ModelSettingsInput, type UpdateStatus } from '../api'
 import { locale } from '../i18n'
-import { applyModelSettings, state } from '../store'
+import { applyModelSettings, applyUpdateStatus, state } from '../store'
 import ModelSettingsDialog from './ModelSettings.vue'
 
 const wrappers: VueWrapper[] = []
@@ -79,6 +79,7 @@ function makeModelSettings(anthropicEnabled: boolean): ModelSettings {
 
 beforeEach(() => {
   locale.value = 'zh-CN'
+  state.updateStatus = null
 })
 
 afterEach(() => {
@@ -511,5 +512,74 @@ describe('ModelSettings', () => {
     const imageSwitch = detail.find('[role="switch"]')
     expect(imageSwitch.exists()).toBe(true)
     expect(imageSwitch.attributes('aria-label')).toBe('看图片')
+  })
+
+  test('shows a status dot badge on the updates tab when an update or restart is pending', async () => {
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(makeModelSettings(true))
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+
+    const baseUpdate: UpdateStatus = {
+      version: '0.1.0-alpha.23',
+      preferences: { channel: 'preview', automatic: true },
+      state: 'ready',
+      release: {
+        version: '0.1.0-alpha.24',
+        notes: '',
+        url: 'https://example.test/release',
+        prerelease: true,
+        installable: true,
+      },
+      canInstall: true,
+      canRestart: true,
+      restarting: false,
+      restartPhase: 'waiting_idle',
+      activeTurns: 1,
+      activeBackground: 0,
+      downloadPercent: 0,
+    }
+    applyUpdateStatus(baseUpdate, { trackVersion: false })
+
+    const wrapper = mount(ModelSettingsDialog, {
+      props: { open: true, tab: 'models' },
+      global: {
+        stubs: {
+          PluginSettings: true,
+          SearchSettings: true,
+          WorkSettings: true,
+          InputSettings: true,
+          McpSettings: true,
+          DataTab: true,
+          UpdatesSettings: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const updatesTab = () =>
+      wrapper.findAll('[role="tab"]').find((el) => el.text().includes('更新'))
+
+    expect(updatesTab()?.find('.dou-badge__mark.is-dot.dou-badge--primary').exists()).toBe(true)
+
+    applyUpdateStatus(
+      { ...baseUpdate, restarting: true, restartPhase: 'draining' },
+      { trackVersion: false },
+    )
+    await flushPromises()
+    expect(updatesTab()?.find('.dou-badge__mark.is-dot.dou-badge--warning').exists()).toBe(true)
+
+    applyUpdateStatus(
+      {
+        ...baseUpdate,
+        state: 'current',
+        canRestart: false,
+        restarting: false,
+        restartPhase: '',
+      },
+      { trackVersion: false },
+    )
+    await flushPromises()
+    expect(updatesTab()?.find('.dou-badge__mark').exists()).toBe(false)
   })
 })

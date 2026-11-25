@@ -16,10 +16,27 @@ const (
 	DrainModeSafePoint = "safe-point"
 	DrainModeTurn      = "turn"
 	DrainModeWhenIdle  = "when-idle"
+	DrainModeNow       = "now"
 
 	ActionStop    = "stop"
 	ActionRestart = "restart"
+
+	RestartPhaseNone        = ""
+	RestartPhaseWaitingIdle = "waiting_idle"
+	RestartPhaseDraining    = "draining"
+	RestartPhaseRestarting  = "restarting"
 )
+
+type RestartState struct {
+	CanRestart       bool
+	Phase            string
+	ActiveTurns      int
+	ActiveBackground int
+}
+
+func (s RestartState) Restarting() bool {
+	return s.Phase != RestartPhaseNone
+}
 
 type ActiveTurn struct {
 	ConversationID string `json:"conversationId"`
@@ -36,6 +53,7 @@ type ActiveBackground struct {
 	ID        string `json:"id"`
 	ThreadID  string `json:"threadId"`
 	Command   string `json:"command"`
+	Keep      bool   `json:"keep,omitempty"`
 	StartedAt int64  `json:"startedAt"`
 }
 
@@ -50,6 +68,7 @@ type StatusSnapshot struct {
 	Draining         bool               `json:"draining"`
 	DrainMode        string             `json:"drainMode,omitempty"`
 	DrainAction      string             `json:"drainAction,omitempty"`
+	RestartPhase     string             `json:"restartPhase,omitempty"`
 	WaitBackground   bool               `json:"waitBackground,omitempty"`
 	AutoShutdown     bool               `json:"autoShutdown,omitempty"`
 	ActiveTurns      []ActiveTurn       `json:"activeTurns"`
@@ -60,17 +79,24 @@ func (s StatusSnapshot) ReadyToStop(waitBackground bool) bool {
 	if len(s.ActiveTurns) > 0 {
 		return false
 	}
-	if waitBackground && len(s.ActiveBackground) > 0 {
-		return false
+	if waitBackground {
+		for _, bg := range s.ActiveBackground {
+			if !bg.Keep {
+				return false
+			}
+		}
 	}
 	return true
 }
 
 type DrainRequest struct {
-	Mode           string `json:"mode"`
-	Action         string `json:"action"`
-	WaitBackground bool   `json:"waitBackground,omitempty"`
-	AutoShutdown   bool   `json:"autoShutdown,omitempty"`
+	Mode            string `json:"mode"`
+	Action          string `json:"action"`
+	WaitBackground  bool   `json:"waitBackground,omitempty"`
+	AutoShutdown    bool   `json:"autoShutdown,omitempty"`
+	QuietWindowMs   int64  `json:"quietWindowMs,omitempty"`
+	LeaseMs         int64  `json:"leaseMs,omitempty"`
+	ImmediateIfIdle bool   `json:"immediateIfIdle,omitempty"`
 }
 
 type ShutdownRequest struct {
@@ -116,6 +142,17 @@ func (c *Client) Health(ctx context.Context) error {
 	return nil
 }
 
+type httpStatusError struct {
+	method     string
+	path       string
+	statusCode int
+	msg        string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Errorf("service control %s %s: HTTP %d: %s", e.method, e.path, e.statusCode, e.msg).Error()
+}
+
 func (c *Client) doJSON(ctx context.Context, method, path string, body any, out any) error {
 	var reader io.Reader
 	if body != nil {
@@ -149,7 +186,12 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body any, out 
 		if msg == "" {
 			msg = http.StatusText(resp.StatusCode)
 		}
-		return fmt.Errorf("service control %s %s: HTTP %d: %s", method, path, resp.StatusCode, msg)
+		return &httpStatusError{
+			method:     method,
+			path:       path,
+			statusCode: resp.StatusCode,
+			msg:        msg,
+		}
 	}
 	if out != nil && len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
@@ -170,6 +212,20 @@ func (c *Client) Status(ctx context.Context) (*StatusSnapshot, error) {
 func (c *Client) BeginDrain(ctx context.Context, req DrainRequest) (*StatusSnapshot, error) {
 	var snap StatusSnapshot
 	if err := c.doJSON(ctx, http.MethodPost, "/api/service/drain", req, &snap); err != nil {
+		return nil, err
+	}
+	return &snap, nil
+}
+
+// RenewDrain explicitly extends an active client-held drain lease and returns the latest status.
+// When talking to an older server without /api/service/renew-drain, it falls back to Status.
+func (c *Client) RenewDrain(ctx context.Context) (*StatusSnapshot, error) {
+	var snap StatusSnapshot
+	if err := c.doJSON(ctx, http.MethodPost, "/api/service/renew-drain", nil, &snap); err != nil {
+		var statusErr *httpStatusError
+		if errors.As(err, &statusErr) && (statusErr.statusCode == http.StatusNotFound || statusErr.statusCode == http.StatusMethodNotAllowed) {
+			return c.Status(ctx)
+		}
 		return nil, err
 	}
 	return &snap, nil

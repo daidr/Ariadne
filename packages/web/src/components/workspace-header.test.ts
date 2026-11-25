@@ -4,9 +4,9 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { DouConfigProvider } from 'dou-ui'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
-import { api } from '../api'
+import { api, type UpdateStatus } from '../api'
 import { douLocale, locale } from '../i18n'
-import { state } from '../store'
+import { applyUpdateStatus, state } from '../store'
 import type { WorkspaceLayoutMode } from '../workspace-layout'
 import WorkspaceHeader from './WorkspaceHeader.vue'
 
@@ -70,6 +70,7 @@ function mountHeader(
   const onToggleProjects = vi.fn(() => {
     projectsCollapsed.value = !projectsCollapsed.value
   })
+  const onOpenSettings = vi.fn()
 
   const Host = defineComponent({
     setup() {
@@ -85,6 +86,7 @@ function mountHeader(
             },
             onToggleSide,
             onToggleProjects,
+            onOpenSettings,
           }),
         )
     },
@@ -100,6 +102,7 @@ function mountHeader(
     projectsPopoverOpen,
     onToggleSide,
     onToggleProjects,
+    onOpenSettings,
   }
 }
 
@@ -120,6 +123,7 @@ describe('WorkspaceHeader medium layout', () => {
     state.planWide = false
     state.workspaceLevel = 'coordinator'
     state.main = { kind: 'conversation' }
+    state.updateStatus = null
 
     getProjectActivity = vi.spyOn(api, 'getProjectActivity').mockResolvedValue({
       coordinator: { status: 'idle' },
@@ -238,5 +242,86 @@ describe('WorkspaceHeader medium layout', () => {
     const expandBtn = wrapper.find<HTMLButtonElement>('button[aria-label="展开项目面板"]')
     expect(expandBtn.exists()).toBe(true)
     expect(expandBtn.attributes('aria-expanded')).toBe('false')
+  })
+
+  test('merges update indicator into settings badge only on narrow project views', async () => {
+    const baseUpdate: UpdateStatus = {
+      version: '0.1.0-alpha.23',
+      preferences: { channel: 'preview', automatic: true },
+      state: 'ready',
+      release: {
+        version: '0.1.0-alpha.24',
+        notes: '',
+        url: 'https://example.test/release',
+        prerelease: true,
+        installable: true,
+      },
+      canInstall: true,
+      canRestart: true,
+      restarting: false,
+      restartPhase: 'waiting_idle',
+      activeTurns: 2,
+      activeBackground: 0,
+      downloadPercent: 0,
+    }
+    applyUpdateStatus(baseUpdate, { trackVersion: false })
+
+    const { wrapper, layoutMode, onOpenSettings } = mountHeader({ layoutMode: 'narrow' })
+
+    // Narrow project inner page: standalone indicator is hidden; settings button shows a primary dot badge.
+    expect(wrapper.find('button.update-indicator').exists()).toBe(false)
+    const settingsBtn = wrapper.find<HTMLButtonElement>('button[aria-label="设置 · 空闲后重启"]')
+    expect(settingsBtn.exists()).toBe(true)
+    expect(settingsBtn.find('.dou-badge__mark.is-dot.dou-badge--primary').exists()).toBe(true)
+
+    await settingsBtn.trigger('click')
+    expect(onOpenSettings).toHaveBeenCalledTimes(1)
+
+    // Draining switches the settings dot badge to warning tone.
+    applyUpdateStatus(
+      { ...baseUpdate, restarting: true, restartPhase: 'draining' },
+      { trackVersion: false },
+    )
+    await nextTick()
+    const drainingSettingsBtn = wrapper.find<HTMLButtonElement>(
+      'button[aria-label="设置 · 排空等待重启"]',
+    )
+    expect(drainingSettingsBtn.exists()).toBe(true)
+    expect(drainingSettingsBtn.find('.dou-badge__mark.is-dot.dou-badge--warning').exists()).toBe(
+      true,
+    )
+
+    // Narrow project list home: standalone indicator returns with label, settings badge hides.
+    state.workspaceLevel = 'projects'
+    await nextTick()
+    const standaloneOnHome = wrapper.find<HTMLButtonElement>('button.update-indicator')
+    expect(standaloneOnHome.exists()).toBe(true)
+    expect(standaloneOnHome.text()).toContain('排空等待重启')
+    const plainSettingsBtn = wrapper.find<HTMLButtonElement>('button[aria-label="设置"]')
+    expect(plainSettingsBtn.exists()).toBe(true)
+    expect(plainSettingsBtn.find('.dou-badge__mark').exists()).toBe(false)
+
+    // Wide desktop inside project: standalone indicator is shown and settings badge stays hidden.
+    state.workspaceLevel = 'coordinator'
+    layoutMode.value = 'wide'
+    await nextTick()
+    expect(wrapper.find('button.update-indicator').exists()).toBe(true)
+    expect(wrapper.find('button[aria-label="设置"] .dou-badge__mark').exists()).toBe(false)
+
+    // Back to narrow project inner page with no pending update/restart: badge disappears.
+    layoutMode.value = 'narrow'
+    applyUpdateStatus(
+      {
+        ...baseUpdate,
+        state: 'current',
+        canRestart: false,
+        restarting: false,
+        restartPhase: '',
+      },
+      { trackVersion: false },
+    )
+    await nextTick()
+    expect(wrapper.find('button.update-indicator').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="设置"] .dou-badge__mark').exists()).toBe(false)
   })
 })

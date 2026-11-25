@@ -2,6 +2,7 @@
 import {
   DouAlert,
   DouAutocomplete,
+  DouBadge,
   DouButton,
   DouCard,
   DouCascader,
@@ -52,7 +53,8 @@ import {
   type ModelProblem,
   type ModelSettings,
 } from '../api'
-import { applyModelSettings, refreshConversationModels } from '../store'
+import { applyModelSettings, refreshConversationModels, state } from '../store'
+import { hasUpdateIndicator, updateIndicatorLabel, updateIndicatorTone } from '../update-restart'
 import { coordinatorDefaultEffort, EFFORTS, effortsOf, effortWithin } from '../effort'
 import { lt, t, tm } from '../i18n'
 import InputSettings from './InputSettings.vue'
@@ -431,6 +433,9 @@ const isReadOnlyTab = computed(
   () => tab.value === 'updates' || tab.value === 'plugins' || tab.value === 'data',
 )
 const showSaveFooter = computed(() => !isReadOnlyTab.value || hasUnsavedChanges.value)
+const showUpdatesTabBadge = computed(() => hasUpdateIndicator(state.updateStatus))
+const updatesTabBadgeTone = computed(() => updateIndicatorTone(state.updateStatus))
+const updatesTabBadgeLabel = computed(() => updateIndicatorLabel(state.updateStatus))
 
 function discardAndClose() {
   mounted.value = false
@@ -1191,6 +1196,17 @@ async function saveModels(): Promise<boolean> {
         <DataTab v-if="open" />
       </DouTabPanel>
       <DouTabPanel value="updates" :label="t('settings.tab.updates')" :icon="RefreshIcon">
+        <template #label>
+          <span class="settings-tab-label">
+            <span>{{ t('settings.tab.updates') }}</span>
+            <DouBadge
+              v-if="showUpdatesTabBadge"
+              dot
+              :tone="updatesTabBadgeTone"
+              :label="updatesTabBadgeLabel"
+            />
+          </span>
+        </template>
         <UpdatesSettings v-if="open && tab === 'updates'" />
       </DouTabPanel>
     </DouTabs>
@@ -1221,6 +1237,12 @@ async function saveModels(): Promise<boolean> {
 </style>
 
 <style scoped>
+.settings-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .settings {
   display: flex;
   flex-direction: column;
