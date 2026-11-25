@@ -38,6 +38,9 @@ func newHostedTest(t *testing.T, remote, data string, clone Cloner) *Hosted {
 	return host
 }
 func TestHostedCloneSharedWorkAndSafePush(t *testing.T) {
+	if testing.Short() {
+		t.Skip("hosted bare-clone matrix covered by full suite")
+	}
 	t.Parallel()
 	remote, remoteGit := initGit(t)
 	storage := t.TempDir()

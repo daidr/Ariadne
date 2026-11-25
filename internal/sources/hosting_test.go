@@ -54,6 +54,9 @@ func readLooseRef(t *testing.T, gitDir, ref string) string {
 }
 
 func TestHostingMovesCommitsBetweenIndependentRepositories(t *testing.T) {
+	if testing.Short() {
+		t.Skip("cross-repo git object sync covered by full suite")
+	}
 	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")

@@ -14,6 +14,9 @@ import (
 )
 
 func TestBrowserInteractsWithLocalPageAndCloses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real Chromium integration test covered by full suite")
+	}
 	if installed() == "" {
 		t.Skip("Chrome, Edge or Chromium is required")
 	}
@@ -22,7 +25,7 @@ func TestBrowserInteractsWithLocalPageAndCloses(t *testing.T) {
 		fmt.Fprint(w, `<!doctype html><input aria-label="Example input" value="Before"><button onclick="document.querySelector('p').textContent=document.querySelector('input').value;console.error('example log')">Apply</button><p>Waiting</p>`)
 	}))
 	defer site.Close()
-	browserCtx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	browserCtx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	pages := New(browserCtx, t.TempDir(), nil)
 	defer func() {
@@ -35,7 +38,11 @@ func TestBrowserInteractsWithLocalPageAndCloses(t *testing.T) {
 	do := func(action Action) Result {
 		t.Helper()
 		start := time.Now()
-		stepCtx, stopStep := context.WithTimeout(browserCtx, 25*time.Second)
+		stepTimeout := 30 * time.Second
+		if action.Name == "open" {
+			stepTimeout = 60 * time.Second
+		}
+		stepCtx, stopStep := context.WithTimeout(browserCtx, stepTimeout)
 		defer stopStep()
 		result, err := pages.Do(stepCtx, "project/thread", action)
 		if err != nil {

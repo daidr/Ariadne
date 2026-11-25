@@ -12,6 +12,9 @@ import (
 )
 
 func TestFileSourcesUseSeparateGitWorktreesAndPinTheDefault(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-repo git worktree routing covered by full suite")
+	}
 	t.Parallel()
 	ctx := t.Context()
 	first, second, managed := t.TempDir(), t.TempDir(), t.TempDir()

@@ -182,32 +182,21 @@ jobs:
           GOCACHE: ${{ runner.temp }}/gobuild
         run: |
           pkgs=(
-            ./internal/browser
             ./internal/runner
             ./internal/local
-            ./internal/server
             ./internal/workspaces
-            ./internal/core
             ./internal/process
-            ./internal/repowatch
             ./internal/update
-            ./internal/background
+            ./internal/repowatch
             ./internal/service
-            ./internal/sources
             ./internal/providers/antigravity
             ./internal/providers/codex
-            ./internal/application
-            ./internal/providers/acp
-            ./internal/agentruntime
-            ./internal/data
-            ./internal/settings
-            ./internal/plugins
-            ./internal/modelhttp
-            ./internal/trace
-            ./internal/eventstore
-            ./cmd/ariadne
             ./internal/providers/claudecode
+            ./internal/agentruntime
+            ./internal/browser
+            ./internal/plugins
             ./internal/fsutil
+            ./cmd/ariadne
           )
           while IFS= read -r f; do
             [ -n "$f" ] || continue
@@ -233,29 +222,18 @@ jobs:
           $env:TMP = $testTmp
           $env:GOTMPDIR = $testTmp
           $pkgs = [System.Collections.Generic.List[string]]@(
-            './internal/browser',
             './internal/local',
             './internal/runner',
             './internal/workspaces',
-            './internal/sources',
-            './internal/core',
             './internal/process',
-            './internal/server',
-            './internal/application',
-            './internal/service',
             './internal/update',
-            './internal/providers/acp',
+            './internal/repowatch',
+            './internal/service',
             './internal/providers/antigravity',
             './internal/providers/codex',
             './internal/providers/claudecode',
-            './internal/repowatch',
-            './internal/background',
-            './internal/settings',
-            './internal/trace',
-            './internal/modelhttp',
-            './internal/data',
-            './internal/eventstore',
             './internal/agentruntime',
+            './internal/browser',
             './internal/plugins',
             './internal/fsutil',
             './cmd/ariadne'

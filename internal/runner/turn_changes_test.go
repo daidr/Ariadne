@@ -192,6 +192,9 @@ func initTestRemoteRepo(t *testing.T) string {
 }
 
 func TestTurnChangesRecordedForHostedRepository(t *testing.T) {
+	if testing.Short() {
+		t.Skip("hosted turn-changes git matrix covered by full suite")
+	}
 	t.Parallel()
 	ctx := t.Context()
 	remoteDir := initTestRemoteRepo(t)
