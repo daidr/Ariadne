@@ -47,7 +47,7 @@ export interface Reaction {
 }
 
 /** What a thread reports about its own work. */
-export type ReportKind = 'progress' | 'waiting' | 'ready' | 'blocked' | 'failed' | 'done'
+export type ReportKind = 'progress' | 'idle' | 'waiting' | 'ready' | 'blocked' | 'failed' | 'done'
 
 export type TodoStatus = 'doing' | 'next' | 'waiting' | 'done'
 
@@ -696,6 +696,8 @@ export interface EventMap {
   'thread.stopped': { threadId: string; reason: string; by: string }
   /** Work goes on; `reason` is why it had been stopped, for the thread to read. */
   'thread.resumed': { threadId: string; by: string; reason: string }
+  /** A completed thread was returned to idle so the user can continue the discussion. */
+  'thread.reopened': { threadId: string; by: string }
   /**
    * The user is done with what the thread's last report put up for review, without merging
    * it here: they looked it over, merged it elsewhere, or let it go.

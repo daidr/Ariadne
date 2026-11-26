@@ -56,7 +56,7 @@ func ThreadStage(facts StageFacts) string {
 	if !facts.Started {
 		return "queued"
 	}
-	if facts.LastReport == "waiting" || facts.Reviewer {
+	if facts.LastReport == "waiting" || facts.LastReport == "idle" || facts.Reviewer {
 		return "idle"
 	}
 	if facts.Unreported && !facts.Waiting {

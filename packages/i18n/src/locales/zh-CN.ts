@@ -295,6 +295,8 @@ export const zhCN = {
   'thread.stoppedByCoordinator': '协调器暂停了这个讨论串：{reason}',
   'thread.stoppedByUser': '你暂停了这个讨论串：{reason}',
   'thread.resume': '继续',
+  'thread.resolved': '当前讨论串已解决',
+  'thread.reopen': '恢复',
   'thread.stage.answer': '等你回答',
   'thread.stage.review': '待审阅',
   'thread.stage.waitingMerge': '待合并',

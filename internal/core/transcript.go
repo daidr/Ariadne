@@ -193,6 +193,12 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 		if c := coordinator(w, e.ProjectID); c != nil && d["by"] != c {
 			note(c, payload, false)
 		}
+	case "thread.reopened":
+		payload := tagged("thread-reopened", d)
+		note(d["threadId"], payload, false)
+		if c := coordinator(w, e.ProjectID); c != nil && d["by"] != c {
+			note(c, payload, false)
+		}
 	case "pull_request.closed", "branch.merged", "branch.merge_undone":
 		kind := map[string]string{"pull_request.closed": "pull-request-closed", "branch.merged": "branch-merged", "branch.merge_undone": "merge-undone"}[e.Type]
 		data := d

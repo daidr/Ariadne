@@ -266,6 +266,17 @@ func (repo *Repository) ResumeThread(ctx context.Context, threadID, by string) (
 		return []change{{"thread.resumed", object{"threadId": threadID, "by": by, "reason": current.Stopped.Reason}}}, nil
 	})
 }
+
+// ReopenThread returns a completed discussion to the idle stage so the user
+// can continue the conversation without immediately starting a turn.
+func (repo *Repository) ReopenThread(ctx context.Context, threadID, by string) (ThreadView, error) {
+	return repo.mutateThread(ctx, threadID, func(_ *eventstore.Transaction, current ThreadView) ([]change, error) {
+		if current.Stage != "done" {
+			return nil, nil
+		}
+		return []change{{"thread.reopened", object{"threadId": threadID, "by": by}}}, nil
+	})
+}
 func abandonedReview(w *projectionWriter, conversationID string) []change {
 	reviewer := w.one("SELECT review_of, project_id FROM threads WHERE id = ?", conversationID)
 	if reviewer.text("review_of") == "" {

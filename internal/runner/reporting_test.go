@@ -187,7 +187,7 @@ func TestUnreportedDiscussionReceivesActionableReminder(t *testing.T) {
 				}
 			case 3:
 				hint := request.Messages[len(request.Messages)-1].Content
-				if !strings.Contains(hint, "<report_missing>") || !strings.Contains(hint, "Use done for completed work") {
+				if !strings.Contains(hint, "<report_missing>") || !strings.Contains(hint, "Use idle when a research") || !strings.Contains(hint, "done only when the thread is fully resolved") {
 					t.Errorf("expected an actionable report reminder, got %q", hint)
 				}
 				if !slices.ContainsFunc(request.Tools, func(tool sdk.Tool) bool { return tool.Name == "report" }) {
@@ -623,5 +623,46 @@ func TestEffectiveContextSizePreventsFalseCompactionFromEstimateInflation(t *tes
 	}
 	if summaries != 1 {
 		t.Fatalf("expected exactly 1 compaction, got %d", summaries)
+	}
+}
+
+func TestIdleReportToolKeepsThreadIdle(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	store, err := settings.Open(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := repo.CreateProject(ctx, new("Research"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "调研实现方案"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.StartThread(ctx, thread.ID); err != nil {
+		t.Fatal(err)
+	}
+	active := &turn{
+		Runner:       &Runner{Repository: repo, Settings: store},
+		conversation: core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"},
+	}
+	reply, err := active.report(ctx, args{
+		"kind":     "idle",
+		"headline": "已整理三套方案对比",
+		"summary":  "完成了代码调研并整理出三套候选方案，等待后续讨论。",
+	})
+	if err != nil || reply != "Reported." {
+		t.Fatalf("report(idle) = %q, %v", reply, err)
+	}
+	after, err := repo.GetThread(ctx, thread.ID)
+	if err != nil || after.Stage != "idle" || after.LastReport != "idle" || after.LastHeadline != "已整理三套方案对比" {
+		t.Fatalf("unexpected thread after idle report: %+v, %v", after, err)
 	}
 }

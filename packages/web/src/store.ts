@@ -2206,6 +2206,21 @@ export async function resumeThread(threadId: string) {
   await api.resumeThread(threadId).catch(report)
 }
 
+/** Return a completed thread to idle so the user can continue the conversation. */
+export async function reopenThread(threadId: string): Promise<boolean> {
+  try {
+    const { thread } = await api.reopenThread(threadId)
+    if (state.detail && state.detail.project.id === thread.projectId) {
+      const threads = patchThreads(state.detail.threads, [thread], undefined)
+      if (threads) state.detail = { ...state.detail, threads }
+    }
+    return true
+  } catch (error) {
+    report(error)
+    return false
+  }
+}
+
 /** Take back a source the user allowed one thread to read. */
 export async function removeThreadReference(threadId: string, referenceId: string) {
   try {

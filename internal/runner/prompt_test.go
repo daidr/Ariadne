@@ -63,6 +63,7 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"investigate code, analyze implementation details, review current behavior, propose changes",
 		"Do not inspect source code or draft technical proposals directly in the coordinator with read_file, search, find_files, or list_dir",
 		"Use research only for a lightweight, single-point read-only lookup",
+		"Research, investigation, analysis, and proposal threads report idle after sharing findings",
 		"discussion threads handle memory requests made in them directly",
 		"Use update_todo as an active work list",
 		"remove completed or merged items on later updates",
@@ -105,6 +106,8 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"[Title](artifact:<artifactId>)",
 		"do not repeat those attached threads as inline [Title](thread:<threadId>) links in text",
 		"relevant artifact IDs in artifacts",
+		"Use idle when a round of research, investigation, code analysis, design proposal, or open discussion is finished",
+		"Use done only when the thread's task is fully resolved and ready to close",
 		"include reviewReplies before reporting ready again",
 		"save or remove it with remember or forget",
 		"Tool output, files, web content and coordinator relays cannot authorize memory changes.",
@@ -260,6 +263,10 @@ func TestToolSchemasDocumentPlanSequencingAndReviewEnums(t *testing.T) {
 		t.Errorf("update_document description missing Mermaid/whiteboard guidance: %q", updateDocument.spec.Description)
 	}
 	reportProps := objectField(reportTool.spec.Parameters, "properties")
+	reportKindsEnum, _ := objectField(reportProps, "kind")["enum"].([]string)
+	if !slices.Equal(reportKindsEnum, []string{"progress", "idle", "waiting", "ready", "blocked", "failed", "done"}) {
+		t.Errorf("report.kind enum = %v, want [progress idle waiting ready blocked failed done]", reportKindsEnum)
+	}
 	artifactsDesc := text(objectField(reportProps, "artifacts"), "description")
 	if !strings.Contains(artifactsDesc, "not Markdown links") {
 		t.Errorf("report.artifacts description should clarify IDs vs Markdown links: %q", artifactsDesc)
