@@ -35,12 +35,22 @@ func artifactEvent(w *projectionWriter, e eventstore.Event, d object) {
 		if agent == "user" {
 			agent = nil
 		}
-		w.run("INSERT INTO artifacts (id, project_id, kind, title, node_id, version, content, preview, created_by, updated_by, last_agent, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)", d["artifactId"], e.ProjectID, d["kind"], d["title"], d["nodeId"], d["content"], encoded(artifactPreview(d.str("kind"), d.str("content"))), d["author"], d["author"], agent, e.At, e.At)
+		meta := computeArtifactMetadata(d.str("kind"), d.str("content"))
+		hasProto := 0
+		if meta.hasPrototype {
+			hasProto = 1
+		}
+		w.run("INSERT INTO artifacts (id, project_id, kind, title, node_id, version, content, preview, created_by, updated_by, last_agent, has_prototype, pending_actions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)", d["artifactId"], e.ProjectID, d["kind"], d["title"], d["nodeId"], d["content"], encoded(meta.preview), d["author"], d["author"], agent, hasProto, meta.pendingActions, e.At, e.At)
 		w.run("INSERT INTO artifact_versions (artifact_id, version, title, content, author, reason, created_at) VALUES (?, 1, ?, ?, ?, '', ?)", d["artifactId"], d["title"], d["content"], d["author"], e.At)
 		w.run("UPDATE threads SET changed_seq = ? WHERE project_id = ? AND EXISTS (SELECT 1 FROM json_each(last_artifacts) WHERE value = ?)", e.Seq, e.ProjectID, d["artifactId"])
 	case "artifact.revised":
 		kind := artifactKind(w, d["artifactId"])
-		w.run("UPDATE artifacts SET title = ?, version = ?, content = ?, updated_by = ?, updated_at = ?, preview = ?, last_agent = CASE WHEN ? = 'user' THEN last_agent ELSE ? END WHERE id = ?", d["title"], d["version"], d["content"], d["author"], e.At, encoded(artifactPreview(kind, d.str("content"))), d["author"], d["author"], d["artifactId"])
+		meta := computeArtifactMetadata(kind, d.str("content"))
+		hasProto := 0
+		if meta.hasPrototype {
+			hasProto = 1
+		}
+		w.run("UPDATE artifacts SET title = ?, version = ?, content = ?, updated_by = ?, updated_at = ?, preview = ?, has_prototype = ?, pending_actions = ?, last_agent = CASE WHEN ? = 'user' THEN last_agent ELSE ? END WHERE id = ?", d["title"], d["version"], d["content"], d["author"], e.At, encoded(meta.preview), hasProto, meta.pendingActions, d["author"], d["author"], d["artifactId"])
 		w.run("INSERT INTO artifact_versions (artifact_id, version, title, content, author, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", d["artifactId"], d["version"], d["title"], d["content"], d["author"], d["reason"], e.At)
 		for threadID, quote := range d.obj("quotes") {
 			w.run("UPDATE artifact_comments SET quote = ? WHERE id = ? AND artifact_id = ?", quote, threadID, d["artifactId"])

@@ -64,6 +64,8 @@ CREATE TABLE artifacts (
       last_agent TEXT,
       open_comments INTEGER NOT NULL DEFAULT 0,
       commented_at INTEGER NOT NULL DEFAULT 0,
+      has_prototype INTEGER NOT NULL DEFAULT 0,
+      pending_actions INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -459,6 +461,10 @@ CREATE INDEX artifact_feedback_pending ON artifact_feedback (notify, created_at,
   WHERE done_at IS NULL;
 
 CREATE INDEX artifacts_project ON artifacts (project_id, updated_at);
+
+CREATE INDEX artifacts_updated ON artifacts (updated_at DESC, id DESC);
+
+CREATE INDEX artifacts_created ON artifacts (created_at DESC, id DESC);
 
 CREATE INDEX attentions_message ON attentions (message_id);
 

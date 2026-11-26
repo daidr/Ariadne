@@ -36,6 +36,9 @@ const (
 	// ArtifactServiceListArtifactsProcedure is the fully-qualified name of the ArtifactService's
 	// ListArtifacts RPC.
 	ArtifactServiceListArtifactsProcedure = "/ariadne.v1.ArtifactService/ListArtifacts"
+	// ArtifactServiceListGalleryArtifactsProcedure is the fully-qualified name of the ArtifactService's
+	// ListGalleryArtifacts RPC.
+	ArtifactServiceListGalleryArtifactsProcedure = "/ariadne.v1.ArtifactService/ListGalleryArtifacts"
 	// ArtifactServiceCreateArtifactProcedure is the fully-qualified name of the ArtifactService's
 	// CreateArtifact RPC.
 	ArtifactServiceCreateArtifactProcedure = "/ariadne.v1.ArtifactService/CreateArtifact"
@@ -83,6 +86,7 @@ const (
 // ArtifactServiceClient is a client for the ariadne.v1.ArtifactService service.
 type ArtifactServiceClient interface {
 	ListArtifacts(context.Context, *connect.Request[v1.ListArtifactsRequest]) (*connect.Response[v1.ListArtifactsResponse], error)
+	ListGalleryArtifacts(context.Context, *connect.Request[v1.ListGalleryArtifactsRequest]) (*connect.Response[v1.ListGalleryArtifactsResponse], error)
 	CreateArtifact(context.Context, *connect.Request[v1.CreateArtifactRequest]) (*connect.Response[v1.CreateArtifactResponse], error)
 	GetArtifact(context.Context, *connect.Request[v1.GetArtifactRequest]) (*connect.Response[v1.GetArtifactResponse], error)
 	ListArtifactVersions(context.Context, *connect.Request[v1.ListArtifactVersionsRequest]) (*connect.Response[v1.ListArtifactVersionsResponse], error)
@@ -114,6 +118,12 @@ func NewArtifactServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+ArtifactServiceListArtifactsProcedure,
 			connect.WithSchema(artifactServiceMethods.ByName("ListArtifacts")),
+			connect.WithClientOptions(opts...),
+		),
+		listGalleryArtifacts: connect.NewClient[v1.ListGalleryArtifactsRequest, v1.ListGalleryArtifactsResponse](
+			httpClient,
+			baseURL+ArtifactServiceListGalleryArtifactsProcedure,
+			connect.WithSchema(artifactServiceMethods.ByName("ListGalleryArtifacts")),
 			connect.WithClientOptions(opts...),
 		),
 		createArtifact: connect.NewClient[v1.CreateArtifactRequest, v1.CreateArtifactResponse](
@@ -206,6 +216,7 @@ func NewArtifactServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 // artifactServiceClient implements ArtifactServiceClient.
 type artifactServiceClient struct {
 	listArtifacts                *connect.Client[v1.ListArtifactsRequest, v1.ListArtifactsResponse]
+	listGalleryArtifacts         *connect.Client[v1.ListGalleryArtifactsRequest, v1.ListGalleryArtifactsResponse]
 	createArtifact               *connect.Client[v1.CreateArtifactRequest, v1.CreateArtifactResponse]
 	getArtifact                  *connect.Client[v1.GetArtifactRequest, v1.GetArtifactResponse]
 	listArtifactVersions         *connect.Client[v1.ListArtifactVersionsRequest, v1.ListArtifactVersionsResponse]
@@ -225,6 +236,11 @@ type artifactServiceClient struct {
 // ListArtifacts calls ariadne.v1.ArtifactService.ListArtifacts.
 func (c *artifactServiceClient) ListArtifacts(ctx context.Context, req *connect.Request[v1.ListArtifactsRequest]) (*connect.Response[v1.ListArtifactsResponse], error) {
 	return c.listArtifacts.CallUnary(ctx, req)
+}
+
+// ListGalleryArtifacts calls ariadne.v1.ArtifactService.ListGalleryArtifacts.
+func (c *artifactServiceClient) ListGalleryArtifacts(ctx context.Context, req *connect.Request[v1.ListGalleryArtifactsRequest]) (*connect.Response[v1.ListGalleryArtifactsResponse], error) {
+	return c.listGalleryArtifacts.CallUnary(ctx, req)
 }
 
 // CreateArtifact calls ariadne.v1.ArtifactService.CreateArtifact.
@@ -300,6 +316,7 @@ func (c *artifactServiceClient) RemoveArtifactCommentThread(ctx context.Context,
 // ArtifactServiceHandler is an implementation of the ariadne.v1.ArtifactService service.
 type ArtifactServiceHandler interface {
 	ListArtifacts(context.Context, *connect.Request[v1.ListArtifactsRequest]) (*connect.Response[v1.ListArtifactsResponse], error)
+	ListGalleryArtifacts(context.Context, *connect.Request[v1.ListGalleryArtifactsRequest]) (*connect.Response[v1.ListGalleryArtifactsResponse], error)
 	CreateArtifact(context.Context, *connect.Request[v1.CreateArtifactRequest]) (*connect.Response[v1.CreateArtifactResponse], error)
 	GetArtifact(context.Context, *connect.Request[v1.GetArtifactRequest]) (*connect.Response[v1.GetArtifactResponse], error)
 	ListArtifactVersions(context.Context, *connect.Request[v1.ListArtifactVersionsRequest]) (*connect.Response[v1.ListArtifactVersionsResponse], error)
@@ -327,6 +344,12 @@ func NewArtifactServiceHandler(svc ArtifactServiceHandler, opts ...connect.Handl
 		ArtifactServiceListArtifactsProcedure,
 		svc.ListArtifacts,
 		connect.WithSchema(artifactServiceMethods.ByName("ListArtifacts")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactServiceListGalleryArtifactsHandler := connect.NewUnaryHandler(
+		ArtifactServiceListGalleryArtifactsProcedure,
+		svc.ListGalleryArtifacts,
+		connect.WithSchema(artifactServiceMethods.ByName("ListGalleryArtifacts")),
 		connect.WithHandlerOptions(opts...),
 	)
 	artifactServiceCreateArtifactHandler := connect.NewUnaryHandler(
@@ -417,6 +440,8 @@ func NewArtifactServiceHandler(svc ArtifactServiceHandler, opts ...connect.Handl
 		switch r.URL.Path {
 		case ArtifactServiceListArtifactsProcedure:
 			artifactServiceListArtifactsHandler.ServeHTTP(w, r)
+		case ArtifactServiceListGalleryArtifactsProcedure:
+			artifactServiceListGalleryArtifactsHandler.ServeHTTP(w, r)
 		case ArtifactServiceCreateArtifactProcedure:
 			artifactServiceCreateArtifactHandler.ServeHTTP(w, r)
 		case ArtifactServiceGetArtifactProcedure:
@@ -456,6 +481,10 @@ type UnimplementedArtifactServiceHandler struct{}
 
 func (UnimplementedArtifactServiceHandler) ListArtifacts(context.Context, *connect.Request[v1.ListArtifactsRequest]) (*connect.Response[v1.ListArtifactsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ArtifactService.ListArtifacts is not implemented"))
+}
+
+func (UnimplementedArtifactServiceHandler) ListGalleryArtifacts(context.Context, *connect.Request[v1.ListGalleryArtifactsRequest]) (*connect.Response[v1.ListGalleryArtifactsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ArtifactService.ListGalleryArtifacts is not implemented"))
 }
 
 func (UnimplementedArtifactServiceHandler) CreateArtifact(context.Context, *connect.Request[v1.CreateArtifactRequest]) (*connect.Response[v1.CreateArtifactResponse], error) {

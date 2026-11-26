@@ -36,6 +36,7 @@ export function createWorkspaceRouter(history: RouterHistory, workspace: Compone
   return createRouter({
     history,
     routes: [
+      { path: '/gallery', name: 'gallery', component: workspace },
       { path: '/projects/:projectId?', name: 'workspace', component: workspace },
       { path: '/:pathMatch(.*)*', redirect: { name: 'workspace' } },
     ],
@@ -44,6 +45,17 @@ export function createWorkspaceRouter(history: RouterHistory, workspace: Compone
 
 export function workspaceLocation(route: RouteLocationNormalized): WorkspaceLocation {
   const { query, params } = route
+  if (route.name === 'gallery' || route.path === '/gallery') {
+    return {
+      projectId: null,
+      level: query.pane === 'projects' ? 'projects' : 'coordinator',
+      main: { kind: 'gallery' },
+      starting: false,
+      tab: null,
+      modal: null,
+      from: null,
+    }
+  }
   const projectId =
     typeof params.projectId === 'string' && params.projectId ? params.projectId : null
   const starting = query.new === '1'
@@ -72,6 +84,14 @@ export function workspaceLocation(route: RouteLocationNormalized): WorkspaceLoca
 
 export function workspaceAddress(location: WorkspaceLocation): RouteLocationAsRelative {
   const { projectId, level, main, starting, tab, modal, from } = location
+  if (main.kind === 'gallery') {
+    return {
+      name: 'gallery',
+      query: {
+        ...(level === 'projects' && { pane: 'projects' }),
+      },
+    }
+  }
   return {
     name: 'workspace',
     params: { projectId: projectId ?? '' },

@@ -356,6 +356,7 @@ export function resolveDuoBackAction(options: {
     if (workspaceLevel === 'side') return 'to-coordinator'
   }
   if (mainKind === 'trace') return 'main'
+  if (mainKind === 'gallery') return layoutMode === 'narrow' ? 'to-projects' : 'main'
   if (starting && hasCurrentProject) return 'cancel-new'
   if (mainKind !== 'conversation') return 'main'
   if (layoutMode === 'narrow') return 'to-projects'
