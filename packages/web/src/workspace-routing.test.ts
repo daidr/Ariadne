@@ -184,6 +184,22 @@ describe('workspace routes', () => {
     await openProjectThread('prj_second', thread.id)
     expect(state.main.kind).toBe('conversation')
     expect(side.focusedThread(state.side)).toBe(thread.id)
+
+    // Opening gallery while a FullView modal is active clears state.full so the gallery is not covered.
+    await openView({ kind: 'artifact', id: artifact.id }, { from: thread.id })
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.query.modal).toBe(`artifact:${artifact.id}`),
+    )
+    expect(state.full).not.toBeNull()
+
+    openGallery()
+    expect(state.full).toBeNull()
+    expect(state.main).toEqual({ kind: 'gallery' })
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/gallery'))
+
+    // Browser back returns to the project's full-screen artifact view.
+    router.back()
+    await vi.waitFor(() => expect(state.full?.view).toEqual({ kind: 'artifact', id: artifact.id }))
   })
 
   test('refresh and browser back preserve artifact Back/Forward history', async () => {

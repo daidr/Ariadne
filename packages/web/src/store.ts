@@ -1296,6 +1296,7 @@ export function startNewProject() {
 }
 
 export function openGallery() {
+  setFull(null)
   openMain({ kind: 'gallery' })
 }
 

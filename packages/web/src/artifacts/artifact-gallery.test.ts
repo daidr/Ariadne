@@ -17,8 +17,35 @@ import { douLocale, locale } from '../i18n'
 import * as store from '../store'
 import ArtifactGallery from './ArtifactGallery.vue'
 import ArtifactThumb from './ArtifactThumb.vue'
+import { clearBoardThumbnails } from './board-thumbnail'
 import { formatGalleryUpdater, groupGalleryItems, resolveGalleryTimeBucket } from './gallery-groups'
 import { galleryState, resetGalleryStateForTests } from './gallery-state'
+
+vi.mock('@dou-ui/flow', () => ({
+  renderFlowSVG: vi.fn(
+    async (board: { nodes?: { data?: { label?: string } }[] }) =>
+      `<svg data-label="${board.nodes?.[0]?.data?.label ?? ''}"></svg>`,
+  ),
+}))
+vi.mock('@dou-ui/flow/style.css', () => ({}))
+vi.mock('./whiteboard-extensions', () => ({ whiteboardExtensions: () => [] }))
+
+function makeBoardJson(label: string) {
+  return JSON.stringify({
+    version: 1,
+    nodes: [
+      {
+        id: 'n1',
+        type: 'shape',
+        position: { x: 0, y: 0 },
+        width: 140,
+        height: 60,
+        data: { shape: 'rectangle', label },
+      },
+    ],
+    edges: [],
+  })
+}
 
 function makeItem(
   id: string,
@@ -160,6 +187,7 @@ describe('gallery-groups helpers', () => {
 describe('ArtifactThumb prototype cover and minimap', () => {
   afterEach(() => {
     while (wrappers.length) wrappers.pop()!.unmount()
+    clearBoardThumbnails()
     vi.restoreAllMocks()
   })
 
@@ -190,6 +218,103 @@ describe('ArtifactThumb prototype cover and minimap', () => {
     wrappers.push(wrapper)
     await nextTick()
     expect(wrapper.findAll('.minimap-box')).toHaveLength(2)
+  })
+
+  test('re-renders visible whiteboard SVG when updatedAt changes without losing visibility', async () => {
+    const originalIO = globalThis.IntersectionObserver
+    const observed = new Set<Element>()
+    let notify: IntersectionObserverCallback | null = null
+    class FakeIO {
+      constructor(cb: IntersectionObserverCallback) {
+        notify = cb
+      }
+      observe(el: Element) {
+        observed.add(el)
+      }
+      unobserve(el: Element) {
+        observed.delete(el)
+      }
+      disconnect() {
+        observed.clear()
+      }
+      takeRecords() {
+        return []
+      }
+    }
+    globalThis.IntersectionObserver = FakeIO as unknown as typeof IntersectionObserver
+
+    const itemV1 = makeItem('board_refresh', {
+      kind: 'whiteboard',
+      hasPrototype: false,
+      previewImage: null,
+      updatedAt: 1_800_000_001_000,
+    })
+
+    const getArtifactSpy = vi.spyOn(api, 'getArtifact').mockImplementation(async (id) => ({
+      artifact: {
+        ...itemV1.artifact,
+        id,
+        content: makeBoardJson(
+          id === 'board_refresh' ? `rev-${getArtifactSpy.mock.calls.length}` : 'other',
+        ),
+      },
+      versions: [],
+      comments: [],
+      nextVersionPageToken: '',
+      hasMoreVersions: false,
+      askBaseline: null,
+    }))
+
+    try {
+      const wrapper = mount(ArtifactThumb, { props: { artifact: itemV1.artifact } })
+      wrappers.push(wrapper)
+      await flushPromises()
+      await nextTick()
+
+      // Before becoming visible, no full board fetch or SVG image yet.
+      expect(observed.size).toBe(1)
+      expect(getArtifactSpy).not.toHaveBeenCalled()
+      expect(wrapper.find('img.thumb-board').exists()).toBe(false)
+
+      // Enter viewport once: observeThumbnailVisibility fires callback and unobserves the element.
+      const el = [...observed][0]!
+      notify!(
+        [{ target: el, isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver,
+      )
+      await vi.waitFor(() => expect(wrapper.find('img.thumb-board').exists()).toBe(true))
+      expect(observed.size).toBe(0)
+      expect(getArtifactSpy).toHaveBeenCalledTimes(1)
+      const firstSrc = wrapper.find('img.thumb-board').attributes('src')
+      expect(firstSrc).toContain('data:image/svg+xml')
+
+      // Same artifact gets a new updatedAt (silent refresh): must re-render SVG immediately
+      // without needing another IntersectionObserver notification.
+      await wrapper.setProps({
+        artifact: { ...itemV1.artifact, updatedAt: 1_800_000_002_000 },
+      })
+      await vi.waitFor(() => expect(getArtifactSpy).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() => {
+        const nextSrc = wrapper.find('img.thumb-board').attributes('src')
+        expect(nextSrc).toContain('data:image/svg+xml')
+        expect(nextSrc).not.toBe(firstSrc)
+      })
+
+      // Switching to a different artifact id resets visibility and re-observes the element.
+      const otherItem = makeItem('board_other', {
+        kind: 'whiteboard',
+        hasPrototype: false,
+        previewImage: null,
+        updatedAt: 1_800_000_003_000,
+      })
+      await wrapper.setProps({ artifact: otherItem.artifact })
+      await flushPromises()
+      await nextTick()
+      expect(observed.size).toBe(1)
+      expect(getArtifactSpy).toHaveBeenCalledTimes(2)
+    } finally {
+      globalThis.IntersectionObserver = originalIO
+    }
   })
 })
 
@@ -325,7 +450,23 @@ describe('ArtifactGallery interactions', () => {
     )
   })
 
-  test('narrow layout shows filter sheet trigger and bottom sheet quick-view drawer', async () => {
+  test('narrow layout shows filter sheet with dedicated field labels and bottom sheet quick-view drawer', async () => {
+    const desktopWrapper = mountGallery('wide')
+    await flushPromises()
+    const desktopLabels = desktopWrapper
+      .findAll('.gallery-select-wrap [aria-label]')
+      .map((el) => el.attributes('aria-label'))
+    expect(desktopLabels).toContain('排序')
+    expect(desktopLabels).toContain('分组')
+    expect(desktopLabels).not.toContain('最近更新')
+    expect(desktopLabels).not.toContain('不分组')
+    desktopWrapper.unmount()
+
+    galleryState.sort = 'title_asc'
+    galleryState.groupBy = 'project'
+    galleryState.viewMode = 'list'
+    galleryState.density = 'compact'
+
     const wrapper = mountGallery('narrow')
     await flushPromises()
 
@@ -335,7 +476,12 @@ describe('ArtifactGallery interactions', () => {
     await nextTick()
     expect(document.body.textContent).toContain('筛选与排序')
 
-    await wrapper.find('[data-artifact-id="art_doc"] .quick-view-btn').trigger('click')
+    const fieldHeadings = [
+      ...document.body.querySelectorAll('.mobile-filter-sheet .sheet-field > :first-child'),
+    ].map((el) => el.textContent?.trim())
+    expect(fieldHeadings).toEqual(['项目', '状态', '排序', '分组', '视图', '密度'])
+
+    await wrapper.find('[data-artifact-id="art_doc"] .list-quick-btn').trigger('click')
     await flushPromises()
     expect(wrapper.find('aside.quick-pane').exists()).toBe(false)
     expect(galleryState.quickViewId).toBe('art_doc')

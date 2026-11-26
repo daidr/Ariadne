@@ -540,7 +540,7 @@ onBeforeUnmount(() => {
                 :model-value="galleryState.sort"
                 :options="sortOptions"
                 size="sm"
-                :aria-label="t('gallery.sort.updated')"
+                :aria-label="t('gallery.sort.label')"
                 @update:model-value="setSort"
               />
             </div>
@@ -549,7 +549,7 @@ onBeforeUnmount(() => {
                 :model-value="galleryState.groupBy"
                 :options="groupOptions"
                 size="sm"
-                :aria-label="t('gallery.group.none')"
+                :aria-label="t('gallery.group.label')"
                 @update:model-value="setGroupBy"
               />
             </div>
@@ -840,19 +840,20 @@ onBeforeUnmount(() => {
       <div class="mobile-filter-sheet">
         <div class="sheet-field">
           <DouText size="sm" variant="secondary" weight="medium">{{
-            t('gallery.project.placeholder')
+            t('gallery.project.label')
           }}</DouText>
           <DouSelect
             :model-value="galleryState.projectId"
             :options="projectOptions"
             filterable
+            :aria-label="t('gallery.project.label')"
             @update:model-value="setProjectFilter"
           />
         </div>
 
         <div class="sheet-field">
           <DouText size="sm" variant="secondary" weight="medium">{{
-            t('gallery.status.all')
+            t('gallery.status.label')
           }}</DouText>
           <div class="sheet-chips">
             <DouCheckTag
@@ -889,29 +890,31 @@ onBeforeUnmount(() => {
 
         <div class="sheet-field">
           <DouText size="sm" variant="secondary" weight="medium">{{
-            t('gallery.sort.updated')
+            t('gallery.sort.label')
           }}</DouText>
           <DouSelect
             :model-value="galleryState.sort"
             :options="sortOptions"
+            :aria-label="t('gallery.sort.label')"
             @update:model-value="setSort"
           />
         </div>
 
         <div class="sheet-field">
           <DouText size="sm" variant="secondary" weight="medium">{{
-            t('gallery.group.none')
+            t('gallery.group.label')
           }}</DouText>
           <DouSelect
             :model-value="galleryState.groupBy"
             :options="groupOptions"
+            :aria-label="t('gallery.group.label')"
             @update:model-value="setGroupBy"
           />
         </div>
 
         <div class="sheet-field">
           <DouText size="sm" variant="secondary" weight="medium">{{
-            t('gallery.view.grid')
+            t('gallery.view.label')
           }}</DouText>
           <div class="sheet-chips">
             <DouButton
@@ -937,7 +940,7 @@ onBeforeUnmount(() => {
 
         <div class="sheet-field">
           <DouText size="sm" variant="secondary" weight="medium">{{
-            t('gallery.density.comfortable')
+            t('gallery.density.label')
           }}</DouText>
           <div class="sheet-chips">
             <DouButton

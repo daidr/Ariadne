@@ -53,10 +53,12 @@ const visible = ref(noObserver())
 
 watch(
   () => [props.artifact.id, props.artifact.updatedAt] as const,
-  () => {
+  ([id], [prevId]) => {
     picture.value = null
     coverFailed.value = false
-    visible.value = noObserver()
+    if (id !== prevId) {
+      visible.value = noObserver()
+    }
   },
 )
 
