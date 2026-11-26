@@ -215,6 +215,168 @@ func TestProviderEnvPersistenceMaskingRedactionAndDraft(t *testing.T) {
 	}
 }
 
+func TestProviderEnvDisabledPluginPreservedAndKindSwitchIsolated(t *testing.T) {
+	t.Parallel()
+	store, err := Open(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexKind := sdk.ModelProviderInfo{
+		Kind:    "codex",
+		Title:   sdk.LocalizedText{"zh-CN": "Codex", "en": "Codex"},
+		Program: true,
+		Settings: sdk.SettingsSchema{
+			Type: "object",
+			Properties: map[string]sdk.SettingField{
+				"command": {Type: "string", Default: "codex"},
+			},
+		},
+	}
+	allKinds := append(testProgramKinds(), codexKind)
+
+	// Initial save with a program provider that has secret env variables.
+	if _, err := store.UpdateModels(Object{
+		"providers": []any{
+			Object{
+				"id":       "p-cc",
+				"kind":     "claude-code",
+				"name":     "Claude Code",
+				"settings": Object{"command": "claude"},
+				"env": []any{
+					Object{"name": "ANTHROPIC_AUTH_TOKEN", "value": "sk-claude-secret"},
+					Object{"name": "ANTHROPIC_BASE_URL", "value": "https://claude.example"},
+				},
+			},
+		},
+		"models": []any{
+			Object{"id": "m-cc", "provider": "p-cc", "model": "default"},
+		},
+		"roles": Object{
+			"thread": Object{"model": "m-cc", "effort": nil},
+		},
+	}, allKinds); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Saving while claude-code plugin is disabled preserves stored env even if request sends env=[].
+	disabledKinds := []sdk.ModelProviderInfo{testProgramKinds()[1], codexKind}
+	if _, err := store.UpdateModels(Object{
+		"providers": []any{
+			Object{
+				"id":       "p-cc",
+				"kind":     "claude-code",
+				"name":     "Claude Code",
+				"settings": Object{},
+				"env":      []any{},
+			},
+		},
+		"models": []any{
+			Object{"id": "m-cc", "provider": "p-cc", "model": "default"},
+		},
+		"roles": Object{
+			"thread": Object{"model": "m-cc", "effort": nil},
+		},
+	}, disabledKinds); err != nil {
+		t.Fatalf("save with disabled plugin failed: %v", err)
+	}
+
+	// Re-enabling the plugin must still have all stored env secrets intact.
+	resolved, err := store.ResolveModel("thread", "", "", allKinds)
+	if err != nil || resolved == nil {
+		t.Fatalf("ResolveModel after re-enable = %+v, err=%v", resolved, err)
+	}
+	envMap, _ := resolved.Settings["env"].(map[string]any)
+	if envMap["ANTHROPIC_AUTH_TOKEN"] != "sk-claude-secret" || envMap["ANTHROPIC_BASE_URL"] != "https://claude.example" {
+		t.Fatalf("disabled plugin env lost: %#v", envMap)
+	}
+
+	// 2. Switching provider kind from claude-code to codex must NOT inherit old claude-code secrets.
+	if _, err := store.UpdateModels(Object{
+		"providers": []any{
+			Object{
+				"id":       "p-cc",
+				"kind":     "codex",
+				"name":     "Codex",
+				"settings": Object{"command": "codex"},
+				"env": []any{
+					Object{"name": "ANTHROPIC_AUTH_TOKEN", "value": ""},
+				},
+			},
+		},
+		"models": []any{
+			Object{"id": "m-cc", "provider": "p-cc", "model": "default"},
+		},
+		"roles": Object{
+			"thread": Object{"model": "m-cc", "effort": nil},
+		},
+	}, allKinds); err == nil {
+		t.Fatal("expected switching provider kind with empty stored env to be rejected rather than inheriting old secrets")
+	}
+
+	// Switching kind with new env values succeeds and drops old kind's secrets completely.
+	if _, err := store.UpdateModels(Object{
+		"providers": []any{
+			Object{
+				"id":       "p-cc",
+				"kind":     "codex",
+				"name":     "Codex",
+				"settings": Object{"command": "codex"},
+				"env": []any{
+					Object{"name": "OPENAI_API_KEY", "value": "sk-codex-new"},
+				},
+			},
+		},
+		"models": []any{
+			Object{"id": "m-cc", "provider": "p-cc", "model": "default"},
+		},
+		"roles": Object{
+			"thread": Object{"model": "m-cc", "effort": nil},
+		},
+	}, allKinds); err != nil {
+		t.Fatalf("kind switch with fresh env failed: %v", err)
+	}
+	resolved, err = store.ResolveModel("thread", "", "", allKinds)
+	if err != nil || resolved == nil {
+		t.Fatalf("ResolveModel after kind switch = %+v, err=%v", resolved, err)
+	}
+	envMap, _ = resolved.Settings["env"].(map[string]any)
+	if len(envMap) != 1 || envMap["OPENAI_API_KEY"] != "sk-codex-new" {
+		t.Fatalf("expected only codex env after kind switch, got %#v", envMap)
+	}
+
+	// 3. Switching from program kind (codex) to non-program kind (anthropic) drops env even if env is sent.
+	if _, err := store.UpdateModels(Object{
+		"providers": []any{
+			Object{
+				"id":       "p-cc",
+				"kind":     "anthropic",
+				"name":     "Anthropic",
+				"settings": Object{"apiKey": "sk-anth"},
+				"env": []any{
+					Object{"name": "SHOULD_NOT_KEEP", "value": "secret-should-drop"},
+				},
+			},
+		},
+		"models": []any{
+			Object{"id": "m-cc", "provider": "p-cc", "model": "claude-sonnet"},
+		},
+		"roles": Object{
+			"thread": Object{"model": "m-cc", "effort": nil},
+		},
+	}, allKinds); err != nil {
+		t.Fatalf("switch to non-program kind failed: %v", err)
+	}
+	public := store.PublicModels(allKinds)
+	publicEnv, _ := object(list(public["providers"])[0])["env"].([]string)
+	if len(publicEnv) != 0 {
+		t.Fatalf("expected non-program provider to drop env, got %#v", publicEnv)
+	}
+	configured := secrets.ConfiguredValues(store.Current())
+	if slices.Contains(configured, "sk-codex-new") || slices.Contains(configured, "secret-should-drop") {
+		t.Fatalf("non-program provider must not retain env secrets: %#v", configured)
+	}
+}
+
 func TestProjectModelOverridesResolutionAndFallback(t *testing.T) {
 	t.Parallel()
 	store, err := Open(filepath.Join(t.TempDir(), "config.json"))

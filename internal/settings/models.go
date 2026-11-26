@@ -124,11 +124,13 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo, valid
 			kind := text(given["kind"])
 			info, ok := providerInfo(kinds, kind)
 			var settings Object
+			var env Object
 			if !ok {
 				if before == nil || before["kind"] != kind {
 					return bad(at + ".kind")
 				}
 				settings = cloneMap(object(before["settings"]))
+				env = cloneMap(object(before["env"]))
 			} else {
 				settings = storedProviderSecrets(kind, given["settings"], before, info)
 				if validateSettings != nil {
@@ -136,12 +138,19 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo, valid
 						return err
 					}
 				}
+				if info.Program {
+					var beforeEnv Object
+					if before != nil && before["kind"] == kind {
+						beforeEnv = object(before["env"])
+					}
+					var err error
+					env, err = secretPairs(given["env"], validProviderEnv, beforeEnv, at+".env")
+					if err != nil {
+						return err
+					}
+				}
 			}
 			headers, err := secretPairs(given["headers"], headerName.MatchString, object(object(before["request"])["headers"]), at+".headers")
-			if err != nil {
-				return err
-			}
-			env, err := secretPairs(given["env"], validProviderEnv, object(before["env"]), at+".env")
 			if err != nil {
 				return err
 			}
@@ -412,18 +421,20 @@ func (store *Store) DraftProvider(input any, kinds []sdk.ModelProviderInfo, vali
 		headers = cloneMap(object(object(before["request"])["headers"]))
 	}
 	var env Object
-	if rawEnv, exists := given["env"]; exists && rawEnv != nil {
-		var beforeEnv Object
-		if before != nil && before["kind"] == kind {
-			beforeEnv = object(before["env"])
+	if info.Program {
+		if rawEnv, exists := given["env"]; exists && rawEnv != nil {
+			var beforeEnv Object
+			if before != nil && before["kind"] == kind {
+				beforeEnv = object(before["env"])
+			}
+			var err error
+			env, err = secretPairs(rawEnv, validProviderEnv, beforeEnv, "provider.env")
+			if err != nil {
+				return DraftProvider{}, err
+			}
+		} else if before != nil && before["kind"] == kind {
+			env = cloneMap(object(before["env"]))
 		}
-		var err error
-		env, err = secretPairs(rawEnv, validProviderEnv, beforeEnv, "provider.env")
-		if err != nil {
-			return DraftProvider{}, err
-		}
-	} else if before != nil && before["kind"] == kind {
-		env = cloneMap(object(before["env"]))
 	}
 	hint := []string{kind}
 	secrets := secretFields(info)

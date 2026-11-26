@@ -1096,7 +1096,6 @@ export const en: Record<MessageKey, string> = {
   'settings.request': 'Request options',
   'settings.headers': 'Headers',
   'settings.env': 'Environment variables',
-  'settings.envHelp': 'Passed when starting this program; saved values are not shown again',
   'settings.extraBody': 'Extra body fields (JSON)',
   'settings.extraBodyInvalid': 'The extra body fields of “{name}” are not a JSON object',
   'settings.timeoutSeconds': 'Timeout without response (s)',
@@ -1153,8 +1152,6 @@ export const en: Record<MessageKey, string> = {
   'projectSettings.checkHelp':
     'Runs after each file a thread edits, and a failure goes back to it; {placeholder} becomes the changed files',
   'projectSettings.env': 'Command environment variables',
-  'projectSettings.modelsHelp':
-    'Override models and thinking effort for this project only. Leave unset to follow global settings.',
   'projectSettings.followGlobal': 'Follow global',
   'projectSettings.followGlobalValue': 'Follow global ({value})',
   'projectSettings.modelsEmpty': 'No models configured yet',

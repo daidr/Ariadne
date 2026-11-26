@@ -1053,7 +1053,6 @@ export const zhCN = {
   'settings.request': '请求参数',
   'settings.headers': '请求头',
   'settings.env': '环境变量',
-  'settings.envHelp': '启动此程序时传入的环境变量；已保存的值不会再次显示',
   'settings.extraBody': '额外请求字段（JSON）',
   'settings.extraBodyInvalid': '「{name}」的额外请求字段不是 JSON 对象',
   'settings.timeoutSeconds': '无响应超时（秒）',
@@ -1108,7 +1107,6 @@ export const zhCN = {
   'projectSettings.checkHelp':
     '讨论串每次改完文件后运行，失败时把输出交给它；{placeholder} 会换成改动的文件',
   'projectSettings.env': '命令的环境变量',
-  'projectSettings.modelsHelp': '仅为当前项目覆盖模型与思考深度，留空则跟随全局设置。',
   'projectSettings.followGlobal': '跟随全局',
   'projectSettings.followGlobalValue': '跟随全局（{value}）',
   'projectSettings.modelsEmpty': '尚未配置可用模型',

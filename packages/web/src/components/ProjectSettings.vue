@@ -467,38 +467,35 @@ async function save() {
           </div>
         </DouTabPanel>
         <DouTabPanel value="models" :label="t('projectSettings.tab.models')" :icon="CpuIcon">
-          <div v-if="state.models.length" class="project-stack">
-            <DouText size="sm" variant="secondary">{{ t('projectSettings.modelsHelp') }}</DouText>
-            <DouForm layout="vertical" size="sm">
-              <DouFormItem :label="t('settings.threadModel')">
-                <DouCascader
-                  v-model="threadModelPath"
-                  :options="threadModelOptions"
-                  separator=" · "
+          <DouForm v-if="state.models.length" layout="vertical" size="sm">
+            <DouFormItem :label="t('settings.threadModel')">
+              <DouCascader
+                v-model="threadModelPath"
+                :options="threadModelOptions"
+                separator=" · "
+              />
+            </DouFormItem>
+            <DouFormItem :label="t('settings.coordinatorModel')">
+              <DouCascader
+                v-model="coordinatorModelPath"
+                :options="coordinatorModelOptions"
+                separator=" · "
+              />
+            </DouFormItem>
+            <DouFormItem>
+              <template #label>
+                <SettingsLabelHelp
+                  :label="t('settings.researchModel')"
+                  :content="t('settings.researchModelHelp')"
                 />
-              </DouFormItem>
-              <DouFormItem :label="t('settings.coordinatorModel')">
-                <DouCascader
-                  v-model="coordinatorModelPath"
-                  :options="coordinatorModelOptions"
-                  separator=" · "
-                />
-              </DouFormItem>
-              <DouFormItem>
-                <template #label>
-                  <SettingsLabelHelp
-                    :label="t('settings.researchModel')"
-                    :content="t('settings.researchModelHelp')"
-                  />
-                </template>
-                <DouCascader
-                  v-model="researchModelPath"
-                  :options="researchModelOptions"
-                  separator=" · "
-                />
-              </DouFormItem>
-            </DouForm>
-          </div>
+              </template>
+              <DouCascader
+                v-model="researchModelPath"
+                :options="researchModelOptions"
+                separator=" · "
+              />
+            </DouFormItem>
+          </DouForm>
           <DouEmpty v-else :description="t('projectSettings.modelsEmpty')">
             <DouButton size="sm" variant="outline" @click="openModels">
               {{ t('projectSettings.modelsConfigure') }}

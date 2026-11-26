@@ -703,4 +703,205 @@ describe('ModelSettings', () => {
       { name: 'ANTHROPIC_AUTH_TOKEN', value: 'sk-draft-token' },
     ])
   })
+
+  test('preserves disabled program provider env on save and does not expand HTTP request settings', async () => {
+    const initial: ModelSettings = {
+      kinds: [openaiKind],
+      providers: [
+        {
+          id: 'p-oa',
+          kind: 'openai-compatible',
+          name: 'OpenAI',
+          settings: { baseUrl: 'https://api.openai.com/v1' },
+          secretsSet: ['apiKey'],
+          headers: [],
+          env: [],
+          extraBody: {},
+          timeoutSeconds: null,
+        },
+        {
+          id: 'p-cc',
+          kind: 'claude-code',
+          name: 'Claude Code',
+          settings: {},
+          secretsSet: [],
+          headers: [],
+          env: ['ANTHROPIC_AUTH_TOKEN'],
+          extraBody: {},
+          timeoutSeconds: null,
+        },
+      ],
+      models: [
+        { id: 'm-oa', provider: 'p-oa', model: 'gpt-5' },
+        { id: 'm-cc', provider: 'p-cc', model: 'default' },
+      ],
+      roles: {
+        thread: { model: 'm-oa', effort: null },
+        coordinator: { model: null, effort: null },
+        triage: { model: null, effort: null },
+        research: { model: null, effort: null },
+      },
+      showCost: false,
+    }
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(initial)
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 1 })
+    vi.spyOn(api, 'saveConcurrency').mockResolvedValue({ slots: 3, reserved: 1 })
+    const saveSpy = vi.spyOn(api, 'saveModelSettings').mockResolvedValue({
+      ...initial,
+      problems: [],
+    })
+
+    const wrapper = mount(ModelSettingsDialog, {
+      props: { open: true, tab: 'models' },
+      global: {
+        stubs: {
+          PluginSettings: true,
+          SearchSettings: true,
+          WorkSettings: true,
+          InputSettings: true,
+          McpSettings: true,
+          DataTab: true,
+          UpdatesSettings: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const cards = wrapper.findAll('.dou-card')
+    expect(cards).toHaveLength(2)
+    const disabledCard = cards[1]!
+    // Disabled program provider hides both env and HTTP request settings.
+    expect(disabledCard.text()).not.toContain('环境变量')
+    expect(disabledCard.text()).not.toContain('请求参数')
+    expect(disabledCard.text()).not.toContain('请求头')
+    expect(disabledCard.text()).not.toContain('额外请求字段')
+    expect(disabledCard.text()).not.toContain('超时')
+
+    // Saving keeps stored env keys for the disabled provider instead of sending [].
+    const saveButton = wrapper.findAll('button').find((btn) => btn.text().trim() === '保存')
+    expect(saveButton).toBeTruthy()
+    await saveButton!.trigger('click')
+    await flushPromises()
+
+    expect(saveSpy).toHaveBeenCalledTimes(1)
+    expect(saveSpy.mock.calls[0]?.[0]?.providers[1]?.env).toEqual([
+      { name: 'ANTHROPIC_AUTH_TOKEN', value: '' },
+    ])
+  })
+
+  test('clears stored env when switching provider kind so model listing and saving succeed', async () => {
+    const claudeKind: ModelSettings['kinds'][number] = {
+      kind: 'claude-code',
+      title: { 'zh-CN': 'Claude Code', en: 'Claude Code' },
+      program: true,
+      settings: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', title: { 'zh-CN': '命令', en: 'Command' }, default: 'claude' },
+        },
+      },
+    }
+    const codexKind: ModelSettings['kinds'][number] = {
+      kind: 'codex',
+      title: { 'zh-CN': 'Codex', en: 'Codex' },
+      program: true,
+      settings: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', title: { 'zh-CN': '命令', en: 'Command' }, default: 'codex' },
+        },
+      },
+    }
+    const initial: ModelSettings = {
+      kinds: [openaiKind, claudeKind, codexKind],
+      providers: [
+        {
+          id: 'p-cc',
+          kind: 'claude-code',
+          name: 'Claude Code',
+          settings: { command: 'claude' },
+          secretsSet: [],
+          headers: [],
+          env: ['ANTHROPIC_AUTH_TOKEN'],
+          extraBody: {},
+          timeoutSeconds: null,
+        },
+      ],
+      models: [{ id: 'm-cc', provider: 'p-cc', model: 'default' }],
+      roles: {
+        thread: { model: 'm-cc', effort: null },
+        coordinator: { model: null, effort: null },
+        triage: { model: null, effort: null },
+        research: { model: null, effort: null },
+      },
+      showCost: false,
+    }
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(initial)
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 1 })
+    vi.spyOn(api, 'saveConcurrency').mockResolvedValue({ slots: 3, reserved: 1 })
+    const listModelsSpy = vi.spyOn(api, 'listModels').mockResolvedValue({ models: [] })
+    const saveSpy = vi.spyOn(api, 'saveModelSettings').mockResolvedValue({
+      ...initial,
+      providers: [
+        {
+          ...initial.providers[0]!,
+          kind: 'codex',
+          name: 'Codex',
+          env: [],
+        },
+      ],
+      problems: [],
+    })
+
+    const wrapper = mount(ModelSettingsDialog, {
+      props: { open: true, tab: 'models' },
+      global: {
+        stubs: {
+          PluginSettings: true,
+          SearchSettings: true,
+          WorkSettings: true,
+          InputSettings: true,
+          McpSettings: true,
+          DataTab: true,
+          UpdatesSettings: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.findAll('input.pairs-name, .pairs-name input')).toHaveLength(1)
+
+    // Switch provider kind from claude-code to codex.
+    const kindSelect = wrapper.findComponent({ name: 'DouSelect' })
+    await kindSelect.vm.$emit('update:modelValue', 'codex')
+    await flushPromises()
+
+    // Old stored env entries are cleared and the env section collapses cleanly.
+    expect(wrapper.findAll('input.pairs-name, .pairs-name input')).toHaveLength(0)
+
+    // Listing models sends empty env rather than stale stored claude-code env keys.
+    const autocomplete = wrapper.findComponent({ name: 'DouAutocomplete' })
+    const fetchSuggestions = autocomplete.props('fetch') as (query: string) => Promise<unknown>
+    await fetchSuggestions('')
+    expect(listModelsSpy).toHaveBeenCalledWith({
+      id: 'p-cc',
+      kind: 'codex',
+      settings: { command: 'claude' },
+      env: [],
+    })
+
+    // Saving also sends empty env for the switched provider.
+    const saveButton = wrapper.findAll('button').find((btn) => btn.text().trim() === '保存')
+    expect(saveButton).toBeTruthy()
+    await saveButton!.trigger('click')
+    await flushPromises()
+
+    expect(saveSpy).toHaveBeenCalledTimes(1)
+    expect(saveSpy.mock.calls[0]?.[0]?.providers[0]?.kind).toBe('codex')
+    expect(saveSpy.mock.calls[0]?.[0]?.providers[0]?.env).toEqual([])
+  })
 })

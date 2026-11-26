@@ -532,6 +532,7 @@ function addProvider() {
 
 /** A new type brings its own settings; a name still the old type's follows the new one. */
 function setKind(provider: (typeof providers.value)[number], kind: string) {
+  if (provider.kind === kind) return
   const before = kindOf(provider.kind)
   const after = kindOf(kind)
   const oldName = before ? (lt(before.title) ?? before.kind) : provider.kind
@@ -540,6 +541,10 @@ function setKind(provider: (typeof providers.value)[number], kind: string) {
   }
   provider.kind = kind
   provider.secretsSet = []
+  provider.env = []
+  provider.advanced = after?.program
+    ? false
+    : !!(provider.extraBody.trim() || provider.headers.length || provider.timeoutSeconds)
   for (const model of modelsOf(provider)) presetModel(model)
 }
 
@@ -813,7 +818,8 @@ async function saveModels(): Promise<boolean> {
         name: provider.name,
         settings: provider.settings,
         headers: pairsInput(provider.headers),
-        env: kindOf(provider.kind)?.program ? pairsInput(provider.env) : [],
+        env:
+          !kindOf(provider.kind) || kindOf(provider.kind)?.program ? pairsInput(provider.env) : [],
         extraBody: bodies[at]!,
         timeoutSeconds: provider.timeoutSeconds || null,
       })),
@@ -1118,13 +1124,12 @@ async function saveModels(): Promise<boolean> {
                   </template>
                   {{ t('settings.env') }}
                 </DouButton>
-                <template v-if="provider.advanced && kindOf(provider.kind)?.program">
-                  <DouFormItem :help="t('settings.envHelp')">
-                    <SecretPairs v-model="provider.env" />
-                  </DouFormItem>
-                </template>
+                <SecretPairs
+                  v-if="provider.advanced && kindOf(provider.kind)?.program"
+                  v-model="provider.env"
+                />
                 <DouButton
-                  v-if="!kindOf(provider.kind)?.program"
+                  v-if="kindOf(provider.kind) && !kindOf(provider.kind)!.program"
                   size="sm"
                   variant="ghost"
                   class="settings-more"
@@ -1137,7 +1142,11 @@ async function saveModels(): Promise<boolean> {
                   </template>
                   {{ t('settings.request') }}
                 </DouButton>
-                <template v-if="provider.advanced && !kindOf(provider.kind)?.program">
+                <template
+                  v-if="
+                    provider.advanced && kindOf(provider.kind) && !kindOf(provider.kind)!.program
+                  "
+                >
                   <DouFormItem :label="t('settings.headers')">
                     <SecretPairs v-model="provider.headers" />
                   </DouFormItem>
