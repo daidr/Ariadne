@@ -11,6 +11,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/dlclark/regexp2/v2 v2.13.0
 	github.com/google/uuid v1.6.0
+	github.com/tats-u/goldmark-cjk-friendly/v2 v2.0.3
 	github.com/yuin/goldmark v1.8.6
 	github.com/yuin/gopher-lua v1.1.2
 	golang.org/x/mod v0.42.0

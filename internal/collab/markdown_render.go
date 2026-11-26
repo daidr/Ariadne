@@ -137,14 +137,42 @@ func inlineTags(key inlineFormat, asHTML, delimiterOK bool) (string, string) {
 	return "<" + tag + ">", "</" + tag + ">"
 }
 
+// isCJKRune matches core CJK characters and CJK punctuation recognized by both
+// goldmark-cjk-friendly and DouMarkdown so serialized emphasis delimiters
+// round-trip cleanly across the editor and Markdown previews.
+func isCJKRune(r rune) bool {
+	if r < 0x1100 {
+		return false
+	}
+	return (0x1100 <= r && r <= 0x11ff) ||
+		(0x2e80 <= r && r <= 0x2e99) ||
+		(0x2e9b <= r && r <= 0x2ef3) ||
+		(0x2f00 <= r && r <= 0x2fd5) ||
+		(0x2ff0 <= r && r <= 0x303e && r != 0x3000) ||
+		(0x3041 <= r && r <= 0x3096) ||
+		(0x3099 <= r && r <= 0x30ff) ||
+		(0x3105 <= r && r <= 0x312f) ||
+		(0x3131 <= r && r <= 0x318e) ||
+		(0x3190 <= r && r <= 0x31e5) ||
+		(0x31ef <= r && r <= 0x321e) ||
+		(0x3220 <= r && r <= 0x3247) ||
+		(0x3250 <= r && r <= 0x9fff) ||
+		(0xac00 <= r && r <= 0xd7a3) ||
+		(0xf900 <= r && r <= 0xfaff) ||
+		(0xfe30 <= r && r <= 0xfe4f) ||
+		(0xff01 <= r && r <= 0xffbe) ||
+		(0xffe0 <= r && r <= 0xffe6) ||
+		(0x20000 <= r && r <= 0x2ffff)
+}
+
 func flanks(inner, outer rune) bool {
 	if inner == 0 || unicode.IsSpace(inner) {
 		return false
 	}
-	if !unicode.IsPunct(inner) && !unicode.IsSymbol(inner) {
+	if (!unicode.IsPunct(inner) && !unicode.IsSymbol(inner)) || isCJKRune(inner) {
 		return true
 	}
-	return outer == 0 || unicode.IsSpace(outer) || unicode.IsPunct(outer) || unicode.IsSymbol(outer)
+	return outer == 0 || unicode.IsSpace(outer) || unicode.IsPunct(outer) || unicode.IsSymbol(outer) || isCJKRune(outer)
 }
 
 func renderInlines(parts []documentInline, asHTML bool) string {
