@@ -156,6 +156,7 @@ const contentSplit = computed({
 const PlanMain = defineAsyncView(() => import('./plan/PlanMain.vue'))
 const ArtifactsOverview = defineAsyncView(() => import('./artifacts/ArtifactsOverview.vue'))
 const PulseView = defineAsyncView(() => import('./pulse/PulseView.vue'))
+const ArtifactGallery = defineAsyncView(() => import('./artifacts/ArtifactGallery.vue'))
 const TraceView = defineAsyncView(() => import('./trace/TraceView.vue'))
 
 // Modal dialogs and secondary overlays are loaded lazily on first use.
@@ -286,7 +287,10 @@ onScopeDispose(
           </template>
           <template #end>
             <DouLayoutMain class="main">
-              <div v-if="!state.currentId || state.starting" class="pane">
+              <div v-if="state.main.kind === 'gallery'" class="pane">
+                <ArtifactGallery :layout-mode="layoutMode" />
+              </div>
+              <div v-else-if="!state.currentId || state.starting" class="pane">
                 <StartScreen class="start-panel" />
               </div>
               <div v-else-if="state.main.kind === 'plan' && state.planWide" class="pane">

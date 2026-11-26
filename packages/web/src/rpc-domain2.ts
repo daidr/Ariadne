@@ -17,6 +17,10 @@ import type {
   FileSourceSet,
   FormField,
   FormValue,
+  GalleryArtifactSummary,
+  GalleryArtifactsPage,
+  GalleryArtifactsQuery,
+  GalleryCounts,
   NeedsMeItem,
   NeedsMeThreadSummary,
   PlanNodeView,
@@ -57,6 +61,8 @@ import {
   type ErrorParamValue,
   type FileSource as ProtoFileSource,
   type FileSourceSet as ProtoFileSourceSet,
+  type GalleryArtifactSummary as ProtoGalleryArtifactSummary,
+  type GalleryCounts as ProtoGalleryCounts,
   type IssueDetail as ProtoIssueDetail,
   type IssueSummary as ProtoIssueSummary,
   type LocalizedError,
@@ -947,6 +953,16 @@ function fromProtoArtifactPreview(preview?: ProtoArtifactPreview): ArtifactPrevi
         items: preview.preview.value.items,
         connectors: preview.preview.value.connectors,
         texts: [...preview.preview.value.texts],
+        prototypeCount: preview.preview.value.prototypeCount,
+        optionCount: preview.preview.value.optionCount,
+        previewImage: preview.preview.value.previewImage ?? null,
+        minimap: preview.preview.value.minimap.map((box) => ({
+          x: box.x,
+          y: box.y,
+          w: box.w,
+          h: box.h,
+          kind: box.kind,
+        })),
       }
     case 'dashboard':
       return {
@@ -965,6 +981,7 @@ function fromProtoArtifactPreview(preview?: ProtoArtifactPreview): ArtifactPrevi
           h: tile.h,
           title: tile.title ?? null,
         })),
+        isLive: preview.preview.value.isLive,
       }
     default:
       return { kind: 'document', excerpt: '', lead: '' }
@@ -986,6 +1003,39 @@ function fromProtoArtifactSummary(item: ProtoArtifactSummary): ArtifactSummary {
     preview: fromProtoArtifactPreview(item.preview),
     openComments: Number(item.openComments),
     commentedAt: Number(item.commentedAt),
+  }
+}
+
+function fromProtoGalleryArtifactSummary(
+  item: ProtoGalleryArtifactSummary,
+): GalleryArtifactSummary {
+  return {
+    artifact: fromProtoArtifactSummary(requireField(item.artifact, 'artifact')),
+    projectName: item.projectName,
+    updatedByLabel: item.updatedByLabel ?? null,
+    updatedByCoordinator: item.updatedByCoordinator,
+    hasPrototype: item.hasPrototype,
+    pendingActions: item.pendingActions,
+    pendingFeedback: item.pendingFeedback,
+    nodeTitle: item.nodeTitle ?? null,
+  }
+}
+
+function fromProtoGalleryCounts(counts?: ProtoGalleryCounts): GalleryCounts | null {
+  if (!counts) return null
+  return {
+    total: counts.total,
+    documents: counts.documents,
+    whiteboards: counts.whiteboards,
+    dashboards: counts.dashboards,
+    prototypes: counts.prototypes,
+    needsMe: counts.needsMe,
+    feedbackPending: counts.feedbackPending,
+    projects: counts.projects.map((project) => ({
+      projectId: project.projectId,
+      projectName: project.projectName,
+      count: project.count,
+    })),
   }
 }
 
@@ -1736,6 +1786,31 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
       }
     },
 
+    async listGalleryArtifacts(
+      options: GalleryArtifactsQuery & { signal?: AbortSignal } = {},
+    ): Promise<GalleryArtifactsPage> {
+      const response = await clients.artifacts.listGalleryArtifacts(
+        {
+          projectId: options.projectId ?? '',
+          kind: options.kind ?? '',
+          onlyPrototypes: options.onlyPrototypes ?? false,
+          status: options.status ?? '',
+          query: options.query ?? '',
+          sort: options.sort ?? '',
+          pageSize: options.pageSize ?? 0,
+          pageToken: options.pageToken ?? '',
+          includeCounts: options.includeCounts ?? false,
+        },
+        options.signal ? { signal: options.signal } : undefined,
+      )
+      return {
+        items: response.items.map(fromProtoGalleryArtifactSummary),
+        nextPageToken: response.nextPageToken,
+        hasMore: response.hasMore,
+        counts: fromProtoGalleryCounts(response.counts),
+      }
+    },
+
     async createArtifact(
       projectId: string,
       input: { kind: ArtifactKind; title: string },
@@ -1760,6 +1835,7 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
         versions?: boolean
         versionPageSize?: number
         versionPageToken?: string
+        lightweight?: boolean
       } = {},
     ): Promise<ArtifactDetailResult> {
       const response = await clients.artifacts.getArtifact(
@@ -1769,6 +1845,7 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
           includeVersions: options.versions !== false,
           versionPageSize: options.versionPageSize ?? 0,
           versionPageToken: options.versionPageToken ?? '',
+          lightweight: options.lightweight ?? false,
         },
         options.signal ? { signal: options.signal } : undefined,
       )

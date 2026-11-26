@@ -1673,6 +1673,8 @@ export const api = {
     projectId: string,
     options: { pageSize?: number; pageToken?: string; signal?: AbortSignal } = {},
   ) => domain2Api.listArtifacts(projectId, options),
+  listGalleryArtifacts: (options: Parameters<typeof domain2Api.listGalleryArtifacts>[0] = {}) =>
+    domain2Api.listGalleryArtifacts(options),
   getArtifact: (
     id: string,
     options: {
@@ -1681,6 +1683,7 @@ export const api = {
       versions?: boolean
       versionPageSize?: number
       versionPageToken?: string
+      lightweight?: boolean
     } = {},
   ) => domain2Api.getArtifact(id, options),
   listArtifactVersions: (

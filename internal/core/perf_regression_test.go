@@ -90,6 +90,22 @@ func TestQueryPlansAvoidEventsScanAndUseProjectIndexes(t *testing.T) {
 		t.Fatalf("archive candidate query did not use expected indexes:\n%s", archiveCandidatePlan)
 	}
 
+	galleryUpdatedPlan := strings.Join(explain(
+		"SELECT "+galleryArtifactColumns+" FROM artifacts a WHERE (a.updated_at < ? OR (a.updated_at = ? AND a.id < ?)) ORDER BY a.updated_at DESC, a.id DESC LIMIT ?",
+		1800000000000, 1800000000000, "art_z", 49,
+	), "\n")
+	if strings.Contains(galleryUpdatedPlan, "TEMP B-TREE") || !strings.Contains(galleryUpdatedPlan, "artifacts_updated") {
+		t.Fatalf("gallery updated_desc query did not use artifacts_updated index:\n%s", galleryUpdatedPlan)
+	}
+
+	galleryCreatedPlan := strings.Join(explain(
+		"SELECT "+galleryArtifactColumns+" FROM artifacts a ORDER BY a.created_at DESC, a.id DESC LIMIT ?",
+		49,
+	), "\n")
+	if strings.Contains(galleryCreatedPlan, "TEMP B-TREE") || !strings.Contains(galleryCreatedPlan, "artifacts_created") {
+		t.Fatalf("gallery created_desc query did not use artifacts_created index:\n%s", galleryCreatedPlan)
+	}
+
 	assertPulsePlan := func(name, query, wantIndex, tableName string, allowCoveringScan bool, args ...any) {
 		t.Helper()
 		plan := strings.Join(explain(query, args...), "\n")
@@ -649,4 +665,79 @@ type recordingQueryer struct {
 func (r *recordingQueryer) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	r.queries = append(r.queries, query)
 	return r.inner.QueryContext(ctx, query, args...)
+}
+
+func TestSchemaV75MigrationBackfillsGalleryMetadataAndSearch(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "v75.sqlite")
+	repo, err := Open(t.Context(), Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prj, err := repo.CreateProject(t.Context(), new("旧版项目"), ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	boardJSON := `{"version":1,"nodes":[{"id":"grp","type":"group","x":0,"y":0,"width":500,"height":400,"data":{"title":"决策组","mode":"choose","round":1}},{"id":"p1","type":"prototype","x":20,"y":60,"width":460,"height":320,"data":{"title":"旧版交互原型","note":"历史迁移校验关键词","html":"<div>v75</div>","preview":"/api/files/fil_v75_cover"}}],"edges":[]}`
+	art, err := repo.CreateArtifact(t.Context(), prj.ID, NewArtifact{
+		Kind:    "whiteboard",
+		Title:   "迁移原型白板",
+		Author:  prj.CoordinatorID,
+		Content: boardJSON,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate an existing v75 database (with Pulse tables) lacking v76 gallery columns, indexes, enhanced preview, and title/note search indexing.
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		"DROP INDEX IF EXISTS artifacts_updated",
+		"DROP INDEX IF EXISTS artifacts_created",
+		"ALTER TABLE artifacts DROP COLUMN has_prototype",
+		"ALTER TABLE artifacts DROP COLUMN pending_actions",
+		`UPDATE artifacts SET preview = '{"kind":"whiteboard","items":2,"connectors":0,"texts":[]}' WHERE id = '` + art.ID + `'`,
+		`UPDATE search_text SET body = '' WHERE rowid = (SELECT id FROM search_docs WHERE kind = 'artifact' AND ref_id = '` + art.ID + `')`,
+		"PRAGMA user_version = 75",
+	} {
+		if _, err := db.ExecContext(t.Context(), stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, err := Open(t.Context(), Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrated.Close()
+
+	var version int
+	if err := migrated.Store.DB().QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&version); err != nil || version != schema.Version {
+		t.Fatalf("user_version = %d, want %d (err=%v)", version, schema.Version, err)
+	}
+	page, err := migrated.Reader.ListGalleryArtifacts(t.Context(), GalleryArtifactsQuery{
+		OnlyPrototypes: true,
+		Status:         "needs_me",
+		Query:          "历史迁移校验关键词",
+		IncludeCounts:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Artifact.ID != art.ID {
+		t.Fatalf("migrated gallery query = %+v, want %s", page.Items, art.ID)
+	}
+	prev := asObject(page.Items[0].Artifact.Preview)
+	if prev.str("previewImage") != "/api/files/fil_v75_cover" {
+		t.Fatalf("migrated previewImage = %q", prev.str("previewImage"))
+	}
 }

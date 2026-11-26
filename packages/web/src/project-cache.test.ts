@@ -11,10 +11,10 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-test('switching projects clears visual caches before any new project data arrives', async () => {
+test('switching projects keeps cross-project board thumbnails while clearing link caches', async () => {
   vi.spyOn(api, 'getProject').mockRejectedValue(new Error('fixture'))
   await openProject('next')
-  expect(clearBoardThumbnails).toHaveBeenCalledTimes(1)
+  expect(clearBoardThumbnails).not.toHaveBeenCalled()
   expect(clearLinkCaches).toHaveBeenCalledTimes(1)
 })
 
