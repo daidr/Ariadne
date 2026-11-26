@@ -91,14 +91,11 @@ const label = computed(() => {
   </DouDialog>
 </template>
 
-<style>
-/* The dialog's panel is drawn outside this component: its look is set unscoped. */
+<style scoped>
 .full-view {
   --dou-dialog-padding: 0;
 }
-</style>
 
-<style scoped>
 .full-shell {
   box-sizing: border-box;
   height: 100%;

@@ -217,6 +217,11 @@ test('shows native title tooltip only when a tab label is actually truncated', a
     project: { id: 'prj_1', name: 'Demo', coordinatorId: 'crd_1' } as ProjectView,
     threads: [
       {
+        id: 'thr_short',
+        title: '短标题',
+        stage: 'working',
+      } as ThreadView,
+      {
         id: 'thr_long',
         title: 'A very long discussion thread title that overflows the tab width',
         stage: 'working',
@@ -245,7 +250,8 @@ test('shows native title tooltip only when a tab label is actually truncated', a
       preview: { kind: 'document', lead: '# Spec', excerpt: 'Spec' },
     } as ArtifactSummary,
   ]
-  let layout = side.open(side.defaultLayout(), side.threadKey('thr_long'))
+  let layout = side.open(side.defaultLayout(), side.threadKey('thr_short'))
+  layout = side.open(layout, side.threadKey('thr_long'))
   layout = side.open(layout, side.artifactKey('art_short'))
   layout = side.open(layout, side.artifactKey('art_long'))
   state.side = layout
@@ -267,15 +273,27 @@ test('shows native title tooltip only when a tab label is actually truncated', a
   try {
     await nextTick()
     const tabs = wrapper.findAll('.dou-tabs__list [role="tab"]')
-    expect(tabs).toHaveLength(3)
+    expect(tabs).toHaveLength(4)
 
     // No hardcoded title attributes on label slot nodes.
     expect(wrapper.find('.pane-thread-label').attributes('title')).toBeUndefined()
 
-    const [threadTab, shortArtTab, longArtTab] = tabs
-    const threadTitleEl = threadTab!.find('.pane-thread-title').element as HTMLElement
-    Object.defineProperty(threadTitleEl, 'clientWidth', { value: 180, configurable: true })
-    Object.defineProperty(threadTitleEl, 'scrollWidth', { value: 320, configurable: true })
+    const [shortThreadTab, longThreadTab, shortArtTab, longArtTab] = tabs
+
+    // Simulate ripple pseudo-element enlarging DouStatusDot's scrollWidth on both working threads.
+    for (const tab of [shortThreadTab!, longThreadTab!]) {
+      const dotEl = tab.find('.dou-status-dot__dot').element as HTMLElement
+      Object.defineProperty(dotEl, 'clientWidth', { value: 8, configurable: true })
+      Object.defineProperty(dotEl, 'scrollWidth', { value: 14, configurable: true })
+    }
+
+    const shortThreadTitleEl = shortThreadTab!.find('.pane-thread-title').element as HTMLElement
+    Object.defineProperty(shortThreadTitleEl, 'clientWidth', { value: 60, configurable: true })
+    Object.defineProperty(shortThreadTitleEl, 'scrollWidth', { value: 60, configurable: true })
+
+    const longThreadTitleEl = longThreadTab!.find('.pane-thread-title').element as HTMLElement
+    Object.defineProperty(longThreadTitleEl, 'clientWidth', { value: 180, configurable: true })
+    Object.defineProperty(longThreadTitleEl, 'scrollWidth', { value: 320, configurable: true })
 
     const shortLabelEl = shortArtTab!.find('.dou-tabs__label').element as HTMLElement
     Object.defineProperty(shortLabelEl, 'clientWidth', { value: 60, configurable: true })
@@ -285,11 +303,13 @@ test('shows native title tooltip only when a tab label is actually truncated', a
     Object.defineProperty(longLabelEl, 'clientWidth', { value: 180, configurable: true })
     Object.defineProperty(longLabelEl, 'scrollWidth', { value: 340, configurable: true })
 
-    await threadTab!.trigger('pointerenter')
+    await shortThreadTab!.trigger('pointerenter')
+    await longThreadTab!.trigger('pointerenter')
     await shortArtTab!.trigger('pointerenter')
     await longArtTab!.trigger('pointerenter')
 
-    expect(threadTab!.attributes('title')).toBe(
+    expect(shortThreadTab!.attributes('title')).toBeUndefined()
+    expect(longThreadTab!.attributes('title')).toBe(
       'A very long discussion thread title that overflows the tab width',
     )
     expect(shortArtTab!.attributes('title')).toBeUndefined()
