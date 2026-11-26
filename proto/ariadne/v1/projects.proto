@@ -14,6 +14,7 @@ service ProjectService {
   rpc UpdateProject(UpdateProjectRequest) returns (UpdateProjectResponse);
   rpc DeleteProject(DeleteProjectRequest) returns (DeleteProjectResponse);
   rpc GetProjectActivity(GetProjectActivityRequest) returns (GetProjectActivityResponse);
+  rpc GetPulse(GetPulseRequest) returns (GetPulseResponse);
   rpc SearchProject(SearchProjectRequest) returns (SearchProjectResponse);
   rpc GetProjectSettings(GetProjectSettingsRequest) returns (GetProjectSettingsResponse);
   rpc GetFileSources(GetFileSourcesRequest) returns (GetFileSourcesResponse);
@@ -578,4 +579,85 @@ message RemoveProjectReferenceRequest {
 
 message RemoveProjectReferenceResponse {
   ProjectView project = 1;
+}
+
+message GetPulseRequest {
+  string project_id = 1;
+  int64 from_ms = 2 [jstype = JS_NUMBER];
+  int64 to_ms = 3 [jstype = JS_NUMBER];
+  bool include_completed = 4;
+}
+
+message PulseLane {
+  string conversation_id = 1;
+  string project_id = 2;
+  string project_name = 3;
+  string title = 4;
+  string role = 5;
+  optional string review_of = 6;
+  string stage = 7;
+  bool completed = 8;
+  optional string attention_id = 9;
+  optional string live_command = 10;
+  optional string live_tail = 11;
+  optional string last_headline = 12;
+  int64 active_at = 13 [jstype = JS_NUMBER];
+}
+
+message PulseSpan {
+  int64 id = 1 [jstype = JS_NUMBER];
+  string project_id = 2;
+  string conversation_id = 3;
+  string stage = 4;
+  bool occupies_slot = 5;
+  int64 started_at = 6 [jstype = JS_NUMBER];
+  optional int64 ended_at = 7 [jstype = JS_NUMBER];
+  int64 seq_start = 8 [jstype = JS_NUMBER];
+  optional int64 seq_end = 9 [jstype = JS_NUMBER];
+  string label = 10;
+}
+
+message PulseMarker {
+  int64 seq = 1 [jstype = JS_NUMBER];
+  string project_id = 2;
+  string conversation_id = 3;
+  optional string related_thread_id = 4;
+  string kind = 5;
+  int64 at = 6 [jstype = JS_NUMBER];
+  string label = 7;
+}
+
+message PulseHandoff {
+  int64 seq = 1 [jstype = JS_NUMBER];
+  string project_id = 2;
+  string from_conversation_id = 3;
+  string to_conversation_id = 4;
+  string kind = 5;
+  int64 at = 6 [jstype = JS_NUMBER];
+  string label = 7;
+}
+
+message PulseConcurrencyPoint {
+  int64 at = 1 [jstype = JS_NUMBER];
+  int32 active = 2;
+}
+
+message PulseConcurrency {
+  int32 slots = 1;
+  int32 current = 2;
+  int32 peak = 3;
+  repeated PulseConcurrencyPoint points = 4;
+}
+
+message GetPulseResponse {
+  repeated PulseLane lanes = 1;
+  repeated PulseSpan spans = 2;
+  repeated PulseMarker markers = 3;
+  repeated PulseHandoff handoffs = 4;
+  PulseConcurrency concurrency = 5;
+  optional int64 last_returned_at = 6 [jstype = JS_NUMBER];
+  int64 cursor_seq = 7 [jstype = JS_NUMBER];
+  int64 from_ms = 8 [jstype = JS_NUMBER];
+  int64 to_ms = 9 [jstype = JS_NUMBER];
+  int64 server_now_ms = 10 [jstype = JS_NUMBER];
 }

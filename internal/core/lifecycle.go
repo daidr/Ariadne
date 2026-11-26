@@ -31,7 +31,7 @@ func (LifecycleProjection) Forget(ctx context.Context, tx *sql.Tx, projectID str
 		}
 	}
 	// Only the application's known tables are touched, preserving plugin tables.
-	for _, table := range []string{"artifacts", "artifact_shared", "attentions", "issue_writes", "messages", "notices", "memories", "todos", "conversations", "plan_edges", "plan_node_issues", "plan_nodes", "plan_proposals", "plan_revisions", "reviews", "search_docs", "transcript", "prompts", "thread_repo_baselines", "threads", "files"} {
+	for _, table := range []string{"artifacts", "artifact_shared", "attentions", "issue_writes", "messages", "notices", "memories", "todos", "conversations", "plan_edges", "plan_node_issues", "plan_nodes", "plan_proposals", "plan_revisions", "pulse_markers", "pulse_spans", "reviews", "search_docs", "transcript", "prompts", "thread_repo_baselines", "threads", "files"} {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE project_id = ?", projectID); err != nil {
 			return err
 		}
@@ -89,9 +89,10 @@ func except(value object, key string) object {
 }
 
 type projectionWriter struct {
-	ctx context.Context
-	tx  *sql.Tx
-	err error
+	ctx               context.Context
+	tx                *sql.Tx
+	err               error
+	wokeConversations []string
 }
 
 func (writer *projectionWriter) run(query string, args ...any) {
@@ -391,6 +392,9 @@ func addEntry(w *projectionWriter, e eventstore.Event, conversationID any, kind 
 	w.run("INSERT INTO transcript (project_id, conversation_id, seq, kind, ref, payload, woke) VALUES (?, ?, ?, ?, ?, ?, ?)", e.ProjectID, conversationID, e.Seq, kind, ref, nullableJSON(payload), boolean(wake))
 	if wake {
 		w.run("UPDATE conversations SET pending_seq = ?1, pending_since = CASE WHEN pending_since = 0 THEN ?1 ELSE pending_since END WHERE id = ?2", e.Seq, conversationID)
+		if id, ok := conversationID.(string); ok && id != "" {
+			w.wokeConversations = append(w.wokeConversations, id)
+		}
 	}
 	touchThread(w, e.Seq, conversationID)
 }
