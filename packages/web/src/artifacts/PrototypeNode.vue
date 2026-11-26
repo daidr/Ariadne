@@ -3,17 +3,19 @@ import type { ArtifactCommentElement } from '@ariadne/core'
 import type { NodeViewProps } from '@dou-ui/flow'
 import { CloseIcon, MousePointerClickIcon, SlidersIcon } from '@dou-ui/icons'
 import { DouButton, DouPopover, DouTag, DouText } from 'dou-ui'
-import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { t } from '../i18n'
-import { registerPrototypeInspector } from './prototype-bridge'
+import { PROTOTYPE_TWEAKS_BRIDGE_KEY, registerPrototypeInspector } from './prototype-bridge'
 import {
   PROTOTYPE_DEFAULT_VIEWPORT_HEIGHT,
   PROTOTYPE_DEFAULT_VIEWPORT_WIDTH,
   PROTOTYPE_HEADER_HEIGHT,
   buildSandboxedPrototypeDoc,
   countModifiedTweaks,
+  diffTweakValues,
   effectiveTweakValues,
   extractTweaksFromHtml,
+  hasTweakValuesDiff,
   isValidPrototypeSrc,
   normalizePrototypeTweaks,
   resolvePrototypeHeaderLayout,
@@ -85,19 +87,78 @@ const tweakSpecs = computed<PrototypeTweakSpec[]>(() => {
   return extractTweaksFromHtml(rawHtml.value)
 })
 
+const tweaksBridge = inject(PROTOTYPE_TWEAKS_BRIDGE_KEY, null)
+const sendingTweaks = computed(() => tweaksBridge?.sendingNodeId.value === props.node.id)
 const liveValues = ref<PrototypeTweakValues>({})
+const savedValues = computed<PrototypeTweakValues>(() =>
+  effectiveTweakValues(tweakSpecs.value, props.data.tweakValues),
+)
+
+function serializeTweakValues(
+  specs: readonly PrototypeTweakSpec[],
+  values: PrototypeTweakValues,
+): string {
+  return JSON.stringify(specs.map((spec) => [spec.key, values[spec.key] ?? spec.default]))
+}
+
+function persistPreview(values: PrototypeTweakValues) {
+  if (props.readonly || !tweaksBridge) return
+  const specs = tweakSpecs.value
+  tweaksBridge.setPreview(props.node.id, {
+    specsKey: JSON.stringify(specs),
+    savedKey: serializeTweakValues(specs, savedValues.value),
+    liveValues: { ...values },
+  })
+}
+
+let lastNodeId: string | null = null
+let lastSpecsKey: string | null = null
+let lastSavedKey: string | null = null
 
 watch(
-  [tweakSpecs, () => props.data.tweakValues],
-  ([specs, saved]) => {
-    const next = effectiveTweakValues(specs, saved)
-    liveValues.value = next
-    postTweaks(next)
+  [() => props.node.id, tweakSpecs, savedValues],
+  ([nodeId, specs, saved]) => {
+    const nextSpecsKey = JSON.stringify(specs)
+    const nextSavedKey = serializeTweakValues(specs, saved)
+    if (nodeId === lastNodeId && nextSpecsKey === lastSpecsKey && nextSavedKey === lastSavedKey) {
+      return
+    }
+    lastNodeId = nodeId
+    lastSpecsKey = nextSpecsKey
+    lastSavedKey = nextSavedKey
+
+    if (!props.readonly && tweaksBridge) {
+      const cached = tweaksBridge.getPreview(nodeId)
+      if (cached && cached.specsKey === nextSpecsKey && cached.savedKey === nextSavedKey) {
+        const restored = effectiveTweakValues(specs, cached.liveValues)
+        liveValues.value = restored
+        postTweaks(restored)
+        return
+      }
+      if (cached && (specs.length > 0 || !loading.value)) {
+        tweaksBridge.clearPreview(nodeId)
+      }
+    }
+
+    liveValues.value = saved
+    postTweaks(saved)
   },
-  { immediate: true, deep: true },
+  { immediate: true },
 )
 
 const modifiedCount = computed(() => countModifiedTweaks(tweakSpecs.value, liveValues.value))
+const hasUnsentChanges = computed(() =>
+  hasTweakValuesDiff(tweakSpecs.value, liveValues.value, savedValues.value),
+)
+const canSendTweaks = computed(
+  () =>
+    !props.readonly &&
+    !!tweaksBridge &&
+    hasUnsentChanges.value &&
+    !sendingTweaks.value &&
+    !tweaksBridge.sending.value,
+)
+const tweaksSent = computed(() => modifiedCount.value > 0 && !hasUnsentChanges.value)
 
 // Rebuild srcdoc only when the source HTML changes; live tweaks update via postMessage without reload.
 const sandboxedDoc = ref('')
@@ -109,7 +170,7 @@ watch(
       return
     }
     const specs = tweakSpecs.value
-    const initial = effectiveTweakValues(specs, props.data.tweakValues)
+    const initial = effectiveTweakValues(specs, liveValues.value)
     sandboxedDoc.value = buildSandboxedPrototypeDoc(html, frameId, specs, initial)
   },
   { immediate: true },
@@ -125,34 +186,45 @@ function onIframeLoad() {
   postTweaks(liveValues.value)
 }
 
-function onTweakPreview(next: PrototypeTweakValues) {
+function onTweakChange(next: PrototypeTweakValues) {
   liveValues.value = next
+  persistPreview(next)
   postTweaks(next)
-}
-
-function onTweakCommit(next: PrototypeTweakValues) {
-  liveValues.value = next
-  postTweaks(next)
-  if (props.readonly) return
-  const diffOnly: PrototypeTweakValues = {}
-  for (const spec of tweakSpecs.value) {
-    const val = next[spec.key]
-    if (val !== undefined && val !== spec.default) {
-      diffOnly[spec.key] = val
-    }
-  }
-  props.updateData({
-    tweakValues: Object.keys(diffOnly).length > 0 ? diffOnly : undefined,
-  })
 }
 
 function onTweakReset() {
   const defaults = effectiveTweakValues(tweakSpecs.value)
   liveValues.value = defaults
+  persistPreview(defaults)
   postTweaks(defaults)
-  if (!props.readonly) {
-    props.updateData({ tweakValues: undefined })
+}
+
+async function onTweakSend() {
+  if (
+    !tweaksBridge ||
+    props.readonly ||
+    !hasUnsentChanges.value ||
+    sendingTweaks.value ||
+    tweaksBridge.sending.value
+  ) {
+    return
   }
+  const specs = tweakSpecs.value
+  const nextDiff = diffTweakValues(specs, liveValues.value)
+  const prevDiff = props.data.tweakValues ? { ...props.data.tweakValues } : undefined
+  const nextSavedKey = serializeTweakValues(specs, effectiveTweakValues(specs, nextDiff))
+  const prevSavedKey = serializeTweakValues(specs, effectiveTweakValues(specs, prevDiff))
+
+  // Keep the local preview cached at room level so rollback or node remount restores it cleanly.
+  persistPreview(liveValues.value)
+
+  await tweaksBridge.submitTweaks({
+    nodeId: props.node.id,
+    nextDiff,
+    prevDiff,
+    nextSavedKey,
+    prevSavedKey,
+  })
 }
 
 // ---- logical viewport scaling ----
@@ -361,9 +433,13 @@ const headerLayout = computed(() =>
               :specs="tweakSpecs"
               :values="liveValues"
               :readonly="readonly"
-              @preview="onTweakPreview"
-              @commit="onTweakCommit"
+              :show-send="!!tweaksBridge"
+              :can-send="canSendTweaks"
+              :sending="sendingTweaks"
+              :sent="tweaksSent"
+              @change="onTweakChange"
               @reset="onTweakReset"
+              @send="onTweakSend"
             />
           </template>
         </DouPopover>

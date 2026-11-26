@@ -675,6 +675,8 @@ export const en: Record<MessageKey, string> = {
   'artifact.prototype.tweaksTitle': 'Parameters',
   'artifact.prototype.tweaksReset': 'Reset defaults',
   'artifact.prototype.tweaksGeneral': 'General',
+  'artifact.prototype.tweaksSend': 'Send parameters to AI',
+  'artifact.prototype.tweaksSent': 'Parameters sent',
   'artifact.prototype.loading': 'Loading prototype…',
   'artifact.prototype.loadError': 'Could not load prototype',
   'artifact.prototype.doubleClickHint': 'Double-click or press Interact to try',

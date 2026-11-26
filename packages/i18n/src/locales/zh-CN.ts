@@ -645,6 +645,8 @@ export const zhCN = {
   'artifact.prototype.tweaksTitle': '参数调节',
   'artifact.prototype.tweaksReset': '恢复默认',
   'artifact.prototype.tweaksGeneral': '基础参数',
+  'artifact.prototype.tweaksSend': '将当前参数发给 AI',
+  'artifact.prototype.tweaksSent': '当前参数已发送',
   'artifact.prototype.loading': '正在加载原型…',
   'artifact.prototype.loadError': '原型加载失败',
   'artifact.prototype.doubleClickHint': '双击或点右上角进入交互',

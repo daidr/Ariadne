@@ -1,11 +1,50 @@
 import type { ArtifactCommentElement } from '@ariadne/core'
 import type { FlowDocument, FlowNode } from '@dou-ui/flow'
+import type { InjectionKey, Ref } from 'vue'
 import {
   PROTOTYPE_DEFAULT_VIEWPORT_HEIGHT,
   PROTOTYPE_DEFAULT_VIEWPORT_WIDTH,
   PROTOTYPE_HEADER_HEIGHT,
   type PrototypeNodeData,
+  type PrototypeTweakValues,
 } from './prototype-tweaks'
+
+export interface PrototypeTweaksPreviewEntry {
+  specsKey: string
+  savedKey: string
+  liveValues: PrototypeTweakValues
+}
+
+export interface PrototypeTweaksSubmitOptions {
+  nodeId: string
+  nextDiff: PrototypeTweakValues | undefined
+  prevDiff: PrototypeTweakValues | undefined
+  nextSavedKey: string
+  prevSavedKey: string
+}
+
+export interface PrototypeTweaksFeedbackBridge {
+  /**
+   * Commits final prototype tweak values silently to the whiteboard (through the persistent
+   * whiteboard editor transaction rather than a volatile node instance) and sends them as
+   * feedback immediately. Returns true if a feedback round was recorded on the server.
+   */
+  submitTweaks: (options: PrototypeTweaksSubmitOptions) => Promise<boolean>
+  /** Reactive flag indicating a feedback send is currently in flight for this artifact. */
+  sending: Readonly<Ref<boolean>>
+  /** Node ID whose prototype tweaks are currently being submitted, if any. */
+  sendingNodeId: Readonly<Ref<string | null>>
+  /** Reads the room-level local preview cache entry for a prototype node. */
+  getPreview: (nodeId: string) => PrototypeTweaksPreviewEntry | undefined
+  /** Stores or updates the room-level local preview cache entry for a prototype node. */
+  setPreview: (nodeId: string, entry: PrototypeTweaksPreviewEntry) => void
+  /** Clears the room-level local preview cache entry for a prototype node. */
+  clearPreview: (nodeId: string) => void
+}
+
+export const PROTOTYPE_TWEAKS_BRIDGE_KEY: InjectionKey<PrototypeTweaksFeedbackBridge> = Symbol(
+  'ariadne:prototype-tweaks-bridge',
+)
 
 export type PrototypeInspector = (
   viewportX: number,
