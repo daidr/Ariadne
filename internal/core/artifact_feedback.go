@@ -122,13 +122,12 @@ func artifactCommentStates(ctx context.Context, db queryer, id string) ([]object
 	return result, nil
 }
 
-// HasPendingDecisionGroups reports whether a whiteboard has at least one active
-// (unconfirmed) decision group, in which case automatic idle sending pauses so
-// the user can review and submit the round explicitly.
-func HasPendingDecisionGroups(content string) bool {
+// CountPendingDecisionGroups counts active (unconfirmed) decision groups on a
+// whiteboard.
+func CountPendingDecisionGroups(content string) int {
 	nodes, err := boardNodes(content)
 	if err != nil {
-		return false
+		return 0
 	}
 	index := indexBoard(nodes)
 	optionGroups := map[string]bool{}
@@ -140,6 +139,7 @@ func HasPendingDecisionGroups(content string) bool {
 			optionGroups[gid] = true
 		}
 	}
+	count := 0
 	for _, node := range nodes {
 		if node.str("type") != "group" {
 			continue
@@ -151,10 +151,17 @@ func HasPendingDecisionGroups(content string) bool {
 		round, _ := number(data["round"])
 		mode := data.str("mode")
 		if mode == "choose" || round > 0 || optionGroups[node.str("id")] {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
+}
+
+// HasPendingDecisionGroups reports whether a whiteboard has at least one active
+// (unconfirmed) decision group, in which case automatic idle sending pauses so
+// the user can review and submit the round explicitly.
+func HasPendingDecisionGroups(content string) bool {
+	return CountPendingDecisionGroups(content) > 0
 }
 
 type parsedDocumentAsk struct {
@@ -217,16 +224,22 @@ func parseDocumentAsks(content string) ([]parsedDocumentAsk, string) {
 	return asks, normalized
 }
 
+// CountPendingDocumentAsks counts active (unconfirmed) inline ask blocks in a document.
+func CountPendingDocumentAsks(content string) int {
+	asks, _ := parseDocumentAsks(content)
+	count := 0
+	for _, ask := range asks {
+		if !ask.confirmed {
+			count++
+		}
+	}
+	return count
+}
+
 // HasPendingDocumentAsks reports whether a document has at least one active
 // (unconfirmed) inline ask block.
 func HasPendingDocumentAsks(content string) bool {
-	asks, _ := parseDocumentAsks(content)
-	for _, ask := range asks {
-		if !ask.confirmed {
-			return true
-		}
-	}
-	return false
+	return CountPendingDocumentAsks(content) > 0
 }
 
 func describeDocumentAskChanges(previous, current string) ([]object, string, string) {

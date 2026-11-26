@@ -44,6 +44,7 @@ const hasSidePane = computed(
   () =>
     !!state.currentId &&
     !state.starting &&
+    state.main.kind !== 'gallery' &&
     state.main.kind !== 'trace' &&
     !(state.main.kind === 'plan' && state.planWide),
 )
@@ -216,7 +217,7 @@ watch(
             </DouButton>
             <DouDivider />
             <DouButton
-              v-if="state.detail"
+              v-if="state.detail && state.main.kind !== 'gallery'"
               variant="ghost"
               size="sm"
               class="duo-rail-menu-item"

@@ -12,6 +12,7 @@ type WorkspaceRequest struct {
 	Ref      *string  `json:"ref,omitempty"`
 	Branch   *string  `json:"branch,omitempty"`
 	Base     **string `json:"base,omitempty"`
+	Shared   bool     `json:"shared,omitempty"`
 }
 
 func (request *WorkspaceRequest) UnmarshalJSON(data []byte) error {
@@ -96,6 +97,10 @@ type WorkspaceCapability struct {
 	View     func(context.Context) (SourceView, error)
 	Branches *BranchCapability
 	Checkout *HostedCheckout
+	// Stale reports whether this capability snapshot no longer reflects the
+	// source's current isolation state (for example, after an unborn Git
+	// repository receives its first commit).
+	Stale func(context.Context) bool
 }
 
 // Remote workspaces can expose a loopback port without giving tools access to

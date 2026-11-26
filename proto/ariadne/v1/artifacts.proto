@@ -8,6 +8,7 @@ import "ariadne/v1/conversations.proto";
 // and version listings, feedback rounds, and dedicated comment lifecycle RPCs.
 service ArtifactService {
   rpc ListArtifacts(ListArtifactsRequest) returns (ListArtifactsResponse);
+  rpc ListGalleryArtifacts(ListGalleryArtifactsRequest) returns (ListGalleryArtifactsResponse);
   rpc CreateArtifact(CreateArtifactRequest) returns (CreateArtifactResponse);
   rpc GetArtifact(GetArtifactRequest) returns (GetArtifactResponse);
   rpc ListArtifactVersions(ListArtifactVersionsRequest) returns (ListArtifactVersionsResponse);
@@ -30,10 +31,22 @@ message DocumentArtifactPreview {
   string lead = 2;
 }
 
+message WhiteboardMinimapBox {
+  double x = 1;
+  double y = 2;
+  double w = 3;
+  double h = 4;
+  string kind = 5;
+}
+
 message WhiteboardArtifactPreview {
   int32 items = 1;
   int32 connectors = 2;
   repeated string texts = 3;
+  int32 prototype_count = 4;
+  int32 option_count = 5;
+  optional string preview_image = 6;
+  repeated WhiteboardMinimapBox minimap = 7;
 }
 
 message ArtifactPreviewTile {
@@ -50,6 +63,7 @@ message DashboardArtifactPreview {
   optional int64 taken_at = 2 [jstype = JS_NUMBER];
   repeated string titles = 3;
   repeated ArtifactPreviewTile tiles = 4;
+  bool is_live = 5;
 }
 
 message ArtifactPreview {
@@ -180,6 +194,53 @@ message ListArtifactsResponse {
   bool has_more = 3;
 }
 
+message GalleryArtifactSummary {
+  ArtifactSummary artifact = 1;
+  string project_name = 2;
+  optional string updated_by_label = 3;
+  bool updated_by_coordinator = 4;
+  bool has_prototype = 5;
+  int32 pending_actions = 6;
+  int32 pending_feedback = 7;
+  optional string node_title = 8;
+}
+
+message GalleryProjectCount {
+  string project_id = 1;
+  string project_name = 2;
+  int32 count = 3;
+}
+
+message GalleryCounts {
+  int32 total = 1;
+  int32 documents = 2;
+  int32 whiteboards = 3;
+  int32 dashboards = 4;
+  int32 prototypes = 5;
+  int32 needs_me = 6;
+  int32 feedback_pending = 7;
+  repeated GalleryProjectCount projects = 8;
+}
+
+message ListGalleryArtifactsRequest {
+  string project_id = 1;
+  string kind = 2;
+  bool only_prototypes = 3;
+  string status = 4;
+  string query = 5;
+  string sort = 6;
+  int32 page_size = 7;
+  string page_token = 8;
+  bool include_counts = 9;
+}
+
+message ListGalleryArtifactsResponse {
+  repeated GalleryArtifactSummary items = 1;
+  string next_page_token = 2;
+  bool has_more = 3;
+  optional GalleryCounts counts = 4;
+}
+
 message CreateArtifactRequest {
   string project_id = 1;
   string kind = 2;
@@ -198,6 +259,7 @@ message GetArtifactRequest {
   bool include_versions = 3;
   int32 version_page_size = 4;
   string version_page_token = 5;
+  bool lightweight = 6;
 }
 
 message DocumentAskAnswerBaseline {

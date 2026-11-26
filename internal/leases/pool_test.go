@@ -200,3 +200,54 @@ func TestFailedAndPanickingLoadersDoNotRetainResources(t *testing.T) {
 	}
 	closePool(t, pool)
 }
+func TestRetireReplacesStaleEntryWithoutInterruptingActiveLease(t *testing.T) {
+	pool := New[*resource](Options{})
+	defer closePool(t, pool)
+	var loads atomic.Int32
+	loader := func(context.Context) (*resource, error) {
+		n := loads.Add(1)
+		return &resource{secret: fmt.Sprintf("gen-%d", n)}, nil
+	}
+	first, err := pool.Acquire(t.Context(), "id", "same-key", loader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstCtx, stopFirst := first.Context(t.Context())
+	defer stopFirst()
+
+	// Non-matching predicate must keep the active entry in place.
+	pool.Retire("id", func(*resource) bool { return false })
+	same, err := pool.Acquire(t.Context(), "id", "same-key", loader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same.Value != first.Value || loads.Load() != 1 {
+		t.Fatalf("non-matching Retire replaced entry: loads=%d", loads.Load())
+	}
+	same.Release()
+
+	// Matching predicate detaches the old entry without interrupting its active lease.
+	pool.Retire("id", func(r *resource) bool { return r == first.Value })
+	if firstCtx.Err() != nil || first.Value.closed.Load() != 0 {
+		t.Fatal("Retire interrupted or closed an active lease")
+	}
+	second, err := pool.Acquire(t.Context(), "id", "same-key", loader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Value == first.Value || second.Value.secret != "gen-2" || loads.Load() != 2 {
+		t.Fatalf("expected fresh generation after Retire, got %q (loads=%d)", second.Value.secret, loads.Load())
+	}
+	if first.Value.closed.Load() != 0 {
+		t.Fatal("old generation closed before lease release")
+	}
+	first.Release()
+	deadline := time.Now().Add(time.Second)
+	for first.Value.closed.Load() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("retired generation did not close after release")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	second.Release()
+}
