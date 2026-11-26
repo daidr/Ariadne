@@ -27,6 +27,7 @@ import {
   effectScope,
   nextTick,
   onBeforeUnmount,
+  provide,
   ref,
   shallowRef,
   watch,
@@ -53,6 +54,7 @@ import {
   setPendingArtifactFeedback,
 } from './feedback-pending'
 import { kindIcon } from './kinds'
+import { PROTOTYPE_TWEAKS_BRIDGE_KEY } from './prototype-bridge'
 import { useSharedArtifact, type SharedArtifact } from './shared'
 
 /** `place` is where it is shown: in a tab on the right side, or full screen. */
@@ -210,8 +212,16 @@ function setArtifactFlag(target: typeof sendingArtifacts, id: string, active: bo
   else next.delete(id)
   target.value = next
 }
-/** Synchronous guard around applyRecommendedPicks() so real concurrent user edits are never dropped. */
-let applyingRecommended = false
+/** Synchronous guard around internal silent Yjs writes (recommended picks / explicit prototype tweaks). */
+let silentLocalUpdates = 0
+function runSilently<T>(fn: () => T): T {
+  silentLocalUpdates++
+  try {
+    return fn()
+  } finally {
+    silentLocalUpdates--
+  }
+}
 const sentRound = ref<{
   artifactId: string
   round: number
@@ -219,6 +229,7 @@ const sentRound = ref<{
   hadNotes: number
   previousHeard?: unknown
   previousAskBaseline?: DocumentAskAnswerBaseline[] | null
+  rollbackTweaks?: () => void
 } | null>(null)
 const decisionSummary = ref<DecisionGroupSummary | null>(null)
 const documentAsks = ref<AskBlockProps[]>([])
@@ -379,7 +390,7 @@ function join(id: string) {
   shared.value?.doc.on(
     'update',
     (_update: Uint8Array, origin: unknown, doc: Y.Doc, tr: Y.Transaction) => {
-      if (origin === shared.value?.provider.value || applyingRecommended) return
+      if (origin === shared.value?.provider.value || silentLocalUpdates > 0) return
       if (artifact.value?.kind === 'document' && isAskAnswerOnlyTransaction(doc, tr)) {
         touchAskAnswer()
         return
@@ -456,18 +467,30 @@ function onDocumentAsks(asks: AskBlockProps[]) {
   documentAsks.value = asks
 }
 
-async function sendFeedback(explicit = false) {
+interface PrototypeTweakCommit {
+  apply: () => void
+  rollback: () => void
+}
+
+interface SendFeedbackOptions {
+  explicit?: boolean
+  prototypeTweaks?: PrototypeTweakCommit
+}
+
+async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean> {
+  const prototypeTweaks = options.prototypeTweaks
+  const explicit = Boolean(options.explicit || prototypeTweaks)
   stopQuietTimer()
-  if (!room) return
+  if (!room) return false
   const sendRoom = room
   const id = sendRoom.id
-  if (sendingArtifacts.value.has(id)) return
-  if (!explicit && (!waiting.value || hasStructuredRound.value)) return
+  if (sendingArtifacts.value.has(id)) return false
+  if (!explicit && (!waiting.value || hasStructuredRound.value)) return false
 
   const isDocument = artifact.value?.kind === 'document'
   const projectId = artifact.value?.projectId ?? ''
   const initialPending = pendingChanges.value
-  const hadPending = isDocument ? initialPending : Math.max(1, initialPending)
+  const hadPending = isDocument || prototypeTweaks ? initialPending : Math.max(1, initialPending)
   const hadNotes = pendingNotes.value
   const hadUnsentAsks = isDocument && askSummary.value.hasUnsentChanges
   const previousAskBaseline = isDocument
@@ -478,16 +501,24 @@ async function sendFeedback(explicit = false) {
   const isSameRoom = () => props.id === id && room === sendRoom && !viewingOld.value
   const isCurrentLiveArtifact = () => props.id === id && room?.id === id && !viewingOld.value
   let applied = 0
+  let tweaksApplied = false
   let clearedPending = false
+  const rollbackAppliedTweaks = () => {
+    if (!tweaksApplied || !prototypeTweaks || !isSameRoom()) return
+    tweaksApplied = false
+    runSilently(() => prototypeTweaks.rollback())
+  }
   setArtifactFlag(sendingArtifacts, id, true)
   try {
-    if (explicit && hasStructuredRound.value) {
-      applyingRecommended = true
-      try {
-        applied = body.value?.applyRecommendedPicks?.() ?? 0
-      } finally {
-        applyingRecommended = false
-      }
+    if (prototypeTweaks) {
+      runSilently(() => {
+        prototypeTweaks.apply()
+        tweaksApplied = true
+      })
+      await nextTick()
+      await new Promise((resolve) => setTimeout(resolve, 120))
+    } else if (explicit && hasStructuredRound.value) {
+      applied = runSilently(() => body.value?.applyRecommendedPicks?.() ?? 0)
       if (applied > 0) {
         await nextTick()
         await new Promise((resolve) => setTimeout(resolve, 120))
@@ -514,9 +545,9 @@ async function sendFeedback(explicit = false) {
       pictures.map(async (picture) => (await api.uploadFile(projectId, picture)).file.id),
     )
     let result = await api.sendFeedback(id, images)
-    // If ask answers or recommended picks were just written to Yjs and the first flush raced
-    // WebSocket delivery, wait briefly and try once more before restoring pending state.
-    if (explicit && (applied > 0 || hadUnsentAsks) && !result?.feedback) {
+    // If ask answers, recommended picks, or prototype tweaks were just written to Yjs and the
+    // first flush raced WebSocket delivery, wait briefly and try once more before restoring state.
+    if (explicit && (applied > 0 || hadUnsentAsks || tweaksApplied) && !result?.feedback) {
       await new Promise((resolve) => setTimeout(resolve, 250))
       result = await api.sendFeedback(id, images)
     }
@@ -539,6 +570,7 @@ async function sendFeedback(explicit = false) {
             hadNotes,
             previousHeard,
             previousAskBaseline,
+            rollbackTweaks: prototypeTweaks?.rollback,
           }
           startSentRoundCountdown()
         }
@@ -546,8 +578,12 @@ async function sendFeedback(explicit = false) {
         askBaselineEpoch++
         void refreshAskBaseline(id)
       }
-    } else if (explicit && !editedDuringSend) {
-      const restorePending = isDocument ? initialPending : Math.max(initialPending, applied)
+      return true
+    }
+    rollbackAppliedTweaks()
+    if (explicit && !editedDuringSend) {
+      const restorePending =
+        isDocument || prototypeTweaks ? initialPending : Math.max(initialPending, applied)
       if (restorePending > 0) {
         if (isCurrentLiveArtifact()) {
           waiting.value = true
@@ -563,9 +599,12 @@ async function sendFeedback(explicit = false) {
         void refreshAskBaseline(id)
       }
     }
+    return false
   } catch (error) {
+    rollbackAppliedTweaks()
     if (clearedPending) {
-      const restorePending = isDocument ? initialPending : Math.max(initialPending, applied)
+      const restorePending =
+        isDocument || prototypeTweaks ? initialPending : Math.max(initialPending, applied)
       if (restorePending > 0) {
         if (isCurrentLiveArtifact()) {
           waiting.value = true
@@ -579,10 +618,16 @@ async function sendFeedback(explicit = false) {
       }
     }
     report(error)
+    return false
   } finally {
     setArtifactFlag(sendingArtifacts, id, false)
   }
 }
+
+provide(PROTOTYPE_TWEAKS_BRIDGE_KEY, {
+  submitTweaks: (options) => sendFeedback({ explicit: true, prototypeTweaks: options }),
+  sending,
+})
 
 async function withdrawSentFeedback() {
   const target = sentRound.value
@@ -599,6 +644,9 @@ async function withdrawSentFeedback() {
     if (sentRound.value === target) clearSentRound()
     if (withdrawn) {
       if (isSameRoom()) {
+        if (target.rollbackTweaks) {
+          runSilently(() => target.rollbackTweaks?.())
+        }
         if (target.previousHeard !== undefined) body.value?.setHeard?.(target.previousHeard)
         if (target.previousAskBaseline !== undefined) {
           askBaselineEpoch++
@@ -1138,7 +1186,7 @@ async function rename() {
           tone="primary"
           :loading="sending"
           :disabled="!canSubmitDecision"
-          @click="sendFeedback(true)"
+          @click="sendFeedback({ explicit: true })"
         >
           <template #leading><SendIcon /></template>
           {{ t('artifact.feedback.submitRound') }}
@@ -1154,7 +1202,7 @@ async function rename() {
           tone="primary"
           :loading="sending"
           :disabled="!canSubmitAsk"
-          @click="sendFeedback(true)"
+          @click="sendFeedback({ explicit: true })"
         >
           <template #leading><SendIcon /></template>
           {{ t('artifact.feedback.submitAnswers') }}
@@ -1188,7 +1236,7 @@ async function rename() {
             variant="soft"
             tone="primary"
             :loading="sending"
-            @click="sendFeedback(true)"
+            @click="sendFeedback({ explicit: true })"
           >
             <template #leading><SendIcon /></template>
             {{ t('artifact.feedback.sendNow') }}

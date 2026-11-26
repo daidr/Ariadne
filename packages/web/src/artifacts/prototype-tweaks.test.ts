@@ -4,9 +4,11 @@ import { resolvePrototypeViewportPoint } from './prototype-bridge'
 import {
   buildSandboxedPrototypeDoc,
   countModifiedTweaks,
+  diffTweakValues,
   effectiveTweakValues,
   extractTweaksFromHtml,
   groupTweaksBySection,
+  hasTweakValuesDiff,
   isValidPrototypeSrc,
   sanitizeCommentElement,
 } from './prototype-tweaks'
@@ -78,6 +80,15 @@ describe('prototype tweaks & sandbox builder', () => {
     const cleared = effectiveTweakValues(specs, { cta: '' })
     expect(cleared.cta).toBe('')
     expect(countModifiedTweaks(specs, cleared)).toBe(1)
+
+    expect(diffTweakValues(specs, effectiveTweakValues(specs))).toBeUndefined()
+    expect(diffTweakValues(specs, { gap: 99, mode: 'unknown', cta: '' })).toEqual({
+      gap: 24,
+      cta: '',
+    })
+    expect(hasTweakValuesDiff(specs, undefined, effectiveTweakValues(specs))).toBe(false)
+    expect(hasTweakValuesDiff(specs, { gap: 24 }, { gap: 16 })).toBe(true)
+    expect(hasTweakValuesDiff(specs, { gap: 99 }, { gap: 24 })).toBe(false)
   })
 
   test('prepends strict CSP before leading comments or external script tags and escapes script closes', () => {

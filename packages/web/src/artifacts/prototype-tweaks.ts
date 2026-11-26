@@ -285,6 +285,36 @@ export function countModifiedTweaks(
   return count
 }
 
+/** Returns only tweak entries whose effective value differs from default, or undefined when none differ. */
+export function diffTweakValues(
+  specs: readonly PrototypeTweakSpec[],
+  values?: PrototypeTweakValues,
+): PrototypeTweakValues | undefined {
+  const effective = effectiveTweakValues(specs, values)
+  const diff: PrototypeTweakValues = {}
+  for (const spec of specs) {
+    const val = effective[spec.key]
+    if (val !== undefined && val !== spec.default) {
+      diff[spec.key] = val
+    }
+  }
+  return Object.keys(diff).length > 0 ? diff : undefined
+}
+
+/** Returns true when two tweak value sets differ on at least one declared spec key. */
+export function hasTweakValuesDiff(
+  specs: readonly PrototypeTweakSpec[],
+  left?: PrototypeTweakValues,
+  right?: PrototypeTweakValues,
+): boolean {
+  const a = effectiveTweakValues(specs, left)
+  const b = effectiveTweakValues(specs, right)
+  for (const spec of specs) {
+    if (a[spec.key] !== b[spec.key]) return true
+  }
+  return false
+}
+
 export interface PrototypeTweakGroup {
   section: string | null
   items: PrototypeTweakSpec[]

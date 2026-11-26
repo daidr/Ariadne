@@ -1,11 +1,27 @@
 import type { ArtifactCommentElement } from '@ariadne/core'
 import type { FlowDocument, FlowNode } from '@dou-ui/flow'
+import type { InjectionKey, Ref } from 'vue'
 import {
   PROTOTYPE_DEFAULT_VIEWPORT_HEIGHT,
   PROTOTYPE_DEFAULT_VIEWPORT_WIDTH,
   PROTOTYPE_HEADER_HEIGHT,
   type PrototypeNodeData,
 } from './prototype-tweaks'
+
+export interface PrototypeTweaksFeedbackBridge {
+  /**
+   * Commits final prototype tweak values silently to the whiteboard (without incrementing
+   * pendingChanges or starting the auto-send countdown) and sends them as feedback immediately.
+   * Returns true if a feedback round was recorded on the server.
+   */
+  submitTweaks: (options: { apply: () => void; rollback: () => void }) => Promise<boolean>
+  /** Reactive flag indicating a feedback send is currently in flight for this artifact. */
+  sending: Readonly<Ref<boolean>>
+}
+
+export const PROTOTYPE_TWEAKS_BRIDGE_KEY: InjectionKey<PrototypeTweaksFeedbackBridge> = Symbol(
+  'ariadne:prototype-tweaks-bridge',
+)
 
 export type PrototypeInspector = (
   viewportX: number,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RotateCcwIcon } from '@dou-ui/icons'
+import { CheckIcon, RotateCcwIcon, SendIcon } from '@dou-ui/icons'
 import {
   DouButton,
   DouColorPicker,
@@ -24,12 +24,16 @@ const props = defineProps<{
   specs: PrototypeTweakSpec[]
   values: PrototypeTweakValues
   readonly?: boolean
+  showSend?: boolean
+  canSend?: boolean
+  sending?: boolean
+  sent?: boolean
 }>()
 
 const emit = defineEmits<{
-  preview: [values: PrototypeTweakValues]
-  commit: [values: PrototypeTweakValues]
+  change: [values: PrototypeTweakValues]
   reset: []
+  send: []
 }>()
 
 const groups = computed(() => groupTweaksBySection(props.specs))
@@ -39,38 +43,15 @@ function withValue(key: string, value: PrototypeTweakValue): PrototypeTweakValue
   return { ...props.values, [key]: value }
 }
 
-function onSliderPreview(spec: PrototypeTweakSpec, raw: number | [number, number] | undefined) {
+function onSliderChange(spec: PrototypeTweakSpec, raw: number | [number, number] | undefined) {
   const value = Array.isArray(raw) ? raw[0] : raw
   if (typeof value !== 'number' || !Number.isFinite(value)) return
-  emit('preview', withValue(spec.key, value))
+  emit('change', withValue(spec.key, value))
 }
 
-function onSliderCommit(spec: PrototypeTweakSpec, raw: number | [number, number]) {
-  const value = Array.isArray(raw) ? raw[0] : raw
-  if (typeof value !== 'number' || !Number.isFinite(value)) return
-  const next = withValue(spec.key, value)
-  emit('preview', next)
-  emit('commit', next)
-}
-
-function onImmediateChange(
-  spec: PrototypeTweakSpec,
-  value: PrototypeTweakValue | null | undefined,
-) {
+function onValueChange(spec: PrototypeTweakSpec, value: PrototypeTweakValue | null | undefined) {
   if (value === null || value === undefined) return
-  const next = withValue(spec.key, value)
-  emit('preview', next)
-  emit('commit', next)
-}
-
-function onTextPreview(spec: PrototypeTweakSpec, val: string) {
-  emit('preview', withValue(spec.key, val))
-}
-
-function onTextCommit(spec: PrototypeTweakSpec, val: string) {
-  const next = withValue(spec.key, val)
-  emit('preview', next)
-  emit('commit', next)
+  emit('change', withValue(spec.key, value))
 }
 
 function formatRangeValue(spec: PrototypeTweakSpec, val: PrototypeTweakValue | undefined): string {
@@ -114,7 +95,7 @@ function formatRangeValue(spec: PrototypeTweakSpec, val: PrototypeTweakValue | u
                 size="sm"
                 :model-value="Boolean(values[spec.key])"
                 :disabled="readonly"
-                @update:model-value="(val) => onImmediateChange(spec, Boolean(val))"
+                @update:model-value="(val) => onValueChange(spec, Boolean(val))"
               />
             </div>
           </template>
@@ -130,10 +111,14 @@ function formatRangeValue(spec: PrototypeTweakSpec, val: PrototypeTweakValue | u
                 show-text
                 @update:model-value="
                   (val) => {
-                    if (val) emit('preview', withValue(spec.key, val))
+                    if (val) onValueChange(spec, val)
                   }
                 "
-                @change="(val) => onImmediateChange(spec, val)"
+                @change="
+                  (val) => {
+                    if (val) onValueChange(spec, val)
+                  }
+                "
               />
             </div>
           </template>
@@ -153,8 +138,7 @@ function formatRangeValue(spec: PrototypeTweakSpec, val: PrototypeTweakValue | u
                 :max="spec.max ?? 100"
                 :step="spec.step ?? 1"
                 :disabled="readonly"
-                @update:model-value="(val) => onSliderPreview(spec, val)"
-                @change="(val) => onSliderCommit(spec, val)"
+                @update:model-value="(val) => onSliderChange(spec, val)"
               />
             </div>
           </template>
@@ -169,7 +153,7 @@ function formatRangeValue(spec: PrototypeTweakSpec, val: PrototypeTweakValue | u
                 :model-value="String(values[spec.key] ?? spec.default)"
                 :options="spec.options ?? []"
                 :disabled="readonly"
-                @update:model-value="(val) => onImmediateChange(spec, String(val))"
+                @update:model-value="(val) => onValueChange(spec, String(val))"
               />
               <DouSelect
                 v-else
@@ -179,7 +163,7 @@ function formatRangeValue(spec: PrototypeTweakSpec, val: PrototypeTweakValue | u
                 :disabled="readonly"
                 @update:model-value="
                   (val) => {
-                    if (typeof val === 'string') onImmediateChange(spec, val)
+                    if (typeof val === 'string') onValueChange(spec, val)
                   }
                 "
               />
@@ -193,14 +177,34 @@ function formatRangeValue(spec: PrototypeTweakSpec, val: PrototypeTweakValue | u
                 size="sm"
                 :model-value="String(values[spec.key] ?? spec.default)"
                 :disabled="readonly"
-                @update:model-value="(val) => onTextPreview(spec, String(val))"
-                @blur="onTextCommit(spec, String(values[spec.key] ?? spec.default))"
-                @keydown.enter="onTextCommit(spec, String(values[spec.key] ?? spec.default))"
+                @update:model-value="(val) => onValueChange(spec, String(val))"
               />
             </div>
           </template>
         </div>
       </section>
+    </div>
+
+    <div v-if="!readonly && showSend" class="tweaks-footer">
+      <DouButton
+        block
+        size="sm"
+        variant="soft"
+        :tone="canSend ? 'primary' : 'neutral'"
+        :disabled="!canSend"
+        :loading="sending"
+        @click="emit('send')"
+      >
+        <template #leading>
+          <CheckIcon v-if="sent && !canSend && !sending" />
+          <SendIcon v-else />
+        </template>
+        {{
+          sent && !canSend && !sending
+            ? t('artifact.prototype.tweaksSent')
+            : t('artifact.prototype.tweaksSend')
+        }}
+      </DouButton>
     </div>
   </div>
 </template>
@@ -274,5 +278,10 @@ function formatRangeValue(spec: PrototypeTweakSpec, val: PrototypeTweakValue | u
 
 .tweak-value {
   font-variant-numeric: tabular-nums;
+}
+
+.tweaks-footer {
+  padding-top: 10px;
+  border-top: 1px solid var(--dou-color-border-subtle, var(--dou-color-border));
 }
 </style>
