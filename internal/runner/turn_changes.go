@@ -50,6 +50,18 @@ func newTurnChanges(runner *Runner, conversation core.ConversationView) *turnCha
 	}
 }
 
+func workspaceBranchName(value any) string {
+	switch branch := value.(type) {
+	case string:
+		return branch
+	case *string:
+		if branch != nil {
+			return *branch
+		}
+	}
+	return ""
+}
+
 func (tc *turnChanges) threadSources(ctx context.Context, thread core.ThreadView) ([]workspaces.ThreadSource, error) {
 	sources, err := tc.workspaces.ThreadSources(ctx, thread)
 	if err != nil {
@@ -57,6 +69,9 @@ func (tc *turnChanges) threadSources(ctx context.Context, thread core.ThreadView
 	}
 	if len(sources) > 0 {
 		return sources, nil
+	}
+	if thread.Workspace != nil && !thread.Workspace.Removed && workspaceBranchName(thread.Workspace.Branch) == "" {
+		return nil, nil
 	}
 	branches, err := tc.workspaces.BranchesForThread(ctx, thread)
 	if err != nil || branches == nil {

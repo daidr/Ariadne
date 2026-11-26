@@ -216,4 +216,78 @@ func TestWorkspaceFilesRespectsGitignoreAndAllowsExplicitIgnoredSubdir(t *testin
 			t.Fatalf("non-git explicit ignored subdir missed file: %v", pkgFiles.Files)
 		}
 	})
+
+	t.Run("unborn git repo without commits", func(t *testing.T) {
+		t.Parallel()
+		root, _ := initUnbornGit(t)
+		writeGit(t, root, "src/code.ts", "hello unborn\n")
+		writeGit(t, root, ".github/ci.yml", "hello hidden\n")
+		writeGit(t, root, ".gitignore", "ignored/\nnode_modules/\n")
+		writeGit(t, root, "ignored/private.ts", "hello ignored\n")
+		writeGit(t, root, "node_modules/pkg/index.d.ts", "hello dep\n")
+
+		assertUnborn := func(t *testing.T, ws *Workspace) {
+			t.Helper()
+			view := SearchableView(ws, "")
+			files, err := view.(sdk.SourceFiles).Files(t.Context(), ".")
+			if err != nil {
+				t.Fatal(err)
+			}
+			joined := strings.Join(files.Files, "\n")
+			if !strings.Contains(joined, "src/code.ts") || !strings.Contains(joined, ".github/ci.yml") {
+				t.Fatalf("unborn listing missing expected files:\n%s", joined)
+			}
+			if strings.Contains(joined, "ignored/private.ts") || strings.Contains(joined, "node_modules/pkg/index.d.ts") || strings.Contains(joined, ".git/") {
+				t.Fatalf("unborn listing leaked ignored or .git files:\n%s", joined)
+			}
+			result, err := view.(sdk.SourceSearch).Search(t.Context(), "hello", ".", sdk.SearchOptions{})
+			if err != nil || result.Error != nil {
+				t.Fatalf("unborn search failed: %+v, %v", result, err)
+			}
+			searchJoined := strings.Join(result.Lines, "\n")
+			if !strings.Contains(searchJoined, "src/code.ts") || !strings.Contains(searchJoined, ".github/ci.yml") {
+				t.Fatalf("unborn search missing expected matches:\n%s", searchJoined)
+			}
+			if strings.Contains(searchJoined, "ignored/private.ts") || strings.Contains(searchJoined, "node_modules/pkg/index.d.ts") {
+				t.Fatalf("unborn search leaked ignored matches:\n%s", searchJoined)
+			}
+		}
+
+		assertUnborn(t, newTestWorkspace(t, root, WorkspaceOptions{HideGit: true}))
+
+		noRG := newTestWorkspace(t, root, WorkspaceOptions{HideGit: true})
+		done := make(chan struct{})
+		close(done)
+		noRG.probes = map[string]*probeResult{"rg": {done: done, value: false}}
+		assertUnborn(t, noRG)
+	})
+
+	t.Run("non-git directory search respects gitignore and hidden files", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		writeGit(t, root, "src/code.ts", "needle main\n")
+		writeGit(t, root, ".github/ci.yml", "needle hidden\n")
+		writeGit(t, root, ".gitignore", "ignored/\nnode_modules/\n")
+		writeGit(t, root, "ignored/private.ts", "needle ignored\n")
+		writeGit(t, root, "node_modules/pkg/index.d.ts", "needle dep\n")
+		ws := newTestWorkspace(t, root, WorkspaceOptions{HideGit: true})
+		hasRG, err := ws.probe(t.Context(), "rg", []string{"rg", "--version"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasRG {
+			t.Skip("rg not installed")
+		}
+		result, err := ws.Search(t.Context(), "needle", "", sdk.SearchOptions{})
+		if err != nil || result.Error != nil {
+			t.Fatalf("non-git search failed: %+v, %v", result, err)
+		}
+		joined := strings.Join(result.Lines, "\n")
+		if !strings.Contains(joined, "src/code.ts") || !strings.Contains(joined, ".github/ci.yml") {
+			t.Fatalf("non-git search missing expected matches:\n%s", joined)
+		}
+		if strings.Contains(joined, "ignored/private.ts") || strings.Contains(joined, "node_modules/pkg/index.d.ts") {
+			t.Fatalf("non-git search leaked ignored files:\n%s", joined)
+		}
+	})
 }

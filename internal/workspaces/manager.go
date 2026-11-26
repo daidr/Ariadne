@@ -28,13 +28,13 @@ import (
 )
 
 type Options struct {
-	Repository   *core.Repository
-	Sources      *sources.Registry
-	Secrets      func(string) map[string]any
-	Env          func(string) map[string]string
-	State        *realtime.State
-	CacheTTL     time.Duration
-	Now          func() time.Time
+	Repository         *core.Repository
+	Sources            *sources.Registry
+	Secrets            func(string) map[string]any
+	Env                func(string) map[string]string
+	State              *realtime.State
+	CacheTTL           time.Duration
+	Now                func() time.Time
 	CommandRules       func(project string) []commandpolicy.Rule
 	SetupTimeout       func(project string) time.Duration
 	OnBackgroundChange func()
@@ -310,7 +310,7 @@ func (manager *Manager) acquireSource(ctx context.Context, project, key string, 
 	if config.id != core.LegacyPrimarySource {
 		id += "\x00" + config.id
 	}
-	lease, err := manager.connections.Acquire(ctx, id, config.key, func(ctx context.Context) (*connection, error) {
+	load := func(ctx context.Context) (*connection, error) {
 		caps, err := manager.options.Sources.ConnectSource(ctx, config.definition, config.secrets)
 		if err != nil {
 			return nil, err
@@ -325,11 +325,31 @@ func (manager *Manager) acquireSource(ctx context.Context, project, key string, 
 			return nil, changedSource()
 		}
 		return value, nil
-	})
-	if err != nil {
-		return leases.Lease[*connection]{}, unreadable(err)
 	}
-	return lease, nil
+	for attempt := 0; ; attempt++ {
+		lease, err := manager.connections.Acquire(ctx, id, config.key, load)
+		if err != nil {
+			return leases.Lease[*connection]{}, unreadable(err)
+		}
+		if attempt < 2 {
+			if ws := lease.Value.caps.Workspace; ws != nil && ws.Stale != nil {
+				leaseCtx, stop := lease.Context(ctx)
+				stale := ws.Stale(leaseCtx)
+				stop()
+				if err := ctx.Err(); err != nil {
+					lease.Release()
+					return leases.Lease[*connection]{}, unreadable(err)
+				}
+				if stale {
+					retired := lease.Value
+					lease.Release()
+					manager.connections.Retire(id, func(current *connection) bool { return current == retired })
+					continue
+				}
+			}
+		}
+		return lease, nil
+	}
 }
 func withSource[T any](ctx context.Context, manager *Manager, project, key string, work func(context.Context, sdk.Capabilities) (T, error), selection ...sourceSelection) (T, error) {
 	var zero T
