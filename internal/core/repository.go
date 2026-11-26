@@ -13,10 +13,19 @@ import (
 	"github.com/daidr/Ariadne/internal/schema"
 )
 
-var projectionTables = []string{"projects", "threads", "thread_repo_baselines", "attentions", "attention_waiters", "messages", "todos", "memories", "notices", "conversations", "transcript", "plan_nodes", "plan_edges", "plan_revisions", "plan_proposals", "plan_node_issues", "issue_writes", "used_approvals", "artifacts", "artifact_versions", "artifact_comments", "artifact_feedback", "reviews", "prompts", "search_docs", "search_text"}
+var projectionTables = []string{"projects", "threads", "thread_repo_baselines", "attentions", "attention_waiters", "messages", "todos", "memories", "notices", "conversations", "transcript", "plan_nodes", "plan_edges", "plan_revisions", "plan_proposals", "plan_node_issues", "issue_writes", "used_approvals", "artifacts", "artifact_versions", "artifact_comments", "artifact_feedback", "reviews", "prompts", "search_docs", "search_text", "pulse_spans", "pulse_markers"}
 
 // DomainProjection preserves the dependency order of the original projections.
-type DomainProjection struct{}
+type DomainProjection struct {
+	Now func() time.Time
+}
+
+func (projection DomainProjection) now() int64 {
+	if projection.Now != nil {
+		return projection.Now().UnixMilli()
+	}
+	return time.Now().UnixMilli()
+}
 
 func (DomainProjection) Forget(ctx context.Context, tx *sql.Tx, projectID string) error {
 	return (LifecycleProjection{}).Forget(ctx, tx, projectID)
@@ -106,8 +115,28 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 			return err
 		}
 	}
-	if version == schema.Version || version == 67 || version == 68 || version == 69 || version == 70 || version == 71 || version == 72 || version == 73 {
+	if version >= 67 && version <= 75 {
+		if err := addColumnIfMissing(ctx, tx, "artifacts", "has_prototype", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		if err := addColumnIfMissing(ctx, tx, "artifacts", "pending_actions", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		if err := backfillArtifactGalleryMetadata(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if version == schema.Version {
 		return schema.Create(ctx, tx)
+	}
+	if version >= 67 && version < schema.Version {
+		if err := schema.Create(ctx, tx); err != nil {
+			return err
+		}
+		if version <= 74 {
+			return backfillPulse(ctx, tx, projection.now())
+		}
+		return nil
 	}
 	if err := dropProjectionTables(ctx, tx); err != nil {
 		return err
@@ -145,6 +174,12 @@ func (DomainProjection) Apply(ctx context.Context, tx *sql.Tx, e eventstore.Even
 	if w.err != nil {
 		return w.err
 	}
+	var beforePR object
+	if e.Type == "pull_request.synced" {
+		if row := w.one("SELECT pull_request FROM threads WHERE id = ?", d["threadId"]); row != nil {
+			beforePR = asObject(w.parsed(row, "pull_request", nil))
+		}
+	}
 	if err := projectEvent(w, e, d); err != nil {
 		return err
 	}
@@ -160,6 +195,7 @@ func (DomainProjection) Apply(ctx context.Context, tx *sql.Tx, e eventstore.Even
 	reviewEvent(w, e, d)
 	searchEvent(w, e, d)
 	transcriptEvent(w, e, d)
+	pulseEvent(w, e, d, beforePR)
 	return w.err
 }
 func addColumnIfMissing(ctx context.Context, tx *sql.Tx, table, column, definition string) error {
@@ -173,6 +209,58 @@ func addColumnIfMissing(ctx context.Context, tx *sql.Tx, table, column, definiti
 	}
 	_, err = tx.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
 	return err
+}
+
+func backfillArtifactGalleryMetadata(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, "SELECT id, kind, content FROM artifacts")
+	if err != nil {
+		return err
+	}
+	type artifactRow struct {
+		id, kind, content string
+	}
+	var items []artifactRow
+	for rows.Next() {
+		var item artifactRow
+		if err := rows.Scan(&item.id, &item.kind, &item.content); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, item := range items {
+		meta := computeArtifactMetadata(item.kind, item.content)
+		hasProto := 0
+		if meta.hasPrototype {
+			hasProto = 1
+		}
+		if _, err := tx.ExecContext(
+			ctx,
+			"UPDATE artifacts SET preview = ?, has_prototype = ?, pending_actions = ? WHERE id = ?",
+			encoded(meta.preview), hasProto, meta.pendingActions, item.id,
+		); err != nil {
+			return err
+		}
+		if item.kind == "whiteboard" {
+			var docID int64
+			err := tx.QueryRowContext(ctx, "SELECT id FROM search_docs WHERE kind = 'artifact' AND ref_id = ?", item.id).Scan(&docID)
+			if err == nil {
+				if _, err := tx.ExecContext(ctx, "UPDATE search_text SET body = ? WHERE rowid = ?", searchText(item.kind, item.content), docID); err != nil {
+					return err
+				}
+			} else if err != sql.ErrNoRows {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func dropProjectionTables(ctx context.Context, tx *sql.Tx) error {
@@ -203,7 +291,7 @@ type Repository struct {
 }
 
 func Open(ctx context.Context, options Options) (*Repository, error) {
-	store, err := eventstore.Open(ctx, eventstore.Options{Path: options.Path, Now: options.Now, Projections: []eventstore.Projection{DomainProjection{}}, Check: func(ctx context.Context, tx *sql.Tx, e eventstore.NewEvent) error {
+	store, err := eventstore.Open(ctx, eventstore.Options{Path: options.Path, Now: options.Now, Projections: []eventstore.Projection{DomainProjection{Now: options.Now}}, Check: func(ctx context.Context, tx *sql.Tx, e eventstore.NewEvent) error {
 		if e.Type == "project.created" {
 			return nil
 		}

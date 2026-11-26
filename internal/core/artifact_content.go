@@ -387,6 +387,133 @@ func documentLead(content string) string {
 	}
 	return lead
 }
+type artifactMetadata struct {
+	preview        any
+	hasPrototype   bool
+	pendingActions int
+}
+
+func defaultNodeSize(nodeType string) (float64, float64) {
+	switch nodeType {
+	case "prototype":
+		return 480, 336
+	case "option", "group":
+		return 360, 280
+	case "sticky":
+		return 200, 140
+	case "text":
+		return 180, 40
+	default:
+		return 180, 80
+	}
+}
+
+func whiteboardMinimap(nodes []any) []object {
+	const maxBoxes = 24
+	type rawBox struct {
+		x, y, w, h float64
+		kind       string
+	}
+	boxes := make([]rawBox, 0, len(nodes))
+	minX, minY := math.Inf(1), math.Inf(1)
+	maxX, maxY := math.Inf(-1), math.Inf(-1)
+	for _, item := range nodes {
+		node := asObject(item)
+		if node == nil {
+			continue
+		}
+		x, xOK := number(node["x"])
+		y, yOK := number(node["y"])
+		if !xOK || !yOK {
+			continue
+		}
+		nodeType := node.str("type")
+		defW, defH := defaultNodeSize(nodeType)
+		w, wOK := number(node["width"])
+		if !wOK || w <= 0 {
+			w = defW
+		}
+		h, hOK := number(node["height"])
+		if !hOK || h <= 0 {
+			h = defH
+		}
+		if x < minX {
+			minX = x
+		}
+		if y < minY {
+			minY = y
+		}
+		if x+w > maxX {
+			maxX = x + w
+		}
+		if y+h > maxY {
+			maxY = y + h
+		}
+		boxes = append(boxes, rawBox{x: x, y: y, w: w, h: h, kind: nodeType})
+	}
+	if len(boxes) == 0 || math.IsInf(minX, 1) || math.IsInf(minY, 1) {
+		return []object{}
+	}
+	spanX := math.Max(maxX-minX, 1)
+	spanY := math.Max(maxY-minY, 1)
+	round3 := func(v float64) float64 {
+		return math.Round(math.Max(0, math.Min(1, v))*1000) / 1000
+	}
+	selected := boxes
+	if len(boxes) > maxBoxes {
+		selected = make([]rawBox, 0, maxBoxes)
+		step := float64(len(boxes)) / float64(maxBoxes)
+		for i := 0; i < maxBoxes; i++ {
+			idx := int(float64(i) * step)
+			if idx >= len(boxes) {
+				idx = len(boxes) - 1
+			}
+			selected = append(selected, boxes[idx])
+		}
+	}
+	out := make([]object, 0, len(selected))
+	for _, box := range selected {
+		out = append(out, object{
+			"x":    round3((box.x - minX) / spanX),
+			"y":    round3((box.y - minY) / spanY),
+			"w":    round3(box.w / spanX),
+			"h":    round3(box.h / spanY),
+			"kind": box.kind,
+		})
+	}
+	return out
+}
+
+func computeArtifactMetadata(kind, content string) artifactMetadata {
+	preview := artifactPreview(kind, content)
+	switch kind {
+	case "whiteboard":
+		hasProto := false
+		if obj := asObject(preview); obj != nil {
+			if n, ok := obj["prototypeCount"].(int); ok && n > 0 {
+				hasProto = true
+			}
+		}
+		return artifactMetadata{
+			preview:        preview,
+			hasPrototype:   hasProto,
+			pendingActions: CountPendingDecisionGroups(content),
+		}
+	case "document":
+		return artifactMetadata{
+			preview:        preview,
+			hasPrototype:   false,
+			pendingActions: CountPendingDocumentAsks(content),
+		}
+	default:
+		return artifactMetadata{
+			preview:        preview,
+			hasPrototype:   false,
+			pendingActions: 0,
+		}
+	}
+}
+
 func artifactPreview(kind, content string) any {
 	if kind == "whiteboard" || kind == "dashboard" {
 		var raw any
@@ -397,17 +524,50 @@ func artifactPreview(kind, content string) any {
 				edges, edgesOK := value["edges"].([]any)
 				valid := nodesOK && edgesOK
 				texts := []string{}
+				prototypeCount := 0
+				optionCount := 0
+				previewImage := ""
 				for _, item := range nodes {
 					if item == nil {
 						valid = false
 						break
 					}
-					if text, ok := asObject(item).obj("data")["text"].(string); ok && projectsettings.Trim(text) != "" && len(texts) < 6 {
-						texts = append(texts, text)
+					node := asObject(item)
+					nodeType := node.str("type")
+					if nodeType == "prototype" {
+						prototypeCount++
+					} else if nodeType == "option" {
+						optionCount++
+					}
+					data := node.obj("data")
+					if nodeType == "prototype" && previewImage == "" {
+						if pic, ok := data["preview"].(string); ok && prototypeFileURLRe.MatchString(pic) {
+							previewImage = pic
+						}
+					}
+					if len(texts) < 6 {
+						for _, field := range []string{"text", "title", "label"} {
+							if text, ok := data[field].(string); ok && projectsettings.Trim(text) != "" {
+								texts = append(texts, text)
+								break
+							}
+						}
 					}
 				}
 				if valid {
-					return object{"kind": kind, "items": len(nodes), "connectors": len(edges), "texts": texts}
+					out := object{
+						"kind":           kind,
+						"items":          len(nodes),
+						"connectors":     len(edges),
+						"texts":          texts,
+						"prototypeCount": prototypeCount,
+						"optionCount":    optionCount,
+						"minimap":        whiteboardMinimap(nodes),
+					}
+					if previewImage != "" {
+						out["previewImage"] = previewImage
+					}
+					return out
 				}
 			} else {
 				widgets, widgetsOK := value.obj("dashboard")["widgets"].([]any)
@@ -461,14 +621,15 @@ func artifactPreview(kind, content string) any {
 					free++
 				}
 				if valid {
-					return object{"kind": kind, "widgets": len(widgets), "takenAt": value["takenAt"], "titles": titles, "tiles": tiles}
+					isLive := value.obj("source").str("kind") != ""
+					return object{"kind": kind, "widgets": len(widgets), "takenAt": value["takenAt"], "titles": titles, "tiles": tiles, "isLive": isLive}
 				}
 			}
 		}
 		if kind == "whiteboard" {
-			return object{"kind": kind, "items": 0, "connectors": 0, "texts": []any{}}
+			return object{"kind": kind, "items": 0, "connectors": 0, "texts": []any{}, "prototypeCount": 0, "optionCount": 0, "minimap": []any{}}
 		}
-		return object{"kind": "dashboard", "widgets": 0, "takenAt": nil, "titles": []any{}, "tiles": []any{}}
+		return object{"kind": "dashboard", "widgets": 0, "takenAt": nil, "titles": []any{}, "tiles": []any{}, "isLive": false}
 	}
 	shown := documentBoard.ReplaceAllString(content, "")
 	shown = pendingText.ReplaceAllString(shown, `\[${1}\]`)
@@ -484,6 +645,46 @@ func artifactPreview(kind, content string) any {
 	}
 	return object{"kind": "document", "excerpt": text, "lead": documentLead(shown)}
 }
+// LightweightArtifactContent trims bulky inline payloads that are not needed
+// when rendering a thumbnail (currently inline HTML inside whiteboard prototype
+// nodes). Original content is returned unchanged when nothing needs trimming.
+func LightweightArtifactContent(kind, content string) string {
+	if kind != "whiteboard" || content == "" {
+		return content
+	}
+	var doc object
+	if err := json.Unmarshal([]byte(content), &doc); err != nil || doc == nil {
+		return content
+	}
+	nodes, ok := doc["nodes"].([]any)
+	if !ok || len(nodes) == 0 {
+		return content
+	}
+	changed := false
+	for _, item := range nodes {
+		node := asObject(item)
+		if node == nil || node.str("type") != "prototype" {
+			continue
+		}
+		data := node.obj("data")
+		if data == nil {
+			continue
+		}
+		if html, ok := data["html"].(string); ok && html != "" {
+			delete(data, "html")
+			changed = true
+		}
+	}
+	if !changed {
+		return content
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return content
+	}
+	return string(out)
+}
+
 func truthy(value any) bool {
 	if value == nil {
 		return false

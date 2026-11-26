@@ -17,6 +17,7 @@ import {
   FolderCogIcon,
   FolderIcon,
   KeyboardIcon,
+  LayoutGridIcon,
   ListTreeIcon,
   MessagesIcon,
   MoonIcon,
@@ -32,6 +33,7 @@ import { kindIcon } from '../artifacts/kinds'
 import { locale, t } from '../i18n'
 import {
   exportProject,
+  openGallery,
   openMain,
   openProject,
   openProjectArtifact,
@@ -177,6 +179,7 @@ const actions = computed(() => {
       ]
     : []
   return new Map<string, Action>([
+    ['gallery', { label: t('gallery.open'), icon: LayoutGridIcon, run: openGallery }],
     ['newProject', { label: t('nav.newProject'), icon: PlusIcon, run: startNewProject }],
     ...own,
     ['settings', { label: t('settings.open'), icon: SettingsIcon, run: () => openSettings() }],

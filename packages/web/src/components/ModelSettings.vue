@@ -134,7 +134,7 @@ const threadEffort = ref<Effort | ''>('')
 const coordinatorEffort = ref<CoordinatorEffort | ''>('')
 // An empty value means the coordinator inherits the discussion thread's model.
 const coordinatorModel = ref('')
-// Questions a conversation hands to a research; `''` is the asking conversation's own model.
+// Questions a thread hands to a sub-research; `''` is the asking thread's own model.
 const researchModel = ref<string>('')
 const researchEffort = ref<Effort | ''>('')
 // What the page no longer shows is saved back as it was: the triage role.
@@ -224,7 +224,7 @@ const coordinatorTold = computed(() =>
     ? toldOf(coordinatorModel.value)
     : threadTold.value,
 )
-// When research inherits the asking conversation's model, any effort accepted by a configured model
+// When research inherits the asking thread's model, any effort accepted by a configured model
 // can be asked for; the server clamps to the nearest effort the asking model supports.
 const askingTold = computed<readonly Effort[]>(() => {
   const accepted = new Set<Effort>()

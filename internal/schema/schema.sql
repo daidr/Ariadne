@@ -64,6 +64,8 @@ CREATE TABLE artifacts (
       last_agent TEXT,
       open_comments INTEGER NOT NULL DEFAULT 0,
       commented_at INTEGER NOT NULL DEFAULT 0,
+      has_prototype INTEGER NOT NULL DEFAULT 0,
+      pending_actions INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -294,6 +296,29 @@ CREATE TABLE prompts (
       PRIMARY KEY (project_id, hash)
     );
 
+CREATE TABLE pulse_markers (
+      seq INTEGER PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL DEFAULT '',
+      related_thread_id TEXT,
+      kind TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      label TEXT NOT NULL DEFAULT ''
+    );
+
+CREATE TABLE pulse_spans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      stage TEXT NOT NULL,
+      occupies_slot INTEGER NOT NULL DEFAULT 0,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      seq_start INTEGER NOT NULL,
+      seq_end INTEGER,
+      label TEXT NOT NULL DEFAULT ''
+    );
+
 CREATE TABLE push_subscriptions (
       id TEXT PRIMARY KEY,
       endpoint TEXT NOT NULL UNIQUE,
@@ -437,6 +462,10 @@ CREATE INDEX artifact_feedback_pending ON artifact_feedback (notify, created_at,
 
 CREATE INDEX artifacts_project ON artifacts (project_id, updated_at);
 
+CREATE INDEX artifacts_updated ON artifacts (updated_at DESC, id DESC);
+
+CREATE INDEX artifacts_created ON artifacts (created_at DESC, id DESC);
+
 CREATE INDEX attentions_message ON attentions (message_id);
 
 CREATE INDEX attentions_project ON attentions (project_id, closed);
@@ -461,6 +490,25 @@ CREATE INDEX notices_conversation ON notices (conversation_id, created_at);
 CREATE INDEX plan_nodes_project ON plan_nodes (project_id, position);
 
 CREATE INDEX plan_revisions_project ON plan_revisions (project_id, seq);
+
+CREATE INDEX pulse_markers_at ON pulse_markers (at, seq);
+
+CREATE INDEX pulse_markers_project_at ON pulse_markers (project_id, at, seq);
+
+CREATE INDEX pulse_markers_returned ON pulse_markers (project_id, at DESC)
+  WHERE kind = 'user_returned';
+
+CREATE INDEX pulse_markers_returned_at ON pulse_markers (at DESC)
+  WHERE kind = 'user_returned';
+
+CREATE INDEX pulse_spans_conversation ON pulse_spans (conversation_id, id DESC);
+
+CREATE INDEX pulse_spans_open ON pulse_spans (conversation_id)
+  WHERE ended_at IS NULL;
+
+CREATE INDEX pulse_spans_project ON pulse_spans (project_id, ended_at, started_at);
+
+CREATE INDEX pulse_spans_range ON pulse_spans (ended_at, started_at);
 
 CREATE INDEX reviews_thread ON reviews (thread_id, id);
 

@@ -16,7 +16,10 @@ import {
   closeFull,
   closePane,
   navigateArtifactInPlace,
+  openGallery,
   openProject,
+  openProjectArtifact,
+  openProjectThread,
   openThread,
   openView,
   setSide,
@@ -151,6 +154,52 @@ describe('workspace routes', () => {
     expect(state.workspaceLevel).toBe('side')
     showWorkspace('coordinator')
     await vi.waitFor(() => expect(router.currentRoute.value.query.pane).toBeUndefined())
+  })
+
+  test('gallery route loads directly and browser back returns to gallery after opening a project artifact', async () => {
+    const { router } = await enter('/gallery')
+    expect(state.main).toEqual({ kind: 'gallery' })
+    expect(state.workspaceLevel).toBe('coordinator')
+    expect(router.currentRoute.value.fullPath).toBe('/gallery')
+
+    await openProjectArtifact('prj_second', artifact.id)
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.fullPath).toContain('/projects/prj_second'),
+    )
+    expect(state.main.kind).toBe('conversation')
+
+    router.back()
+    await vi.waitFor(() => expect(state.main).toEqual({ kind: 'gallery' }))
+    expect(router.currentRoute.value.fullPath).toBe('/gallery')
+
+    await openProject('prj_first')
+    await vi.waitFor(() => expect(router.currentRoute.value.params.projectId).toBe('prj_first'))
+    openGallery()
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/gallery'))
+
+    // Opening a thread in the already-loaded project while on /gallery exits the gallery view.
+    await openProject('prj_second')
+    openGallery()
+    await vi.waitFor(() => expect(state.main).toEqual({ kind: 'gallery' }))
+    await openProjectThread('prj_second', thread.id)
+    expect(state.main.kind).toBe('conversation')
+    expect(side.focusedThread(state.side)).toBe(thread.id)
+
+    // Opening gallery while a FullView modal is active clears state.full so the gallery is not covered.
+    await openView({ kind: 'artifact', id: artifact.id }, { from: thread.id })
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.query.modal).toBe(`artifact:${artifact.id}`),
+    )
+    expect(state.full).not.toBeNull()
+
+    openGallery()
+    expect(state.full).toBeNull()
+    expect(state.main).toEqual({ kind: 'gallery' })
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/gallery'))
+
+    // Browser back returns to the project's full-screen artifact view.
+    router.back()
+    await vi.waitFor(() => expect(state.full?.view).toEqual({ kind: 'artifact', id: artifact.id }))
   })
 
   test('refresh and browser back preserve artifact Back/Forward history', async () => {

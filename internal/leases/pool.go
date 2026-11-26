@@ -18,15 +18,15 @@ type Options struct {
 	Now              func() time.Time
 }
 type entry[T Resource] struct {
-	id, key                  string
-	value                    T
-	err                      error
-	ready, closed            chan struct{}
-	loaded, retired, closing bool
-	refs, waiters            int
-	used                     time.Time
-	ctx                      context.Context
-	cancel                   context.CancelFunc
+	id, key                         string
+	value                           T
+	err                             error
+	ready, closed                   chan struct{}
+	loaded, retired, closing, stale bool
+	refs, waiters                   int
+	used                            time.Time
+	ctx                             context.Context
+	cancel                          context.CancelFunc
 }
 type Pool[T Resource] struct {
 	mu                         sync.Mutex
@@ -131,6 +131,9 @@ func (pool *Pool[T]) closeEntry(entry *entry[T]) {
 }
 func (pool *Pool[T]) retire(entry *entry[T], interrupt bool) {
 	entry.retired = true
+	if interrupt {
+		entry.stale = false
+	}
 	if pool.entries[entry.id] == entry {
 		delete(pool.entries, entry.id)
 	}
@@ -157,85 +160,7 @@ func (pool *Pool[T]) trim() {
 		pool.retire(oldest, false)
 	}
 }
-func (pool *Pool[T]) Acquire(ctx context.Context, id, key string, loader func(context.Context) (T, error)) (Lease[T], error) {
-	var empty Lease[T]
-	if id == "" || len(id) > 1024 || len(key) > 1024 || loader == nil {
-		return empty, errors.New("invalid resource identity or loader")
-	}
-	pool.mu.Lock()
-	if pool.closed {
-		pool.mu.Unlock()
-		return empty, errors.New("resource pool is closed")
-	}
-	if err := ctx.Err(); err != nil {
-		pool.mu.Unlock()
-		return empty, err
-	}
-	known := pool.entries[id]
-	if known != nil && known.key != key {
-		pool.retire(known, false)
-		known = nil
-	}
-	if known == nil {
-		if pool.loading >= 128 {
-			pool.mu.Unlock()
-			return empty, errors.New("too many pending resource connections")
-		}
-		life, cancel := context.WithCancel(pool.life)
-		known = &entry[T]{id: strings.Clone(id), key: strings.Clone(key), ready: make(chan struct{}), closed: make(chan struct{}), used: pool.options.Now(), ctx: life, cancel: cancel}
-		pool.entries[known.id] = known
-		pool.all[known] = true
-		pool.loading++
-		pool.jobs.Add(1)
-		go func(entry *entry[T]) {
-			defer pool.jobs.Done()
-			ctx, cancel := context.WithTimeout(entry.ctx, pool.options.LoadTimeout)
-			defer cancel()
-			value, err := load(ctx, loader)
-			pool.mu.Lock()
-			defer pool.mu.Unlock()
-			pool.loading--
-			entry.value, entry.err, entry.loaded = value, err, true
-			if err != nil || ctx.Err() != nil || pool.closed || entry.retired {
-				if err == nil {
-					entry.err = ctx.Err()
-					if entry.err == nil {
-						entry.err = errors.New("resource configuration changed")
-					}
-				}
-				pool.retire(entry, true)
-			}
-			close(entry.ready)
-			pool.trim()
-		}(known)
-	}
-	known.waiters++
-	ready := known.ready
-	pool.mu.Unlock()
-	select {
-	case <-ctx.Done():
-		pool.mu.Lock()
-		known.waiters--
-		pool.trim()
-		pool.mu.Unlock()
-		return empty, ctx.Err()
-	case <-ready:
-	}
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-	known.waiters--
-	if err := ctx.Err(); err != nil {
-		pool.trim()
-		return empty, err
-	}
-	if known.err != nil {
-		pool.trim()
-		return empty, known.err
-	}
-	if pool.closed || known.retired || pool.entries[id] != known {
-		pool.trim()
-		return empty, errors.New("resource configuration changed")
-	}
+func (pool *Pool[T]) grant(known *entry[T]) Lease[T] {
 	known.refs++
 	known.used = pool.options.Now()
 	pool.jobs.Add(1)
@@ -253,7 +178,117 @@ func (pool *Pool[T]) Acquire(ctx context.Context, id, key string, loader func(co
 			pool.jobs.Done()
 		})
 	}
-	return Lease[T]{Value: known.value, Release: release, ctx: known.ctx}, nil
+	return Lease[T]{Value: known.value, Release: release, ctx: known.ctx}
+}
+func (pool *Pool[T]) Acquire(ctx context.Context, id, key string, loader func(context.Context) (T, error)) (Lease[T], error) {
+	var empty Lease[T]
+	if id == "" || len(id) > 1024 || len(key) > 1024 || loader == nil {
+		return empty, errors.New("invalid resource identity or loader")
+	}
+	for {
+		pool.mu.Lock()
+		if pool.closed {
+			pool.mu.Unlock()
+			return empty, errors.New("resource pool is closed")
+		}
+		if err := ctx.Err(); err != nil {
+			pool.mu.Unlock()
+			return empty, err
+		}
+		known := pool.entries[id]
+		if known != nil && known.key != key {
+			pool.retire(known, false)
+			known = nil
+		}
+		if known != nil && known.loaded && known.err == nil && !known.retired {
+			lease := pool.grant(known)
+			pool.mu.Unlock()
+			return lease, nil
+		}
+		if known == nil {
+			if pool.loading >= 128 {
+				pool.mu.Unlock()
+				return empty, errors.New("too many pending resource connections")
+			}
+			life, cancel := context.WithCancel(pool.life)
+			known = &entry[T]{id: strings.Clone(id), key: strings.Clone(key), ready: make(chan struct{}), closed: make(chan struct{}), used: pool.options.Now(), ctx: life, cancel: cancel}
+			pool.entries[known.id] = known
+			pool.all[known] = true
+			pool.loading++
+			pool.jobs.Add(1)
+			go func(entry *entry[T]) {
+				defer pool.jobs.Done()
+				ctx, cancel := context.WithTimeout(entry.ctx, pool.options.LoadTimeout)
+				defer cancel()
+				value, err := load(ctx, loader)
+				pool.mu.Lock()
+				defer pool.mu.Unlock()
+				pool.loading--
+				entry.value, entry.err, entry.loaded = value, err, true
+				if err != nil || ctx.Err() != nil || pool.closed || entry.retired {
+					if err == nil {
+						entry.err = ctx.Err()
+						if entry.err == nil {
+							entry.err = errors.New("resource configuration changed")
+						}
+					}
+					pool.retire(entry, true)
+				}
+				close(entry.ready)
+				pool.trim()
+			}(known)
+		}
+		known.waiters++
+		ready := known.ready
+		pool.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			pool.mu.Lock()
+			known.waiters--
+			pool.trim()
+			pool.mu.Unlock()
+			return empty, ctx.Err()
+		case <-ready:
+		}
+		pool.mu.Lock()
+		known.waiters--
+		if err := ctx.Err(); err != nil {
+			pool.trim()
+			pool.mu.Unlock()
+			return empty, err
+		}
+		if known.err != nil {
+			pool.trim()
+			pool.mu.Unlock()
+			return empty, known.err
+		}
+		if !pool.closed && known.stale && (pool.entries[id] == nil || pool.entries[id].key == key) {
+			pool.trim()
+			pool.mu.Unlock()
+			continue
+		}
+		if pool.closed || known.retired || pool.entries[id] != known {
+			pool.trim()
+			pool.mu.Unlock()
+			return empty, errors.New("resource configuration changed")
+		}
+		lease := pool.grant(known)
+		pool.mu.Unlock()
+		return lease, nil
+	}
+}
+
+// Retire detaches the current active entry for id when match returns true
+// (or is nil) without interrupting existing leases. The retired resource
+// closes once all active leases are released.
+func (pool *Pool[T]) Retire(id string, match func(T) bool) {
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	entry := pool.entries[id]
+	if entry != nil && entry.loaded && (match == nil || match(entry.value)) {
+		entry.stale = true
+		pool.retire(entry, false)
+	}
 }
 func (pool *Pool[T]) Remove(id string) {
 	pool.mu.Lock()

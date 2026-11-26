@@ -93,11 +93,10 @@ type turn struct {
 const (
 	maxToolResultChars = 200_000
 
-	coordinatorLookHint           = 6
-	coordinatorLookLimit          = 12
-	coordinatorResearchLookWeight = 3
-	coordinatorLookHintText       = "[Ariadne: you have looked at a lot this turn. Looking further is doing the work yourself, and work is a thread's: put what you found into a brief and open a thread with create_thread (or pass it to the thread that has it with message_thread). Answer yourself only if what you have already answers the user.]"
-	coordinatorLookRefusedText    = "[Ariadne: not run. You have looked as far as a coordinator does in one turn without handing anything to a thread. Open a thread with create_thread and put what you found into its brief, or message the thread that has the work; after that you may look again for the next one.]"
+	coordinatorLookHint        = 6
+	coordinatorLookLimit       = 12
+	coordinatorLookHintText    = "[Ariadne: you have looked at a lot this turn. Looking further is doing the work yourself, and work is a thread's: put what you found into a brief and open a thread with create_thread (or pass it to the thread that has it with message_thread). Answer yourself only if what you have already answers the user.]"
+	coordinatorLookRefusedText = "[Ariadne: not run. You have looked as far as a coordinator does in one turn without handing anything to a thread. Open a thread with create_thread and put what you found into its brief, or message the thread that has the work; after that you may look again for the next one.]"
 
 	todoMissingAfter            = 3
 	todoStaleAfter              = 10
@@ -121,14 +120,12 @@ type lookDecision struct {
 	hint    bool
 }
 
-func coordinatorLookWeight(name string) int {
+func coordinatorLook(name string) bool {
 	switch name {
-	case "research":
-		return coordinatorResearchLookWeight
 	case "list_dir", "read_file", "search", "find_files", "fetch_url", "web_search", "browser":
-		return 1
+		return true
 	default:
-		return 0
+		return false
 	}
 }
 
@@ -142,14 +139,13 @@ func (state *coordinatorLookState) reset() {
 }
 
 func (state *coordinatorLookState) reserve(name string) lookDecision {
-	weight := coordinatorLookWeight(name)
-	if weight == 0 {
+	if !coordinatorLook(name) {
 		return lookDecision{}
 	}
-	if state.looks+weight > coordinatorLookLimit {
+	if state.looks >= coordinatorLookLimit {
 		return lookDecision{refused: true}
 	}
-	state.looks += weight
+	state.looks++
 	hint := !state.hinted && state.looks >= coordinatorLookHint
 	if hint {
 		state.hinted = true
@@ -481,7 +477,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		if turn.Browser != nil && !slices.Contains(project.Settings.Tools, "browser") {
 			tools = append(tools, turn.browserTool())
 		}
-		if !slices.Contains(project.Settings.Tools, "research") {
+		if conversation.Role == "thread" && !slices.Contains(project.Settings.Tools, "research") {
 			tools = append(tools, turn.researchTool(tools, model, limits))
 		}
 		sections := turn.sections(ctx, project, config)

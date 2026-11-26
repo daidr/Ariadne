@@ -54,22 +54,29 @@ func DirectoryProvider(dataDir string, clone Cloner, disableClone bool) sdk.Cont
 	}
 }
 func (factory *Workspaces) Capability() *sdk.WorkspaceCapability {
-	capability := &sdk.WorkspaceCapability{Isolated: factory.Isolated(),
+	isolated := factory.Isolated()
+	capability := &sdk.WorkspaceCapability{
+		Isolated: isolated,
 		Open: func(ctx context.Context, input sdk.WorkspaceRequest) (sdk.Workspace, error) {
-			return factory.Open(ctx, OpenRequest{ThreadID: input.ThreadID, Branch: input.Branch, Base: input.Base})
+			return factory.Open(ctx, OpenRequest{ThreadID: input.ThreadID, Branch: input.Branch, Base: input.Base, Shared: input.Shared})
 		},
 		View: func(ctx context.Context) (sdk.SourceView, error) { return factory.View(), ctx.Err() },
 	}
-	if !factory.Isolated() {
+	if factory.localCheckout || (factory.repository == "" && factory.detectGit) {
+		capability.Stale = func(ctx context.Context) bool {
+			return factory.capabilityStale(ctx, isolated)
+		}
+	}
+	if !isolated {
 		return capability
 	}
 	capability.Branches = &sdk.BranchCapability{
 		Changes: func(ctx context.Context, thread sdk.ThreadBranch, base string) (*sdk.BranchChanges, error) {
 			return factory.Changes(ctx, thread.ThreadID, thread.Branch, base)
 		},
-			Revisions: func(ctx context.Context, thread sdk.ThreadBranch, base string) (sdk.BranchRevisions, error) {
-				return factory.revisions(ctx, thread.Branch, "refs/heads/"+base, "refs/remotes/origin/"+base)
-			},
+		Revisions: func(ctx context.Context, thread sdk.ThreadBranch, base string) (sdk.BranchRevisions, error) {
+			return factory.revisions(ctx, thread.Branch, "refs/heads/"+base, "refs/remotes/origin/"+base)
+		},
 		File: func(ctx context.Context, input sdk.FileVersionRequest) (sdk.FileVersions, error) {
 			files, err := factory.FileVersions(ctx, []sdk.FileVersionRequest{input})
 			if err != nil || len(files) == 0 {

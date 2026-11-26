@@ -39,8 +39,8 @@ func boardWords(raw any) (string, bool) {
 			return "", false
 		}
 		data := asObject(raw).obj("data")
-		for _, key := range []string{"text", "label"} {
-			if text, ok := data[key].(string); ok {
+		for _, key := range []string{"text", "label", "title", "note"} {
+			if text, ok := data[key].(string); ok && projectsettings.Trim(text) != "" {
 				words = append(words, text)
 			}
 		}

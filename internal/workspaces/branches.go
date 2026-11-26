@@ -69,6 +69,14 @@ func sourceDisplayName(project core.ProjectView, thread core.ThreadView, sourceI
 	return ""
 }
 
+func workspaceHasBranch(workspace *core.WorkspaceView) bool {
+	if workspace == nil {
+		return false
+	}
+	branch := optionalString(workspace.Branch)
+	return branch != nil && *branch != ""
+}
+
 // ThreadSources returns the primary source (if open/parked) plus any opened
 // secondary writable sources for a thread, each with its BranchCapability.
 func (manager *Manager) ThreadSources(ctx context.Context, thread core.ThreadView) ([]ThreadSource, error) {
@@ -83,7 +91,7 @@ func (manager *Manager) ThreadSources(ctx context.Context, thread core.ThreadVie
 	}
 	primaryID := threadSourceID(project, thread)
 	result := []ThreadSource{}
-	if thread.Workspace != nil && (!thread.Workspace.Removed || thread.Workspace.Parked) {
+	if workspaceHasBranch(thread.Workspace) && (!thread.Workspace.Removed || thread.Workspace.Parked) {
 		branches, err := manager.branches(ctx, thread.ProjectID, sourceSelection{id: primaryID})
 		if err != nil {
 			return nil, err
@@ -105,7 +113,7 @@ func (manager *Manager) ThreadSources(ctx context.Context, thread core.ThreadVie
 		return nil, err
 	}
 	for _, sw := range secondaryWorkspaces {
-		if sw.SourceID == "" || sw.SourceID == primaryID || sw.Removed {
+		if sw.SourceID == "" || sw.SourceID == primaryID || sw.Removed || !workspaceHasBranch(&sw) {
 			continue
 		}
 		branches, err := manager.branches(ctx, thread.ProjectID, sourceSelection{id: sw.SourceID, owner: thread.ID})
@@ -325,19 +333,18 @@ func (manager *Manager) removeSourceWorktree(ctx context.Context, project, threa
 		}
 	}
 	workspace := owner.Workspace
+	if known && secondary {
+		workspace, err = manager.options.Repository.SecondaryWorkspace(ctx, thread, sourceID)
+		if err != nil {
+			return "", err
+		}
+	}
 	if orphaned {
-		if !known {
+		if !known || !hasRecordedCheckout(workspace) {
 			return "orphan-changed", nil
 		}
-		if secondary {
-			workspace, err = manager.options.Repository.SecondaryWorkspace(ctx, thread, sourceID)
-			if err != nil {
-				return "", err
-			}
-		}
-		if !hasRecordedCheckout(workspace) {
-			return "orphan-changed", nil
-		}
+	} else if known && workspace != nil && !workspaceHasBranch(workspace) {
+		return "dirty", nil
 	}
 	branches, err := manager.branches(ctx, project, sourceSelection{id: sourceID, owner: thread})
 	if err != nil {
@@ -499,7 +506,7 @@ func (manager *Manager) DiscardProject(ctx context.Context, project string) (err
 						return err
 					}
 				}
-				if workspace == nil || workspace.Removed {
+				if workspace == nil || workspace.Removed || !workspaceHasBranch(workspace) {
 					continue
 				}
 				branches, err := manager.branches(ctx, project, selection)

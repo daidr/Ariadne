@@ -31,6 +31,9 @@ type OpenRequest struct {
 	// nil means choose the checkout's current branch; a pointer to nil records
 	// that the workspace began at detached HEAD and has no base branch.
 	Base **string
+	// Shared keeps an already-opened shared workspace on the source directory
+	// even after the underlying repository later becomes worktree-capable.
+	Shared bool
 }
 type threadLock struct {
 	token chan struct{}
@@ -38,6 +41,8 @@ type threadLock struct {
 }
 type Workspaces struct {
 	path, repository, common string
+	localCheckout            bool
+	detectGit                bool
 	roots                    []string
 	git                      GitRun
 	source                   *Workspace
@@ -144,6 +149,145 @@ func localBranchDefinitelyMissing(commonDir, branch string) bool {
 	return true
 }
 
+func packedRefsHasAnyHead(commonDir string) (found bool, ok bool) {
+	raw, err := os.ReadFile(filepath.Join(commonDir, "packed-refs"))
+	if os.IsNotExist(err) {
+		return false, true
+	}
+	if err != nil {
+		return false, false
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(strings.TrimRight(line, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "^") {
+			continue
+		}
+		if _, ref, split := strings.Cut(line, " "); split && strings.HasPrefix(strings.TrimSpace(ref), "refs/heads/") {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+func dirHasAnyFile(dir string) (found bool, ok bool) {
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return false, true
+	}
+	if err != nil {
+		return false, false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			return true, true
+		}
+		subFound, subOK := dirHasAnyFile(filepath.Join(dir, entry.Name()))
+		if !subOK {
+			return false, false
+		}
+		if subFound {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+// packedRefsLookupHead checks packed-refs for refs/heads/<branch>.
+// found is true when an exact refs/heads/<branch> entry with a valid object ID
+// exists; missing is true when packed-refs is absent or contains no
+// case-insensitive match for refs/heads/<branch>.
+func packedRefsLookupHead(commonDir, branch string) (found, missing bool) {
+	raw, err := os.ReadFile(filepath.Join(commonDir, "packed-refs"))
+	if os.IsNotExist(err) {
+		return false, true
+	}
+	if err != nil {
+		return false, false
+	}
+	exact := "refs/heads/" + branch
+	lowerExact := strings.ToLower(exact)
+	sawCaseInsensitive := false
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(strings.TrimRight(line, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "^") {
+			continue
+		}
+		oid, ref, split := strings.Cut(line, " ")
+		if !split {
+			continue
+		}
+		ref = strings.TrimSpace(ref)
+		if ref == exact && isObjectID(oid) {
+			return true, false
+		}
+		if strings.ToLower(ref) == lowerExact {
+			sawCaseInsensitive = true
+		}
+	}
+	return false, !sawCaseInsensitive
+}
+
+func repoHasHeadCommit(ctx context.Context, directory, commonDir string, git GitRun) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if commonDir != "" {
+		if _, err := os.Stat(filepath.Join(commonDir, "reftable")); os.IsNotExist(err) {
+			if gitDir := directWorktreeGitDir(directory); gitDir != "" {
+				if raw, err := readSmallTextFile(filepath.Join(gitDir, "HEAD")); err == nil {
+					line, _, _ := strings.Cut(raw, "\n")
+					line = strings.TrimSpace(strings.TrimRight(line, "\r"))
+					if ref, isSym := strings.CutPrefix(line, "ref:"); isSym {
+						ref = strings.TrimSpace(ref)
+						if short, isHead := strings.CutPrefix(ref, "refs/heads/"); isHead && short != "" {
+							refPath := filepath.Join(commonDir, "refs", "heads", filepath.FromSlash(short))
+							if refRaw, refErr := readSmallTextFile(refPath); refErr == nil {
+								refLine, _, _ := strings.Cut(refRaw, "\n")
+								if isObjectID(strings.TrimSpace(strings.TrimRight(refLine, "\r"))) {
+									return true, nil
+								}
+							} else if os.IsNotExist(refErr) {
+								if found, missing := packedRefsLookupHead(commonDir, short); found {
+									return true, nil
+								} else if missing {
+									return false, nil
+								}
+							}
+						}
+					} else if isObjectID(line) {
+						return true, nil
+					}
+				}
+			}
+		}
+	}
+	sha := commitSHA(ctx, git, "HEAD", "")
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return sha != "", nil
+}
+
+func repoHasAnyBranch(ctx context.Context, commonDir string, git GitRun) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if commonDir != "" {
+		if _, err := os.Stat(filepath.Join(commonDir, "reftable")); os.IsNotExist(err) {
+			hasLoose, looseOK := dirHasAnyFile(filepath.Join(commonDir, "refs", "heads"))
+			hasPacked, packedOK := packedRefsHasAnyHead(commonDir)
+			if looseOK && packedOK && !hasLoose && !hasPacked {
+				return false, nil
+			}
+		}
+	}
+	result := git(ctx, []string{"for-each-ref", "--count=1", "--format=%(objectname)", "refs/heads"}, GitOptions{})
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return result.ExitCode == 0 && strings.TrimSpace(result.Stdout) != "", nil
+}
+
 func NewWorkspaces(ctx context.Context, options FactoryOptions) (*Workspaces, error) {
 	source, err := NewWorkspace(options.Path, WorkspaceOptions{ID: "source", HideGit: true})
 	if err != nil {
@@ -221,6 +365,8 @@ func NewWorkspaces(ctx context.Context, options FactoryOptions) (*Workspaces, er
 	}
 	factory := newWorkspaceOwner()
 	factory.path, factory.repository, factory.common = source.directory, repository, common
+	factory.localCheckout = repository != ""
+	factory.detectGit = options.RepositoryRoot == nil && options.DataDir != ""
 	factory.roots, factory.git, factory.source, factory.clone = roots, git, source, clone
 	return factory, nil
 }
@@ -228,7 +374,53 @@ func newWorkspaceOwner() *Workspaces {
 	life, cancel := context.WithCancel(context.Background())
 	return &Workspaces{life: life, cancel: cancel, active: map[*Workspace]struct{}{}, locks: map[string]*threadLock{}, closeDone: make(chan struct{}), cloneMu: make(chan struct{}, 1)}
 }
-func (factory *Workspaces) Isolated() bool { return factory.repository != "" }
+func (factory *Workspaces) hasHeadCommit(ctx context.Context) (bool, error) {
+	if factory.repository == "" {
+		return false, nil
+	}
+	if !factory.localCheckout {
+		return true, nil
+	}
+	return repoHasHeadCommit(ctx, factory.repository, factory.common, factory.git)
+}
+func (factory *Workspaces) canBranch(ctx context.Context) (bool, error) {
+	if factory.repository == "" {
+		return false, nil
+	}
+	if !factory.localCheckout {
+		return true, nil
+	}
+	hasHead, err := factory.hasHeadCommit(ctx)
+	if err != nil || hasHead {
+		return hasHead, err
+	}
+	return repoHasAnyBranch(ctx, factory.common, factory.git)
+}
+func (factory *Workspaces) Isolated() bool {
+	ok, err := factory.canBranch(context.Background())
+	return err == nil && ok
+}
+func (factory *Workspaces) capabilityStale(ctx context.Context, wasIsolated bool) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if factory.localCheckout {
+		nowIsolated, err := factory.canBranch(ctx)
+		return err == nil && nowIsolated != wasIsolated
+	}
+	if factory.repository == "" && factory.detectGit {
+		if common, ok := resolveRepoCommonDir(factory.path); ok {
+			git := NewGit(factory.path, "file")
+			if hasHead, err := repoHasHeadCommit(ctx, factory.path, common, git); err == nil && hasHead {
+				return true
+			}
+			if hasBranch, err := repoHasAnyBranch(ctx, common, git); err == nil && hasBranch {
+				return true
+			}
+		}
+	}
+	return false
+}
 func (factory *Workspaces) View() sdk.SourceView {
 	if factory.source == nil {
 		return nil
@@ -403,98 +595,138 @@ func (factory *Workspaces) Open(ctx context.Context, input OpenRequest) (*Worksp
 	defer release()
 	var branch, base *string
 	root := factory.path
-	if factory.Isolated() {
-		chosen := BranchFor(input.ThreadID)
-		if input.Branch != nil {
-			chosen = *input.Branch
-		}
-		if err := validRef(ctx, factory.git, "refs/heads/"+chosen); err != nil {
-			return nil, err
-		}
-		branch = &chosen
-		if input.Base != nil {
-			if *input.Base != nil {
-				base = new(**input.Base)
-			}
-		} else if short, ok := readHeadBranchFast(factory.repository, factory.common); ok {
-			if short != "" {
-				base = new(short)
-			}
-		} else {
-			result := factory.git(ctx, []string{"symbolic-ref", "--quiet", "--short", "HEAD"}, GitOptions{})
-			if result.ExitCode == 0 && strings.TrimSpace(result.Stdout) != "" {
-				base = new(strings.TrimSpace(result.Stdout))
-			}
-		}
-		dir, err := factory.checkedDirectory(input.ThreadID)
+	if !input.Shared && factory.repository != "" {
+		canBranch, err := factory.canBranch(ctx)
 		if err != nil {
 			return nil, err
 		}
-		_, err = os.Lstat(filepath.Join(dir, ".git"))
-		fresh := os.IsNotExist(err)
-		if err != nil && !fresh {
-			return nil, err
-		}
-		if fresh {
-			shared, err := factory.cloningRoot(ctx)
+		if canBranch {
+			chosen := BranchFor(input.ThreadID)
+			if input.Branch != nil {
+				chosen = *input.Branch
+			}
+			if err := validRef(ctx, factory.git, "refs/heads/"+chosen); err != nil {
+				return nil, err
+			}
+			dir, err := factory.checkedDirectory(input.ThreadID)
 			if err != nil {
 				return nil, err
 			}
-			if shared != "" {
-				dir = filepath.Join(shared, input.ThreadID)
-			}
-			if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
+			_, err = os.Lstat(filepath.Join(dir, ".git"))
+			fresh := os.IsNotExist(err)
+			if err != nil && !fresh {
 				return nil, err
-			}
-			if worktreesDirHasEntries(factory.common) {
-				pruned := factory.git(ctx, []string{"worktree", "prune"}, GitOptions{})
-				if pruned.ExitCode != 0 {
-					return nil, gitFailure(pruned, "git worktree prune")
-				}
 			}
 			hasBranch := false
-			if !localBranchDefinitelyMissing(factory.common, chosen) {
+			if fresh && !localBranchDefinitelyMissing(factory.common, chosen) {
 				hasBranch = commitSHA(ctx, factory.git, "refs/heads/"+chosen, "") != ""
 			}
-			args := []string{"worktree", "add"}
-			if shared != "" {
-				args = append(args, "--no-checkout")
+			hasHead := false
+			checkedHead := false
+			isolate := true
+			if fresh && !hasBranch {
+				hasHead, err = factory.hasHeadCommit(ctx)
+				if err != nil {
+					return nil, err
+				}
+				checkedHead = true
+				isolate = hasHead
 			}
-			if hasBranch {
-				args = append(args, "--", dir, chosen)
-			} else {
-				args = append(args, "-b", chosen, "--", dir, "HEAD")
+			if isolate {
+				branch = &chosen
+				if input.Base != nil {
+					if *input.Base != nil {
+						base = new(**input.Base)
+					}
+				} else {
+					if !checkedHead {
+						hasHead, err = factory.hasHeadCommit(ctx)
+						if err != nil {
+							return nil, err
+						}
+					}
+					if hasHead {
+						if short, ok := readHeadBranchFast(factory.repository, factory.common); ok {
+							if short != "" {
+								base = new(short)
+							}
+						} else {
+							result := factory.git(ctx, []string{"symbolic-ref", "--quiet", "--short", "HEAD"}, GitOptions{})
+							if result.ExitCode == 0 && strings.TrimSpace(result.Stdout) != "" {
+								base = new(strings.TrimSpace(result.Stdout))
+							}
+						}
+					}
+				}
+				if fresh {
+					shared, err := factory.cloningRoot(ctx)
+					if err != nil {
+						return nil, err
+					}
+					if shared != "" {
+						dir = filepath.Join(shared, input.ThreadID)
+					}
+					if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
+						return nil, err
+					}
+					if worktreesDirHasEntries(factory.common) {
+						pruned := factory.git(ctx, []string{"worktree", "prune"}, GitOptions{})
+						if pruned.ExitCode != 0 {
+							return nil, gitFailure(pruned, "git worktree prune")
+						}
+					}
+					args := []string{"worktree", "add"}
+					if shared != "" {
+						args = append(args, "--no-checkout")
+					}
+					if hasBranch {
+						args = append(args, "--", dir, chosen)
+					} else {
+						args = append(args, "-b", chosen, "--", dir, "HEAD")
+					}
+					result := factory.git(ctx, args, GitOptions{})
+					if result.ExitCode != 0 {
+						return nil, gitFailure(result, "git worktree add")
+					}
+				}
+				if err := factory.verifiedWorktree(ctx, dir); err != nil {
+					return nil, err
+				}
+				pending, err := CheckoutPending(ctx, factory.git, dir)
+				if err != nil {
+					return nil, err
+				}
+				if pending {
+					if _, err := CheckoutCloned(ctx, factory.repository, dir, factory.git, factory.clone); err != nil {
+						cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+						factory.git(cleanup, []string{"worktree", "remove", "--force", "--force", "--", dir}, GitOptions{Timeout: 10 * time.Second})
+						if fresh && !hasBranch {
+							factory.git(cleanup, []string{"branch", "-D", "--", chosen}, GitOptions{Timeout: 10 * time.Second})
+						}
+						stop()
+						return nil, err
+					}
+					if _, err := SeedWorktree(ctx, factory.repository, dir, factory.git, factory.clone); err != nil {
+						return nil, err
+					}
+				}
+				sub, err := filepath.Rel(factory.repository, factory.path)
+				if err != nil {
+					return nil, err
+				}
+				root = filepath.Join(dir, sub)
+				if _, err := os.Stat(root); err != nil {
+					if fresh {
+						cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+						factory.git(cleanup, []string{"worktree", "remove", "--force", "--force", "--", dir}, GitOptions{Timeout: 10 * time.Second})
+						if !hasBranch {
+							factory.git(cleanup, []string{"branch", "-D", "--", chosen}, GitOptions{Timeout: 10 * time.Second})
+						}
+						stop()
+					}
+					return nil, fmt.Errorf("%s is not in the repository's current commit (untracked or ignored), so the thread's checkout has no such directory; commit it, or choose the repository root", sub)
+				}
 			}
-			result := factory.git(ctx, args, GitOptions{})
-			if result.ExitCode != 0 {
-				return nil, gitFailure(result, "git worktree add")
-			}
-		}
-		if err := factory.verifiedWorktree(ctx, dir); err != nil {
-			return nil, err
-		}
-		pending, err := CheckoutPending(ctx, factory.git, dir)
-		if err != nil {
-			return nil, err
-		}
-		if pending {
-			if _, err := CheckoutCloned(ctx, factory.repository, dir, factory.git, factory.clone); err != nil {
-				cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-				factory.git(cleanup, []string{"worktree", "remove", "--force", "--force", "--", dir}, GitOptions{Timeout: 10 * time.Second})
-				stop()
-				return nil, err
-			}
-			if _, err := SeedWorktree(ctx, factory.repository, dir, factory.git, factory.clone); err != nil {
-				return nil, err
-			}
-		}
-		sub, err := filepath.Rel(factory.repository, factory.path)
-		if err != nil {
-			return nil, err
-		}
-		root = filepath.Join(dir, sub)
-		if _, err := os.Stat(root); err != nil {
-			return nil, fmt.Errorf("%s is not in the repository's current commit (untracked or ignored), so the thread's checkout has no such directory; commit it, or choose the repository root", sub)
 		}
 	}
 	workspace, err := NewWorkspace(root, WorkspaceOptions{ID: input.ThreadID, Branch: branch, Base: base})

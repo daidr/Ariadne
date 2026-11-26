@@ -54,6 +54,8 @@ const (
 	// ProjectServiceGetProjectActivityProcedure is the fully-qualified name of the ProjectService's
 	// GetProjectActivity RPC.
 	ProjectServiceGetProjectActivityProcedure = "/ariadne.v1.ProjectService/GetProjectActivity"
+	// ProjectServiceGetPulseProcedure is the fully-qualified name of the ProjectService's GetPulse RPC.
+	ProjectServiceGetPulseProcedure = "/ariadne.v1.ProjectService/GetPulse"
 	// ProjectServiceSearchProjectProcedure is the fully-qualified name of the ProjectService's
 	// SearchProject RPC.
 	ProjectServiceSearchProjectProcedure = "/ariadne.v1.ProjectService/SearchProject"
@@ -83,6 +85,7 @@ type ProjectServiceClient interface {
 	UpdateProject(context.Context, *connect.Request[v1.UpdateProjectRequest]) (*connect.Response[v1.UpdateProjectResponse], error)
 	DeleteProject(context.Context, *connect.Request[v1.DeleteProjectRequest]) (*connect.Response[v1.DeleteProjectResponse], error)
 	GetProjectActivity(context.Context, *connect.Request[v1.GetProjectActivityRequest]) (*connect.Response[v1.GetProjectActivityResponse], error)
+	GetPulse(context.Context, *connect.Request[v1.GetPulseRequest]) (*connect.Response[v1.GetPulseResponse], error)
 	SearchProject(context.Context, *connect.Request[v1.SearchProjectRequest]) (*connect.Response[v1.SearchProjectResponse], error)
 	GetProjectSettings(context.Context, *connect.Request[v1.GetProjectSettingsRequest]) (*connect.Response[v1.GetProjectSettingsResponse], error)
 	GetFileSources(context.Context, *connect.Request[v1.GetFileSourcesRequest]) (*connect.Response[v1.GetFileSourcesResponse], error)
@@ -144,6 +147,12 @@ func NewProjectServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(projectServiceMethods.ByName("GetProjectActivity")),
 			connect.WithClientOptions(opts...),
 		),
+		getPulse: connect.NewClient[v1.GetPulseRequest, v1.GetPulseResponse](
+			httpClient,
+			baseURL+ProjectServiceGetPulseProcedure,
+			connect.WithSchema(projectServiceMethods.ByName("GetPulse")),
+			connect.WithClientOptions(opts...),
+		),
 		searchProject: connect.NewClient[v1.SearchProjectRequest, v1.SearchProjectResponse](
 			httpClient,
 			baseURL+ProjectServiceSearchProjectProcedure,
@@ -192,6 +201,7 @@ type projectServiceClient struct {
 	updateProject          *connect.Client[v1.UpdateProjectRequest, v1.UpdateProjectResponse]
 	deleteProject          *connect.Client[v1.DeleteProjectRequest, v1.DeleteProjectResponse]
 	getProjectActivity     *connect.Client[v1.GetProjectActivityRequest, v1.GetProjectActivityResponse]
+	getPulse               *connect.Client[v1.GetPulseRequest, v1.GetPulseResponse]
 	searchProject          *connect.Client[v1.SearchProjectRequest, v1.SearchProjectResponse]
 	getProjectSettings     *connect.Client[v1.GetProjectSettingsRequest, v1.GetProjectSettingsResponse]
 	getFileSources         *connect.Client[v1.GetFileSourcesRequest, v1.GetFileSourcesResponse]
@@ -235,6 +245,11 @@ func (c *projectServiceClient) GetProjectActivity(ctx context.Context, req *conn
 	return c.getProjectActivity.CallUnary(ctx, req)
 }
 
+// GetPulse calls ariadne.v1.ProjectService.GetPulse.
+func (c *projectServiceClient) GetPulse(ctx context.Context, req *connect.Request[v1.GetPulseRequest]) (*connect.Response[v1.GetPulseResponse], error) {
+	return c.getPulse.CallUnary(ctx, req)
+}
+
 // SearchProject calls ariadne.v1.ProjectService.SearchProject.
 func (c *projectServiceClient) SearchProject(ctx context.Context, req *connect.Request[v1.SearchProjectRequest]) (*connect.Response[v1.SearchProjectResponse], error) {
 	return c.searchProject.CallUnary(ctx, req)
@@ -274,6 +289,7 @@ type ProjectServiceHandler interface {
 	UpdateProject(context.Context, *connect.Request[v1.UpdateProjectRequest]) (*connect.Response[v1.UpdateProjectResponse], error)
 	DeleteProject(context.Context, *connect.Request[v1.DeleteProjectRequest]) (*connect.Response[v1.DeleteProjectResponse], error)
 	GetProjectActivity(context.Context, *connect.Request[v1.GetProjectActivityRequest]) (*connect.Response[v1.GetProjectActivityResponse], error)
+	GetPulse(context.Context, *connect.Request[v1.GetPulseRequest]) (*connect.Response[v1.GetPulseResponse], error)
 	SearchProject(context.Context, *connect.Request[v1.SearchProjectRequest]) (*connect.Response[v1.SearchProjectResponse], error)
 	GetProjectSettings(context.Context, *connect.Request[v1.GetProjectSettingsRequest]) (*connect.Response[v1.GetProjectSettingsResponse], error)
 	GetFileSources(context.Context, *connect.Request[v1.GetFileSourcesRequest]) (*connect.Response[v1.GetFileSourcesResponse], error)
@@ -331,6 +347,12 @@ func NewProjectServiceHandler(svc ProjectServiceHandler, opts ...connect.Handler
 		connect.WithSchema(projectServiceMethods.ByName("GetProjectActivity")),
 		connect.WithHandlerOptions(opts...),
 	)
+	projectServiceGetPulseHandler := connect.NewUnaryHandler(
+		ProjectServiceGetPulseProcedure,
+		svc.GetPulse,
+		connect.WithSchema(projectServiceMethods.ByName("GetPulse")),
+		connect.WithHandlerOptions(opts...),
+	)
 	projectServiceSearchProjectHandler := connect.NewUnaryHandler(
 		ProjectServiceSearchProjectProcedure,
 		svc.SearchProject,
@@ -383,6 +405,8 @@ func NewProjectServiceHandler(svc ProjectServiceHandler, opts ...connect.Handler
 			projectServiceDeleteProjectHandler.ServeHTTP(w, r)
 		case ProjectServiceGetProjectActivityProcedure:
 			projectServiceGetProjectActivityHandler.ServeHTTP(w, r)
+		case ProjectServiceGetPulseProcedure:
+			projectServiceGetPulseHandler.ServeHTTP(w, r)
 		case ProjectServiceSearchProjectProcedure:
 			projectServiceSearchProjectHandler.ServeHTTP(w, r)
 		case ProjectServiceGetProjectSettingsProcedure:
@@ -430,6 +454,10 @@ func (UnimplementedProjectServiceHandler) DeleteProject(context.Context, *connec
 
 func (UnimplementedProjectServiceHandler) GetProjectActivity(context.Context, *connect.Request[v1.GetProjectActivityRequest]) (*connect.Response[v1.GetProjectActivityResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ProjectService.GetProjectActivity is not implemented"))
+}
+
+func (UnimplementedProjectServiceHandler) GetPulse(context.Context, *connect.Request[v1.GetPulseRequest]) (*connect.Response[v1.GetPulseResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ProjectService.GetPulse is not implemented"))
 }
 
 func (UnimplementedProjectServiceHandler) SearchProject(context.Context, *connect.Request[v1.SearchProjectRequest]) (*connect.Response[v1.SearchProjectResponse], error) {

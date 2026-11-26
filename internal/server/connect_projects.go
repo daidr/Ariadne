@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -17,6 +18,7 @@ import (
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/projectsettings"
+	"github.com/daidr/Ariadne/internal/realtime"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -434,6 +436,24 @@ func (s *projectService) GetProjectActivity(
 		},
 		Threads: threads,
 	}), nil
+}
+
+func (s *projectService) GetPulse(
+	ctx context.Context,
+	req *connect.Request[ariadnev1.GetPulseRequest],
+) (*connect.Response[ariadnev1.GetPulseResponse], error) {
+	snapshot, err := s.api.options.Repository.GetPulse(ctx, core.PulseQuery{
+		ProjectID:        req.Msg.ProjectId,
+		FromMs:           req.Msg.FromMs,
+		ToMs:             req.Msg.ToMs,
+		IncludeCompleted: req.Msg.IncludeCompleted,
+		GlobalSlots:      s.api.pulseGlobalSlots(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	liveCmds := s.api.liveCommandsByConversation(req.Msg.ProjectId)
+	return connect.NewResponse(toProtoPulseResponse(snapshot, liveCmds)), nil
 }
 
 func (s *projectService) SearchProject(
@@ -1570,4 +1590,187 @@ func fromProtoFileSourceInputs(inputs []*ariadnev1.FileSourceInput) []any {
 		out = append(out, entry)
 	}
 	return out
+}
+
+func (api *API) pulseGlobalSlots() int {
+	if api.options.Settings != nil {
+		if raw, ok := api.options.Settings.Concurrency()["slots"]; ok {
+			if n := int(asInt32(raw)); n > 0 && n <= 16 {
+				return n
+			}
+		}
+	}
+	return 3
+}
+
+func (api *API) liveCommandsByConversation(projectID string) map[string]realtime.LiveCommand {
+	if api.state == nil {
+		return nil
+	}
+	result := map[string]realtime.LiveCommand{}
+	for item := range api.state.Snapshots(projectID) {
+		if item.Kind != "live" {
+			continue
+		}
+		var payload realtime.LiveUpdate
+		switch v := item.Value.(type) {
+		case *realtime.LiveUpdate:
+			if v == nil {
+				continue
+			}
+			payload = *v
+		case realtime.LiveUpdate:
+			payload = v
+		default:
+			if len(item.Data) == 0 || json.Unmarshal(item.Data, &payload) != nil {
+				continue
+			}
+		}
+		if payload.Command == nil {
+			continue
+		}
+		convID := payload.ConversationID
+		if convID == "" {
+			convID = payload.Command.ConversationID
+		}
+		if convID == "" {
+			convID = item.ConversationID
+		}
+		if convID == "" {
+			continue
+		}
+		result[convID] = *payload.Command
+	}
+	return result
+}
+
+func pulseLiveTailPreview(tail string) string {
+	trimmed := strings.TrimSpace(tail)
+	if trimmed == "" {
+		return ""
+	}
+	const maxRunes = 512
+	chars := []rune(trimmed)
+	if len(chars) > maxRunes {
+		return string(chars[len(chars)-maxRunes:])
+	}
+	return trimmed
+}
+
+func pulseCommandLabel(command string) string {
+	line, _, _ := strings.Cut(projectsettings.Trim(command), "\n")
+	line = projectsettings.Trim(line)
+	if line == "" {
+		return ""
+	}
+	const maxRunes = 60
+	chars := []rune(line)
+	if len(chars) > maxRunes {
+		return string(chars[:maxRunes]) + "…"
+	}
+	return line
+}
+
+func toProtoPulseResponse(snapshot core.PulseSnapshot, liveCmds map[string]realtime.LiveCommand) *ariadnev1.GetPulseResponse {
+	lanes := make([]*ariadnev1.PulseLane, 0, len(snapshot.Lanes))
+	for _, lane := range snapshot.Lanes {
+		out := &ariadnev1.PulseLane{
+			ConversationId: lane.ConversationID,
+			ProjectId:      lane.ProjectID,
+			ProjectName:    lane.ProjectName,
+			Title:          lane.Title,
+			Role:           lane.Role,
+			ReviewOf:       lane.ReviewOf,
+			Stage:          lane.Stage,
+			Completed:      lane.Completed,
+			AttentionId:    lane.AttentionID,
+			LiveCommand:    lane.LiveCommand,
+			LiveTail:       lane.LiveTail,
+			LastHeadline:   lane.LastHeadline,
+			ActiveAt:       lane.ActiveAt,
+		}
+		if cmd, ok := liveCmds[lane.ConversationID]; ok {
+			if cmdText := strings.TrimSpace(cmd.Command); cmdText != "" {
+				out.LiveCommand = &cmdText
+			}
+			if tail := pulseLiveTailPreview(cmd.Tail); tail != "" {
+				out.LiveTail = &tail
+			}
+		}
+		lanes = append(lanes, out)
+	}
+
+	spans := make([]*ariadnev1.PulseSpan, 0, len(snapshot.Spans))
+	for _, span := range snapshot.Spans {
+		label := span.Label
+		if label == "" && span.EndedAt == nil && span.Stage == core.PulseStageWorking {
+			if cmd, ok := liveCmds[span.ConversationID]; ok {
+				label = pulseCommandLabel(cmd.Command)
+			}
+		}
+		spans = append(spans, &ariadnev1.PulseSpan{
+			Id:             span.ID,
+			ProjectId:      span.ProjectID,
+			ConversationId: span.ConversationID,
+			Stage:          span.Stage,
+			OccupiesSlot:   span.OccupiesSlot,
+			StartedAt:      span.StartedAt,
+			EndedAt:        span.EndedAt,
+			SeqStart:       span.SeqStart,
+			SeqEnd:         span.SeqEnd,
+			Label:          label,
+		})
+	}
+
+	markers := make([]*ariadnev1.PulseMarker, 0, len(snapshot.Markers))
+	for _, marker := range snapshot.Markers {
+		markers = append(markers, &ariadnev1.PulseMarker{
+			Seq:             marker.Seq,
+			ProjectId:       marker.ProjectID,
+			ConversationId:  marker.ConversationID,
+			RelatedThreadId: marker.RelatedThreadID,
+			Kind:            marker.Kind,
+			At:              marker.At,
+			Label:           marker.Label,
+		})
+	}
+
+	handoffs := make([]*ariadnev1.PulseHandoff, 0, len(snapshot.Handoffs))
+	for _, handoff := range snapshot.Handoffs {
+		handoffs = append(handoffs, &ariadnev1.PulseHandoff{
+			Seq:                handoff.Seq,
+			ProjectId:          handoff.ProjectID,
+			FromConversationId: handoff.FromConversationID,
+			ToConversationId:   handoff.ToConversationID,
+			Kind:               handoff.Kind,
+			At:                 handoff.At,
+			Label:              handoff.Label,
+		})
+	}
+
+	points := make([]*ariadnev1.PulseConcurrencyPoint, 0, len(snapshot.Concurrency.Points))
+	for _, pt := range snapshot.Concurrency.Points {
+		points = append(points, &ariadnev1.PulseConcurrencyPoint{
+			At:     pt.At,
+			Active: pt.Active,
+		})
+	}
+
+	return &ariadnev1.GetPulseResponse{
+		Lanes:    lanes,
+		Spans:    spans,
+		Markers:  markers,
+		Handoffs: handoffs,
+		Concurrency: &ariadnev1.PulseConcurrency{
+			Slots:   snapshot.Concurrency.Slots,
+			Current: snapshot.Concurrency.Current,
+			Peak:    snapshot.Concurrency.Peak,
+			Points:  points,
+		},
+		LastReturnedAt: snapshot.LastReturnedAt,
+		CursorSeq:      snapshot.CursorSeq,
+		FromMs:         snapshot.FromMs,
+		ToMs:           snapshot.ToMs,
+		ServerNowMs:    snapshot.ServerNowMs,
+	}
 }

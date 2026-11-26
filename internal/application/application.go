@@ -390,6 +390,9 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	add(janitor.Stop)
 	daily.Start(life)
 	add(daily.Stop)
+	pulsePruner := &core.PulsePruner{Repository: repo, OnError: onError}
+	pulsePruner.Start(life)
+	add(pulsePruner.Stop)
 	watcher := repowatch.Watcher{Repository: repo, ThreadRepo: manager.RepoForThread, OnError: onError}
 	watchDone := make(chan struct{})
 	interval := time.Minute

@@ -1,10 +1,11 @@
 import { ExpiringCache } from '@ariadne/core/cache'
 import { api } from '../api'
 
-export const THUMBNAIL_LIMIT = 64
-export const THUMBNAIL_TTL_MS = 5 * 60_000
+export const THUMBNAIL_LIMIT = 128
+export const THUMBNAIL_TTL_MS = 10 * 60_000
+export const THUMBNAIL_CONCURRENCY = 3
 export const MAX_THUMBNAIL_CHARS = 256_000
-export const THUMBNAIL_ROOT_MARGIN = '120px 0px'
+export const THUMBNAIL_ROOT_MARGIN = '160px 0px'
 
 const visibilityListeners = new Map<Element, () => void>()
 let visibilityObserver: IntersectionObserver | null = null
@@ -72,7 +73,8 @@ const drawn = new ExpiringCache<string, Thumbnail>(
     entry.resolve(null)
   },
 )
-let running = false
+let activeWorkers = 0
+let rampScheduled = false
 
 /** A bounded queue as well as a bounded cache: evicted jobs never start rendering. */
 export function boardThumbnail(
@@ -90,7 +92,7 @@ export function boardThumbnail(
   const entry = { key, colorMode, picture, resolve, controller: new AbortController() }
   drawn.set(id, entry)
   waiting.set(id, entry)
-  void renderWaiting()
+  scheduleWorkers()
   return picture
 }
 
@@ -98,12 +100,31 @@ export function clearBoardThumbnails(): void {
   drawn.clear()
 }
 
-async function renderWaiting() {
-  if (running) return
-  running = true
+function scheduleWorkers() {
+  // Start the first worker synchronously so callers observe immediate dispatch and
+  // abort semantics, then ramp additional concurrent workers in a microtask so a
+  // synchronous burst evicts stale items before filling extra slots.
+  if (activeWorkers === 0 && waiting.size > 0) {
+    void runWorker()
+  }
+  if (!rampScheduled && activeWorkers < THUMBNAIL_CONCURRENCY && waiting.size > 0) {
+    rampScheduled = true
+    queueMicrotask(() => {
+      rampScheduled = false
+      while (activeWorkers < THUMBNAIL_CONCURRENCY && waiting.size > 0) {
+        void runWorker()
+      }
+    })
+  }
+}
+
+async function runWorker() {
+  activeWorkers++
   try {
-    while (waiting.size) {
-      const [id, entry] = waiting.entries().next().value!
+    while (waiting.size > 0) {
+      const next = waiting.entries().next()
+      if (next.done) break
+      const [id, entry] = next.value
       waiting.delete(id)
       const timer = setTimeout(() => entry.controller.abort(), 30_000)
       try {
@@ -116,7 +137,7 @@ async function renderWaiting() {
       }
     }
   } finally {
-    running = false
+    activeWorkers--
   }
 }
 
@@ -126,7 +147,7 @@ async function draw(
   signal: AbortSignal,
 ): Promise<string | null> {
   const [{ artifact }, { renderFlowSVG }, { whiteboardExtensions }] = await Promise.all([
-    api.getArtifact(id, { signal, versions: false }),
+    api.getArtifact(id, { signal, versions: false, lightweight: true }),
     import('@dou-ui/flow'),
     import('./whiteboard-extensions'),
     import('@dou-ui/flow/style.css'),

@@ -757,7 +757,7 @@ export interface ModelSettingsInput {
    * `coordinator.model: null` uses the threads' model (and `'low'` effort when `effort` is
    * `null` and the model accepts `'low'`, or the model's own default when `effort` is
    * `'default'`), `triage.model: null` the coordinator's, `research.model: null` the asking
-   * conversation's; `effort: null` asks nothing for other roles.
+   * thread's; `effort: null` asks nothing for other roles.
    */
   roles: {
     thread: RoleInput
@@ -1671,6 +1671,8 @@ export const api = {
     projectId: string,
     options: { pageSize?: number; pageToken?: string; signal?: AbortSignal } = {},
   ) => domain2Api.listArtifacts(projectId, options),
+  listGalleryArtifacts: (options: Parameters<typeof domain2Api.listGalleryArtifacts>[0] = {}) =>
+    domain2Api.listGalleryArtifacts(options),
   getArtifact: (
     id: string,
     options: {
@@ -1679,6 +1681,7 @@ export const api = {
       versions?: boolean
       versionPageSize?: number
       versionPageToken?: string
+      lightweight?: boolean
     } = {},
   ) => domain2Api.getArtifact(id, options),
   listArtifactVersions: (

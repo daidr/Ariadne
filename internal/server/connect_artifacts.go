@@ -53,6 +53,36 @@ func (s *artifactService) ListArtifacts(
 	}), nil
 }
 
+func (s *artifactService) ListGalleryArtifacts(
+	ctx context.Context,
+	req *connect.Request[ariadnev1.ListGalleryArtifactsRequest],
+) (*connect.Response[ariadnev1.ListGalleryArtifactsResponse], error) {
+	page, err := s.api.options.Repository.ListGalleryArtifacts(ctx, core.GalleryArtifactsQuery{
+		ProjectID:      req.Msg.ProjectId,
+		Kind:           req.Msg.Kind,
+		OnlyPrototypes: req.Msg.OnlyPrototypes,
+		Status:         req.Msg.Status,
+		Query:          req.Msg.Query,
+		Sort:           req.Msg.Sort,
+		PageSize:       int(req.Msg.PageSize),
+		PageToken:      req.Msg.PageToken,
+		IncludeCounts:  req.Msg.IncludeCounts,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]*ariadnev1.GalleryArtifactSummary, 0, len(page.Items))
+	for _, item := range page.Items {
+		items = append(items, toProtoGalleryArtifactSummary(item))
+	}
+	return connect.NewResponse(&ariadnev1.ListGalleryArtifactsResponse{
+		Items:         items,
+		NextPageToken: page.NextPageToken,
+		HasMore:       page.HasMore,
+		Counts:        toProtoGalleryCounts(page.Counts),
+	}), nil
+}
+
 func (s *artifactService) CreateArtifact(
 	ctx context.Context,
 	req *connect.Request[ariadnev1.CreateArtifactRequest],
@@ -99,10 +129,13 @@ func (s *artifactService) GetArtifact(
 		int(req.Msg.VersionPageSize),
 		req.Msg.VersionPageToken,
 	)
-	if err != nil {
-		return nil, err
-	}
-	return connect.NewResponse(&ariadnev1.GetArtifactResponse{
+		if err != nil {
+			return nil, err
+		}
+		if req.Msg.Lightweight {
+			detail.Artifact.Content = core.LightweightArtifactContent(detail.Artifact.Kind, detail.Artifact.Content)
+		}
+		return connect.NewResponse(&ariadnev1.GetArtifactResponse{
 		Artifact:             toProtoArtifactView(detail.Artifact),
 		Versions:             toProtoArtifactVersions(detail.Versions),
 		Comments:             toProtoArtifactCommentThreads(detail.Comments),
@@ -524,12 +557,26 @@ func toProtoArtifactPreview(raw any) *ariadnev1.ArtifactPreview {
 			},
 		}
 	case "whiteboard":
+		minimap := []*ariadnev1.WhiteboardMinimapBox{}
+		for _, box := range asMapSlice(m["minimap"]) {
+			minimap = append(minimap, &ariadnev1.WhiteboardMinimapBox{
+				X:    anyFloat64(box["x"]),
+				Y:    anyFloat64(box["y"]),
+				W:    anyFloat64(box["w"]),
+				H:    anyFloat64(box["h"]),
+				Kind: anyString(box["kind"]),
+			})
+		}
 		return &ariadnev1.ArtifactPreview{
 			Preview: &ariadnev1.ArtifactPreview_Whiteboard{
 				Whiteboard: &ariadnev1.WhiteboardArtifactPreview{
-					Items:      int32(anyInt64(m["items"])),
-					Connectors: int32(anyInt64(m["connectors"])),
-					Texts:      anyStringSlice(m["texts"]),
+					Items:          int32(anyInt64(m["items"])),
+					Connectors:     int32(anyInt64(m["connectors"])),
+					Texts:          anyStringSlice(m["texts"]),
+					PrototypeCount: int32(anyInt64(m["prototypeCount"])),
+					OptionCount:    int32(anyInt64(m["optionCount"])),
+					PreviewImage:   anyStringPtr(m["previewImage"]),
+					Minimap:        minimap,
 				},
 			},
 		}
@@ -557,6 +604,7 @@ func toProtoArtifactPreview(raw any) *ariadnev1.ArtifactPreview {
 					TakenAt: takenAt,
 					Titles:  anyStringSlice(m["titles"]),
 					Tiles:   tiles,
+					IsLive:  anyBool(m["isLive"]),
 				},
 			},
 		}
@@ -580,6 +628,53 @@ func toProtoArtifactSummary(item core.ArtifactSummary) *ariadnev1.ArtifactSummar
 		Preview:      toProtoArtifactPreview(item.Preview),
 		OpenComments: item.OpenComments,
 		CommentedAt:  item.CommentedAt,
+	}
+}
+
+func toProtoGalleryArtifactSummary(item core.GalleryArtifactSummary) *ariadnev1.GalleryArtifactSummary {
+	var updatedByLabel *string
+	if item.UpdatedByLabel != "" {
+		v := item.UpdatedByLabel
+		updatedByLabel = &v
+	}
+	var nodeTitle *string
+	if item.NodeTitle != "" {
+		v := item.NodeTitle
+		nodeTitle = &v
+	}
+	return &ariadnev1.GalleryArtifactSummary{
+		Artifact:             toProtoArtifactSummary(item.Artifact),
+		ProjectName:          item.ProjectName,
+		UpdatedByLabel:       updatedByLabel,
+		UpdatedByCoordinator: item.UpdatedByCoordinator,
+		HasPrototype:         item.HasPrototype,
+		PendingActions:       int32(item.PendingActions),
+		PendingFeedback:      int32(item.PendingFeedback),
+		NodeTitle:            nodeTitle,
+	}
+}
+
+func toProtoGalleryCounts(counts *core.GalleryCounts) *ariadnev1.GalleryCounts {
+	if counts == nil {
+		return nil
+	}
+	projects := make([]*ariadnev1.GalleryProjectCount, 0, len(counts.Projects))
+	for _, p := range counts.Projects {
+		projects = append(projects, &ariadnev1.GalleryProjectCount{
+			ProjectId:   p.ProjectID,
+			ProjectName: p.ProjectName,
+			Count:       int32(p.Count),
+		})
+	}
+	return &ariadnev1.GalleryCounts{
+		Total:           int32(counts.Total),
+		Documents:       int32(counts.Documents),
+		Whiteboards:     int32(counts.Whiteboards),
+		Dashboards:      int32(counts.Dashboards),
+		Prototypes:      int32(counts.Prototypes),
+		NeedsMe:         int32(counts.NeedsMe),
+		FeedbackPending: int32(counts.FeedbackPending),
+		Projects:        projects,
 	}
 }
 

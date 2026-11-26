@@ -3,6 +3,7 @@ import type { ProjectView } from '@ariadne/core'
 import {
   DouButton,
   DouContextMenu,
+  DouDivider,
   DouEmpty,
   DouSortable,
   DouText,
@@ -14,6 +15,7 @@ import {
 } from 'dou-ui'
 import {
   DownloadIcon,
+  LayoutGridIcon,
   ListTreeIcon,
   PencilIcon,
   PlusIcon,
@@ -26,6 +28,7 @@ import { t } from '../i18n'
 import {
   deleteProject,
   exportProject,
+  openGallery,
   openMain,
   openProject,
   renameProject,
@@ -56,6 +59,7 @@ const canReorder = computed(() => state.projects.length > 1)
 const menuOpen = ref(false)
 const inspecting = ref<string>()
 const inPopover = computed(() => props.surface === 'popover')
+const isGallery = computed(() => state.main.kind === 'gallery' && !state.starting)
 const virtualized = computed(() => state.projects.length > PROJECT_VIRTUALIZE_THRESHOLD)
 const rowStride = computed(() => (props.compact ? 44 : inPopover.value ? 36 : 32) + ROW_GAP)
 
@@ -110,6 +114,12 @@ function selectProject(id: string) {
 
 function createProject() {
   startNewProject()
+  emit('select')
+}
+
+function goGallery() {
+  inspecting.value = undefined
+  openGallery()
   emit('select')
 }
 
@@ -228,6 +238,21 @@ async function confirmDelete(id: string) {
       'projects-virtualized': virtualized,
     }"
   >
+    <div class="gallery-entry-wrap">
+      <button
+        type="button"
+        class="gallery-entry"
+        data-gallery-entry
+        :aria-current="isGallery ? 'page' : undefined"
+        @click="goGallery"
+      >
+        <span class="gallery-entry-icon">
+          <LayoutGridIcon aria-hidden="true" />
+        </span>
+        <span class="gallery-entry-label">{{ t('gallery.title') }}</span>
+      </button>
+    </div>
+    <DouDivider class="gallery-entry-divider" />
     <div class="projects-head">
       <DouText variant="secondary" size="sm">{{ t('nav.projects') }}</DouText>
       <DouButton
@@ -268,7 +293,7 @@ async function confirmDelete(id: string) {
               >
                 <ProjectRow
                   :project="item"
-                  :current="state.currentId === item.id && !state.starting"
+                  :current="state.currentId === item.id && !state.starting && !isGallery"
                   :can-reorder="canReorder"
                   :inspecting="inspecting === item.id"
                   :activity-disabled="activityDisabled"
@@ -291,7 +316,7 @@ async function confirmDelete(id: string) {
           <template #default="{ item }">
             <ProjectRow
               :project="item"
-              :current="state.currentId === item.id && !state.starting"
+              :current="state.currentId === item.id && !state.starting && !isGallery"
               :can-reorder="canReorder"
               :inspecting="inspecting === item.id"
               :activity-disabled="activityDisabled"
@@ -371,5 +396,63 @@ async function confirmDelete(id: string) {
   padding-inline-start: 8px;
   align-items: center;
   justify-content: space-between;
+}
+
+.gallery-entry-wrap {
+  flex: none;
+}
+
+.gallery-entry {
+  --entry-bg: var(--project-row-base);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--project-row-min-height, 32px);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--dou-radius-control);
+  background: var(--entry-bg);
+  color: var(--dou-color-text-secondary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.gallery-entry:hover {
+  --entry-bg: color-mix(in oklab, var(--dou-color-text) 6%, var(--project-row-base));
+  color: var(--dou-color-text);
+}
+
+.gallery-entry[aria-current='page'] {
+  --entry-bg: color-mix(in oklab, var(--dou-color-primary) 12%, var(--project-row-base));
+  color: var(--dou-color-primary-text);
+  font-weight: var(--dou-font-weight-medium);
+}
+
+.gallery-entry:focus-visible {
+  outline: 2px solid var(--dou-color-focus);
+  outline-offset: -2px;
+}
+
+.gallery-entry-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+}
+
+.gallery-entry-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-entry-divider {
+  margin: 0;
 }
 </style>
