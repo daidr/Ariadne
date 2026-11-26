@@ -530,3 +530,246 @@ func TestWorktreesAndOrphanCleanupNormalizeSymlinkedDataDir(t *testing.T) {
 		t.Fatal("orphan directory still on disk", err)
 	}
 }
+
+func initUnbornGit(t *testing.T) (string, GitRun) {
+	t.Helper()
+	root := t.TempDir()
+	git := NewGit(root, "file")
+	gitOK(t, git, "init", "-q")
+	return root, git
+}
+
+func TestUnbornGitRepoDegradesToSharedAndRecoversAfterFirstCommit(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	root, git := initUnbornGit(t)
+	writeGit(t, root, "sub/hello.txt", "before commit\n")
+	dataDir := t.TempDir()
+
+	// Exercise both the repository root and a subdirectory inside the unborn repo.
+	for _, tc := range []struct {
+		name string
+		path string
+		file string
+	}{
+		{name: "root", path: root, file: "sub/hello.txt"},
+		{name: "subdir", path: filepath.Join(root, "sub"), file: "hello.txt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			factory := newFactory(t, FactoryOptions{Path: tc.path, DataDir: dataDir, DisableClone: true})
+			if factory.Isolated() {
+				t.Fatal("unborn git repo reported isolated")
+			}
+			capBefore := factory.Capability()
+			if capBefore.Isolated || capBefore.Branches != nil {
+				t.Fatalf("unborn capability should be non-isolated without branches: %+v", capBefore)
+			}
+			if capBefore.Stale == nil || capBefore.Stale(ctx) {
+				t.Fatal("fresh unborn capability should report not stale")
+			}
+			ws, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_unborn_" + tc.name})
+			if err != nil {
+				t.Fatalf("opening unborn git repo failed: %v", err)
+			}
+			defer ws.Close()
+			if ws.Info().Branch != nil || ws.Info().Base != nil {
+				t.Fatalf("unborn workspace should not have branch/base: %+v", ws.Info())
+			}
+			if got, err := ws.ReadFile(ctx, tc.file); err != nil || got != "before commit\n" {
+				t.Fatalf("read from unborn workspace: %q, %v", got, err)
+			}
+			if err := ws.WriteFile(ctx, "draft-"+tc.name+".txt", "edited in place\n"); err != nil {
+				t.Fatalf("write to unborn workspace: %v", err)
+			}
+			if data, err := os.ReadFile(filepath.Join(tc.path, "draft-"+tc.name+".txt")); err != nil || string(data) != "edited in place\n" {
+				t.Fatalf("shared write did not land in source dir: %q, %v", data, err)
+			}
+			if worktrees, err := factory.Worktrees(ctx, false); err != nil || len(worktrees) != 0 {
+				t.Fatalf("unborn Worktrees: %+v, %v", worktrees, err)
+			}
+			if shared, err := factory.SharesStorage(ctx); err != nil || shared {
+				t.Fatalf("unborn SharesStorage: %t, %v", shared, err)
+			}
+			if _, err := os.Stat(filepath.Join(root, ".git", "worktrees")); !os.IsNotExist(err) {
+				t.Fatalf("unborn Open created .git/worktrees metadata: %v", err)
+			}
+			if entries, err := os.ReadDir(dataDir); err == nil && len(entries) != 0 {
+				t.Fatalf("unborn Open created worktree directories in dataDir: %v", entries)
+			}
+		})
+	}
+
+	factory := newFactory(t, FactoryOptions{Path: root, DataDir: dataDir, DisableClone: true})
+	capBefore := factory.Capability()
+
+	// Make the first commit; the repo should recover isolation automatically.
+	gitOK(t, git, "add", "-A")
+	gitCommitOnly(t, git, "Initial commit")
+
+	if !capBefore.Stale(ctx) {
+		t.Fatal("capability did not become stale after first commit")
+	}
+	if !factory.Isolated() {
+		t.Fatal("factory did not become isolated after first commit")
+	}
+	capAfter := factory.Capability()
+	if !capAfter.Isolated || capAfter.Branches == nil || capAfter.Stale == nil || capAfter.Stale(ctx) {
+		t.Fatalf("post-commit capability mismatch: %+v", capAfter)
+	}
+
+	// New threads get an isolated worktree.
+	isolatedWS, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_isolated"})
+	if err != nil {
+		t.Fatalf("open after first commit failed: %v", err)
+	}
+	defer isolatedWS.Close()
+	if isolatedWS.Info().Branch == nil || isolatedWS.Info().Base == nil {
+		t.Fatalf("expected isolated branch and base after commit, got %+v", isolatedWS.Info())
+	}
+	if err := isolatedWS.WriteFile(ctx, "sub/hello.txt", "isolated edit\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "sub/hello.txt")); err != nil || string(got) != "before commit\n" {
+		t.Fatalf("isolated edit leaked into original repo: %q, %v", got, err)
+	}
+
+	// Previously-shared threads stay on the source directory when reopened with Shared=true.
+	sharedWS, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_unborn_root", Shared: true})
+	if err != nil {
+		t.Fatalf("reopen shared thread failed: %v", err)
+	}
+	defer sharedWS.Close()
+	if sharedWS.Info().Branch != nil || sharedWS.Info().Base != nil || sharedWS.directory != factory.path {
+		t.Fatalf("shared reopen switched to isolated worktree: %+v (%s vs %s)", sharedWS.Info(), sharedWS.directory, factory.path)
+	}
+	worktrees, err := factory.Worktrees(ctx, false)
+	if err != nil || len(worktrees) != 1 || worktrees[0].ThreadID != "thr_isolated" {
+		t.Fatalf("expected only isolated worktree listed, got %+v, %v", worktrees, err)
+	}
+}
+
+func TestOrphanHeadBranchDegradesNewThreadsWhileKeepingExistingWorktrees(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	root, git := initGit(t)
+	factory := newFactory(t, FactoryOptions{Path: root, DataDir: t.TempDir(), DisableClone: true})
+
+	existing, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_existing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	existingBranch := *existing.Info().Branch
+	existingBase := existing.Info().Base
+	existing.Close()
+	if removed, err := factory.Remove(ctx, "thr_existing", RemoveOptions{Spare: true}); err != nil || !removed {
+		t.Fatalf("park existing worktree: %t, %v", removed, err)
+	}
+
+	// Switch the main checkout to an unborn orphan branch while main and thr_existing still exist.
+	gitOK(t, git, "checkout", "--orphan", "wip-orphan")
+	if !factory.Isolated() {
+		t.Fatal("repo with existing branches should remain branch-capable")
+	}
+
+	// Existing branch can still reopen its worktree even while main checkout HEAD is unborn.
+	reopened, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_existing", Branch: &existingBranch, Base: &existingBase})
+	if err != nil {
+		t.Fatalf("reopening existing branch failed under orphan HEAD: %v", err)
+	}
+	defer reopened.Close()
+	if reopened.Info().Branch == nil || *reopened.Info().Branch != existingBranch {
+		t.Fatalf("unexpected reopened branch: %+v", reopened.Info())
+	}
+
+	// A brand new thread degrades cleanly to shared mode instead of failing on `git worktree add ... HEAD`.
+	fresh, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_orphan_new"})
+	if err != nil {
+		t.Fatalf("opening fresh thread on orphan HEAD failed: %v", err)
+	}
+	defer fresh.Close()
+	if fresh.Info().Branch != nil || fresh.Info().Base != nil || fresh.directory != factory.path {
+		t.Fatalf("fresh thread on orphan HEAD should degrade to shared dir: %+v", fresh.Info())
+	}
+
+	// Once HEAD has a commit again, new threads resume isolated worktrees.
+	writeGit(t, root, "orphan.txt", "committed\n")
+	gitOK(t, git, "add", "orphan.txt")
+	gitCommitOnly(t, git, "Commit on orphan branch")
+	recovered, err := factory.Open(ctx, OpenRequest{ThreadID: "thr_recovered"})
+	if err != nil {
+		t.Fatalf("opening thread after orphan commit failed: %v", err)
+	}
+	defer recovered.Close()
+	if recovered.Info().Branch == nil || recovered.Info().Base == nil || *recovered.Info().Base != "wip-orphan" {
+		t.Fatalf("expected isolated worktree off wip-orphan, got %+v", recovered.Info())
+	}
+}
+
+func TestPlainDirectoryCapabilityBecomesStaleOnlyAfterFirstCommit(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	root := t.TempDir()
+	writeGit(t, root, "notes.txt", "plain\n")
+	factory := newFactory(t, FactoryOptions{Path: root, DataDir: t.TempDir(), DisableClone: true})
+	cap := factory.Capability()
+	if cap.Isolated || cap.Branches != nil || cap.Stale == nil {
+		t.Fatalf("unexpected plain directory capability: %+v", cap)
+	}
+	if cap.Stale(ctx) {
+		t.Fatal("plain directory reported stale before git init")
+	}
+
+	git := NewGit(root, "file")
+	gitOK(t, git, "init", "-q")
+	if cap.Stale(ctx) {
+		t.Fatal("plain directory reported stale after git init without commit")
+	}
+
+	gitOK(t, git, "add", "notes.txt")
+	gitCommitOnly(t, git, "First commit")
+	if !cap.Stale(ctx) {
+		t.Fatal("plain directory did not become stale after git init + first commit")
+	}
+}
+
+func TestRepoHasHeadCommitFastPathsAvoidGitSubprocess(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	noGit := func(context.Context, []string, GitOptions) sdk.ExecResult {
+		t.Fatal("unexpected git subprocess invocation on fast path")
+		return sdk.ExecResult{ExitCode: 1}
+	}
+
+	unbornRoot, git := initUnbornGit(t)
+	unbornCommon, ok := resolveRepoCommonDir(unbornRoot)
+	if !ok {
+		t.Fatal("unborn repo common dir not resolved")
+	}
+	if _, err := os.Stat(filepath.Join(unbornCommon, "reftable")); !os.IsNotExist(err) {
+		t.Skip("reftable backend does not use loose/packed ref files")
+	}
+	hasHead, err := repoHasHeadCommit(ctx, unbornRoot, unbornCommon, noGit)
+	if err != nil || hasHead {
+		t.Fatalf("unborn HEAD fast path = (%t, %v), want (false, nil)", hasHead, err)
+	}
+
+	writeGit(t, unbornRoot, "file.txt", "hello\n")
+	gitOK(t, git, "add", "file.txt")
+	gitCommitOnly(t, git, "Initial commit")
+	hasHead, err = repoHasHeadCommit(ctx, unbornRoot, unbornCommon, noGit)
+	if err != nil || !hasHead {
+		t.Fatalf("loose ref HEAD fast path = (%t, %v), want (true, nil)", hasHead, err)
+	}
+
+	gitOK(t, git, "pack-refs", "--all")
+	hasHead, err = repoHasHeadCommit(ctx, unbornRoot, unbornCommon, noGit)
+	if err != nil || !hasHead {
+		t.Fatalf("packed ref HEAD fast path = (%t, %v), want (true, nil)", hasHead, err)
+	}
+
+	gitOK(t, git, "checkout", "--detach", "-q", "HEAD")
+	hasHead, err = repoHasHeadCommit(ctx, unbornRoot, unbornCommon, noGit)
+	if err != nil || !hasHead {
+		t.Fatalf("detached HEAD fast path = (%t, %v), want (true, nil)", hasHead, err)
+	}
+}

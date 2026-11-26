@@ -200,8 +200,11 @@ func (manager *Manager) acquireWorkspace(ctx context.Context, view *workspaceVie
 		}
 		fresh := previousWorkspace == nil || previousWorkspace.Removed
 		if previousWorkspace != nil {
-			if previous := optionalString(previousWorkspace.Branch); previous != nil {
+			if previous := optionalString(previousWorkspace.Branch); previous != nil && *previous != "" {
 				request.Branch = previous
+			} else if !previousWorkspace.Removed {
+				request.Shared = true
+				request.Branch = nil
 			}
 			base := optionalString(previousWorkspace.Base)
 			request.Base = &base
@@ -232,7 +235,8 @@ func (manager *Manager) acquireWorkspace(ctx context.Context, view *workspaceVie
 		}
 		value := &workspaceConnection{workspace: workspace, source: source}
 		if fresh && !view.secondary {
-			manager.prepareSetup(ctx, settings, known, value, key, view.sourceID, capability.Isolated)
+			isolated := capability.Isolated && info.Branch != nil && *info.Branch != ""
+			manager.prepareSetup(ctx, settings, known, value, key, view.sourceID, isolated)
 		}
 		valid, keep = true, true
 		return value, nil

@@ -144,31 +144,51 @@ func (workspace *Workspace) Search(ctx context.Context, pattern, path string, op
 	if err != nil {
 		return sdk.FileSearchResult{}, err
 	}
-	inGit, err := workspace.probe(ctx, "git", []string{gitExecutable(nil), "rev-parse", "--is-inside-work-tree"})
-	if err != nil {
-		return sdk.FileSearchResult{}, err
+	inGit := false
+	if !hasRG {
+		inGit, err = workspace.probe(ctx, "git", []string{gitExecutable(nil), "rev-parse", "--is-inside-work-tree"})
+		if err != nil {
+			return sdk.FileSearchResult{}, err
+		}
+	}
+	target := path
+	if target == "" {
+		target = "."
 	}
 	caseless := []string{}
 	if options.IgnoreCase {
 		caseless = append(caseless, "-i")
 	}
-	atRoot := path == "" || path == "." || path == "./"
-	argv := []string{}
+	atRoot := target == "." || target == "./"
+	var result sdk.ExecResult
 	if hasRG {
-		argv = []string{"rg", "-n", "--no-heading", "--color", "never"}
-		if inGit {
-			argv = append(argv, "--hidden", "-g", "!.git")
+		buildRG := func(noRequireGit bool) []string {
+			argv := []string{"rg", "-n", "--no-heading", "--color", "never", "--hidden"}
+			if noRequireGit {
+				argv = append(argv, "--no-require-git")
+			}
+			argv = append(argv, "-g", "!.git")
+			if glob != "" && (atRoot || !strings.ContainsRune(glob, '/')) {
+				argv = append(argv, "-g", glob)
+			}
+			argv = append(argv, caseless...)
+			return append(argv, "--max-count", "50", "-e", pattern, "--", target)
 		}
-		if glob != "" && (atRoot || !strings.ContainsRune(glob, '/')) {
-			argv = append(argv, "-g", glob)
+		result, err = workspace.ExecFile(ctx, buildRG(true), sdk.ExecOptions{Timeout: 30 * time.Second})
+		if err != nil {
+			return sdk.FileSearchResult{}, err
 		}
-		argv = append(argv, caseless...)
-		argv = append(argv, "--max-count", "50", "-e", pattern, "--", path)
+		if result.ExitCode == 2 && strings.Contains(result.Stderr, "no-require-git") {
+			result, err = workspace.ExecFile(ctx, buildRG(false), sdk.ExecOptions{Timeout: 30 * time.Second})
+			if err != nil {
+				return sdk.FileSearchResult{}, err
+			}
+		}
 	} else if inGit {
-		argv = []string{gitExecutable(nil), "grep", "-n", "-I", "-E"}
+		argv := []string{gitExecutable(nil), "grep", "-n", "-I", "-E"}
 		argv = append(argv, caseless...)
 		argv = append(argv, "--untracked", "--no-color", "-e", pattern, "--")
-		under := path
+		under := target
 		if glob != "" && atRoot && !strings.ContainsRune(glob, '{') {
 			under = glob
 			if !strings.ContainsRune(under, '/') {
@@ -177,14 +197,18 @@ func (workspace *Workspace) Search(ctx context.Context, pattern, path string, op
 			under = ":(glob)" + under
 		}
 		argv = append(argv, under)
+		result, err = workspace.ExecFile(ctx, argv, sdk.ExecOptions{Timeout: 30 * time.Second})
+		if err != nil {
+			return sdk.FileSearchResult{}, err
+		}
 	} else {
-		argv = []string{"grep", "-rnIE"}
+		argv := []string{"grep", "-rnIE"}
 		argv = append(argv, caseless...)
-		argv = append(argv, "--exclude-dir=.git", "--exclude-dir=node_modules", "-m", "50", "-e", pattern, "--", path)
-	}
-	result, err := workspace.ExecFile(ctx, argv, sdk.ExecOptions{Timeout: 30 * time.Second})
-	if err != nil {
-		return sdk.FileSearchResult{}, err
+		argv = append(argv, "--exclude-dir=.git", "--exclude-dir=node_modules", "-m", "50", "-e", pattern, "--", target)
+		result, err = workspace.ExecFile(ctx, argv, sdk.ExecOptions{Timeout: 30 * time.Second})
+		if err != nil {
+			return sdk.FileSearchResult{}, err
+		}
 	}
 	if !hasRG && !inGit && result.ExitCode == 127 {
 		return sdk.SearchByReading(ctx, workspace, pattern, path, options)
@@ -201,7 +225,12 @@ func (workspace *Workspace) Search(ctx context.Context, pattern, path string, op
 		if line == "" {
 			continue
 		}
-		line = strings.TrimPrefix(line, "./")
+		if file, rest, ok := strings.Cut(line, ":"); ok {
+			file = strings.TrimPrefix(strings.ReplaceAll(file, "\\", "/"), "./")
+			line = file + ":" + rest
+		} else {
+			line = strings.TrimPrefix(strings.TrimPrefix(line, "./"), ".\\")
+		}
 		if keep(line) {
 			lines = append(lines, line)
 		}
