@@ -73,6 +73,10 @@ const { width: canvasWidth } = useElementSize(canvasRef)
 
 const mobileFilterOpen = ref(false)
 
+watch(isNarrow, (narrow) => {
+  if (!narrow) mobileFilterOpen.value = false
+})
+
 const quickPreviewMode = computed<'bottom' | 'right' | 'docked'>(() => {
   if (isNarrow.value) return 'bottom'
   if (pageWidth.value > 0 && pageWidth.value < 960) return 'right'
@@ -516,7 +520,7 @@ onBeforeUnmount(() => {
             :title="t('gallery.filters')"
             @click="mobileFilterOpen = true"
           >
-            <FilterIcon aria-hidden="true" />
+            <template #leading><FilterIcon aria-hidden="true" /></template>
             <span v-if="activeGalleryFilterCount > 0" class="mobile-filter-count">
               {{ activeGalleryFilterCount }}
             </span>
@@ -581,12 +585,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Narrow quick kind chips bar -->
-      <div
-        v-if="isNarrow"
-        class="narrow-kind-strip"
-        role="tablist"
-        :aria-label="t('gallery.title')"
-      >
+      <div v-if="isNarrow" class="narrow-kind-strip" role="group" :aria-label="t('gallery.title')">
         <DouCheckTag
           v-for="opt in kindOptions"
           :key="opt.value"

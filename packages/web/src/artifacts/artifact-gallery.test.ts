@@ -137,9 +137,17 @@ const wrappers: VueWrapper[] = []
 
 function mountGallery(layoutMode: 'wide' | 'medium' | 'narrow' = 'wide') {
   const Host = defineComponent({
-    setup() {
+    props: {
+      layoutMode: {
+        type: String as () => 'wide' | 'medium' | 'narrow',
+        default: layoutMode,
+      },
+    },
+    setup(props) {
       return () =>
-        h(DouConfigProvider, { locale: douLocale.value }, () => h(ArtifactGallery, { layoutMode }))
+        h(DouConfigProvider, { locale: douLocale.value }, () =>
+          h(ArtifactGallery, { layoutMode: props.layoutMode }),
+        )
     },
   })
   const wrapper = mount(Host, { attachTo: document.body })
@@ -462,7 +470,6 @@ describe('ArtifactGallery interactions', () => {
     expect(desktopLabels).not.toContain('不分组')
     desktopWrapper.unmount()
 
-    galleryState.sort = 'title_asc'
     galleryState.groupBy = 'project'
     galleryState.viewMode = 'list'
     galleryState.density = 'compact'
@@ -470,16 +477,29 @@ describe('ArtifactGallery interactions', () => {
     const wrapper = mountGallery('narrow')
     await flushPromises()
 
+    // Narrow kind strip holds toggle buttons (DouCheckTag), so it uses role="group".
+    expect(wrapper.find('.narrow-kind-strip').attributes('role')).toBe('group')
+
+    // Count === 0: #leading icon alone renders DouButton as icon-only with no label wrapper.
     const filterBtn = wrapper.find('.mobile-filter-trigger')
     expect(filterBtn.exists()).toBe(true)
     expect(filterBtn.attributes('aria-label')).toBe('筛选与排序')
     expect(filterBtn.text()).not.toContain('筛选与排序')
-    // Active sort filter ('title_asc') renders a compact numeric badge on the trigger button.
-    expect(filterBtn.find('.mobile-filter-count').text()).toBe('1')
+    expect(filterBtn.classes()).toContain('is-icon-only')
+    expect(filterBtn.find('.dou-button__icon svg').exists()).toBe(true)
+    expect(filterBtn.find('.dou-button__label').exists()).toBe(false)
+
+    // Count > 0: #leading icon stays in .dou-button__icon while count sits in .dou-button__label.
+    galleryState.sort = 'title_asc'
+    await nextTick()
+    expect(filterBtn.classes()).not.toContain('is-icon-only')
+    expect(filterBtn.find('.dou-button__icon svg').exists()).toBe(true)
+    expect(filterBtn.find('.dou-button__label .mobile-filter-count').text()).toBe('1')
 
     await filterBtn.trigger('click')
     await nextTick()
     expect(document.body.textContent).toContain('筛选与排序')
+    expect(document.body.querySelector('.mobile-filter-sheet')).not.toBeNull()
 
     const fieldHeadings = [
       ...document.body.querySelectorAll('.mobile-filter-sheet .sheet-field > :first-child'),
@@ -488,6 +508,15 @@ describe('ArtifactGallery interactions', () => {
     expect(
       document.body.querySelectorAll('.mobile-filter-sheet .dou-segmented-control').length,
     ).toBe(2)
+
+    // Leaving narrow resets mobileFilterOpen so returning to narrow does not re-open the drawer.
+    await wrapper.setProps({ layoutMode: 'medium' })
+    await nextTick()
+    expect(document.body.querySelector('.mobile-filter-sheet')).toBeNull()
+
+    await wrapper.setProps({ layoutMode: 'narrow' })
+    await nextTick()
+    expect(document.body.querySelector('.mobile-filter-sheet')).toBeNull()
 
     // Narrow list row keeps the kind label in metadata so the title keeps full width.
     const docRow = wrapper.find('[data-artifact-id="art_doc"]')
