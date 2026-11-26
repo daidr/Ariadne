@@ -732,3 +732,450 @@ func TestSchemaV74UpgradeBackfillsPulseLast30Days(t *testing.T) {
 		}
 	}
 }
+
+func TestPulseCIRetryAndGaveUpStages(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	nowMs := int64(1_860_000_000_000)
+	now := func() time.Time { return time.UnixMilli(nowMs) }
+
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	appendEv := func(at int64, evType string, data map[string]any) eventstore.Event {
+		t.Helper()
+		nowMs = at
+		raw, err := json.Marshal(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events, err := repo.Store.Append(ctx, []eventstore.NewEvent{{
+			Type:      evType,
+			ProjectID: "prj_ci",
+			Data:      raw,
+		}})
+		if err != nil {
+			t.Fatalf("append %s: %v", evType, err)
+		}
+		return events[0]
+	}
+
+	base := nowMs
+	appendEv(base, "project.created", map[string]any{"name": "CI 重试", "coordinatorId": "crd_ci"})
+	appendEv(base+1_000, "thread.created", map[string]any{"threadId": "thr_ci", "title": "修 CI"})
+	appendEv(base+2_000, "turn.started", map[string]any{"conversationId": "thr_ci", "turnId": "trn_1", "model": "m"})
+	appendEv(base+3_000, "pull_request.synced", map[string]any{
+		"threadId": "thr_ci", "number": 12, "title": "Fix PR", "state": "open", "headSha": "sha1",
+		"checks": map[string]any{"state": "pending"},
+	})
+	appendEv(base+4_000, "thread.reported", map[string]any{"threadId": "thr_ci", "report": "ready", "headline": "提交首版", "summary": "ok", "artifacts": []any{}})
+	appendEv(base+5_000, "turn.finished", map[string]any{"conversationId": "thr_ci", "turnId": "trn_1", "outcome": "completed"})
+
+	// First CI failure (attempt=1) wakes the thread to fix it.
+	appendEv(base+10_000, "pull_request.synced", map[string]any{
+		"threadId": "thr_ci", "number": 12, "title": "Fix PR", "state": "open", "headSha": "sha1",
+		"checks": map[string]any{"state": "failure", "failed": []any{"unit-test"}},
+	})
+	failEv := appendEv(base+10_050, "checks.failed", map[string]any{
+		"threadId": "thr_ci", "number": 12, "headSha": "sha1", "failed": []any{"unit-test"}, "attempt": 1,
+	})
+	// Thread starts fix turn, consumes failure wake, pushes new commit with pending checks.
+	appendEv(base+12_000, "turn.started", map[string]any{"conversationId": "thr_ci", "turnId": "trn_2", "model": "m"})
+	appendEv(base+13_000, "turn.step", map[string]any{"conversationId": "thr_ci", "turnId": "trn_2", "sawSeq": failEv.Seq, "text": "", "finish": "stop"})
+	appendEv(base+14_000, "pull_request.synced", map[string]any{
+		"threadId": "thr_ci", "number": 12, "title": "Fix PR", "state": "open", "headSha": "sha2",
+		"checks": map[string]any{"state": "pending"},
+	})
+	appendEv(base+15_000, "turn.finished", map[string]any{"conversationId": "thr_ci", "turnId": "trn_2", "outcome": "completed"})
+
+	// Must transition into ci (NOT stuck in halted even though check_failures == 1).
+	nowMs = base + 16_000
+	snapCI, err := repo.GetPulse(ctx, PulseQuery{ProjectID: "prj_ci", FromMs: base, ToMs: nowMs, IncludeCompleted: true})
+	if err != nil {
+		t.Fatalf("GetPulse during CI retry: %v", err)
+	}
+	var openSpan *PulseSpan
+	for i := range snapCI.Spans {
+		if snapCI.Spans[i].ConversationID == "thr_ci" && snapCI.Spans[i].EndedAt == nil {
+			openSpan = &snapCI.Spans[i]
+		}
+	}
+	if openSpan == nil || openSpan.Stage != PulseStageCI {
+		t.Fatalf("expected open ci span during CI retry (check_failures=1), got %+v (all=%+v)", openSpan, snapCI.Spans)
+	}
+
+	// Entering peer review while check_failures == 1 must enter review (NOT halted).
+	appendEv(base+20_000, "thread.created", map[string]any{"threadId": "thr_rev", "title": "审阅", "reviewOf": "thr_ci"})
+	appendEv(base+20_100, "review.requested", map[string]any{"threadId": "thr_ci", "reviewerId": "thr_rev", "round": 1, "head": "sha2"})
+	nowMs = base + 21_000
+	snapRev, err := repo.GetPulse(ctx, PulseQuery{ProjectID: "prj_ci", FromMs: base, ToMs: nowMs, IncludeCompleted: true})
+	if err != nil {
+		t.Fatalf("GetPulse during review with check_failures=1: %v", err)
+	}
+	openSpan = nil
+	for i := range snapRev.Spans {
+		if snapRev.Spans[i].ConversationID == "thr_ci" && snapRev.Spans[i].EndedAt == nil {
+			openSpan = &snapRev.Spans[i]
+		}
+	}
+	if openSpan == nil || openSpan.Stage != PulseStageReview {
+		t.Fatalf("expected open review span (check_failures=1), got %+v", openSpan)
+	}
+
+	// Once check_failures reaches 3 (gave up), halted takes precedence even if PR checks are pending.
+	appendEv(base+25_000, "review.abandoned", map[string]any{"threadId": "thr_ci", "reviewerId": "thr_rev"})
+	appendEv(base+26_000, "checks.failed", map[string]any{
+		"threadId": "thr_ci", "number": 12, "headSha": "sha2", "failed": []any{"unit-test"}, "attempt": 3,
+	})
+	appendEv(base+27_000, "turn.started", map[string]any{"conversationId": "thr_ci", "turnId": "trn_3", "model": "m"})
+	appendEv(base+28_000, "turn.step", map[string]any{"conversationId": "thr_ci", "turnId": "trn_3", "sawSeq": 1000, "text": "", "finish": "stop"})
+	appendEv(base+29_000, "turn.finished", map[string]any{"conversationId": "thr_ci", "turnId": "trn_3", "outcome": "completed"})
+
+	nowMs = base + 30_000
+	snapGaveUp, err := repo.GetPulse(ctx, PulseQuery{ProjectID: "prj_ci", FromMs: base, ToMs: nowMs, IncludeCompleted: true})
+	if err != nil {
+		t.Fatalf("GetPulse after 3 CI failures: %v", err)
+	}
+	openSpan = nil
+	for i := range snapGaveUp.Spans {
+		if snapGaveUp.Spans[i].ConversationID == "thr_ci" && snapGaveUp.Spans[i].EndedAt == nil {
+			openSpan = &snapGaveUp.Spans[i]
+		}
+	}
+	if openSpan == nil || openSpan.Stage != PulseStageHalted {
+		t.Fatalf("expected halted after check_failures>=3, got %+v", openSpan)
+	}
+}
+
+func TestPulseTurnErrorLabelExtraction(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "turn-errors.sqlite")
+	nowMs := int64(1_870_000_000_000)
+	now := func() time.Time { return time.UnixMilli(nowMs) }
+
+	repo, err := Open(ctx, Options{Path: path, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appendEv := func(at int64, evType string, data map[string]any) {
+		t.Helper()
+		nowMs = at
+		raw, err := json.Marshal(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.Store.Append(ctx, []eventstore.NewEvent{{
+			Type:      evType,
+			ProjectID: "prj_err",
+			Data:      raw,
+		}}); err != nil {
+			t.Fatalf("append %s: %v", evType, err)
+		}
+	}
+
+	base := nowMs
+	appendEv(base, "project.created", map[string]any{"name": "错误标签", "coordinatorId": "crd_err"})
+	appendEv(base+1_000, "thread.created", map[string]any{"threadId": "thr_err", "title": "失败任务"})
+	appendEv(base+2_000, "turn.started", map[string]any{"conversationId": "thr_err", "turnId": "trn_1", "model": "m"})
+	appendEv(base+3_000, "thread.reported", map[string]any{"threadId": "thr_err", "report": "progress", "headline": "旧的阶段汇报", "summary": "old", "artifacts": []any{}})
+	appendEv(base+4_000, "turn.finished", map[string]any{
+		"conversationId": "thr_err",
+		"turnId":         "trn_1",
+		"outcome":        "failed",
+		"error":          domainerr.New("error.modelRequest", map[string]any{"detail": "upstream 502 bad gateway"}),
+	})
+
+	// Coordinator fails with domainerr.Error containing only key.
+	appendEv(base+5_000, "turn.started", map[string]any{"conversationId": "crd_err", "turnId": "trn_c1", "model": "m"})
+	appendEv(base+6_000, "turn.finished", map[string]any{
+		"conversationId": "crd_err",
+		"turnId":         "trn_c1",
+		"outcome":        "failed",
+		"error":          domainerr.New("error.noModel", nil),
+	})
+
+	checkLabels := func(r *Repository, label string) {
+		t.Helper()
+		snap, err := r.GetPulse(ctx, PulseQuery{ProjectID: "prj_err", FromMs: base, ToMs: base + 20_000, IncludeCompleted: true})
+		if err != nil {
+			t.Fatalf("%s GetPulse: %v", label, err)
+		}
+		var workerErr, coordErr string
+		for _, s := range snap.Spans {
+			if s.Stage == PulseStageHalted && s.EndedAt == nil {
+				switch s.ConversationID {
+				case "thr_err":
+					workerErr = s.Label
+				case "crd_err":
+					coordErr = s.Label
+				}
+			}
+		}
+		if workerErr != "upstream 502 bad gateway" {
+			t.Fatalf("%s worker halted label = %q, want %q", label, workerErr, "upstream 502 bad gateway")
+		}
+		if coordErr != "error.noModel" {
+			t.Fatalf("%s coordinator halted label = %q, want %q", label, coordErr, "error.noModel")
+		}
+	}
+
+	nowMs = base + 10_000
+	checkLabels(repo, "live")
+
+	// Also verify loadCurrentPulseFacts reads conversations.last_error on v74->v75 upgrade reconciliation
+	// even when events are outside the 30-day backfill window.
+	if err := repo.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		"DROP TABLE IF EXISTS pulse_spans",
+		"DROP TABLE IF EXISTS pulse_markers",
+		"PRAGMA user_version = 74",
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	nowMs = base + 40*int64(24*time.Hour/time.Millisecond)
+	upgraded, err := Open(ctx, Options{Path: path, Now: now})
+	if err != nil {
+		t.Fatalf("upgrade v74 -> v75: %v", err)
+	}
+	defer upgraded.Close()
+
+	snapReconciled, err := upgraded.GetPulse(ctx, PulseQuery{ProjectID: "prj_err", FromMs: base, ToMs: nowMs, IncludeCompleted: true})
+	if err != nil {
+		t.Fatalf("GetPulse after reconciliation: %v", err)
+	}
+	var workerErr, coordErr string
+	for _, s := range snapReconciled.Spans {
+		if s.Stage == PulseStageHalted && s.EndedAt == nil {
+			switch s.ConversationID {
+			case "thr_err":
+				workerErr = s.Label
+			case "crd_err":
+				coordErr = s.Label
+			}
+		}
+	}
+	if workerErr != "upstream 502 bad gateway" {
+		t.Fatalf("reconciled worker halted label = %q, want %q", workerErr, "upstream 502 bad gateway")
+	}
+	if coordErr != "error.noModel" {
+		t.Fatalf("reconciled coordinator halted label = %q, want %q", coordErr, "error.noModel")
+	}
+}
+
+func TestSchemaV74UpgradeBackfillsPendingWaitAndMalformedEvents(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "v74-edge.sqlite")
+	tNow := int64(1_910_000_000_000)
+	base := tNow - int64(2*time.Hour/time.Millisecond)
+
+	nowMs := base
+	now := func() time.Time { return time.UnixMilli(nowMs) }
+
+	repo, err := Open(ctx, Options{Path: path, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appendEv := func(at int64, evType string, data map[string]any) eventstore.Event {
+		t.Helper()
+		nowMs = at
+		raw, _ := json.Marshal(data)
+		evs, err := repo.Store.Append(ctx, []eventstore.NewEvent{{
+			Type:      evType,
+			ProjectID: "prj_edge",
+			Data:      raw,
+		}})
+		if err != nil {
+			t.Fatalf("append %s: %v", evType, err)
+		}
+		return evs[0]
+	}
+
+	appendEv(base, "project.created", map[string]any{"name": "回填边界", "coordinatorId": "crd_edge"})
+
+	// 1. Mid-turn user message consumed by turn.step(sawSeq) -> must NOT produce spurious queued span after turn.finished(completed).
+	appendEv(base+1_000, "thread.created", map[string]any{"threadId": "thr_step", "title": "消费消息"})
+	appendEv(base+2_000, "turn.started", map[string]any{"conversationId": "thr_step", "turnId": "t1", "model": "m"})
+	msgEv := appendEv(base+3_000, "message.posted", map[string]any{
+		"messageId": "m1", "conversationId": "thr_step", "author": "user", "kind": "message", "content": "补充需求",
+	})
+	appendEv(base+4_000, "turn.step", map[string]any{"conversationId": "thr_step", "turnId": "t1", "sawSeq": msgEv.Seq, "text": "继续处理", "finish": "stop"})
+	appendEv(base+5_000, "turn.finished", map[string]any{"conversationId": "thr_step", "turnId": "t1", "outcome": "completed"})
+
+	// 2. Artifact feedback withdrawn -> closes queued span cleanly (spaced >2s after thread.started to avoid coalescing with initial queued).
+	appendEv(base+10_000, "thread.created", map[string]any{"threadId": "thr_fb", "title": "撤回反馈"})
+	appendEv(base+11_000, "thread.started", map[string]any{"threadId": "thr_fb"})
+	appendEv(base+12_000, "artifact.created", map[string]any{"artifactId": "art_fb", "kind": "document", "title": "设计稿", "content": "v1", "author": "thr_fb"})
+	fbEv := appendEv(base+14_000, "artifact.feedback", map[string]any{
+		"artifactId": "art_fb", "round": 1, "version": 1, "notify": "thr_fb", "items": []any{}, "images": []any{}, "fingerprints": []any{},
+	})
+	appendEv(base+18_000, "artifact.feedback_withdrawn", map[string]any{
+		"artifactId": "art_fb", "round": 1, "notify": "thr_fb", "eventSeq": fbEv.Seq,
+	})
+
+	// 3. Cancelled wait_ended (replaced by new wait_set) -> must stay waiting (NOT queued).
+	appendEv(base+20_000, "thread.created", map[string]any{"threadId": "thr_wait", "title": "替换等待"})
+	appendEv(base+21_000, "thread.started", map[string]any{"threadId": "thr_wait"})
+	appendEv(base+22_000, "conversation.wait_set", map[string]any{"conversationId": "thr_wait", "waitId": "w1", "until": base + 60_000, "note": "第一次等待"})
+	appendEv(base+25_000, "conversation.wait_ended", map[string]any{"conversationId": "thr_wait", "waitId": "w1", "how": "cancelled", "by": "thr_wait"})
+	appendEv(base+25_100, "conversation.wait_set", map[string]any{"conversationId": "thr_wait", "waitId": "w2", "until": base + 120_000, "note": "更新后等待"})
+
+	// 4. Non-cancelled wait_ended ("due") -> must wake into queued.
+	appendEv(base+30_000, "thread.created", map[string]any{"threadId": "thr_due", "title": "等待到期"})
+	appendEv(base+31_000, "thread.started", map[string]any{"threadId": "thr_due"})
+	appendEv(base+32_000, "conversation.wait_set", map[string]any{"conversationId": "thr_due", "waitId": "w3", "until": base + 35_000, "note": "等两秒"})
+	appendEv(base+35_000, "conversation.wait_ended", map[string]any{"conversationId": "thr_due", "waitId": "w3", "how": "due", "by": "system"})
+
+	// 5. Failed turn after turn.requested clears pre-turn pendingSeq and extracts domainerr label.
+	appendEv(base+40_000, "thread.created", map[string]any{"threadId": "thr_fail", "title": "请求失败"})
+	appendEv(base+41_000, "turn.requested", map[string]any{"conversationId": "thr_fail"})
+	appendEv(base+42_000, "turn.started", map[string]any{"conversationId": "thr_fail", "turnId": "tf1", "model": "m"})
+	appendEv(base+44_000, "turn.finished", map[string]any{
+		"conversationId": "thr_fail",
+		"turnId":         "tf1",
+		"outcome":        "failed",
+		"error":          domainerr.New("error.modelRequest", map[string]any{"reason": "rate limit exceeded"}),
+	})
+
+	if err := repo.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate v74 database and also inject malformed events missing IDs directly into events table
+	// to verify backfillProjectPulse guards against nil ensureConv without panicking.
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		"DROP TABLE IF EXISTS pulse_spans",
+		"DROP TABLE IF EXISTS pulse_markers",
+		"PRAGMA user_version = 74",
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	malformed := []struct {
+		evType string
+		data   string
+	}{
+		{"thread.started", `{}`},
+		{"turn.started", `{}`},
+		{"turn.finished", `{"outcome":"failed"}`},
+		{"pull_request.synced", `{"state":"open"}`},
+		{"review.submitted", `{"verdict":"pass"}`},
+		{"conversation.wait_ended", `{"how":"due"}`},
+	}
+	for i, mf := range malformed {
+		if _, err := db.ExecContext(ctx,
+			"INSERT INTO events (id, type, project_id, data, at) VALUES (?, ?, ?, ?, ?)",
+			"evt_malformed_"+string(rune('a'+i)), mf.evType, "prj_edge", mf.data, base+50_000+int64(i*100),
+		); err != nil {
+			t.Fatalf("insert malformed event %s: %v", mf.evType, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	nowMs = tNow
+	upgraded, err := Open(ctx, Options{Path: path, Now: now})
+	if err != nil {
+		t.Fatalf("upgrade v74 -> v75: %v", err)
+	}
+	defer upgraded.Close()
+
+	snap, err := upgraded.GetPulse(ctx, PulseQuery{
+		ProjectID:        "prj_edge",
+		FromMs:           base,
+		ToMs:             tNow,
+		IncludeCompleted: true,
+	})
+	if err != nil {
+		t.Fatalf("GetPulse: %v", err)
+	}
+
+	byConv := map[string][]PulseSpan{}
+	for _, s := range snap.Spans {
+		byConv[s.ConversationID] = append(byConv[s.ConversationID], s)
+	}
+
+	// 1. thr_step: initial queued (thread.created -> turn.started) + working (turn.started -> turn.finished), NO queued after turn.finished.
+	for _, s := range byConv["thr_step"] {
+		if s.Stage == PulseStageQueued && s.StartedAt >= base+5_000 {
+			t.Fatalf("unexpected spurious queued span after consumed mid-turn message: %+v", byConv["thr_step"])
+		}
+	}
+
+	// 2. thr_fb: feedback queued span [base+14s, base+18s] closed cleanly on withdrawal.
+	var fbQueuedClosed bool
+	for _, s := range byConv["thr_fb"] {
+		if s.Stage == PulseStageQueued && s.StartedAt == base+14_000 && s.EndedAt != nil && *s.EndedAt == base+18_000 {
+			fbQueuedClosed = true
+		}
+		if s.EndedAt == nil {
+			t.Fatalf("thr_fb should have no open span after feedback withdrawal: %+v", byConv["thr_fb"])
+		}
+	}
+	if !fbQueuedClosed {
+		t.Fatalf("expected closed feedback queued span [base+14s, base+18s], got %+v", byConv["thr_fb"])
+	}
+
+	// 3. thr_wait: cancelled wait_ended + new wait_set must stay waiting (never queued after base+22s).
+	var waitOpen bool
+	for _, s := range byConv["thr_wait"] {
+		if s.Stage == PulseStageQueued && s.StartedAt >= base+22_000 {
+			t.Fatalf("cancelled wait_ended must not enter queued: %+v", byConv["thr_wait"])
+		}
+		if s.Stage == PulseStageWaiting && s.EndedAt == nil {
+			waitOpen = true
+		}
+	}
+	if !waitOpen {
+		t.Fatalf("expected open waiting span on thr_wait, got %+v", byConv["thr_wait"])
+	}
+
+	// 4. thr_due: due wait_ended must wake into open queued span.
+	var dueQueued bool
+	for _, s := range byConv["thr_due"] {
+		if s.Stage == PulseStageQueued && s.StartedAt == base+35_000 && s.EndedAt == nil {
+			dueQueued = true
+		}
+	}
+	if !dueQueued {
+		t.Fatalf("expected open queued span on thr_due after wait due, got %+v", byConv["thr_due"])
+	}
+
+	// 5. thr_fail: failed turn must enter open halted span with domainerr label (not queued).
+	var failHalted bool
+	for _, s := range byConv["thr_fail"] {
+		if s.Stage == PulseStageQueued && s.StartedAt >= base+44_000 {
+			t.Fatalf("failed turn must clear pre-turn pendingSeq instead of entering queued: %+v", byConv["thr_fail"])
+		}
+		if s.Stage == PulseStageHalted && s.EndedAt == nil && s.Label == "rate limit exceeded" {
+			failHalted = true
+		}
+	}
+	if !failHalted {
+		t.Fatalf("expected open halted span with label 'rate limit exceeded' on thr_fail, got %+v", byConv["thr_fail"])
+	}
+}

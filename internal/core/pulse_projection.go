@@ -99,7 +99,7 @@ func derivePulseStage(facts pulseFacts) (string, bool) {
 		(!facts.IsCoordinator && (facts.LastReport == "blocked" || facts.LastReport == "failed")) ||
 		(!facts.IsCoordinator && facts.MergeConflict) ||
 		(!facts.IsCoordinator && facts.LastReport != "done" && !facts.Landed && facts.PRState == "open" && facts.PRChecksState == "failure") ||
-		(!facts.IsCoordinator && facts.ChecksFailures > 0 && facts.LastReport != "done" && !facts.Landed) {
+		(!facts.IsCoordinator && facts.ChecksFailures >= 3 && facts.LastReport != "done" && !facts.Landed) {
 		return PulseStageHalted, false
 	}
 	if !facts.IsCoordinator && !facts.IsReviewer && facts.Reviewing && !facts.Landed {
@@ -238,6 +238,37 @@ func pulseReviewSubmittedLabel(verdict, summary string) string {
 	}
 }
 
+func pulseTurnErrorLabel(raw any) string {
+	if raw == nil {
+		return ""
+	}
+	switch value := raw.(type) {
+	case string:
+		return truncatePulseLabel(value, 60)
+	case object:
+		return pulseTurnErrorLabel(map[string]any(value))
+	case map[string]any:
+		obj := object(value)
+		if message := truncatePulseLabel(obj.str("message"), 60); message != "" {
+			return message
+		}
+		if detail := truncatePulseLabel(obj.str("detail"), 60); detail != "" {
+			return detail
+		}
+		if params := obj.obj("params"); params != nil {
+			for _, candidate := range []string{"detail", "reason", "message", "error"} {
+				if text := truncatePulseLabel(params.str(candidate), 60); text != "" {
+					return text
+				}
+			}
+		}
+		if key := truncatePulseLabel(obj.str("key"), 60); key != "" {
+			return key
+		}
+	}
+	return ""
+}
+
 func pulseUserReturnedAt(eventAt int64, d object) int64 {
 	if since, ok := number(d["since"]); ok && since > 0 {
 		ms := int64(since)
@@ -311,10 +342,7 @@ func pulseEvent(w *projectionWriter, e eventstore.Event, d object, beforePR obje
 		}
 		addTarget(d.str("conversationId"), label, PulseStageWorking, false)
 	case "turn.finished":
-		label := ""
-		if errObj := d.obj("error"); errObj != nil {
-			label = truncatePulseLabel(errObj.str("message"), 60)
-		}
+		label := pulseTurnErrorLabel(d["error"])
 		addTarget(d.str("conversationId"), label, PulseStageHalted, false)
 	case "conversation.wait_set":
 		addTarget(d.str("conversationId"), d.str("note"), PulseStageWaiting, false)
@@ -465,7 +493,7 @@ func lookupLatestReviewerID(w *projectionWriter, authorID string) string {
 }
 
 func loadCurrentPulseFacts(w *projectionWriter, convID string, conflict bool) (facts pulseFacts, projectID string, defaultLabel string, exists bool) {
-	conv := w.one("SELECT project_id, role, turn_id, pending_seq, last_outcome, last_turn_at, wait_id, wait_note, activity FROM conversations WHERE id = ?", convID)
+	conv := w.one("SELECT project_id, role, turn_id, pending_seq, last_outcome, last_error, last_turn_at, wait_id, wait_note, activity FROM conversations WHERE id = ?", convID)
 	if conv == nil || w.err != nil {
 		return pulseFacts{}, "", "", false
 	}
@@ -478,17 +506,25 @@ func loadCurrentPulseFacts(w *projectionWriter, convID string, conflict bool) (f
 	facts.Waiting = conv.present("wait_id")
 	facts.MergeConflict = conflict
 
+	lastErrLabel := ""
+	if conv.present("last_error") {
+		lastErrLabel = pulseTurnErrorLabel(w.parsed(conv, "last_error", nil))
+	}
+
 	if isCoord {
 		att := w.one("SELECT id, block, purpose FROM attentions WHERE project_id = ? AND closed = 0 AND conversation_id = ? AND thread_id IS NULL ORDER BY created_at DESC LIMIT 1", projectID, convID)
 		if att != nil {
 			facts.OpenAttentions = 1
 			defaultLabel = pulseAttentionLabel(object{"block": asObject(w.parsed(att, "block", nil)), "purpose": att.text("purpose")})
 		}
+		stage, _ := derivePulseStage(facts)
 		if defaultLabel == "" {
-			switch {
-			case facts.TurnRunning:
+			switch stage {
+			case PulseStageWorking:
 				defaultLabel = conv.text("activity")
-			case facts.Waiting:
+			case PulseStageHalted:
+				defaultLabel = lastErrLabel
+			case PulseStageWaiting:
 				defaultLabel = conv.text("wait_note")
 			}
 		}
@@ -549,6 +585,9 @@ func loadCurrentPulseFacts(w *projectionWriter, convID string, conflict bool) (f
 		defaultLabel = thread.text("aside_reason")
 	case PulseStageHalted:
 		defaultLabel = thread.text("stopped_reason")
+		if defaultLabel == "" && facts.TurnFailed {
+			defaultLabel = lastErrLabel
+		}
 		if defaultLabel == "" {
 			defaultLabel = thread.text("last_headline")
 		}
@@ -686,13 +725,93 @@ type pulseBackfillMarker struct {
 }
 
 type pulseBackfillConv struct {
-	facts       pulseFacts
-	attentions  map[string]bool
-	prNumber    int64
-	prState     string
-	reviewerID  string
-	lastSpanIdx int
-	hasSpan     bool
+	facts          pulseFacts
+	attentions     map[string]bool
+	prNumber       int64
+	prState        string
+	reviewerID     string
+	waitID         string
+	pendingSeq     int64
+	pendingSince   int64
+	pendingWakeSeq []int64
+	turnStartedSeq int64
+	lastSpanIdx    int
+	hasSpan        bool
+}
+
+func (c *pulseBackfillConv) syncPending() {
+	c.facts.TurnPending = !c.facts.TurnRunning && c.pendingSeq > 0
+}
+
+func (c *pulseBackfillConv) markWake(seq int64) {
+	if seq <= 0 {
+		return
+	}
+	c.pendingSeq = seq
+	if c.pendingSince == 0 {
+		c.pendingSince = seq
+	}
+	c.pendingWakeSeq = append(c.pendingWakeSeq, seq)
+	c.syncPending()
+}
+
+func (c *pulseBackfillConv) clearPending() {
+	c.pendingSeq = 0
+	c.pendingSince = 0
+	c.pendingWakeSeq = c.pendingWakeSeq[:0]
+	c.facts.TurnPending = false
+}
+
+func (c *pulseBackfillConv) consumePendingUpTo(upToSeq int64) {
+	if c.pendingSeq == 0 {
+		return
+	}
+	if c.pendingSeq <= upToSeq {
+		c.clearPending()
+		return
+	}
+	if upToSeq+1 > c.pendingSince {
+		c.pendingSince = upToSeq + 1
+	}
+	kept := c.pendingWakeSeq[:0]
+	for _, s := range c.pendingWakeSeq {
+		if s > upToSeq {
+			kept = append(kept, s)
+		}
+	}
+	c.pendingWakeSeq = kept
+	c.syncPending()
+}
+
+func (c *pulseBackfillConv) withdrawPending(eventSeq int64) {
+	if eventSeq <= 0 || c.pendingSeq == 0 {
+		return
+	}
+	kept := c.pendingWakeSeq[:0]
+	for _, s := range c.pendingWakeSeq {
+		if s != eventSeq {
+			kept = append(kept, s)
+		}
+	}
+	c.pendingWakeSeq = kept
+	switch {
+	case c.pendingSeq == eventSeq && c.pendingSince == eventSeq:
+		c.clearPending()
+	case c.pendingSeq == eventSeq:
+		if len(c.pendingWakeSeq) > 0 {
+			c.pendingSeq = c.pendingWakeSeq[len(c.pendingWakeSeq)-1]
+			c.syncPending()
+		} else {
+			c.clearPending()
+		}
+	case c.pendingSince == eventSeq:
+		if len(c.pendingWakeSeq) > 0 {
+			c.pendingSince = c.pendingWakeSeq[0]
+			c.syncPending()
+		} else {
+			c.clearPending()
+		}
+	}
 }
 
 func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID string, firstSeq, cutoff, latestSeq int64) error {
@@ -721,6 +840,9 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 	}
 	for _, row := range w.all("SELECT id, review_of, reviewer_id FROM threads WHERE project_id = ?", projectID) {
 		c := ensureConv(row.text("id"), false)
+		if c == nil {
+			continue
+		}
 		c.facts.IsReviewer = row.present("review_of")
 		c.reviewerID = row.text("reviewer_id")
 	}
@@ -838,21 +960,39 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "thread.created":
 			id := d.str("threadId")
 			c := ensureConv(id, false)
+			if c == nil {
+				continue
+			}
 			c.facts.Started = false
 			c.facts.IsReviewer = d["reviewOf"] != nil
 			if authorID := d.str("reviewOf"); authorID != "" {
-				author := ensureConv(authorID, false)
-				author.reviewerID = id
+				if author := ensureConv(authorID, false); author != nil {
+					author.reviewerID = id
+				}
 			}
 			transition(id, at, seq, "", "")
 		case "thread.started":
 			id := d.str("threadId")
 			c := ensureConv(id, false)
+			if c == nil {
+				continue
+			}
 			c.facts.Started = true
+			transition(id, at, seq, "", "")
+		case "thread.nudged":
+			id := d.str("threadId")
+			c := ensureConv(id, false)
+			if c == nil {
+				continue
+			}
+			c.markWake(seq)
 			transition(id, at, seq, "", "")
 		case "thread.reported":
 			id := d.str("threadId")
 			c := ensureConv(id, false)
+			if c == nil {
+				continue
+			}
 			c.facts.LastReport = d.str("report")
 			c.facts.MergeConflict = false
 			if d.str("report") == "ready" && !d.yes("reviewing") {
@@ -874,9 +1014,12 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "thread.completed":
 			id := d.str("threadId")
 			c := ensureConv(id, false)
+			if c == nil {
+				continue
+			}
 			c.facts.LastReport = "done"
 			c.facts.Stopped = false
-			c.facts.TurnPending = false
+			c.clearPending()
 			c.facts.TurnFailed = false
 			c.facts.TurnCancelled = false
 			c.facts.ChecksFailures = 0
@@ -887,9 +1030,12 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "thread.reopened":
 			id := d.str("threadId")
 			c := ensureConv(id, false)
+			if c == nil {
+				continue
+			}
 			c.facts.Started = true
 			c.facts.LastReport = "idle"
-			c.facts.TurnPending = false
+			c.clearPending()
 			c.facts.TurnFailed = false
 			c.facts.TurnCancelled = false
 			c.facts.ChecksFailures = 0
@@ -900,39 +1046,61 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "thread.stopped":
 			id := d.str("threadId")
 			c := ensureConv(id, false)
+			if c == nil {
+				continue
+			}
 			c.facts.Stopped = true
 			transition(id, at, seq, d.str("reason"), PulseStageHalted)
 		case "thread.resumed":
 			id := d.str("threadId")
 			c := ensureConv(id, false)
+			if c == nil {
+				continue
+			}
 			c.facts.Stopped = false
+			c.markWake(seq)
 			transition(id, at, seq, "", "")
 		case "thread.reviewed":
 			id := d.str("threadId")
 			c := ensureConv(id, false)
+			if c == nil {
+				continue
+			}
 			c.facts.Reviewed = true
 			transition(id, at, seq, "", "")
 		case "thread.set_aside":
 			id := d.str("threadId")
 			c := ensureConv(id, false)
+			if c == nil {
+				continue
+			}
 			c.facts.Aside = true
 			c.facts.AsideDue = false
 			transition(id, at, seq, d.str("reason"), PulseStageAside)
 		case "thread.aside_due":
 			id := d.str("threadId")
 			c := ensureConv(id, false)
+			if c == nil {
+				continue
+			}
 			c.facts.AsideDue = true
 			transition(id, at, seq, "", "")
 		case "thread.aside_ended":
 			id := d.str("threadId")
 			c := ensureConv(id, false)
+			if c == nil {
+				continue
+			}
 			c.facts.Aside = false
 			c.facts.AsideDue = false
 			transition(id, at, seq, "", "")
 		case "turn.requested":
 			id := d.str("conversationId")
 			c := ensureConv(id, id == coordID)
-			c.facts.TurnPending = true
+			if c == nil {
+				continue
+			}
+			c.markWake(seq)
 			c.facts.TurnFailed = false
 			c.facts.TurnCancelled = false
 			c.facts.MergeConflict = false
@@ -940,7 +1108,11 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "turn.started":
 			id := d.str("conversationId")
 			c := ensureConv(id, id == coordID)
+			if c == nil {
+				continue
+			}
 			c.facts.TurnRunning = true
+			c.turnStartedSeq = seq
 			c.facts.TurnPending = false
 			c.facts.TurnFailed = false
 			c.facts.TurnCancelled = false
@@ -950,6 +1122,9 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "turn.step":
 			id := d.str("conversationId")
 			if c := convs[id]; c != nil {
+				if sawSeq, ok := number(d["sawSeq"]); ok && sawSeq > 0 {
+					c.consumePendingUpTo(int64(sawSeq))
+				}
 				label := ""
 				if d.str("finish") != "stop" && !d.yes("quiet") {
 					label = truncatePulseLabel(d.str("text"), 60)
@@ -961,51 +1136,71 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "turn.finished":
 			id := d.str("conversationId")
 			c := ensureConv(id, id == coordID)
+			if c == nil {
+				continue
+			}
 			c.facts.TurnRunning = false
 			outcome := d.str("outcome")
 			switch outcome {
 			case "interrupted", "suspended":
-				c.facts.TurnPending = true
+				c.markWake(seq)
 				c.facts.TurnFailed = false
 				c.facts.TurnCancelled = false
+			case "completed":
+				c.facts.TurnFailed = false
+				c.facts.TurnCancelled = false
+				c.syncPending()
 			case "failed":
-				c.facts.TurnPending = false
 				c.facts.TurnFailed = true
 				c.facts.TurnCancelled = false
+				c.consumePendingUpTo(c.turnStartedSeq)
 			case "cancelled":
-				c.facts.TurnPending = false
 				c.facts.TurnFailed = false
 				c.facts.TurnCancelled = true
+				c.consumePendingUpTo(c.turnStartedSeq)
 			default:
 				c.facts.TurnFailed = false
 				c.facts.TurnCancelled = false
+				c.consumePendingUpTo(c.turnStartedSeq)
 			}
-			label := ""
-			if errObj := d.obj("error"); errObj != nil {
-				label = errObj.str("message")
-			}
+			label := pulseTurnErrorLabel(d["error"])
 			transition(id, at, seq, label, PulseStageHalted)
 		case "conversation.wait_set":
 			id := d.str("conversationId")
 			c := ensureConv(id, id == coordID)
+			if c == nil {
+				continue
+			}
 			c.facts.Waiting = true
+			c.waitID = d.str("waitId")
 			transition(id, at, seq, d.str("note"), PulseStageWaiting)
 		case "conversation.wait_ended":
 			id := d.str("conversationId")
 			c := ensureConv(id, id == coordID)
-			c.facts.Waiting = false
-			c.facts.TurnPending = true
+			if c == nil {
+				continue
+			}
+			if waitID := d.str("waitId"); c.waitID == "" || waitID == "" || c.waitID == waitID {
+				c.facts.Waiting = false
+				c.waitID = ""
+			}
+			if d.str("how") != "cancelled" {
+				c.markWake(seq)
+			}
 			transition(id, at, seq, "", "")
 		case "message.posted":
 			id := d.str("conversationId")
 			c := ensureConv(id, id == coordID)
+			if c == nil {
+				continue
+			}
 			if d.str("author") == "user" {
 				c.facts.ChecksFailures = 0
 				c.facts.Aside = false
 				c.facts.AsideDue = false
-				c.facts.TurnPending = true
+				c.markWake(seq)
 			} else if d.str("kind") == "relay" {
-				c.facts.TurnPending = true
+				c.markWake(seq)
 			}
 			transition(id, at, seq, "", "")
 		case "todo.updated":
@@ -1023,8 +1218,7 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 			}
 			label := pulseAttentionLabel(d)
 			addMarker(seq, convID, "", PulseMarkerAttentionOpened, at, label)
-			if convID != "" {
-				c := ensureConv(convID, convID == coordID)
+			if c := ensureConv(convID, convID == coordID); c != nil {
 				c.attentions[attID] = true
 				c.facts.OpenAttentions = len(c.attentions)
 				addAttTarget(attID, convID)
@@ -1033,8 +1227,7 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "attention.joined":
 			attID := d.str("attentionId")
 			threadID := d.str("threadId")
-			if threadID != "" {
-				c := ensureConv(threadID, false)
+			if c := ensureConv(threadID, false); c != nil {
 				c.attentions[attID] = true
 				c.facts.OpenAttentions = len(c.attentions)
 				addAttTarget(attID, threadID)
@@ -1046,8 +1239,8 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 				if c := convs[convID]; c != nil {
 					delete(c.attentions, attID)
 					c.facts.OpenAttentions = len(c.attentions)
-					if evType == "attention.answered" && !c.facts.TurnRunning {
-						c.facts.TurnPending = true
+					if evType == "attention.answered" {
+						c.markWake(seq)
 					}
 					transition(convID, at, seq, "", "")
 				}
@@ -1061,21 +1254,21 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 				label = "#" + strconv.Itoa(int(round))
 			}
 			addMarker(seq, authorID, reviewerID, PulseMarkerReviewHandoff, at, label)
-			author := ensureConv(authorID, false)
-			author.facts.Reviewing = true
-			author.reviewerID = reviewerID
-			transition(authorID, at, seq, label, PulseStageReview)
-			if reviewerID != "" {
-				reviewer := ensureConv(reviewerID, false)
+			if author := ensureConv(authorID, false); author != nil {
+				author.facts.Reviewing = true
+				author.reviewerID = reviewerID
+				transition(authorID, at, seq, label, PulseStageReview)
+			}
+			if reviewer := ensureConv(reviewerID, false); reviewer != nil {
 				reviewer.facts.IsReviewer = true
-				reviewer.facts.TurnPending = true
+				reviewer.markWake(seq)
 				transition(reviewerID, at, seq, "", "")
 			}
 		case "review.submitted":
 			authorID := d.str("threadId")
 			author := ensureConv(authorID, false)
 			reviewerID := d.str("reviewerId")
-			if reviewerID == "" {
+			if reviewerID == "" && author != nil {
 				reviewerID = author.reviewerID
 			}
 			label := pulseReviewSubmittedLabel(d.str("verdict"), d.str("summary"))
@@ -1084,28 +1277,35 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 			} else {
 				addMarker(seq, authorID, "", PulseMarkerReviewSubmitted, at, label)
 			}
-			author.facts.Reviewing = false
-			if d.str("verdict") == "changes" {
-				author.facts.TurnPending = true
-			} else if coordID != "" {
-				coord := ensureConv(coordID, true)
-				coord.facts.TurnPending = true
-				transition(coordID, at, seq, "", "")
+			if author != nil {
+				author.facts.Reviewing = false
+				if d.str("verdict") == "changes" {
+					author.markWake(seq)
+				}
+				transition(authorID, at, seq, "", "")
 			}
-			transition(authorID, at, seq, "", "")
+			if d.str("verdict") != "changes" {
+				if coord := ensureConv(coordID, true); coord != nil {
+					coord.markWake(seq)
+					transition(coordID, at, seq, "", "")
+				}
+			}
 		case "review.abandoned":
 			authorID := d.str("threadId")
-			author := ensureConv(authorID, false)
-			author.facts.Reviewing = false
-			transition(authorID, at, seq, "", "")
-			if coordID != "" {
-				coord := ensureConv(coordID, true)
-				coord.facts.TurnPending = true
+			if author := ensureConv(authorID, false); author != nil {
+				author.facts.Reviewing = false
+				transition(authorID, at, seq, "", "")
+			}
+			if coord := ensureConv(coordID, true); coord != nil {
+				coord.markWake(seq)
 				transition(coordID, at, seq, "", "")
 			}
 		case "pull_request.synced":
 			threadID := d.str("threadId")
 			c := ensureConv(threadID, false)
+			if c == nil {
+				continue
+			}
 			afterState := d.str("state")
 			afterNum := pulsePRNumber(d)
 			if afterState == "open" && (c.prState != "open" || (afterNum > 0 && c.prNumber != afterNum)) {
@@ -1131,6 +1331,9 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "pull_request.closed":
 			threadID := d.str("threadId")
 			c := ensureConv(threadID, false)
+			if c == nil {
+				continue
+			}
 			c.facts.ChecksFailures = 0
 			if d.yes("merged") {
 				c.facts.Landed = true
@@ -1145,13 +1348,16 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "checks.failed":
 			threadID := d.str("threadId")
 			c := ensureConv(threadID, false)
+			if c == nil {
+				continue
+			}
 			attempt := c.facts.ChecksFailures + 1
 			if n, ok := number(d["attempt"]); ok && n > 0 {
 				attempt = int(n)
 			}
 			c.facts.ChecksFailures = attempt
 			if attempt <= 3 {
-				c.facts.TurnPending = true
+				c.markWake(seq)
 			}
 			label := pulseCIFailedLabel(d)
 			addMarker(seq, threadID, "", PulseMarkerCIFailed, at, label)
@@ -1159,6 +1365,9 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "branch.merged":
 			threadID := d.str("threadId")
 			c := ensureConv(threadID, false)
+			if c == nil {
+				continue
+			}
 			c.facts.Landed = true
 			c.facts.MergeConflict = false
 			addMarker(seq, threadID, "", PulseMarkerPRMerged, at, pulsePRMergedLabel(d, true))
@@ -1166,13 +1375,19 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "branch.merge_undone":
 			threadID := d.str("threadId")
 			c := ensureConv(threadID, false)
+			if c == nil {
+				continue
+			}
 			c.facts.Landed = false
 			transition(threadID, at, seq, "", "")
 		case "branch.conflicted":
 			threadID := d.str("threadId")
 			c := ensureConv(threadID, false)
+			if c == nil {
+				continue
+			}
 			c.facts.MergeConflict = true
-			c.facts.TurnPending = true
+			c.markWake(seq)
 			label := "merge conflict"
 			if base := truncatePulseLabel(d.str("base"), 40); base != "" {
 				label = "conflict: " + base
@@ -1188,20 +1403,30 @@ func backfillProjectPulse(ctx context.Context, tx *sql.Tx, projectID, coordID st
 		case "artifact.commented":
 			action := d.obj("action")
 			if notify := d.str("notify"); notify != "" && (action.str("type") == "create" || action.str("type") == "reply") {
-				c := ensureConv(notify, notify == coordID)
-				c.facts.TurnPending = true
-				transition(notify, at, seq, "", "")
+				if c := ensureConv(notify, notify == coordID); c != nil {
+					c.markWake(seq)
+					transition(notify, at, seq, "", "")
+				}
 			}
 		case "artifact.feedback":
 			if notify := d.str("notify"); notify != "" {
-				c := ensureConv(notify, notify == coordID)
-				c.facts.TurnPending = true
-				transition(notify, at, seq, "", "")
+				if c := ensureConv(notify, notify == coordID); c != nil {
+					c.markWake(seq)
+					transition(notify, at, seq, "", "")
+				}
+			}
+		case "artifact.feedback_withdrawn":
+			if notify := d.str("notify"); notify != "" {
+				if eventSeq, ok := number(d["eventSeq"]); ok && eventSeq > 0 {
+					if c := convs[notify]; c != nil {
+						c.withdrawPending(int64(eventSeq))
+						transition(notify, at, seq, "", "")
+					}
+				}
 			}
 		case "routine.ran":
-			if coordID != "" {
-				c := ensureConv(coordID, true)
-				c.facts.TurnPending = true
+			if coord := ensureConv(coordID, true); coord != nil {
+				coord.markWake(seq)
 				transition(coordID, at, seq, "", "")
 			}
 		case "user.returned":
