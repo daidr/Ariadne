@@ -13,10 +13,19 @@ import (
 	"github.com/daidr/Ariadne/internal/schema"
 )
 
-var projectionTables = []string{"projects", "threads", "thread_repo_baselines", "attentions", "attention_waiters", "messages", "todos", "memories", "notices", "conversations", "transcript", "plan_nodes", "plan_edges", "plan_revisions", "plan_proposals", "plan_node_issues", "issue_writes", "used_approvals", "artifacts", "artifact_versions", "artifact_comments", "artifact_feedback", "reviews", "prompts", "search_docs", "search_text"}
+var projectionTables = []string{"projects", "threads", "thread_repo_baselines", "attentions", "attention_waiters", "messages", "todos", "memories", "notices", "conversations", "transcript", "plan_nodes", "plan_edges", "plan_revisions", "plan_proposals", "plan_node_issues", "issue_writes", "used_approvals", "artifacts", "artifact_versions", "artifact_comments", "artifact_feedback", "reviews", "prompts", "search_docs", "search_text", "pulse_spans", "pulse_markers"}
 
 // DomainProjection preserves the dependency order of the original projections.
-type DomainProjection struct{}
+type DomainProjection struct {
+	Now func() time.Time
+}
+
+func (projection DomainProjection) now() int64 {
+	if projection.Now != nil {
+		return projection.Now().UnixMilli()
+	}
+	return time.Now().UnixMilli()
+}
 
 func (DomainProjection) Forget(ctx context.Context, tx *sql.Tx, projectID string) error {
 	return (LifecycleProjection{}).Forget(ctx, tx, projectID)
@@ -106,7 +115,7 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 			return err
 		}
 	}
-	if version >= 67 && version <= 74 {
+	if version >= 67 && version <= 75 {
 		if err := addColumnIfMissing(ctx, tx, "artifacts", "has_prototype", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return err
 		}
@@ -117,8 +126,17 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 			return err
 		}
 	}
-	if version == schema.Version || (version >= 67 && version < schema.Version) {
+	if version == schema.Version {
 		return schema.Create(ctx, tx)
+	}
+	if version >= 67 && version < schema.Version {
+		if err := schema.Create(ctx, tx); err != nil {
+			return err
+		}
+		if version <= 74 {
+			return backfillPulse(ctx, tx, projection.now())
+		}
+		return nil
 	}
 	if err := dropProjectionTables(ctx, tx); err != nil {
 		return err
@@ -156,6 +174,12 @@ func (DomainProjection) Apply(ctx context.Context, tx *sql.Tx, e eventstore.Even
 	if w.err != nil {
 		return w.err
 	}
+	var beforePR object
+	if e.Type == "pull_request.synced" {
+		if row := w.one("SELECT pull_request FROM threads WHERE id = ?", d["threadId"]); row != nil {
+			beforePR = asObject(w.parsed(row, "pull_request", nil))
+		}
+	}
 	if err := projectEvent(w, e, d); err != nil {
 		return err
 	}
@@ -171,6 +195,7 @@ func (DomainProjection) Apply(ctx context.Context, tx *sql.Tx, e eventstore.Even
 	reviewEvent(w, e, d)
 	searchEvent(w, e, d)
 	transcriptEvent(w, e, d)
+	pulseEvent(w, e, d, beforePR)
 	return w.err
 }
 func addColumnIfMissing(ctx context.Context, tx *sql.Tx, table, column, definition string) error {
@@ -266,7 +291,7 @@ type Repository struct {
 }
 
 func Open(ctx context.Context, options Options) (*Repository, error) {
-	store, err := eventstore.Open(ctx, eventstore.Options{Path: options.Path, Now: options.Now, Projections: []eventstore.Projection{DomainProjection{}}, Check: func(ctx context.Context, tx *sql.Tx, e eventstore.NewEvent) error {
+	store, err := eventstore.Open(ctx, eventstore.Options{Path: options.Path, Now: options.Now, Projections: []eventstore.Projection{DomainProjection{Now: options.Now}}, Check: func(ctx context.Context, tx *sql.Tx, e eventstore.NewEvent) error {
 		if e.Type == "project.created" {
 			return nil
 		}

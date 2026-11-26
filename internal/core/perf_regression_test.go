@@ -105,6 +105,36 @@ func TestQueryPlansAvoidEventsScanAndUseProjectIndexes(t *testing.T) {
 	if strings.Contains(galleryCreatedPlan, "TEMP B-TREE") || !strings.Contains(galleryCreatedPlan, "artifacts_created") {
 		t.Fatalf("gallery created_desc query did not use artifacts_created index:\n%s", galleryCreatedPlan)
 	}
+
+	assertPulsePlan := func(name, query, wantIndex, tableName string, allowCoveringScan bool, args ...any) {
+		t.Helper()
+		plan := strings.Join(explain(query, args...), "\n")
+		hasTableScan := false
+		for _, line := range strings.Split(plan, "\n") {
+			if strings.Contains(line, "SCAN "+tableName) {
+				if allowCoveringScan && strings.Contains(line, "USING COVERING INDEX "+wantIndex) {
+					continue
+				}
+				hasTableScan = true
+			}
+		}
+		if hasTableScan || strings.Contains(plan, "TEMP B-TREE") || !strings.Contains(plan, wantIndex) {
+			t.Fatalf("%s did not use expected index %s (no table SCAN %s / no TEMP B-TREE):\n%s", name, wantIndex, tableName, plan)
+		}
+	}
+
+	assertPulsePlan("pulseSpansProjectOpenSQL", pulseSpansProjectOpenSQL, "pulse_spans_project", "pulse_spans", false, "prj_a", 2000)
+	assertPulsePlan("pulseSpansProjectClosedSQL", pulseSpansProjectClosedSQL, "pulse_spans_project", "pulse_spans", false, "prj_a", 1000, 2000)
+	assertPulsePlan("pulseSpansGlobalOpenSQL", pulseSpansGlobalOpenSQL, "pulse_spans_range", "pulse_spans", false, 2000)
+	assertPulsePlan("pulseSpansGlobalClosedSQL", pulseSpansGlobalClosedSQL, "pulse_spans_range", "pulse_spans", false, 1000, 2000)
+	assertPulsePlan("pulseMarkersProjectSQL", pulseMarkersProjectSQL, "pulse_markers_project_at", "pulse_markers", false, "prj_a", 1000, 2000)
+	assertPulsePlan("pulseMarkersGlobalSQL", pulseMarkersGlobalSQL, "pulse_markers_at", "pulse_markers", false, 1000, 2000)
+	assertPulsePlan("pulseLastReturnedProjectSQL", pulseLastReturnedProjectSQL, "pulse_markers_returned", "pulse_markers", false, "prj_a")
+	assertPulsePlan("pulseLastReturnedGlobalSQL", pulseLastReturnedGlobalSQL, "pulse_markers_returned_at", "pulse_markers", true)
+	assertPulsePlan("pulseLatestConversationSpan", "SELECT id, stage, occupies_slot, started_at, ended_at, label FROM pulse_spans WHERE conversation_id = ? ORDER BY id DESC LIMIT 1", "pulse_spans_conversation", "pulse_spans", false, "thr_1")
+	assertPulsePlan("pulsePruneSpans", "DELETE FROM pulse_spans WHERE ended_at IS NOT NULL AND ended_at < ?", "pulse_spans_range", "pulse_spans", false, 1000)
+	assertPulsePlan("pulsePruneMarkers", "DELETE FROM pulse_markers WHERE at < ?", "pulse_markers_at", "pulse_markers", false, 1000)
+	assertPulsePlan("pulseBackfillEventsSQL", pulseBackfillEventsSQL, "events_project", "events", false, "prj_a", 1)
 }
 
 func TestSchemaV68MigrationBackfillsWorkspaceSourceIDAndChangedSeq(t *testing.T) {
@@ -637,9 +667,9 @@ func (r *recordingQueryer) QueryContext(ctx context.Context, query string, args 
 	return r.inner.QueryContext(ctx, query, args...)
 }
 
-func TestSchemaV74MigrationBackfillsGalleryMetadataAndSearch(t *testing.T) {
+func TestSchemaV75MigrationBackfillsGalleryMetadataAndSearch(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "v74.sqlite")
+	path := filepath.Join(t.TempDir(), "v75.sqlite")
 	repo, err := Open(t.Context(), Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
@@ -648,7 +678,7 @@ func TestSchemaV74MigrationBackfillsGalleryMetadataAndSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	boardJSON := `{"version":1,"nodes":[{"id":"grp","type":"group","x":0,"y":0,"width":500,"height":400,"data":{"title":"决策组","mode":"choose","round":1}},{"id":"p1","type":"prototype","x":20,"y":60,"width":460,"height":320,"data":{"title":"旧版交互原型","note":"历史迁移校验关键词","html":"<div>v74</div>","preview":"/api/files/fil_v74_cover"}}],"edges":[]}`
+	boardJSON := `{"version":1,"nodes":[{"id":"grp","type":"group","x":0,"y":0,"width":500,"height":400,"data":{"title":"决策组","mode":"choose","round":1}},{"id":"p1","type":"prototype","x":20,"y":60,"width":460,"height":320,"data":{"title":"旧版交互原型","note":"历史迁移校验关键词","html":"<div>v75</div>","preview":"/api/files/fil_v75_cover"}}],"edges":[]}`
 	art, err := repo.CreateArtifact(t.Context(), prj.ID, NewArtifact{
 		Kind:    "whiteboard",
 		Title:   "迁移原型白板",
@@ -662,7 +692,7 @@ func TestSchemaV74MigrationBackfillsGalleryMetadataAndSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Simulate an existing v74 database lacking v75 gallery columns, indexes, enhanced preview, and title/note search indexing.
+	// Simulate an existing v75 database (with Pulse tables) lacking v76 gallery columns, indexes, enhanced preview, and title/note search indexing.
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -674,7 +704,7 @@ func TestSchemaV74MigrationBackfillsGalleryMetadataAndSearch(t *testing.T) {
 		"ALTER TABLE artifacts DROP COLUMN pending_actions",
 		`UPDATE artifacts SET preview = '{"kind":"whiteboard","items":2,"connectors":0,"texts":[]}' WHERE id = '` + art.ID + `'`,
 		`UPDATE search_text SET body = '' WHERE rowid = (SELECT id FROM search_docs WHERE kind = 'artifact' AND ref_id = '` + art.ID + `')`,
-		"PRAGMA user_version = 74",
+		"PRAGMA user_version = 75",
 	} {
 		if _, err := db.ExecContext(t.Context(), stmt); err != nil {
 			t.Fatalf("%s: %v", stmt, err)
@@ -707,7 +737,7 @@ func TestSchemaV74MigrationBackfillsGalleryMetadataAndSearch(t *testing.T) {
 		t.Fatalf("migrated gallery query = %+v, want %s", page.Items, art.ID)
 	}
 	prev := asObject(page.Items[0].Artifact.Preview)
-	if prev.str("previewImage") != "/api/files/fil_v74_cover" {
+	if prev.str("previewImage") != "/api/files/fil_v75_cover" {
 		t.Fatalf("migrated previewImage = %q", prev.str("previewImage"))
 	}
 }

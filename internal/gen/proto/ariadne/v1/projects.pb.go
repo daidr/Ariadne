@@ -5526,6 +5526,750 @@ func (x *RemoveProjectReferenceResponse) GetProject() *ProjectView {
 	return nil
 }
 
+type GetPulseRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ProjectId        string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	FromMs           int64                  `protobuf:"varint,2,opt,name=from_ms,json=fromMs,proto3" json:"from_ms,omitempty"`
+	ToMs             int64                  `protobuf:"varint,3,opt,name=to_ms,json=toMs,proto3" json:"to_ms,omitempty"`
+	IncludeCompleted bool                   `protobuf:"varint,4,opt,name=include_completed,json=includeCompleted,proto3" json:"include_completed,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *GetPulseRequest) Reset() {
+	*x = GetPulseRequest{}
+	mi := &file_ariadne_v1_projects_proto_msgTypes[80]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPulseRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPulseRequest) ProtoMessage() {}
+
+func (x *GetPulseRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_projects_proto_msgTypes[80]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPulseRequest.ProtoReflect.Descriptor instead.
+func (*GetPulseRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{80}
+}
+
+func (x *GetPulseRequest) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *GetPulseRequest) GetFromMs() int64 {
+	if x != nil {
+		return x.FromMs
+	}
+	return 0
+}
+
+func (x *GetPulseRequest) GetToMs() int64 {
+	if x != nil {
+		return x.ToMs
+	}
+	return 0
+}
+
+func (x *GetPulseRequest) GetIncludeCompleted() bool {
+	if x != nil {
+		return x.IncludeCompleted
+	}
+	return false
+}
+
+type PulseLane struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ConversationId string                 `protobuf:"bytes,1,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	ProjectId      string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	ProjectName    string                 `protobuf:"bytes,3,opt,name=project_name,json=projectName,proto3" json:"project_name,omitempty"`
+	Title          string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	Role           string                 `protobuf:"bytes,5,opt,name=role,proto3" json:"role,omitempty"`
+	ReviewOf       *string                `protobuf:"bytes,6,opt,name=review_of,json=reviewOf,proto3,oneof" json:"review_of,omitempty"`
+	Stage          string                 `protobuf:"bytes,7,opt,name=stage,proto3" json:"stage,omitempty"`
+	Completed      bool                   `protobuf:"varint,8,opt,name=completed,proto3" json:"completed,omitempty"`
+	AttentionId    *string                `protobuf:"bytes,9,opt,name=attention_id,json=attentionId,proto3,oneof" json:"attention_id,omitempty"`
+	LiveCommand    *string                `protobuf:"bytes,10,opt,name=live_command,json=liveCommand,proto3,oneof" json:"live_command,omitempty"`
+	LiveTail       *string                `protobuf:"bytes,11,opt,name=live_tail,json=liveTail,proto3,oneof" json:"live_tail,omitempty"`
+	LastHeadline   *string                `protobuf:"bytes,12,opt,name=last_headline,json=lastHeadline,proto3,oneof" json:"last_headline,omitempty"`
+	ActiveAt       int64                  `protobuf:"varint,13,opt,name=active_at,json=activeAt,proto3" json:"active_at,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *PulseLane) Reset() {
+	*x = PulseLane{}
+	mi := &file_ariadne_v1_projects_proto_msgTypes[81]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PulseLane) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PulseLane) ProtoMessage() {}
+
+func (x *PulseLane) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_projects_proto_msgTypes[81]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PulseLane.ProtoReflect.Descriptor instead.
+func (*PulseLane) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{81}
+}
+
+func (x *PulseLane) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *PulseLane) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *PulseLane) GetProjectName() string {
+	if x != nil {
+		return x.ProjectName
+	}
+	return ""
+}
+
+func (x *PulseLane) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *PulseLane) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *PulseLane) GetReviewOf() string {
+	if x != nil && x.ReviewOf != nil {
+		return *x.ReviewOf
+	}
+	return ""
+}
+
+func (x *PulseLane) GetStage() string {
+	if x != nil {
+		return x.Stage
+	}
+	return ""
+}
+
+func (x *PulseLane) GetCompleted() bool {
+	if x != nil {
+		return x.Completed
+	}
+	return false
+}
+
+func (x *PulseLane) GetAttentionId() string {
+	if x != nil && x.AttentionId != nil {
+		return *x.AttentionId
+	}
+	return ""
+}
+
+func (x *PulseLane) GetLiveCommand() string {
+	if x != nil && x.LiveCommand != nil {
+		return *x.LiveCommand
+	}
+	return ""
+}
+
+func (x *PulseLane) GetLiveTail() string {
+	if x != nil && x.LiveTail != nil {
+		return *x.LiveTail
+	}
+	return ""
+}
+
+func (x *PulseLane) GetLastHeadline() string {
+	if x != nil && x.LastHeadline != nil {
+		return *x.LastHeadline
+	}
+	return ""
+}
+
+func (x *PulseLane) GetActiveAt() int64 {
+	if x != nil {
+		return x.ActiveAt
+	}
+	return 0
+}
+
+type PulseSpan struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Id             int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	ProjectId      string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	Stage          string                 `protobuf:"bytes,4,opt,name=stage,proto3" json:"stage,omitempty"`
+	OccupiesSlot   bool                   `protobuf:"varint,5,opt,name=occupies_slot,json=occupiesSlot,proto3" json:"occupies_slot,omitempty"`
+	StartedAt      int64                  `protobuf:"varint,6,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	EndedAt        *int64                 `protobuf:"varint,7,opt,name=ended_at,json=endedAt,proto3,oneof" json:"ended_at,omitempty"`
+	SeqStart       int64                  `protobuf:"varint,8,opt,name=seq_start,json=seqStart,proto3" json:"seq_start,omitempty"`
+	SeqEnd         *int64                 `protobuf:"varint,9,opt,name=seq_end,json=seqEnd,proto3,oneof" json:"seq_end,omitempty"`
+	Label          string                 `protobuf:"bytes,10,opt,name=label,proto3" json:"label,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *PulseSpan) Reset() {
+	*x = PulseSpan{}
+	mi := &file_ariadne_v1_projects_proto_msgTypes[82]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PulseSpan) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PulseSpan) ProtoMessage() {}
+
+func (x *PulseSpan) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_projects_proto_msgTypes[82]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PulseSpan.ProtoReflect.Descriptor instead.
+func (*PulseSpan) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{82}
+}
+
+func (x *PulseSpan) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *PulseSpan) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *PulseSpan) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *PulseSpan) GetStage() string {
+	if x != nil {
+		return x.Stage
+	}
+	return ""
+}
+
+func (x *PulseSpan) GetOccupiesSlot() bool {
+	if x != nil {
+		return x.OccupiesSlot
+	}
+	return false
+}
+
+func (x *PulseSpan) GetStartedAt() int64 {
+	if x != nil {
+		return x.StartedAt
+	}
+	return 0
+}
+
+func (x *PulseSpan) GetEndedAt() int64 {
+	if x != nil && x.EndedAt != nil {
+		return *x.EndedAt
+	}
+	return 0
+}
+
+func (x *PulseSpan) GetSeqStart() int64 {
+	if x != nil {
+		return x.SeqStart
+	}
+	return 0
+}
+
+func (x *PulseSpan) GetSeqEnd() int64 {
+	if x != nil && x.SeqEnd != nil {
+		return *x.SeqEnd
+	}
+	return 0
+}
+
+func (x *PulseSpan) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+type PulseMarker struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Seq             int64                  `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
+	ProjectId       string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	ConversationId  string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	RelatedThreadId *string                `protobuf:"bytes,4,opt,name=related_thread_id,json=relatedThreadId,proto3,oneof" json:"related_thread_id,omitempty"`
+	Kind            string                 `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"`
+	At              int64                  `protobuf:"varint,6,opt,name=at,proto3" json:"at,omitempty"`
+	Label           string                 `protobuf:"bytes,7,opt,name=label,proto3" json:"label,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *PulseMarker) Reset() {
+	*x = PulseMarker{}
+	mi := &file_ariadne_v1_projects_proto_msgTypes[83]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PulseMarker) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PulseMarker) ProtoMessage() {}
+
+func (x *PulseMarker) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_projects_proto_msgTypes[83]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PulseMarker.ProtoReflect.Descriptor instead.
+func (*PulseMarker) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{83}
+}
+
+func (x *PulseMarker) GetSeq() int64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *PulseMarker) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *PulseMarker) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *PulseMarker) GetRelatedThreadId() string {
+	if x != nil && x.RelatedThreadId != nil {
+		return *x.RelatedThreadId
+	}
+	return ""
+}
+
+func (x *PulseMarker) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *PulseMarker) GetAt() int64 {
+	if x != nil {
+		return x.At
+	}
+	return 0
+}
+
+func (x *PulseMarker) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+type PulseHandoff struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Seq                int64                  `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
+	ProjectId          string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	FromConversationId string                 `protobuf:"bytes,3,opt,name=from_conversation_id,json=fromConversationId,proto3" json:"from_conversation_id,omitempty"`
+	ToConversationId   string                 `protobuf:"bytes,4,opt,name=to_conversation_id,json=toConversationId,proto3" json:"to_conversation_id,omitempty"`
+	Kind               string                 `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"`
+	At                 int64                  `protobuf:"varint,6,opt,name=at,proto3" json:"at,omitempty"`
+	Label              string                 `protobuf:"bytes,7,opt,name=label,proto3" json:"label,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *PulseHandoff) Reset() {
+	*x = PulseHandoff{}
+	mi := &file_ariadne_v1_projects_proto_msgTypes[84]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PulseHandoff) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PulseHandoff) ProtoMessage() {}
+
+func (x *PulseHandoff) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_projects_proto_msgTypes[84]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PulseHandoff.ProtoReflect.Descriptor instead.
+func (*PulseHandoff) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{84}
+}
+
+func (x *PulseHandoff) GetSeq() int64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *PulseHandoff) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *PulseHandoff) GetFromConversationId() string {
+	if x != nil {
+		return x.FromConversationId
+	}
+	return ""
+}
+
+func (x *PulseHandoff) GetToConversationId() string {
+	if x != nil {
+		return x.ToConversationId
+	}
+	return ""
+}
+
+func (x *PulseHandoff) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *PulseHandoff) GetAt() int64 {
+	if x != nil {
+		return x.At
+	}
+	return 0
+}
+
+func (x *PulseHandoff) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+type PulseConcurrencyPoint struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	At            int64                  `protobuf:"varint,1,opt,name=at,proto3" json:"at,omitempty"`
+	Active        int32                  `protobuf:"varint,2,opt,name=active,proto3" json:"active,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PulseConcurrencyPoint) Reset() {
+	*x = PulseConcurrencyPoint{}
+	mi := &file_ariadne_v1_projects_proto_msgTypes[85]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PulseConcurrencyPoint) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PulseConcurrencyPoint) ProtoMessage() {}
+
+func (x *PulseConcurrencyPoint) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_projects_proto_msgTypes[85]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PulseConcurrencyPoint.ProtoReflect.Descriptor instead.
+func (*PulseConcurrencyPoint) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{85}
+}
+
+func (x *PulseConcurrencyPoint) GetAt() int64 {
+	if x != nil {
+		return x.At
+	}
+	return 0
+}
+
+func (x *PulseConcurrencyPoint) GetActive() int32 {
+	if x != nil {
+		return x.Active
+	}
+	return 0
+}
+
+type PulseConcurrency struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Slots         int32                    `protobuf:"varint,1,opt,name=slots,proto3" json:"slots,omitempty"`
+	Current       int32                    `protobuf:"varint,2,opt,name=current,proto3" json:"current,omitempty"`
+	Peak          int32                    `protobuf:"varint,3,opt,name=peak,proto3" json:"peak,omitempty"`
+	Points        []*PulseConcurrencyPoint `protobuf:"bytes,4,rep,name=points,proto3" json:"points,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PulseConcurrency) Reset() {
+	*x = PulseConcurrency{}
+	mi := &file_ariadne_v1_projects_proto_msgTypes[86]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PulseConcurrency) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PulseConcurrency) ProtoMessage() {}
+
+func (x *PulseConcurrency) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_projects_proto_msgTypes[86]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PulseConcurrency.ProtoReflect.Descriptor instead.
+func (*PulseConcurrency) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{86}
+}
+
+func (x *PulseConcurrency) GetSlots() int32 {
+	if x != nil {
+		return x.Slots
+	}
+	return 0
+}
+
+func (x *PulseConcurrency) GetCurrent() int32 {
+	if x != nil {
+		return x.Current
+	}
+	return 0
+}
+
+func (x *PulseConcurrency) GetPeak() int32 {
+	if x != nil {
+		return x.Peak
+	}
+	return 0
+}
+
+func (x *PulseConcurrency) GetPoints() []*PulseConcurrencyPoint {
+	if x != nil {
+		return x.Points
+	}
+	return nil
+}
+
+type GetPulseResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Lanes          []*PulseLane           `protobuf:"bytes,1,rep,name=lanes,proto3" json:"lanes,omitempty"`
+	Spans          []*PulseSpan           `protobuf:"bytes,2,rep,name=spans,proto3" json:"spans,omitempty"`
+	Markers        []*PulseMarker         `protobuf:"bytes,3,rep,name=markers,proto3" json:"markers,omitempty"`
+	Handoffs       []*PulseHandoff        `protobuf:"bytes,4,rep,name=handoffs,proto3" json:"handoffs,omitempty"`
+	Concurrency    *PulseConcurrency      `protobuf:"bytes,5,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
+	LastReturnedAt *int64                 `protobuf:"varint,6,opt,name=last_returned_at,json=lastReturnedAt,proto3,oneof" json:"last_returned_at,omitempty"`
+	CursorSeq      int64                  `protobuf:"varint,7,opt,name=cursor_seq,json=cursorSeq,proto3" json:"cursor_seq,omitempty"`
+	FromMs         int64                  `protobuf:"varint,8,opt,name=from_ms,json=fromMs,proto3" json:"from_ms,omitempty"`
+	ToMs           int64                  `protobuf:"varint,9,opt,name=to_ms,json=toMs,proto3" json:"to_ms,omitempty"`
+	ServerNowMs    int64                  `protobuf:"varint,10,opt,name=server_now_ms,json=serverNowMs,proto3" json:"server_now_ms,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GetPulseResponse) Reset() {
+	*x = GetPulseResponse{}
+	mi := &file_ariadne_v1_projects_proto_msgTypes[87]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPulseResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPulseResponse) ProtoMessage() {}
+
+func (x *GetPulseResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_projects_proto_msgTypes[87]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPulseResponse.ProtoReflect.Descriptor instead.
+func (*GetPulseResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_projects_proto_rawDescGZIP(), []int{87}
+}
+
+func (x *GetPulseResponse) GetLanes() []*PulseLane {
+	if x != nil {
+		return x.Lanes
+	}
+	return nil
+}
+
+func (x *GetPulseResponse) GetSpans() []*PulseSpan {
+	if x != nil {
+		return x.Spans
+	}
+	return nil
+}
+
+func (x *GetPulseResponse) GetMarkers() []*PulseMarker {
+	if x != nil {
+		return x.Markers
+	}
+	return nil
+}
+
+func (x *GetPulseResponse) GetHandoffs() []*PulseHandoff {
+	if x != nil {
+		return x.Handoffs
+	}
+	return nil
+}
+
+func (x *GetPulseResponse) GetConcurrency() *PulseConcurrency {
+	if x != nil {
+		return x.Concurrency
+	}
+	return nil
+}
+
+func (x *GetPulseResponse) GetLastReturnedAt() int64 {
+	if x != nil && x.LastReturnedAt != nil {
+		return *x.LastReturnedAt
+	}
+	return 0
+}
+
+func (x *GetPulseResponse) GetCursorSeq() int64 {
+	if x != nil {
+		return x.CursorSeq
+	}
+	return 0
+}
+
+func (x *GetPulseResponse) GetFromMs() int64 {
+	if x != nil {
+		return x.FromMs
+	}
+	return 0
+}
+
+func (x *GetPulseResponse) GetToMs() int64 {
+	if x != nil {
+		return x.ToMs
+	}
+	return 0
+}
+
+func (x *GetPulseResponse) GetServerNowMs() int64 {
+	if x != nil {
+		return x.ServerNowMs
+	}
+	return 0
+}
+
 var File_ariadne_v1_projects_proto protoreflect.FileDescriptor
 
 const file_ariadne_v1_projects_proto_rawDesc = "" +
@@ -6062,7 +6806,94 @@ const file_ariadne_v1_projects_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12!\n" +
 	"\freference_id\x18\x02 \x01(\tR\vreferenceId\"S\n" +
 	"\x1eRemoveProjectReferenceResponse\x121\n" +
-	"\aproject\x18\x01 \x01(\v2\x17.ariadne.v1.ProjectViewR\aproject2\xb6\t\n" +
+	"\aproject\x18\x01 \x01(\v2\x17.ariadne.v1.ProjectViewR\aproject\"\x93\x01\n" +
+	"\x0fGetPulseRequest\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1b\n" +
+	"\afrom_ms\x18\x02 \x01(\x03B\x020\x02R\x06fromMs\x12\x17\n" +
+	"\x05to_ms\x18\x03 \x01(\x03B\x020\x02R\x04toMs\x12+\n" +
+	"\x11include_completed\x18\x04 \x01(\bR\x10includeCompleted\"\x83\x04\n" +
+	"\tPulseLane\x12'\n" +
+	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x02 \x01(\tR\tprojectId\x12!\n" +
+	"\fproject_name\x18\x03 \x01(\tR\vprojectName\x12\x14\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\x12\x12\n" +
+	"\x04role\x18\x05 \x01(\tR\x04role\x12 \n" +
+	"\treview_of\x18\x06 \x01(\tH\x00R\breviewOf\x88\x01\x01\x12\x14\n" +
+	"\x05stage\x18\a \x01(\tR\x05stage\x12\x1c\n" +
+	"\tcompleted\x18\b \x01(\bR\tcompleted\x12&\n" +
+	"\fattention_id\x18\t \x01(\tH\x01R\vattentionId\x88\x01\x01\x12&\n" +
+	"\flive_command\x18\n" +
+	" \x01(\tH\x02R\vliveCommand\x88\x01\x01\x12 \n" +
+	"\tlive_tail\x18\v \x01(\tH\x03R\bliveTail\x88\x01\x01\x12(\n" +
+	"\rlast_headline\x18\f \x01(\tH\x04R\flastHeadline\x88\x01\x01\x12\x1f\n" +
+	"\tactive_at\x18\r \x01(\x03B\x020\x02R\bactiveAtB\f\n" +
+	"\n" +
+	"_review_ofB\x0f\n" +
+	"\r_attention_idB\x0f\n" +
+	"\r_live_commandB\f\n" +
+	"\n" +
+	"_live_tailB\x10\n" +
+	"\x0e_last_headline\"\xdb\x02\n" +
+	"\tPulseSpan\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\x03B\x020\x02R\x02id\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x02 \x01(\tR\tprojectId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x14\n" +
+	"\x05stage\x18\x04 \x01(\tR\x05stage\x12#\n" +
+	"\roccupies_slot\x18\x05 \x01(\bR\foccupiesSlot\x12!\n" +
+	"\n" +
+	"started_at\x18\x06 \x01(\x03B\x020\x02R\tstartedAt\x12\"\n" +
+	"\bended_at\x18\a \x01(\x03B\x020\x02H\x00R\aendedAt\x88\x01\x01\x12\x1f\n" +
+	"\tseq_start\x18\b \x01(\x03B\x020\x02R\bseqStart\x12 \n" +
+	"\aseq_end\x18\t \x01(\x03B\x020\x02H\x01R\x06seqEnd\x88\x01\x01\x12\x14\n" +
+	"\x05label\x18\n" +
+	" \x01(\tR\x05labelB\v\n" +
+	"\t_ended_atB\n" +
+	"\n" +
+	"\b_seq_end\"\xf0\x01\n" +
+	"\vPulseMarker\x12\x14\n" +
+	"\x03seq\x18\x01 \x01(\x03B\x020\x02R\x03seq\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x02 \x01(\tR\tprojectId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12/\n" +
+	"\x11related_thread_id\x18\x04 \x01(\tH\x00R\x0frelatedThreadId\x88\x01\x01\x12\x12\n" +
+	"\x04kind\x18\x05 \x01(\tR\x04kind\x12\x12\n" +
+	"\x02at\x18\x06 \x01(\x03B\x020\x02R\x02at\x12\x14\n" +
+	"\x05label\x18\a \x01(\tR\x05labelB\x14\n" +
+	"\x12_related_thread_id\"\xe1\x01\n" +
+	"\fPulseHandoff\x12\x14\n" +
+	"\x03seq\x18\x01 \x01(\x03B\x020\x02R\x03seq\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x02 \x01(\tR\tprojectId\x120\n" +
+	"\x14from_conversation_id\x18\x03 \x01(\tR\x12fromConversationId\x12,\n" +
+	"\x12to_conversation_id\x18\x04 \x01(\tR\x10toConversationId\x12\x12\n" +
+	"\x04kind\x18\x05 \x01(\tR\x04kind\x12\x12\n" +
+	"\x02at\x18\x06 \x01(\x03B\x020\x02R\x02at\x12\x14\n" +
+	"\x05label\x18\a \x01(\tR\x05label\"C\n" +
+	"\x15PulseConcurrencyPoint\x12\x12\n" +
+	"\x02at\x18\x01 \x01(\x03B\x020\x02R\x02at\x12\x16\n" +
+	"\x06active\x18\x02 \x01(\x05R\x06active\"\x91\x01\n" +
+	"\x10PulseConcurrency\x12\x14\n" +
+	"\x05slots\x18\x01 \x01(\x05R\x05slots\x12\x18\n" +
+	"\acurrent\x18\x02 \x01(\x05R\acurrent\x12\x12\n" +
+	"\x04peak\x18\x03 \x01(\x05R\x04peak\x129\n" +
+	"\x06points\x18\x04 \x03(\v2!.ariadne.v1.PulseConcurrencyPointR\x06points\"\xde\x03\n" +
+	"\x10GetPulseResponse\x12+\n" +
+	"\x05lanes\x18\x01 \x03(\v2\x15.ariadne.v1.PulseLaneR\x05lanes\x12+\n" +
+	"\x05spans\x18\x02 \x03(\v2\x15.ariadne.v1.PulseSpanR\x05spans\x121\n" +
+	"\amarkers\x18\x03 \x03(\v2\x17.ariadne.v1.PulseMarkerR\amarkers\x124\n" +
+	"\bhandoffs\x18\x04 \x03(\v2\x18.ariadne.v1.PulseHandoffR\bhandoffs\x12>\n" +
+	"\vconcurrency\x18\x05 \x01(\v2\x1c.ariadne.v1.PulseConcurrencyR\vconcurrency\x121\n" +
+	"\x10last_returned_at\x18\x06 \x01(\x03B\x020\x02H\x00R\x0elastReturnedAt\x88\x01\x01\x12!\n" +
+	"\n" +
+	"cursor_seq\x18\a \x01(\x03B\x020\x02R\tcursorSeq\x12\x1b\n" +
+	"\afrom_ms\x18\b \x01(\x03B\x020\x02R\x06fromMs\x12\x17\n" +
+	"\x05to_ms\x18\t \x01(\x03B\x020\x02R\x04toMs\x12&\n" +
+	"\rserver_now_ms\x18\n" +
+	" \x01(\x03B\x020\x02R\vserverNowMsB\x13\n" +
+	"\x11_last_returned_at2\xfd\t\n" +
 	"\x0eProjectService\x12Q\n" +
 	"\fListProjects\x12\x1f.ariadne.v1.ListProjectsRequest\x1a .ariadne.v1.ListProjectsResponse\x12W\n" +
 	"\x0eListAllNeedsMe\x12!.ariadne.v1.ListAllNeedsMeRequest\x1a\".ariadne.v1.ListAllNeedsMeResponse\x12K\n" +
@@ -6071,7 +6902,8 @@ const file_ariadne_v1_projects_proto_rawDesc = "" +
 	"\rCreateProject\x12 .ariadne.v1.CreateProjectRequest\x1a!.ariadne.v1.CreateProjectResponse\x12T\n" +
 	"\rUpdateProject\x12 .ariadne.v1.UpdateProjectRequest\x1a!.ariadne.v1.UpdateProjectResponse\x12T\n" +
 	"\rDeleteProject\x12 .ariadne.v1.DeleteProjectRequest\x1a!.ariadne.v1.DeleteProjectResponse\x12c\n" +
-	"\x12GetProjectActivity\x12%.ariadne.v1.GetProjectActivityRequest\x1a&.ariadne.v1.GetProjectActivityResponse\x12T\n" +
+	"\x12GetProjectActivity\x12%.ariadne.v1.GetProjectActivityRequest\x1a&.ariadne.v1.GetProjectActivityResponse\x12E\n" +
+	"\bGetPulse\x12\x1b.ariadne.v1.GetPulseRequest\x1a\x1c.ariadne.v1.GetPulseResponse\x12T\n" +
 	"\rSearchProject\x12 .ariadne.v1.SearchProjectRequest\x1a!.ariadne.v1.SearchProjectResponse\x12c\n" +
 	"\x12GetProjectSettings\x12%.ariadne.v1.GetProjectSettingsRequest\x1a&.ariadne.v1.GetProjectSettingsResponse\x12W\n" +
 	"\x0eGetFileSources\x12!.ariadne.v1.GetFileSourcesRequest\x1a\".ariadne.v1.GetFileSourcesResponse\x12W\n" +
@@ -6094,7 +6926,7 @@ func file_ariadne_v1_projects_proto_rawDescGZIP() []byte {
 	return file_ariadne_v1_projects_proto_rawDescData
 }
 
-var file_ariadne_v1_projects_proto_msgTypes = make([]protoimpl.MessageInfo, 82)
+var file_ariadne_v1_projects_proto_msgTypes = make([]protoimpl.MessageInfo, 90)
 var file_ariadne_v1_projects_proto_goTypes = []any{
 	(*ProjectStringList)(nil),              // 0: ariadne.v1.ProjectStringList
 	(*ProjectUsageTotals)(nil),             // 1: ariadne.v1.ProjectUsageTotals
@@ -6176,21 +7008,29 @@ var file_ariadne_v1_projects_proto_goTypes = []any{
 	(*AddProjectReferenceResponse)(nil),    // 77: ariadne.v1.AddProjectReferenceResponse
 	(*RemoveProjectReferenceRequest)(nil),  // 78: ariadne.v1.RemoveProjectReferenceRequest
 	(*RemoveProjectReferenceResponse)(nil), // 79: ariadne.v1.RemoveProjectReferenceResponse
-	nil,                                    // 80: ariadne.v1.ProjectUsageTotals.CostEntry
-	nil,                                    // 81: ariadne.v1.GetFileSourcesResponse.SecretsSetEntry
-	(*structpb.Struct)(nil),                // 82: google.protobuf.Struct
+	(*GetPulseRequest)(nil),                // 80: ariadne.v1.GetPulseRequest
+	(*PulseLane)(nil),                      // 81: ariadne.v1.PulseLane
+	(*PulseSpan)(nil),                      // 82: ariadne.v1.PulseSpan
+	(*PulseMarker)(nil),                    // 83: ariadne.v1.PulseMarker
+	(*PulseHandoff)(nil),                   // 84: ariadne.v1.PulseHandoff
+	(*PulseConcurrencyPoint)(nil),          // 85: ariadne.v1.PulseConcurrencyPoint
+	(*PulseConcurrency)(nil),               // 86: ariadne.v1.PulseConcurrency
+	(*GetPulseResponse)(nil),               // 87: ariadne.v1.GetPulseResponse
+	nil,                                    // 88: ariadne.v1.ProjectUsageTotals.CostEntry
+	nil,                                    // 89: ariadne.v1.GetFileSourcesResponse.SecretsSetEntry
+	(*structpb.Struct)(nil),                // 90: google.protobuf.Struct
 }
 var file_ariadne_v1_projects_proto_depIdxs = []int32{
-	80,  // 0: ariadne.v1.ProjectUsageTotals.cost:type_name -> ariadne.v1.ProjectUsageTotals.CostEntry
-	82,  // 1: ariadne.v1.ProjectSourcePart.settings:type_name -> google.protobuf.Struct
-	82,  // 2: ariadne.v1.ProjectSource.settings:type_name -> google.protobuf.Struct
+	88,  // 0: ariadne.v1.ProjectUsageTotals.cost:type_name -> ariadne.v1.ProjectUsageTotals.CostEntry
+	90,  // 1: ariadne.v1.ProjectSourcePart.settings:type_name -> google.protobuf.Struct
+	90,  // 2: ariadne.v1.ProjectSource.settings:type_name -> google.protobuf.Struct
 	2,   // 3: ariadne.v1.ProjectSource.hosting:type_name -> ariadne.v1.ProjectSourcePart
-	82,  // 4: ariadne.v1.FileSource.settings:type_name -> google.protobuf.Struct
+	90,  // 4: ariadne.v1.FileSource.settings:type_name -> google.protobuf.Struct
 	2,   // 5: ariadne.v1.FileSource.hosting:type_name -> ariadne.v1.ProjectSourcePart
 	4,   // 6: ariadne.v1.FileSourceSet.sources:type_name -> ariadne.v1.FileSource
-	82,  // 7: ariadne.v1.FileSourceInput.settings:type_name -> google.protobuf.Struct
+	90,  // 7: ariadne.v1.FileSourceInput.settings:type_name -> google.protobuf.Struct
 	2,   // 8: ariadne.v1.FileSourceInput.hosting:type_name -> ariadne.v1.ProjectSourcePart
-	82,  // 9: ariadne.v1.ProjectReference.settings:type_name -> google.protobuf.Struct
+	90,  // 9: ariadne.v1.ProjectReference.settings:type_name -> google.protobuf.Struct
 	9,   // 10: ariadne.v1.ProjectWorkspaceSettings.auto:type_name -> ariadne.v1.ProjectWorkspaceAutoSettings
 	8,   // 11: ariadne.v1.ProjectSettings.delivery:type_name -> ariadne.v1.ProjectDeliverySettings
 	10,  // 12: ariadne.v1.ProjectSettings.workspace:type_name -> ariadne.v1.ProjectWorkspaceSettings
@@ -6209,7 +7049,7 @@ var file_ariadne_v1_projects_proto_depIdxs = []int32{
 	16,  // 25: ariadne.v1.ProjectView.detected:type_name -> ariadne.v1.ProjectDetected
 	1,   // 26: ariadne.v1.ProjectView.usage:type_name -> ariadne.v1.ProjectUsageTotals
 	26,  // 27: ariadne.v1.ProjectThreadPullRequest.checks:type_name -> ariadne.v1.ProjectPullRequestChecks
-	82,  // 28: ariadne.v1.ProjectThreadReference.settings:type_name -> google.protobuf.Struct
+	90,  // 28: ariadne.v1.ProjectThreadReference.settings:type_name -> google.protobuf.Struct
 	22,  // 29: ariadne.v1.ProjectThreadView.last_artifacts:type_name -> ariadne.v1.ProjectThreadArtifact
 	23,  // 30: ariadne.v1.ProjectThreadView.workspace:type_name -> ariadne.v1.ProjectWorkspaceView
 	24,  // 31: ariadne.v1.ProjectThreadView.merged:type_name -> ariadne.v1.ProjectBranchMerge
@@ -6265,44 +7105,52 @@ var file_ariadne_v1_projects_proto_depIdxs = []int32{
 	55,  // 81: ariadne.v1.SearchProjectResponse.messages:type_name -> ariadne.v1.ProjectMessageSearchHit
 	19,  // 82: ariadne.v1.GetProjectSettingsResponse.settings_view:type_name -> ariadne.v1.ProjectSettingsView
 	4,   // 83: ariadne.v1.GetFileSourcesResponse.sources:type_name -> ariadne.v1.FileSource
-	81,  // 84: ariadne.v1.GetFileSourcesResponse.secrets_set:type_name -> ariadne.v1.GetFileSourcesResponse.SecretsSetEntry
+	89,  // 84: ariadne.v1.GetFileSourcesResponse.secrets_set:type_name -> ariadne.v1.GetFileSourcesResponse.SecretsSetEntry
 	6,   // 85: ariadne.v1.SetFileSourcesRequest.sources:type_name -> ariadne.v1.FileSourceInput
 	20,  // 86: ariadne.v1.SetFileSourcesResponse.project:type_name -> ariadne.v1.ProjectView
 	2,   // 87: ariadne.v1.AddProjectReferenceRequest.reference:type_name -> ariadne.v1.ProjectSourcePart
 	20,  // 88: ariadne.v1.AddProjectReferenceResponse.project:type_name -> ariadne.v1.ProjectView
 	20,  // 89: ariadne.v1.RemoveProjectReferenceResponse.project:type_name -> ariadne.v1.ProjectView
-	0,   // 90: ariadne.v1.GetFileSourcesResponse.SecretsSetEntry.value:type_name -> ariadne.v1.ProjectStringList
-	56,  // 91: ariadne.v1.ProjectService.ListProjects:input_type -> ariadne.v1.ListProjectsRequest
-	48,  // 92: ariadne.v1.ProjectService.ListAllNeedsMe:input_type -> ariadne.v1.ListAllNeedsMeRequest
-	58,  // 93: ariadne.v1.ProjectService.GetProject:input_type -> ariadne.v1.GetProjectRequest
-	60,  // 94: ariadne.v1.ProjectService.CreateProject:input_type -> ariadne.v1.CreateProjectRequest
-	62,  // 95: ariadne.v1.ProjectService.UpdateProject:input_type -> ariadne.v1.UpdateProjectRequest
-	64,  // 96: ariadne.v1.ProjectService.DeleteProject:input_type -> ariadne.v1.DeleteProjectRequest
-	66,  // 97: ariadne.v1.ProjectService.GetProjectActivity:input_type -> ariadne.v1.GetProjectActivityRequest
-	68,  // 98: ariadne.v1.ProjectService.SearchProject:input_type -> ariadne.v1.SearchProjectRequest
-	70,  // 99: ariadne.v1.ProjectService.GetProjectSettings:input_type -> ariadne.v1.GetProjectSettingsRequest
-	72,  // 100: ariadne.v1.ProjectService.GetFileSources:input_type -> ariadne.v1.GetFileSourcesRequest
-	74,  // 101: ariadne.v1.ProjectService.SetFileSources:input_type -> ariadne.v1.SetFileSourcesRequest
-	76,  // 102: ariadne.v1.ProjectService.AddProjectReference:input_type -> ariadne.v1.AddProjectReferenceRequest
-	78,  // 103: ariadne.v1.ProjectService.RemoveProjectReference:input_type -> ariadne.v1.RemoveProjectReferenceRequest
-	57,  // 104: ariadne.v1.ProjectService.ListProjects:output_type -> ariadne.v1.ListProjectsResponse
-	49,  // 105: ariadne.v1.ProjectService.ListAllNeedsMe:output_type -> ariadne.v1.ListAllNeedsMeResponse
-	59,  // 106: ariadne.v1.ProjectService.GetProject:output_type -> ariadne.v1.GetProjectResponse
-	61,  // 107: ariadne.v1.ProjectService.CreateProject:output_type -> ariadne.v1.CreateProjectResponse
-	63,  // 108: ariadne.v1.ProjectService.UpdateProject:output_type -> ariadne.v1.UpdateProjectResponse
-	65,  // 109: ariadne.v1.ProjectService.DeleteProject:output_type -> ariadne.v1.DeleteProjectResponse
-	67,  // 110: ariadne.v1.ProjectService.GetProjectActivity:output_type -> ariadne.v1.GetProjectActivityResponse
-	69,  // 111: ariadne.v1.ProjectService.SearchProject:output_type -> ariadne.v1.SearchProjectResponse
-	71,  // 112: ariadne.v1.ProjectService.GetProjectSettings:output_type -> ariadne.v1.GetProjectSettingsResponse
-	73,  // 113: ariadne.v1.ProjectService.GetFileSources:output_type -> ariadne.v1.GetFileSourcesResponse
-	75,  // 114: ariadne.v1.ProjectService.SetFileSources:output_type -> ariadne.v1.SetFileSourcesResponse
-	77,  // 115: ariadne.v1.ProjectService.AddProjectReference:output_type -> ariadne.v1.AddProjectReferenceResponse
-	79,  // 116: ariadne.v1.ProjectService.RemoveProjectReference:output_type -> ariadne.v1.RemoveProjectReferenceResponse
-	104, // [104:117] is the sub-list for method output_type
-	91,  // [91:104] is the sub-list for method input_type
-	91,  // [91:91] is the sub-list for extension type_name
-	91,  // [91:91] is the sub-list for extension extendee
-	0,   // [0:91] is the sub-list for field type_name
+	85,  // 90: ariadne.v1.PulseConcurrency.points:type_name -> ariadne.v1.PulseConcurrencyPoint
+	81,  // 91: ariadne.v1.GetPulseResponse.lanes:type_name -> ariadne.v1.PulseLane
+	82,  // 92: ariadne.v1.GetPulseResponse.spans:type_name -> ariadne.v1.PulseSpan
+	83,  // 93: ariadne.v1.GetPulseResponse.markers:type_name -> ariadne.v1.PulseMarker
+	84,  // 94: ariadne.v1.GetPulseResponse.handoffs:type_name -> ariadne.v1.PulseHandoff
+	86,  // 95: ariadne.v1.GetPulseResponse.concurrency:type_name -> ariadne.v1.PulseConcurrency
+	0,   // 96: ariadne.v1.GetFileSourcesResponse.SecretsSetEntry.value:type_name -> ariadne.v1.ProjectStringList
+	56,  // 97: ariadne.v1.ProjectService.ListProjects:input_type -> ariadne.v1.ListProjectsRequest
+	48,  // 98: ariadne.v1.ProjectService.ListAllNeedsMe:input_type -> ariadne.v1.ListAllNeedsMeRequest
+	58,  // 99: ariadne.v1.ProjectService.GetProject:input_type -> ariadne.v1.GetProjectRequest
+	60,  // 100: ariadne.v1.ProjectService.CreateProject:input_type -> ariadne.v1.CreateProjectRequest
+	62,  // 101: ariadne.v1.ProjectService.UpdateProject:input_type -> ariadne.v1.UpdateProjectRequest
+	64,  // 102: ariadne.v1.ProjectService.DeleteProject:input_type -> ariadne.v1.DeleteProjectRequest
+	66,  // 103: ariadne.v1.ProjectService.GetProjectActivity:input_type -> ariadne.v1.GetProjectActivityRequest
+	80,  // 104: ariadne.v1.ProjectService.GetPulse:input_type -> ariadne.v1.GetPulseRequest
+	68,  // 105: ariadne.v1.ProjectService.SearchProject:input_type -> ariadne.v1.SearchProjectRequest
+	70,  // 106: ariadne.v1.ProjectService.GetProjectSettings:input_type -> ariadne.v1.GetProjectSettingsRequest
+	72,  // 107: ariadne.v1.ProjectService.GetFileSources:input_type -> ariadne.v1.GetFileSourcesRequest
+	74,  // 108: ariadne.v1.ProjectService.SetFileSources:input_type -> ariadne.v1.SetFileSourcesRequest
+	76,  // 109: ariadne.v1.ProjectService.AddProjectReference:input_type -> ariadne.v1.AddProjectReferenceRequest
+	78,  // 110: ariadne.v1.ProjectService.RemoveProjectReference:input_type -> ariadne.v1.RemoveProjectReferenceRequest
+	57,  // 111: ariadne.v1.ProjectService.ListProjects:output_type -> ariadne.v1.ListProjectsResponse
+	49,  // 112: ariadne.v1.ProjectService.ListAllNeedsMe:output_type -> ariadne.v1.ListAllNeedsMeResponse
+	59,  // 113: ariadne.v1.ProjectService.GetProject:output_type -> ariadne.v1.GetProjectResponse
+	61,  // 114: ariadne.v1.ProjectService.CreateProject:output_type -> ariadne.v1.CreateProjectResponse
+	63,  // 115: ariadne.v1.ProjectService.UpdateProject:output_type -> ariadne.v1.UpdateProjectResponse
+	65,  // 116: ariadne.v1.ProjectService.DeleteProject:output_type -> ariadne.v1.DeleteProjectResponse
+	67,  // 117: ariadne.v1.ProjectService.GetProjectActivity:output_type -> ariadne.v1.GetProjectActivityResponse
+	87,  // 118: ariadne.v1.ProjectService.GetPulse:output_type -> ariadne.v1.GetPulseResponse
+	69,  // 119: ariadne.v1.ProjectService.SearchProject:output_type -> ariadne.v1.SearchProjectResponse
+	71,  // 120: ariadne.v1.ProjectService.GetProjectSettings:output_type -> ariadne.v1.GetProjectSettingsResponse
+	73,  // 121: ariadne.v1.ProjectService.GetFileSources:output_type -> ariadne.v1.GetFileSourcesResponse
+	75,  // 122: ariadne.v1.ProjectService.SetFileSources:output_type -> ariadne.v1.SetFileSourcesResponse
+	77,  // 123: ariadne.v1.ProjectService.AddProjectReference:output_type -> ariadne.v1.AddProjectReferenceResponse
+	79,  // 124: ariadne.v1.ProjectService.RemoveProjectReference:output_type -> ariadne.v1.RemoveProjectReferenceResponse
+	111, // [111:125] is the sub-list for method output_type
+	97,  // [97:111] is the sub-list for method input_type
+	97,  // [97:97] is the sub-list for extension type_name
+	97,  // [97:97] is the sub-list for extension extendee
+	0,   // [0:97] is the sub-list for field type_name
 }
 
 func init() { file_ariadne_v1_projects_proto_init() }
@@ -6351,13 +7199,17 @@ func file_ariadne_v1_projects_proto_init() {
 	}
 	file_ariadne_v1_projects_proto_msgTypes[68].OneofWrappers = []any{}
 	file_ariadne_v1_projects_proto_msgTypes[74].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[81].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[82].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[83].OneofWrappers = []any{}
+	file_ariadne_v1_projects_proto_msgTypes[87].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ariadne_v1_projects_proto_rawDesc), len(file_ariadne_v1_projects_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   82,
+			NumMessages:   90,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
