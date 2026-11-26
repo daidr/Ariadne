@@ -708,7 +708,8 @@ describe('DocumentBody.vue TOC integration', () => {
       const scrollEl = wrapper.get('.document').element as HTMLElement
       const surface = wrapper.get('.dou-editor__surface').element as HTMLElement
       const frame = wrapper.get('.dou-editor__content--table').element as HTMLElement
-      const table = frame.querySelector('table') as HTMLElement
+      const viewport = wrapper.get('.dou-editor-table__viewport').element as HTMLElement
+      const table = viewport.querySelector('table') as HTMLElement
 
       let tableLeft = 336
       surface.style.paddingLeft = '288px'
@@ -720,6 +721,9 @@ describe('DocumentBody.vue TOC integration', () => {
         makeRect(48, 0, 1344, 1400),
       )
       vi.spyOn(frame, 'getBoundingClientRect').mockImplementation(() =>
+        makeRect(58, 220, 1334, 286),
+      )
+      vi.spyOn(viewport, 'getBoundingClientRect').mockImplementation(() =>
         makeRect(58, 220, 1334, 260),
       )
       vi.spyOn(table, 'getBoundingClientRect').mockImplementation(() =>
@@ -753,9 +757,9 @@ describe('DocumentBody.vue TOC integration', () => {
       expect(toc.classes()).not.toContain('is-collided')
       expect(toc.classes()).not.toContain('is-collapsed')
 
-      // Simulate scrolling the wide table horizontally so its content enters the left TOC zone.
+      // Simulate scrolling the wide table viewport horizontally so its content enters the left TOC zone.
       tableLeft = 140
-      frame.dispatchEvent(new Event('scroll'))
+      viewport.dispatchEvent(new Event('scroll'))
       flushFrames()
       await nextTick()
       expect(toc.classes()).toContain('is-collided')
@@ -763,7 +767,7 @@ describe('DocumentBody.vue TOC integration', () => {
 
       // Simulate scrolling the table back to the reading column edge -> TOC restores.
       tableLeft = 336
-      frame.dispatchEvent(new Event('scroll'))
+      viewport.dispatchEvent(new Event('scroll'))
       flushFrames()
       await nextTick()
       expect(toc.classes()).not.toContain('is-collided')
