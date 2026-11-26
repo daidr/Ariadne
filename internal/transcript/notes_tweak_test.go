@@ -41,3 +41,20 @@ func TestDescribeFeedbackTweak(t *testing.T) {
 		}
 	}
 }
+
+func TestDescribeThreadReopenedAndReportMissing(t *testing.T) {
+	reopened := DescribeNote(map[string]any{
+		"type":     "thread-reopened",
+		"threadId": "thr_1",
+		"by":       "user",
+	}, func(id string) string { return "调研方案" })
+	if !strings.Contains(reopened, `<thread_reopened thread="thr_1" title="调研方案" by="user">`) ||
+		!strings.Contains(reopened, "reopened this completed thread to continue the discussion") {
+		t.Fatalf("unexpected thread-reopened note:\n%s", reopened)
+	}
+
+	missing := DescribeNote(map[string]any{"type": "report-missing"}, func(string) string { return "" })
+	if !strings.Contains(missing, "Use idle when a research") || !strings.Contains(missing, "done only when the thread is fully resolved") {
+		t.Fatalf("unexpected report-missing note:\n%s", missing)
+	}
+}

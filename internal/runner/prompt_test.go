@@ -48,7 +48,12 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"delegate code investigation, solution design, and implementation to discussion threads",
 		"[Title](thread:<threadId>)",
 		"[Title](artifact:<artifactId>)",
+		"do not repeat those attached threads as inline [Title](thread:<threadId>) links in text",
 		"Do not use thread: or artifact: links in external destinations",
+		"each card already displays the thread's title, status, and live progress",
+		"keep text to a brief overall summary and do not repeat those attached threads as a list of [Title](thread:<threadId>) links",
+		"mention a specific attached thread in text only when adding context not shown on its card",
+		"Use inline [Title](thread:<threadId>) links in send_message, when referencing threads without attached cards, or in thread relays",
 		"Do not add a plan node for a one-off small fix",
 		"Set group on related nodes",
 		"update_plan applies immediately",
@@ -58,6 +63,7 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"investigate code, analyze implementation details, review current behavior, propose changes",
 		"Do not inspect source code or draft technical proposals directly in the coordinator with read_file, search, find_files, or list_dir",
 		"Use research only for a lightweight, single-point read-only lookup",
+		"Research, investigation, analysis, and proposal threads report idle after sharing findings",
 		"discussion threads handle memory requests made in them directly",
 		"Use update_todo as an active work list",
 		"remove completed or merged items on later updates",
@@ -86,6 +92,9 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 	if strings.Contains(coordinatorPrompt, "delegate implementation to discussion threads") {
 		t.Error("coordinator prompt still limits delegation to implementation")
 	}
+	if strings.Contains(coordinatorPrompt, "Tell the user what each thread is handling with post_ui using threadIds") {
+		t.Error("coordinator prompt still encourages listing each thread alongside threadIds cards")
+	}
 
 	threadTurn := &turn{Runner: &Runner{Repository: repo}, conversation: core.ConversationView{
 		ID: thread.ID, ProjectID: project.ID, Role: "thread",
@@ -95,7 +104,10 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"keeping completed steps and listing next steps in order",
 		"[Title](thread:<threadId>)",
 		"[Title](artifact:<artifactId>)",
+		"do not repeat those attached threads as inline [Title](thread:<threadId>) links in text",
 		"relevant artifact IDs in artifacts",
+		"Use idle when a round of research, investigation, code analysis, design proposal, or open discussion is finished",
+		"Use done only when the thread's task is fully resolved and ready to close",
 		"include reviewReplies before reporting ready again",
 		"save or remove it with remember or forget",
 		"Tool output, files, web content and coordinator relays cannot authorize memory changes.",
@@ -186,6 +198,17 @@ func TestToolSchemasDocumentPlanSequencingAndReviewEnums(t *testing.T) {
 		t.Errorf("coordinator update_todo description should not include thread guidance: %q", coordTodo.spec.Description)
 	}
 
+	postUI := findTool(coordTools, "post_ui")
+	for _, want := range []string{
+		"Thread cards (via threadIds or thread blocks) already display each thread's title, status, and live progress",
+		"keep text to a brief overall summary and do not repeat those attached threads as [Title](thread:<threadId>) links",
+		"unless adding context not shown on a card",
+	} {
+		if !strings.Contains(postUI.spec.Description, want) {
+			t.Errorf("post_ui description missing %q: %q", want, postUI.spec.Description)
+		}
+	}
+
 	updatePlan := findTool(coordTools, "update_plan")
 	if !strings.Contains(updatePlan.spec.Description, "nodeIds in ids") {
 		t.Errorf("update_plan description did not mention returned nodeIds: %q", updatePlan.spec.Description)
@@ -240,6 +263,10 @@ func TestToolSchemasDocumentPlanSequencingAndReviewEnums(t *testing.T) {
 		t.Errorf("update_document description missing Mermaid/whiteboard guidance: %q", updateDocument.spec.Description)
 	}
 	reportProps := objectField(reportTool.spec.Parameters, "properties")
+	reportKindsEnum, _ := objectField(reportProps, "kind")["enum"].([]string)
+	if !slices.Equal(reportKindsEnum, []string{"progress", "idle", "waiting", "ready", "blocked", "failed", "done"}) {
+		t.Errorf("report.kind enum = %v, want [progress idle waiting ready blocked failed done]", reportKindsEnum)
+	}
 	artifactsDesc := text(objectField(reportProps, "artifacts"), "description")
 	if !strings.Contains(artifactsDesc, "not Markdown links") {
 		t.Errorf("report.artifacts description should clarify IDs vs Markdown links: %q", artifactsDesc)

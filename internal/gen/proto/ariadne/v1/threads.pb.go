@@ -1994,6 +1994,94 @@ func (x *ResumeThreadResponse) GetThread() *ThreadView {
 	return nil
 }
 
+type ReopenThreadRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ThreadId      string                 `protobuf:"bytes,1,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReopenThreadRequest) Reset() {
+	*x = ReopenThreadRequest{}
+	mi := &file_ariadne_v1_threads_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReopenThreadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReopenThreadRequest) ProtoMessage() {}
+
+func (x *ReopenThreadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_threads_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReopenThreadRequest.ProtoReflect.Descriptor instead.
+func (*ReopenThreadRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *ReopenThreadRequest) GetThreadId() string {
+	if x != nil {
+		return x.ThreadId
+	}
+	return ""
+}
+
+type ReopenThreadResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Thread        *ThreadView            `protobuf:"bytes,1,opt,name=thread,proto3" json:"thread,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReopenThreadResponse) Reset() {
+	*x = ReopenThreadResponse{}
+	mi := &file_ariadne_v1_threads_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReopenThreadResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReopenThreadResponse) ProtoMessage() {}
+
+func (x *ReopenThreadResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_threads_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReopenThreadResponse.ProtoReflect.Descriptor instead.
+func (*ReopenThreadResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ReopenThreadResponse) GetThread() *ThreadView {
+	if x != nil {
+		return x.Thread
+	}
+	return nil
+}
+
 type CompleteThreadRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ThreadId      string                 `protobuf:"bytes,1,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"`
@@ -2003,7 +2091,7 @@ type CompleteThreadRequest struct {
 
 func (x *CompleteThreadRequest) Reset() {
 	*x = CompleteThreadRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[25]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2015,7 +2103,7 @@ func (x *CompleteThreadRequest) String() string {
 func (*CompleteThreadRequest) ProtoMessage() {}
 
 func (x *CompleteThreadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[25]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2028,7 +2116,7 @@ func (x *CompleteThreadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompleteThreadRequest.ProtoReflect.Descriptor instead.
 func (*CompleteThreadRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{25}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *CompleteThreadRequest) GetThreadId() string {
@@ -2047,7 +2135,7 @@ type CompleteThreadResponse struct {
 
 func (x *CompleteThreadResponse) Reset() {
 	*x = CompleteThreadResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[26]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2059,7 +2147,7 @@ func (x *CompleteThreadResponse) String() string {
 func (*CompleteThreadResponse) ProtoMessage() {}
 
 func (x *CompleteThreadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[26]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2072,7 +2160,7 @@ func (x *CompleteThreadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompleteThreadResponse.ProtoReflect.Descriptor instead.
 func (*CompleteThreadResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{26}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *CompleteThreadResponse) GetThread() *ThreadView {
@@ -2091,7 +2179,7 @@ type EndAsideRequest struct {
 
 func (x *EndAsideRequest) Reset() {
 	*x = EndAsideRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[27]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2103,7 +2191,7 @@ func (x *EndAsideRequest) String() string {
 func (*EndAsideRequest) ProtoMessage() {}
 
 func (x *EndAsideRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[27]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2116,7 +2204,7 @@ func (x *EndAsideRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndAsideRequest.ProtoReflect.Descriptor instead.
 func (*EndAsideRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{27}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *EndAsideRequest) GetThreadId() string {
@@ -2135,7 +2223,7 @@ type EndAsideResponse struct {
 
 func (x *EndAsideResponse) Reset() {
 	*x = EndAsideResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[28]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2147,7 +2235,7 @@ func (x *EndAsideResponse) String() string {
 func (*EndAsideResponse) ProtoMessage() {}
 
 func (x *EndAsideResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[28]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2160,7 +2248,7 @@ func (x *EndAsideResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndAsideResponse.ProtoReflect.Descriptor instead.
 func (*EndAsideResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{28}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *EndAsideResponse) GetThread() *ThreadView {
@@ -2185,7 +2273,7 @@ type SetThreadModelRequest struct {
 
 func (x *SetThreadModelRequest) Reset() {
 	*x = SetThreadModelRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[29]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2197,7 +2285,7 @@ func (x *SetThreadModelRequest) String() string {
 func (*SetThreadModelRequest) ProtoMessage() {}
 
 func (x *SetThreadModelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[29]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2210,7 +2298,7 @@ func (x *SetThreadModelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetThreadModelRequest.ProtoReflect.Descriptor instead.
 func (*SetThreadModelRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{29}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *SetThreadModelRequest) GetThreadId() string {
@@ -2277,7 +2365,7 @@ type SetThreadModelResponse struct {
 
 func (x *SetThreadModelResponse) Reset() {
 	*x = SetThreadModelResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[30]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2289,7 +2377,7 @@ func (x *SetThreadModelResponse) String() string {
 func (*SetThreadModelResponse) ProtoMessage() {}
 
 func (x *SetThreadModelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[30]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2302,7 +2390,7 @@ func (x *SetThreadModelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetThreadModelResponse.ProtoReflect.Descriptor instead.
 func (*SetThreadModelResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{30}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *SetThreadModelResponse) GetThread() *ThreadView {
@@ -2322,7 +2410,7 @@ type RemoveThreadReferenceRequest struct {
 
 func (x *RemoveThreadReferenceRequest) Reset() {
 	*x = RemoveThreadReferenceRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[31]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2334,7 +2422,7 @@ func (x *RemoveThreadReferenceRequest) String() string {
 func (*RemoveThreadReferenceRequest) ProtoMessage() {}
 
 func (x *RemoveThreadReferenceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[31]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2347,7 +2435,7 @@ func (x *RemoveThreadReferenceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveThreadReferenceRequest.ProtoReflect.Descriptor instead.
 func (*RemoveThreadReferenceRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{31}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *RemoveThreadReferenceRequest) GetThreadId() string {
@@ -2373,7 +2461,7 @@ type RemoveThreadReferenceResponse struct {
 
 func (x *RemoveThreadReferenceResponse) Reset() {
 	*x = RemoveThreadReferenceResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[32]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2385,7 +2473,7 @@ func (x *RemoveThreadReferenceResponse) String() string {
 func (*RemoveThreadReferenceResponse) ProtoMessage() {}
 
 func (x *RemoveThreadReferenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[32]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2398,7 +2486,7 @@ func (x *RemoveThreadReferenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveThreadReferenceResponse.ProtoReflect.Descriptor instead.
 func (*RemoveThreadReferenceResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{32}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *RemoveThreadReferenceResponse) GetThread() *ThreadView {
@@ -2418,7 +2506,7 @@ type KeepThreadReferenceRequest struct {
 
 func (x *KeepThreadReferenceRequest) Reset() {
 	*x = KeepThreadReferenceRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[33]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2430,7 +2518,7 @@ func (x *KeepThreadReferenceRequest) String() string {
 func (*KeepThreadReferenceRequest) ProtoMessage() {}
 
 func (x *KeepThreadReferenceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[33]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2443,7 +2531,7 @@ func (x *KeepThreadReferenceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeepThreadReferenceRequest.ProtoReflect.Descriptor instead.
 func (*KeepThreadReferenceRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{33}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *KeepThreadReferenceRequest) GetThreadId() string {
@@ -2469,7 +2557,7 @@ type KeepThreadReferenceResponse struct {
 
 func (x *KeepThreadReferenceResponse) Reset() {
 	*x = KeepThreadReferenceResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[34]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2481,7 +2569,7 @@ func (x *KeepThreadReferenceResponse) String() string {
 func (*KeepThreadReferenceResponse) ProtoMessage() {}
 
 func (x *KeepThreadReferenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[34]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2494,7 +2582,7 @@ func (x *KeepThreadReferenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeepThreadReferenceResponse.ProtoReflect.Descriptor instead.
 func (*KeepThreadReferenceResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{34}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *KeepThreadReferenceResponse) GetThread() *ThreadView {
@@ -2514,7 +2602,7 @@ type GetCommandOutputRequest struct {
 
 func (x *GetCommandOutputRequest) Reset() {
 	*x = GetCommandOutputRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[35]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2526,7 +2614,7 @@ func (x *GetCommandOutputRequest) String() string {
 func (*GetCommandOutputRequest) ProtoMessage() {}
 
 func (x *GetCommandOutputRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[35]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2539,7 +2627,7 @@ func (x *GetCommandOutputRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCommandOutputRequest.ProtoReflect.Descriptor instead.
 func (*GetCommandOutputRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{35}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *GetCommandOutputRequest) GetThreadId() string {
@@ -2566,7 +2654,7 @@ type GetCommandOutputResponse struct {
 
 func (x *GetCommandOutputResponse) Reset() {
 	*x = GetCommandOutputResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[36]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2578,7 +2666,7 @@ func (x *GetCommandOutputResponse) String() string {
 func (*GetCommandOutputResponse) ProtoMessage() {}
 
 func (x *GetCommandOutputResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[36]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2591,7 +2679,7 @@ func (x *GetCommandOutputResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCommandOutputResponse.ProtoReflect.Descriptor instead.
 func (*GetCommandOutputResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{36}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *GetCommandOutputResponse) GetCommand() *BackgroundCommandView {
@@ -2618,7 +2706,7 @@ type StreamCommandOutputRequest struct {
 
 func (x *StreamCommandOutputRequest) Reset() {
 	*x = StreamCommandOutputRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[37]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2630,7 +2718,7 @@ func (x *StreamCommandOutputRequest) String() string {
 func (*StreamCommandOutputRequest) ProtoMessage() {}
 
 func (x *StreamCommandOutputRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[37]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2643,7 +2731,7 @@ func (x *StreamCommandOutputRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamCommandOutputRequest.ProtoReflect.Descriptor instead.
 func (*StreamCommandOutputRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{37}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *StreamCommandOutputRequest) GetThreadId() string {
@@ -2670,7 +2758,7 @@ type StreamCommandOutputResponse struct {
 
 func (x *StreamCommandOutputResponse) Reset() {
 	*x = StreamCommandOutputResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[38]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2682,7 +2770,7 @@ func (x *StreamCommandOutputResponse) String() string {
 func (*StreamCommandOutputResponse) ProtoMessage() {}
 
 func (x *StreamCommandOutputResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[38]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2695,7 +2783,7 @@ func (x *StreamCommandOutputResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamCommandOutputResponse.ProtoReflect.Descriptor instead.
 func (*StreamCommandOutputResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{38}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *StreamCommandOutputResponse) GetCommand() *BackgroundCommandView {
@@ -2722,7 +2810,7 @@ type StopCommandRequest struct {
 
 func (x *StopCommandRequest) Reset() {
 	*x = StopCommandRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[39]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2734,7 +2822,7 @@ func (x *StopCommandRequest) String() string {
 func (*StopCommandRequest) ProtoMessage() {}
 
 func (x *StopCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[39]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2747,7 +2835,7 @@ func (x *StopCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopCommandRequest.ProtoReflect.Descriptor instead.
 func (*StopCommandRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{39}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *StopCommandRequest) GetThreadId() string {
@@ -2773,7 +2861,7 @@ type StopCommandResponse struct {
 
 func (x *StopCommandResponse) Reset() {
 	*x = StopCommandResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[40]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2785,7 +2873,7 @@ func (x *StopCommandResponse) String() string {
 func (*StopCommandResponse) ProtoMessage() {}
 
 func (x *StopCommandResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[40]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2798,7 +2886,7 @@ func (x *StopCommandResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopCommandResponse.ProtoReflect.Descriptor instead.
 func (*StopCommandResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{40}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *StopCommandResponse) GetCommand() *BackgroundCommandView {
@@ -2819,7 +2907,7 @@ type ListReviewsRequest struct {
 
 func (x *ListReviewsRequest) Reset() {
 	*x = ListReviewsRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[41]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2831,7 +2919,7 @@ func (x *ListReviewsRequest) String() string {
 func (*ListReviewsRequest) ProtoMessage() {}
 
 func (x *ListReviewsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[41]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2844,7 +2932,7 @@ func (x *ListReviewsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReviewsRequest.ProtoReflect.Descriptor instead.
 func (*ListReviewsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{41}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ListReviewsRequest) GetThreadId() string {
@@ -2879,7 +2967,7 @@ type ListReviewsResponse struct {
 
 func (x *ListReviewsResponse) Reset() {
 	*x = ListReviewsResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[42]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2891,7 +2979,7 @@ func (x *ListReviewsResponse) String() string {
 func (*ListReviewsResponse) ProtoMessage() {}
 
 func (x *ListReviewsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[42]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2904,7 +2992,7 @@ func (x *ListReviewsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReviewsResponse.ProtoReflect.Descriptor instead.
 func (*ListReviewsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{42}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ListReviewsResponse) GetRounds() []*ReviewRoundView {
@@ -2939,7 +3027,7 @@ type ListLineCommentsRequest struct {
 
 func (x *ListLineCommentsRequest) Reset() {
 	*x = ListLineCommentsRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[43]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2951,7 +3039,7 @@ func (x *ListLineCommentsRequest) String() string {
 func (*ListLineCommentsRequest) ProtoMessage() {}
 
 func (x *ListLineCommentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[43]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2964,7 +3052,7 @@ func (x *ListLineCommentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListLineCommentsRequest.ProtoReflect.Descriptor instead.
 func (*ListLineCommentsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{43}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ListLineCommentsRequest) GetThreadId() string {
@@ -2999,7 +3087,7 @@ type ListLineCommentsResponse struct {
 
 func (x *ListLineCommentsResponse) Reset() {
 	*x = ListLineCommentsResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[44]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3011,7 +3099,7 @@ func (x *ListLineCommentsResponse) String() string {
 func (*ListLineCommentsResponse) ProtoMessage() {}
 
 func (x *ListLineCommentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[44]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3024,7 +3112,7 @@ func (x *ListLineCommentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListLineCommentsResponse.ProtoReflect.Descriptor instead.
 func (*ListLineCommentsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{44}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ListLineCommentsResponse) GetComments() []*SentLineComment {
@@ -3057,7 +3145,7 @@ type GetPullRequestChecksRequest struct {
 
 func (x *GetPullRequestChecksRequest) Reset() {
 	*x = GetPullRequestChecksRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[45]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3069,7 +3157,7 @@ func (x *GetPullRequestChecksRequest) String() string {
 func (*GetPullRequestChecksRequest) ProtoMessage() {}
 
 func (x *GetPullRequestChecksRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[45]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3082,7 +3170,7 @@ func (x *GetPullRequestChecksRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPullRequestChecksRequest.ProtoReflect.Descriptor instead.
 func (*GetPullRequestChecksRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{45}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *GetPullRequestChecksRequest) GetThreadId() string {
@@ -3102,7 +3190,7 @@ type GetPullRequestChecksResponse struct {
 
 func (x *GetPullRequestChecksResponse) Reset() {
 	*x = GetPullRequestChecksResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[46]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3114,7 +3202,7 @@ func (x *GetPullRequestChecksResponse) String() string {
 func (*GetPullRequestChecksResponse) ProtoMessage() {}
 
 func (x *GetPullRequestChecksResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[46]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3127,7 +3215,7 @@ func (x *GetPullRequestChecksResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPullRequestChecksResponse.ProtoReflect.Descriptor instead.
 func (*GetPullRequestChecksResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{46}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *GetPullRequestChecksResponse) GetHeadSha() string {
@@ -3375,6 +3463,10 @@ const file_ariadne_v1_threads_proto_rawDesc = "" +
 	"\x13ResumeThreadRequest\x12\x1b\n" +
 	"\tthread_id\x18\x01 \x01(\tR\bthreadId\"F\n" +
 	"\x14ResumeThreadResponse\x12.\n" +
+	"\x06thread\x18\x01 \x01(\v2\x16.ariadne.v1.ThreadViewR\x06thread\"2\n" +
+	"\x13ReopenThreadRequest\x12\x1b\n" +
+	"\tthread_id\x18\x01 \x01(\tR\bthreadId\"F\n" +
+	"\x14ReopenThreadResponse\x12.\n" +
 	"\x06thread\x18\x01 \x01(\v2\x16.ariadne.v1.ThreadViewR\x06thread\"4\n" +
 	"\x15CompleteThreadRequest\x12\x1b\n" +
 	"\tthread_id\x18\x01 \x01(\tR\bthreadId\"H\n" +
@@ -3451,9 +3543,10 @@ const file_ariadne_v1_threads_proto_rawDesc = "" +
 	"\tthread_id\x18\x01 \x01(\tR\bthreadId\"o\n" +
 	"\x1cGetPullRequestChecksResponse\x12\x19\n" +
 	"\bhead_sha\x18\x01 \x01(\tR\aheadSha\x124\n" +
-	"\x06checks\x18\x02 \x03(\v2\x1c.ariadne.v1.PullRequestCheckR\x06checks2\xe4\b\n" +
+	"\x06checks\x18\x02 \x03(\v2\x1c.ariadne.v1.PullRequestCheckR\x06checks2\xb7\t\n" +
 	"\rThreadService\x12Q\n" +
-	"\fResumeThread\x12\x1f.ariadne.v1.ResumeThreadRequest\x1a .ariadne.v1.ResumeThreadResponse\x12W\n" +
+	"\fResumeThread\x12\x1f.ariadne.v1.ResumeThreadRequest\x1a .ariadne.v1.ResumeThreadResponse\x12Q\n" +
+	"\fReopenThread\x12\x1f.ariadne.v1.ReopenThreadRequest\x1a .ariadne.v1.ReopenThreadResponse\x12W\n" +
 	"\x0eCompleteThread\x12!.ariadne.v1.CompleteThreadRequest\x1a\".ariadne.v1.CompleteThreadResponse\x12E\n" +
 	"\bEndAside\x12\x1b.ariadne.v1.EndAsideRequest\x1a\x1c.ariadne.v1.EndAsideResponse\x12W\n" +
 	"\x0eSetThreadModel\x12!.ariadne.v1.SetThreadModelRequest\x1a\".ariadne.v1.SetThreadModelResponse\x12l\n" +
@@ -3481,7 +3574,7 @@ func file_ariadne_v1_threads_proto_rawDescGZIP() []byte {
 	return file_ariadne_v1_threads_proto_rawDescData
 }
 
-var file_ariadne_v1_threads_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
+var file_ariadne_v1_threads_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
 var file_ariadne_v1_threads_proto_goTypes = []any{
 	(*TokenUsageTotals)(nil),              // 0: ariadne.v1.TokenUsageTotals
 	(*TodoProgress)(nil),                  // 1: ariadne.v1.TodoProgress
@@ -3508,35 +3601,37 @@ var file_ariadne_v1_threads_proto_goTypes = []any{
 	(*PullRequestCheck)(nil),              // 22: ariadne.v1.PullRequestCheck
 	(*ResumeThreadRequest)(nil),           // 23: ariadne.v1.ResumeThreadRequest
 	(*ResumeThreadResponse)(nil),          // 24: ariadne.v1.ResumeThreadResponse
-	(*CompleteThreadRequest)(nil),         // 25: ariadne.v1.CompleteThreadRequest
-	(*CompleteThreadResponse)(nil),        // 26: ariadne.v1.CompleteThreadResponse
-	(*EndAsideRequest)(nil),               // 27: ariadne.v1.EndAsideRequest
-	(*EndAsideResponse)(nil),              // 28: ariadne.v1.EndAsideResponse
-	(*SetThreadModelRequest)(nil),         // 29: ariadne.v1.SetThreadModelRequest
-	(*SetThreadModelResponse)(nil),        // 30: ariadne.v1.SetThreadModelResponse
-	(*RemoveThreadReferenceRequest)(nil),  // 31: ariadne.v1.RemoveThreadReferenceRequest
-	(*RemoveThreadReferenceResponse)(nil), // 32: ariadne.v1.RemoveThreadReferenceResponse
-	(*KeepThreadReferenceRequest)(nil),    // 33: ariadne.v1.KeepThreadReferenceRequest
-	(*KeepThreadReferenceResponse)(nil),   // 34: ariadne.v1.KeepThreadReferenceResponse
-	(*GetCommandOutputRequest)(nil),       // 35: ariadne.v1.GetCommandOutputRequest
-	(*GetCommandOutputResponse)(nil),      // 36: ariadne.v1.GetCommandOutputResponse
-	(*StreamCommandOutputRequest)(nil),    // 37: ariadne.v1.StreamCommandOutputRequest
-	(*StreamCommandOutputResponse)(nil),   // 38: ariadne.v1.StreamCommandOutputResponse
-	(*StopCommandRequest)(nil),            // 39: ariadne.v1.StopCommandRequest
-	(*StopCommandResponse)(nil),           // 40: ariadne.v1.StopCommandResponse
-	(*ListReviewsRequest)(nil),            // 41: ariadne.v1.ListReviewsRequest
-	(*ListReviewsResponse)(nil),           // 42: ariadne.v1.ListReviewsResponse
-	(*ListLineCommentsRequest)(nil),       // 43: ariadne.v1.ListLineCommentsRequest
-	(*ListLineCommentsResponse)(nil),      // 44: ariadne.v1.ListLineCommentsResponse
-	(*GetPullRequestChecksRequest)(nil),   // 45: ariadne.v1.GetPullRequestChecksRequest
-	(*GetPullRequestChecksResponse)(nil),  // 46: ariadne.v1.GetPullRequestChecksResponse
-	nil,                                   // 47: ariadne.v1.TokenUsageTotals.CostEntry
-	(*structpb.Struct)(nil),               // 48: google.protobuf.Struct
+	(*ReopenThreadRequest)(nil),           // 25: ariadne.v1.ReopenThreadRequest
+	(*ReopenThreadResponse)(nil),          // 26: ariadne.v1.ReopenThreadResponse
+	(*CompleteThreadRequest)(nil),         // 27: ariadne.v1.CompleteThreadRequest
+	(*CompleteThreadResponse)(nil),        // 28: ariadne.v1.CompleteThreadResponse
+	(*EndAsideRequest)(nil),               // 29: ariadne.v1.EndAsideRequest
+	(*EndAsideResponse)(nil),              // 30: ariadne.v1.EndAsideResponse
+	(*SetThreadModelRequest)(nil),         // 31: ariadne.v1.SetThreadModelRequest
+	(*SetThreadModelResponse)(nil),        // 32: ariadne.v1.SetThreadModelResponse
+	(*RemoveThreadReferenceRequest)(nil),  // 33: ariadne.v1.RemoveThreadReferenceRequest
+	(*RemoveThreadReferenceResponse)(nil), // 34: ariadne.v1.RemoveThreadReferenceResponse
+	(*KeepThreadReferenceRequest)(nil),    // 35: ariadne.v1.KeepThreadReferenceRequest
+	(*KeepThreadReferenceResponse)(nil),   // 36: ariadne.v1.KeepThreadReferenceResponse
+	(*GetCommandOutputRequest)(nil),       // 37: ariadne.v1.GetCommandOutputRequest
+	(*GetCommandOutputResponse)(nil),      // 38: ariadne.v1.GetCommandOutputResponse
+	(*StreamCommandOutputRequest)(nil),    // 39: ariadne.v1.StreamCommandOutputRequest
+	(*StreamCommandOutputResponse)(nil),   // 40: ariadne.v1.StreamCommandOutputResponse
+	(*StopCommandRequest)(nil),            // 41: ariadne.v1.StopCommandRequest
+	(*StopCommandResponse)(nil),           // 42: ariadne.v1.StopCommandResponse
+	(*ListReviewsRequest)(nil),            // 43: ariadne.v1.ListReviewsRequest
+	(*ListReviewsResponse)(nil),           // 44: ariadne.v1.ListReviewsResponse
+	(*ListLineCommentsRequest)(nil),       // 45: ariadne.v1.ListLineCommentsRequest
+	(*ListLineCommentsResponse)(nil),      // 46: ariadne.v1.ListLineCommentsResponse
+	(*GetPullRequestChecksRequest)(nil),   // 47: ariadne.v1.GetPullRequestChecksRequest
+	(*GetPullRequestChecksResponse)(nil),  // 48: ariadne.v1.GetPullRequestChecksResponse
+	nil,                                   // 49: ariadne.v1.TokenUsageTotals.CostEntry
+	(*structpb.Struct)(nil),               // 50: google.protobuf.Struct
 }
 var file_ariadne_v1_threads_proto_depIdxs = []int32{
-	47, // 0: ariadne.v1.TokenUsageTotals.cost:type_name -> ariadne.v1.TokenUsageTotals.CostEntry
+	49, // 0: ariadne.v1.TokenUsageTotals.cost:type_name -> ariadne.v1.TokenUsageTotals.CostEntry
 	6,  // 1: ariadne.v1.ThreadPullRequest.checks:type_name -> ariadne.v1.PullRequestChecksSummary
-	48, // 2: ariadne.v1.ThreadReference.settings:type_name -> google.protobuf.Struct
+	50, // 2: ariadne.v1.ThreadReference.settings:type_name -> google.protobuf.Struct
 	2,  // 3: ariadne.v1.ThreadView.last_artifacts:type_name -> ariadne.v1.ThreadArtifactRef
 	3,  // 4: ariadne.v1.ThreadView.workspace:type_name -> ariadne.v1.ThreadWorkspace
 	4,  // 5: ariadne.v1.ThreadView.merged:type_name -> ariadne.v1.ThreadBranchMerge
@@ -3554,46 +3649,49 @@ var file_ariadne_v1_threads_proto_depIdxs = []int32{
 	18, // 17: ariadne.v1.ReviewRoundView.comments:type_name -> ariadne.v1.ReviewComment
 	20, // 18: ariadne.v1.ReviewRoundView.replies:type_name -> ariadne.v1.ReviewReplyList
 	13, // 19: ariadne.v1.ResumeThreadResponse.thread:type_name -> ariadne.v1.ThreadView
-	13, // 20: ariadne.v1.CompleteThreadResponse.thread:type_name -> ariadne.v1.ThreadView
-	13, // 21: ariadne.v1.EndAsideResponse.thread:type_name -> ariadne.v1.ThreadView
-	13, // 22: ariadne.v1.SetThreadModelResponse.thread:type_name -> ariadne.v1.ThreadView
-	13, // 23: ariadne.v1.RemoveThreadReferenceResponse.thread:type_name -> ariadne.v1.ThreadView
-	13, // 24: ariadne.v1.KeepThreadReferenceResponse.thread:type_name -> ariadne.v1.ThreadView
-	15, // 25: ariadne.v1.GetCommandOutputResponse.command:type_name -> ariadne.v1.BackgroundCommandView
-	15, // 26: ariadne.v1.StreamCommandOutputResponse.command:type_name -> ariadne.v1.BackgroundCommandView
-	15, // 27: ariadne.v1.StopCommandResponse.command:type_name -> ariadne.v1.BackgroundCommandView
-	21, // 28: ariadne.v1.ListReviewsResponse.rounds:type_name -> ariadne.v1.ReviewRoundView
-	17, // 29: ariadne.v1.ListLineCommentsResponse.comments:type_name -> ariadne.v1.SentLineComment
-	22, // 30: ariadne.v1.GetPullRequestChecksResponse.checks:type_name -> ariadne.v1.PullRequestCheck
-	23, // 31: ariadne.v1.ThreadService.ResumeThread:input_type -> ariadne.v1.ResumeThreadRequest
-	25, // 32: ariadne.v1.ThreadService.CompleteThread:input_type -> ariadne.v1.CompleteThreadRequest
-	27, // 33: ariadne.v1.ThreadService.EndAside:input_type -> ariadne.v1.EndAsideRequest
-	29, // 34: ariadne.v1.ThreadService.SetThreadModel:input_type -> ariadne.v1.SetThreadModelRequest
-	31, // 35: ariadne.v1.ThreadService.RemoveThreadReference:input_type -> ariadne.v1.RemoveThreadReferenceRequest
-	33, // 36: ariadne.v1.ThreadService.KeepThreadReference:input_type -> ariadne.v1.KeepThreadReferenceRequest
-	35, // 37: ariadne.v1.ThreadService.GetCommandOutput:input_type -> ariadne.v1.GetCommandOutputRequest
-	37, // 38: ariadne.v1.ThreadService.StreamCommandOutput:input_type -> ariadne.v1.StreamCommandOutputRequest
-	39, // 39: ariadne.v1.ThreadService.StopCommand:input_type -> ariadne.v1.StopCommandRequest
-	41, // 40: ariadne.v1.ThreadService.ListReviews:input_type -> ariadne.v1.ListReviewsRequest
-	43, // 41: ariadne.v1.ThreadService.ListLineComments:input_type -> ariadne.v1.ListLineCommentsRequest
-	45, // 42: ariadne.v1.ThreadService.GetPullRequestChecks:input_type -> ariadne.v1.GetPullRequestChecksRequest
-	24, // 43: ariadne.v1.ThreadService.ResumeThread:output_type -> ariadne.v1.ResumeThreadResponse
-	26, // 44: ariadne.v1.ThreadService.CompleteThread:output_type -> ariadne.v1.CompleteThreadResponse
-	28, // 45: ariadne.v1.ThreadService.EndAside:output_type -> ariadne.v1.EndAsideResponse
-	30, // 46: ariadne.v1.ThreadService.SetThreadModel:output_type -> ariadne.v1.SetThreadModelResponse
-	32, // 47: ariadne.v1.ThreadService.RemoveThreadReference:output_type -> ariadne.v1.RemoveThreadReferenceResponse
-	34, // 48: ariadne.v1.ThreadService.KeepThreadReference:output_type -> ariadne.v1.KeepThreadReferenceResponse
-	36, // 49: ariadne.v1.ThreadService.GetCommandOutput:output_type -> ariadne.v1.GetCommandOutputResponse
-	38, // 50: ariadne.v1.ThreadService.StreamCommandOutput:output_type -> ariadne.v1.StreamCommandOutputResponse
-	40, // 51: ariadne.v1.ThreadService.StopCommand:output_type -> ariadne.v1.StopCommandResponse
-	42, // 52: ariadne.v1.ThreadService.ListReviews:output_type -> ariadne.v1.ListReviewsResponse
-	44, // 53: ariadne.v1.ThreadService.ListLineComments:output_type -> ariadne.v1.ListLineCommentsResponse
-	46, // 54: ariadne.v1.ThreadService.GetPullRequestChecks:output_type -> ariadne.v1.GetPullRequestChecksResponse
-	43, // [43:55] is the sub-list for method output_type
-	31, // [31:43] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	13, // 20: ariadne.v1.ReopenThreadResponse.thread:type_name -> ariadne.v1.ThreadView
+	13, // 21: ariadne.v1.CompleteThreadResponse.thread:type_name -> ariadne.v1.ThreadView
+	13, // 22: ariadne.v1.EndAsideResponse.thread:type_name -> ariadne.v1.ThreadView
+	13, // 23: ariadne.v1.SetThreadModelResponse.thread:type_name -> ariadne.v1.ThreadView
+	13, // 24: ariadne.v1.RemoveThreadReferenceResponse.thread:type_name -> ariadne.v1.ThreadView
+	13, // 25: ariadne.v1.KeepThreadReferenceResponse.thread:type_name -> ariadne.v1.ThreadView
+	15, // 26: ariadne.v1.GetCommandOutputResponse.command:type_name -> ariadne.v1.BackgroundCommandView
+	15, // 27: ariadne.v1.StreamCommandOutputResponse.command:type_name -> ariadne.v1.BackgroundCommandView
+	15, // 28: ariadne.v1.StopCommandResponse.command:type_name -> ariadne.v1.BackgroundCommandView
+	21, // 29: ariadne.v1.ListReviewsResponse.rounds:type_name -> ariadne.v1.ReviewRoundView
+	17, // 30: ariadne.v1.ListLineCommentsResponse.comments:type_name -> ariadne.v1.SentLineComment
+	22, // 31: ariadne.v1.GetPullRequestChecksResponse.checks:type_name -> ariadne.v1.PullRequestCheck
+	23, // 32: ariadne.v1.ThreadService.ResumeThread:input_type -> ariadne.v1.ResumeThreadRequest
+	25, // 33: ariadne.v1.ThreadService.ReopenThread:input_type -> ariadne.v1.ReopenThreadRequest
+	27, // 34: ariadne.v1.ThreadService.CompleteThread:input_type -> ariadne.v1.CompleteThreadRequest
+	29, // 35: ariadne.v1.ThreadService.EndAside:input_type -> ariadne.v1.EndAsideRequest
+	31, // 36: ariadne.v1.ThreadService.SetThreadModel:input_type -> ariadne.v1.SetThreadModelRequest
+	33, // 37: ariadne.v1.ThreadService.RemoveThreadReference:input_type -> ariadne.v1.RemoveThreadReferenceRequest
+	35, // 38: ariadne.v1.ThreadService.KeepThreadReference:input_type -> ariadne.v1.KeepThreadReferenceRequest
+	37, // 39: ariadne.v1.ThreadService.GetCommandOutput:input_type -> ariadne.v1.GetCommandOutputRequest
+	39, // 40: ariadne.v1.ThreadService.StreamCommandOutput:input_type -> ariadne.v1.StreamCommandOutputRequest
+	41, // 41: ariadne.v1.ThreadService.StopCommand:input_type -> ariadne.v1.StopCommandRequest
+	43, // 42: ariadne.v1.ThreadService.ListReviews:input_type -> ariadne.v1.ListReviewsRequest
+	45, // 43: ariadne.v1.ThreadService.ListLineComments:input_type -> ariadne.v1.ListLineCommentsRequest
+	47, // 44: ariadne.v1.ThreadService.GetPullRequestChecks:input_type -> ariadne.v1.GetPullRequestChecksRequest
+	24, // 45: ariadne.v1.ThreadService.ResumeThread:output_type -> ariadne.v1.ResumeThreadResponse
+	26, // 46: ariadne.v1.ThreadService.ReopenThread:output_type -> ariadne.v1.ReopenThreadResponse
+	28, // 47: ariadne.v1.ThreadService.CompleteThread:output_type -> ariadne.v1.CompleteThreadResponse
+	30, // 48: ariadne.v1.ThreadService.EndAside:output_type -> ariadne.v1.EndAsideResponse
+	32, // 49: ariadne.v1.ThreadService.SetThreadModel:output_type -> ariadne.v1.SetThreadModelResponse
+	34, // 50: ariadne.v1.ThreadService.RemoveThreadReference:output_type -> ariadne.v1.RemoveThreadReferenceResponse
+	36, // 51: ariadne.v1.ThreadService.KeepThreadReference:output_type -> ariadne.v1.KeepThreadReferenceResponse
+	38, // 52: ariadne.v1.ThreadService.GetCommandOutput:output_type -> ariadne.v1.GetCommandOutputResponse
+	40, // 53: ariadne.v1.ThreadService.StreamCommandOutput:output_type -> ariadne.v1.StreamCommandOutputResponse
+	42, // 54: ariadne.v1.ThreadService.StopCommand:output_type -> ariadne.v1.StopCommandResponse
+	44, // 55: ariadne.v1.ThreadService.ListReviews:output_type -> ariadne.v1.ListReviewsResponse
+	46, // 56: ariadne.v1.ThreadService.ListLineComments:output_type -> ariadne.v1.ListLineCommentsResponse
+	48, // 57: ariadne.v1.ThreadService.GetPullRequestChecks:output_type -> ariadne.v1.GetPullRequestChecksResponse
+	45, // [45:58] is the sub-list for method output_type
+	32, // [32:45] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_ariadne_v1_threads_proto_init() }
@@ -3611,21 +3709,21 @@ func file_ariadne_v1_threads_proto_init() {
 	file_ariadne_v1_threads_proto_msgTypes[18].OneofWrappers = []any{}
 	file_ariadne_v1_threads_proto_msgTypes[21].OneofWrappers = []any{}
 	file_ariadne_v1_threads_proto_msgTypes[22].OneofWrappers = []any{}
-	file_ariadne_v1_threads_proto_msgTypes[29].OneofWrappers = []any{
+	file_ariadne_v1_threads_proto_msgTypes[31].OneofWrappers = []any{
 		(*SetThreadModelRequest_Model)(nil),
 		(*SetThreadModelRequest_UseDefault)(nil),
 	}
-	file_ariadne_v1_threads_proto_msgTypes[41].OneofWrappers = []any{}
-	file_ariadne_v1_threads_proto_msgTypes[42].OneofWrappers = []any{}
 	file_ariadne_v1_threads_proto_msgTypes[43].OneofWrappers = []any{}
 	file_ariadne_v1_threads_proto_msgTypes[44].OneofWrappers = []any{}
+	file_ariadne_v1_threads_proto_msgTypes[45].OneofWrappers = []any{}
+	file_ariadne_v1_threads_proto_msgTypes[46].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ariadne_v1_threads_proto_rawDesc), len(file_ariadne_v1_threads_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   48,
+			NumMessages:   50,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

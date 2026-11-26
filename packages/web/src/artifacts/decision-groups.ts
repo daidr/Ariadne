@@ -178,3 +178,36 @@ export function areNodesOutsideViewport(
   const totalArea = Math.max(1, (maxX - minX) * (maxY - minY))
   return (overlapW * overlapH) / totalArea < 0.25
 }
+
+export interface OptionNoteLayout {
+  /** 'none' when empty; 'block' for wrapped row below the header; 'compact' for tight legacy 40px insets. */
+  mode: 'none' | 'block' | 'compact'
+  /** Maximum lines to show for the note so it never collides with child nodes below. */
+  maxLines: number
+}
+
+export const OPTION_NOTE_LINE_HEIGHT = 19
+
+/**
+ * Computes how an option card renders its optional `note` relative to child nodes inside the card.
+ * New boards reserve dedicated header inset height for wrapped multi-line notes; legacy boards with
+ * children starting at `y + 40` fall back to a compact two-line header stack so nothing overlaps.
+ */
+export function resolveOptionNoteLayout(
+  note: string | undefined,
+  cardHeight: number,
+  minChildOffset: number | null,
+): OptionNoteLayout {
+  if (!note?.trim()) return { mode: 'none', maxLines: 0 }
+  if (minChildOffset !== null && minChildOffset < 56) {
+    return { mode: 'compact', maxLines: 1 }
+  }
+  const available =
+    minChildOffset !== null
+      ? Math.max(OPTION_NOTE_LINE_HEIGHT, minChildOffset - 44)
+      : Math.max(OPTION_NOTE_LINE_HEIGHT, cardHeight - 48)
+  return {
+    mode: 'block',
+    maxLines: Math.max(1, Math.floor(available / OPTION_NOTE_LINE_HEIGHT)),
+  }
+}

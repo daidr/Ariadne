@@ -1,15 +1,36 @@
 import type { FlowDocument } from '@dou-ui/flow'
 import { describe, expect, test } from 'vitest'
-import { resolvePrototypeViewportPoint } from './prototype-bridge'
+import * as Y from 'yjs'
+import { resolveOptionNoteLayout } from './decision-groups'
 import {
+  clearPendingPrototypeTweakRollback,
+  getPendingPrototypeTweakRollbacks,
+  prunePendingPrototypeTweakRollbacksByArtifacts,
+  setPendingPrototypeTweakRollback,
+} from './feedback-pending'
+import {
+  prototypeDefinitionKey,
+  readDocPrototypeTweakValues,
+  resolvePrototypeViewportPoint,
+  rollbackDocPrototypeTweakValues,
+} from './prototype-bridge'
+import {
+  areTweakValuesEqual,
   buildSandboxedPrototypeDoc,
   countModifiedTweaks,
+  diffTweakValues,
   effectiveTweakValues,
+  estimateTweakLabelWidth,
   extractTweaksFromHtml,
   groupTweaksBySection,
+  hasTweakValuesDiff,
   isValidPrototypeSrc,
+  resolveEnumTweakControl,
+  resolvePrototypeHeaderLayout,
   sanitizeCommentElement,
 } from './prototype-tweaks'
+
+const makeEnumOptions = (labels: string[]) => labels.map((label, i) => ({ value: `v${i}`, label }))
 
 describe('prototype tweaks & sandbox builder', () => {
   test('extracts and normalizes declarative tweaks from HTML script tag', () => {
@@ -78,6 +99,15 @@ describe('prototype tweaks & sandbox builder', () => {
     const cleared = effectiveTweakValues(specs, { cta: '' })
     expect(cleared.cta).toBe('')
     expect(countModifiedTweaks(specs, cleared)).toBe(1)
+
+    expect(diffTweakValues(specs, effectiveTweakValues(specs))).toBeUndefined()
+    expect(diffTweakValues(specs, { gap: 99, mode: 'unknown', cta: '' })).toEqual({
+      gap: 24,
+      cta: '',
+    })
+    expect(hasTweakValuesDiff(specs, undefined, effectiveTweakValues(specs))).toBe(false)
+    expect(hasTweakValuesDiff(specs, { gap: 24 }, { gap: 16 })).toBe(true)
+    expect(hasTweakValuesDiff(specs, { gap: 99 }, { gap: 24 })).toBe(false)
   })
 
   test('prepends strict CSP before leading comments or external script tags and escapes script closes', () => {
@@ -182,5 +212,244 @@ describe('prototype tweaks & sandbox builder', () => {
       viewportX: 640,
       viewportY: 400,
     })
+  })
+
+  test('adapts prototype header chrome cleanly across narrow portrait and wide desktop widths', () => {
+    // Narrow 240px resized card with tweaks collapses both action labels and hides inline size.
+    expect(resolvePrototypeHeaderLayout(240, { hasTweaks: true, interacting: false })).toEqual({
+      showSize: false,
+      compactTweaks: true,
+      compactInteract: true,
+      compactModeTag: false,
+    })
+
+    // Portrait mobile card (280–328px) with tweaks hides inline size so title + buttons have room.
+    expect(resolvePrototypeHeaderLayout(280, { hasTweaks: true, interacting: false })).toEqual({
+      showSize: false,
+      compactTweaks: false,
+      compactInteract: false,
+      compactModeTag: false,
+    })
+    expect(resolvePrototypeHeaderLayout(300, { hasTweaks: true, interacting: true })).toEqual({
+      showSize: false,
+      compactTweaks: true,
+      compactInteract: false,
+      compactModeTag: true,
+    })
+
+    // Wide desktop card (480px) shows inline dimensions and full action labels in both modes.
+    expect(resolvePrototypeHeaderLayout(480, { hasTweaks: true, interacting: false })).toEqual({
+      showSize: true,
+      compactTweaks: false,
+      compactInteract: false,
+      compactModeTag: false,
+    })
+    expect(resolvePrototypeHeaderLayout(480, { hasTweaks: true, interacting: true })).toEqual({
+      showSize: true,
+      compactTweaks: false,
+      compactInteract: false,
+      compactModeTag: false,
+    })
+
+    // Cards without tweaks can show inline size earlier (>= 320px).
+    expect(resolvePrototypeHeaderLayout(330, { hasTweaks: false, interacting: false })).toEqual({
+      showSize: true,
+      compactTweaks: false,
+      compactInteract: false,
+      compactModeTag: false,
+    })
+  })
+
+  test('computes option card note layout for empty, legacy tight inset, reserved inset, and note-only cards', () => {
+    expect(resolveOptionNoteLayout(undefined, 240, 40)).toEqual({ mode: 'none', maxLines: 0 })
+    expect(resolveOptionNoteLayout('   ', 240, 40)).toEqual({ mode: 'none', maxLines: 0 })
+
+    // Legacy boards with children placed at y + 40 fall back to a compact two-line header.
+    expect(resolveOptionNoteLayout('Legacy short note', 240, 40)).toEqual({
+      mode: 'compact',
+      maxLines: 1,
+    })
+
+    // New boards reserve inset height for 1, 2, or 3 wrapped lines above child nodes.
+    expect(resolveOptionNoteLayout('One-line note', 240, 68)).toEqual({
+      mode: 'block',
+      maxLines: 1,
+    })
+    expect(resolveOptionNoteLayout('Two-line wrapped note', 260, 88)).toEqual({
+      mode: 'block',
+      maxLines: 2,
+    })
+    expect(resolveOptionNoteLayout('Three-line wrapped note', 300, 108)).toEqual({
+      mode: 'block',
+      maxLines: 3,
+    })
+
+    // Pure-note option cards without children use the card height.
+    expect(resolveOptionNoteLayout('Standalone note card', 160, null)).toEqual({
+      mode: 'block',
+      maxLines: 5,
+    })
+  })
+
+  test('picks segmented, wrapping tags, or select for enum tweaks based on count and label width', () => {
+    // Short 2–4 option labels fit comfortably inside equal-width segmented controls.
+    expect(resolveEnumTweakControl(makeEnumOptions(['浅色', '深色']))).toBe('segmented')
+    expect(resolveEnumTweakControl(makeEnumOptions(['compact', 'comfortable']))).toBe('segmented')
+    expect(resolveEnumTweakControl(makeEnumOptions(['浅色', '深色', '跟随系统']))).toBe('segmented')
+    expect(resolveEnumTweakControl(makeEnumOptions(['今日', '近 7 天', '近 30 天']))).toBe(
+      'segmented',
+    )
+    expect(resolveEnumTweakControl(makeEnumOptions(['sm', 'md', 'lg', 'xl']))).toBe('segmented')
+    expect(resolveEnumTweakControl(makeEnumOptions(['全部', '文档', '画板', '仪表盘']))).toBe(
+      'segmented',
+    )
+
+    // Longer 2–4 option labels that would clip in equal-width 288px segments switch to wrapping tags.
+    expect(
+      resolveEnumTweakControl(
+        makeEnumOptions(['侧栏顶部（推荐）', '顶栏常驻按钮', '单项目右侧 [更多]']),
+      ),
+    ).toBe('tags')
+    expect(
+      resolveEnumTweakControl(
+        makeEnumOptions(['今日（日报）', '近 7 天（周报）', '近 30 天（月报）']),
+      ),
+    ).toBe('tags')
+    expect(
+      resolveEnumTweakControl(
+        makeEnumOptions(['默认折叠（0 干扰）', '展开 AI 复盘摘要', '纯规则（无 AI）']),
+      ),
+    ).toBe('tags')
+    expect(resolveEnumTweakControl(makeEnumOptions(['关', '开', '仅在桌面端自动启用']))).toBe(
+      'tags',
+    )
+    expect(resolveEnumTweakControl(makeEnumOptions(['Comfortable', 'Compact', 'Spacious']))).toBe(
+      'tags',
+    )
+
+    // Single options, > 4 options, and ultra-long labels (> single chip width) fall back to select.
+    expect(resolveEnumTweakControl(undefined)).toBe('select')
+    expect(resolveEnumTweakControl(makeEnumOptions(['唯一选项']))).toBe('select')
+    expect(resolveEnumTweakControl(makeEnumOptions(['一', '二', '三', '四', '五']))).toBe('select')
+    expect(
+      resolveEnumTweakControl(
+        makeEnumOptions(['这是一段超过整个面板单行标签宽度的非常长描述方案', '另一项超长描述']),
+      ),
+    ).toBe('select')
+
+    // Emoji / surrogate pairs count as a single wide glyph rather than two UTF-16 code units.
+    expect(estimateTweakLabelWidth('🎨')).toBe(13.5)
+  })
+
+  test('compares sparse tweak values and safely rolls back a whiteboard Y.Doc node', () => {
+    expect(areTweakValuesEqual(undefined, undefined)).toBe(true)
+    expect(areTweakValuesEqual(undefined, {})).toBe(true)
+    expect(
+      areTweakValuesEqual({ accent: '#10b981', gap: 24 }, { gap: 24, accent: '#10b981' }),
+    ).toBe(true)
+    expect(areTweakValuesEqual({ accent: '#10b981' }, { accent: '#ef4444' })).toBe(false)
+    expect(areTweakValuesEqual({ accent: '#10b981' }, undefined)).toBe(false)
+
+    const doc = new Y.Doc()
+    const nodes = doc.getMap('nodes') as Y.Map<Y.Map<unknown>>
+    const fields = new Y.Map<unknown>()
+    fields.set('type', 'prototype')
+    fields.set('data', {
+      title: '原型',
+      html: '<!doctype html><html><body>v1</body></html>',
+      tweakValues: { accent: '#10b981', gap: 24 },
+    })
+    nodes.set('proto-1', fields)
+
+    const initialDef = prototypeDefinitionKey({
+      html: '<!doctype html><html><body>v1</body></html>',
+    })
+    expect(readDocPrototypeTweakValues(doc, 'missing')).toEqual({ exists: false })
+    expect(readDocPrototypeTweakValues(doc, 'proto-1')).toEqual({
+      exists: true,
+      tweakValues: { accent: '#10b981', gap: 24 },
+      definitionKey: initialDef,
+    })
+
+    // Diverged remote/AI value must never be overwritten.
+    expect(
+      rollbackDocPrototypeTweakValues(doc, 'proto-1', { accent: '#ef4444' }, undefined, initialDef),
+    ).toBe('diverged')
+    expect(readDocPrototypeTweakValues(doc, 'proto-1')).toEqual({
+      exists: true,
+      tweakValues: { accent: '#10b981', gap: 24 },
+      definitionKey: initialDef,
+    })
+
+    // Exact match rolls back cleanly to undefined (deleting tweakValues).
+    expect(
+      rollbackDocPrototypeTweakValues(
+        doc,
+        'proto-1',
+        { accent: '#10b981', gap: 24 },
+        undefined,
+        initialDef,
+      ),
+    ).toBe('rolled-back')
+    expect(readDocPrototypeTweakValues(doc, 'proto-1')).toEqual({
+      exists: true,
+      tweakValues: undefined,
+      definitionKey: initialDef,
+    })
+
+    // Calling again recognizes it is already reverted.
+    expect(
+      rollbackDocPrototypeTweakValues(
+        doc,
+        'proto-1',
+        { accent: '#10b981', gap: 24 },
+        undefined,
+        initialDef,
+      ),
+    ).toBe('already-reverted')
+
+    // Rolling back a reset (undefined -> previous values) restores previous tweakValues when definition matches.
+    expect(
+      rollbackDocPrototypeTweakValues(doc, 'proto-1', undefined, { accent: '#2563eb' }, initialDef),
+    ).toBe('rolled-back')
+    expect(readDocPrototypeTweakValues(doc, 'proto-1')).toEqual({
+      exists: true,
+      tweakValues: { accent: '#2563eb' },
+      definitionKey: initialDef,
+    })
+
+    // Once AI updates prototype HTML and clears tweakValues, rollback with old definitionKey is refused.
+    fields.set('data', {
+      title: '原型',
+      html: '<!doctype html><html><body>v2 baked</body></html>',
+    })
+    expect(
+      rollbackDocPrototypeTweakValues(doc, 'proto-1', undefined, { accent: '#2563eb' }, initialDef),
+    ).toBe('diverged')
+    expect(readDocPrototypeTweakValues(doc, 'proto-1').exists).toBe(true)
+    const afterAi = readDocPrototypeTweakValues(doc, 'proto-1')
+    expect(afterAi.exists && afterAi.tweakValues).toBeUndefined()
+
+    // Non-user newer artifact version prunes stale pending rollbacks without touching user-only autosaves.
+    clearPendingPrototypeTweakRollback('art_prune_test')
+    setPendingPrototypeTweakRollback('art_prune_test', {
+      nodeId: 'proto-1',
+      nextDiff: undefined,
+      prevDiff: { accent: '#2563eb' },
+      nextSavedKey: 'next',
+      prevSavedKey: 'prev',
+      needsDocRollback: true,
+      definitionKey: initialDef,
+      baseVersion: 2,
+    })
+    prunePendingPrototypeTweakRollbacksByArtifacts([
+      { id: 'art_prune_test', version: 2, updatedBy: 'agent' },
+      { id: 'art_prune_test', version: 3, updatedBy: 'user' },
+    ])
+    expect(getPendingPrototypeTweakRollbacks('art_prune_test')).toHaveLength(1)
+    prunePendingPrototypeTweakRollbacksByArtifacts([
+      { id: 'art_prune_test', version: 3, updatedBy: 'agent' },
+    ])
+    expect(getPendingPrototypeTweakRollbacks('art_prune_test')).toHaveLength(0)
   })
 })

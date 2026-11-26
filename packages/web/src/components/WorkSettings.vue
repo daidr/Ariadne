@@ -132,7 +132,7 @@ defineExpose({ save, dirty })
   justify-content: flex-end;
 }
 
-.work-rule :deep(.work-action) {
+.work-action {
   flex: 0 0 96px;
   width: 96px;
 }

@@ -51,7 +51,9 @@ export function showsHeadline(stage: ThreadStage): boolean {
  */
 export function threadLine(thread: Pick<ThreadView, 'stage' | 'lastHeadline'>): string | null {
   if (!thread.lastHeadline) return null
-  return showsHeadline(thread.stage) || thread.stage === 'done' ? thread.lastHeadline : null
+  return showsHeadline(thread.stage) || thread.stage === 'done' || thread.stage === 'idle'
+    ? thread.lastHeadline
+    : null
 }
 
 /**

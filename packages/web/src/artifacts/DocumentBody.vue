@@ -45,8 +45,9 @@ import {
   type TableCollisionBox,
 } from './document-toc'
 import DocumentToc from './DocumentToc.vue'
+import { referencedArtifactId, type ArtifactNavigationTarget } from './artifact-history'
 import { pendingDocumentBlock } from './pending-block'
-import { refDocumentBlock } from './ref-block'
+import { createRefDocumentBlock } from './ref-block'
 import type { SharedArtifact } from './shared'
 
 /**
@@ -66,6 +67,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   comment: [action: CommentAction, target: string | ArtifactCommentAnchor | null, quote?: string]
   asks: [asks: AskBlockProps[]]
+  navigate: [target: ArtifactNavigationTarget]
 }>()
 const active = defineModel<string | null>('activeComment', { default: null })
 
@@ -83,7 +85,9 @@ const blocks = [
   whiteboardBlock({ upload, commentable: true }),
   pendingDocumentBlock,
   askDocumentBlock,
-  refDocumentBlock,
+  createRefDocumentBlock({
+    onOpen: (target) => emit('navigate', target),
+  }),
 ]
 const extensions = props.shared
   ? [
@@ -484,6 +488,13 @@ function onComment(action: CommentAction) {
   emit('comment', action, commentTarget(anchor), anchor?.text)
 }
 
+function onLinkOpen(opening: { link: string; preventDefault: () => void }) {
+  const artifactId = referencedArtifactId(opening.link, props.projectId)
+  if (!artifactId) return
+  opening.preventDefault()
+  emit('navigate', { artifactId })
+}
+
 /** The commented text as it reads now, by thread; saved with an edit so threads follow it. */
 function quotes(): Record<string, string> {
   const anchors = editor.value?.getCommentAnchors() ?? {}
@@ -528,6 +539,7 @@ defineExpose({ quotes, anchored, revealComment, applyRecommendedPicks, currentAs
         @change="onEditorChange"
         @update:comments="(next: CommentThread[]) => (threads = next)"
         @comment-action="onComment"
+        @link-open="onLinkOpen"
       />
     </div>
     <DocumentToc

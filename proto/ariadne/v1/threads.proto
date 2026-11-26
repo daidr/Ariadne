@@ -8,6 +8,7 @@ import "google/protobuf/struct.proto";
 // line comments, and pull request check statuses.
 service ThreadService {
   rpc ResumeThread(ResumeThreadRequest) returns (ResumeThreadResponse);
+  rpc ReopenThread(ReopenThreadRequest) returns (ReopenThreadResponse);
   rpc CompleteThread(CompleteThreadRequest) returns (CompleteThreadResponse);
   rpc EndAside(EndAsideRequest) returns (EndAsideResponse);
   rpc SetThreadModel(SetThreadModelRequest) returns (SetThreadModelResponse);
@@ -227,6 +228,14 @@ message ResumeThreadRequest {
 }
 
 message ResumeThreadResponse {
+  ThreadView thread = 1;
+}
+
+message ReopenThreadRequest {
+  string thread_id = 1;
+}
+
+message ReopenThreadResponse {
   ThreadView thread = 1;
 }
 

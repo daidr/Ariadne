@@ -327,4 +327,11 @@ func TestDomain3ConnectServices(t *testing.T) {
 	if completed.Msg.GetThread().GetStage() != "done" {
 		t.Fatalf("expected done stage, got %s", completed.Msg.GetThread().GetStage())
 	}
+	reopened, err := threadClient.ReopenThread(t.Context(), connect.NewRequest(&ariadnev1.ReopenThreadRequest{ThreadId: "thr_b"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Msg.GetThread().GetStage() != "idle" || reopened.Msg.GetThread().GetLastReport() != "idle" {
+		t.Fatalf("expected idle stage and report after reopen, got stage=%s report=%s", reopened.Msg.GetThread().GetStage(), reopened.Msg.GetThread().GetLastReport())
+	}
 }

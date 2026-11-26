@@ -41,6 +41,19 @@ func (h *threadServiceHandler) ResumeThread(
 	}), nil
 }
 
+func (h *threadServiceHandler) ReopenThread(
+	ctx context.Context,
+	req *connect.Request[ariadnev1.ReopenThreadRequest],
+) (*connect.Response[ariadnev1.ReopenThreadResponse], error) {
+	thread, err := h.api.options.Repository.ReopenThread(ctx, req.Msg.GetThreadId(), "user")
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&ariadnev1.ReopenThreadResponse{
+		Thread: toProtoThreadView(thread),
+	}), nil
+}
+
 func (h *threadServiceHandler) CompleteThread(
 	ctx context.Context,
 	req *connect.Request[ariadnev1.CompleteThreadRequest],

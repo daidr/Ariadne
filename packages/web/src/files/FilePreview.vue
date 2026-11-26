@@ -176,13 +176,11 @@ watch(
   </DouDialog>
 </template>
 
-<style>
+<style scoped>
 .file-preview-dialog {
   --dou-dialog-padding: 0;
 }
-</style>
 
-<style scoped>
 .file-preview {
   box-sizing: border-box;
   display: flex;

@@ -12,9 +12,9 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-var reportKinds = []string{"progress", "waiting", "ready", "blocked", "failed", "done"}
+var reportKinds = []string{"progress", "idle", "waiting", "ready", "blocked", "failed", "done"}
 
-const reportGuide = "Use ready for checked changes ready for review or when the configured external delivery is complete (if delivery ends at a target branch or ticket update, report ready once those requirements are met and note any unrelated CI failures in the summary). Use done when no change review is needed, progress for intermediate updates, waiting for an outstanding external result, blocked only when a required step cannot proceed, and failed if the task fails. When the user must provide information, approval or an action before work can continue, use post_ui to ask for that specific thing."
+const reportGuide = "Use ready for checked changes ready for review or when the configured external delivery is complete (if delivery ends at a target branch or ticket update, report ready once those requirements are met and note any unrelated CI failures in the summary). Use idle when a round of research, investigation, code analysis, design proposal, or open discussion is finished and the thread should stay idle for follow-up or next steps. Use done only when the thread's task is fully resolved and ready to close with no change review or further discussion expected (for example, a finished standalone deliverable, a completed plan node whose downstream work depends on it, or when the user asks to wrap up). Use progress for intermediate updates, waiting for an outstanding external result, blocked only when a required step cannot proceed, and failed if the task fails. When the user must provide information, approval or an action before work can continue, use post_ui to ask for that specific thing."
 
 func (turn *turn) reportingTools(thread core.ThreadView) []tool {
 	if author, ok := thread.ReviewOf.(string); ok && author != "" {
@@ -33,7 +33,11 @@ func (turn *turn) reportingTools(thread core.ThreadView) []tool {
 	}
 	return []tool{specification("report", "Report the thread's result to the coordinator. "+reportGuide,
 		args{
-			"kind":     args{"type": "string", "enum": reportKinds},
+			"kind": args{
+				"type":        "string",
+				"enum":        reportKinds,
+				"description": "Use idle after finishing research, investigation, analysis, proposals, or open discussion so the thread stays idle for follow-up; use done only when the thread is fully resolved and ready to close.",
+			},
 			"summary":  field("string"),
 			"headline": args{"type": "string", "description": "Short single-line user-facing summary (60 characters or fewer, plain text)."},
 			"artifacts": args{

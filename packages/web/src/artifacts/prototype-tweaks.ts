@@ -42,6 +42,88 @@ export const PROTOTYPE_HEADER_HEIGHT = 36
 export const PROTOTYPE_DEFAULT_VIEWPORT_WIDTH = 1280
 export const PROTOTYPE_DEFAULT_VIEWPORT_HEIGHT = 800
 
+export interface PrototypeHeaderLayout {
+  /** Whether the viewport dimensions (e.g. `1280×800`) fit inline beside the title. */
+  showSize: boolean
+  /** Whether the Tweaks button collapses its text label to icon-only (+ count badge when modified). */
+  compactTweaks: boolean
+  /** Whether the Interact button collapses its text label to icon-only. */
+  compactInteract: boolean
+  /** Whether the interacting status tag uses compact wording. */
+  compactModeTag: boolean
+}
+
+/**
+ * Resolves how much chrome to display in a prototype node's 36px header bar based on its
+ * rendered card width, so title, dimensions, and action buttons never collide on narrow
+ * portrait viewports or resized cards.
+ */
+export function resolvePrototypeHeaderLayout(
+  cardWidth: number,
+  options: { hasTweaks: boolean; interacting: boolean },
+): PrototypeHeaderLayout {
+  const width = Number.isFinite(cardWidth) && cardWidth > 0 ? cardWidth : 480
+  const { hasTweaks, interacting } = options
+  const showSize = width >= (interacting ? 460 : hasTweaks ? 380 : 320)
+  const compactModeTag = interacting && width < 420
+  const compactTweaks = hasTweaks && (width < 270 || (interacting && width < 360))
+  const compactInteract = !interacting && width < (hasTweaks ? 270 : 220)
+  return { showSize, compactTweaks, compactInteract, compactModeTag }
+}
+
+export type EnumTweakControl = 'segmented' | 'tags' | 'select'
+
+const TWEAKS_SEGMENTED_INNER_WIDTH = 272
+const TWEAKS_SEGMENT_HORIZONTAL_OVERHEAD = 24
+const TWEAKS_TAG_MAX_LABEL_WIDTH = 220
+
+const WIDE_CHAR_RE =
+  /[\u1100-\u115f\u2e80-\u9fff\ua960-\ua97c\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6\p{Extended_Pictographic}]/u
+const NARROW_ASCII_RE = /^[\s.,:;'"!|()[\]{}/\\`ilItfj1-]$/
+const WIDE_ASCII_RE = /^[WMmw@%&]$/
+
+/**
+ * Estimates the rendered pixel width of an enum tweak option label at 13px medium weight
+ * (`--dou-font-size-sm`) so narrow inspector controls can pick a widget without truncating text.
+ */
+export function estimateTweakLabelWidth(label: string): number {
+  let width = 0
+  for (const ch of label) {
+    if (WIDE_CHAR_RE.test(ch)) {
+      width += 13.5
+    } else if (NARROW_ASCII_RE.test(ch)) {
+      width += 4.5
+    } else if (WIDE_ASCII_RE.test(ch)) {
+      width += 10.5
+    } else {
+      width += 8
+    }
+  }
+  return width
+}
+
+/**
+ * Chooses the best native DouUI control for an `enum` tweak inside the 288px tweaks popover:
+ * - `segmented`: 2–4 short options that fit comfortably in equal-width segments without clipping.
+ * - `tags`: 2–4 medium/long options rendered as wrapping single-select chips for one-click preview.
+ * - `select`: > 4 options, single-option lists, or ultra-long labels that exceed a single chip row.
+ */
+export function resolveEnumTweakControl(
+  options: readonly PrototypeTweakOption[] | undefined,
+): EnumTweakControl {
+  const count = options?.length ?? 0
+  if (count < 2 || count > 4) return 'select'
+  let maxWidth = 0
+  for (const opt of options!) {
+    const w = estimateTweakLabelWidth(opt.label)
+    if (w > maxWidth) maxWidth = w
+  }
+  const segmentBudget = TWEAKS_SEGMENTED_INNER_WIDTH / count - TWEAKS_SEGMENT_HORIZONTAL_OVERHEAD
+  if (maxWidth <= segmentBudget) return 'segmented'
+  if (maxWidth <= TWEAKS_TAG_MAX_LABEL_WIDTH) return 'tags'
+  return 'select'
+}
+
 const TWEAK_KEY_RE = /^[a-zA-Z0-9_-]{1,64}$/
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 const PROTOTYPE_SRC_RE = /^\/api\/files\/fil_[\w-]+$/
@@ -283,6 +365,50 @@ export function countModifiedTweaks(
     if (effective[spec.key] !== spec.default) count++
   }
   return count
+}
+
+/** Returns only tweak entries whose effective value differs from default, or undefined when none differ. */
+export function diffTweakValues(
+  specs: readonly PrototypeTweakSpec[],
+  values?: PrototypeTweakValues,
+): PrototypeTweakValues | undefined {
+  const effective = effectiveTweakValues(specs, values)
+  const diff: PrototypeTweakValues = {}
+  for (const spec of specs) {
+    const val = effective[spec.key]
+    if (val !== undefined && val !== spec.default) {
+      diff[spec.key] = val
+    }
+  }
+  return Object.keys(diff).length > 0 ? diff : undefined
+}
+
+/** Returns true when two tweak value sets differ on at least one declared spec key. */
+export function hasTweakValuesDiff(
+  specs: readonly PrototypeTweakSpec[],
+  left?: PrototypeTweakValues,
+  right?: PrototypeTweakValues,
+): boolean {
+  const a = effectiveTweakValues(specs, left)
+  const b = effectiveTweakValues(specs, right)
+  for (const spec of specs) {
+    if (a[spec.key] !== b[spec.key]) return true
+  }
+  return false
+}
+
+/** Returns true when two sparse tweak value maps hold the exact same defined key-value entries. */
+export function areTweakValuesEqual(
+  left?: PrototypeTweakValues,
+  right?: PrototypeTweakValues,
+): boolean {
+  const leftKeys = left ? Object.keys(left).filter((k) => left[k] !== undefined) : []
+  const rightKeys = right ? Object.keys(right).filter((k) => right[k] !== undefined) : []
+  if (leftKeys.length !== rightKeys.length) return false
+  for (const key of leftKeys) {
+    if (left![key] !== right![key]) return false
+  }
+  return true
 }
 
 export interface PrototypeTweakGroup {

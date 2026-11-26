@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	cjkfriendly "github.com/tats-u/goldmark-cjk-friendly/v2"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	goldhtml "github.com/yuin/goldmark/renderer/html"
@@ -33,7 +34,12 @@ type documentInline struct {
 }
 
 var editorMarkdown = goldmark.New(
-	goldmark.WithExtensions(extension.Table, extension.Strikethrough, extension.Linkify, extension.TaskList),
+	goldmark.WithExtensions(
+		extension.Table,
+		cjkfriendly.CJKFriendlyEmphasisAndStrikethrough,
+		extension.Linkify,
+		extension.TaskList,
+	),
 	// HTML remains inside the parser. Only editor blocks and marks listed below are stored.
 	goldmark.WithRendererOptions(goldhtml.WithUnsafe()),
 )

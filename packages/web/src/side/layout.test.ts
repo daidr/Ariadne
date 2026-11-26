@@ -18,6 +18,7 @@ import {
   openThreads,
   parseLayout,
   prune,
+  replace,
   split,
   threadKey,
   updateDock,
@@ -289,5 +290,35 @@ describe('side layout', () => {
     expect(focusedGroup(layout).id).toBe(first!.id)
     expect(focusedGroup(layout).active).toBe('plan')
     expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts'], ['thread:a']])
+  })
+
+  test('replaces a tab in place at the same group and slot position', () => {
+    let layout = open(defaultLayout(), 'artifact:art_1')
+    layout = open(layout, threadKey('a'))
+    layout = activate(layout, 'artifact:art_1')
+
+    layout = replace(layout, 'artifact:art_1', 'artifact:art_2')
+    expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts', 'artifact:art_2', 'thread:a']])
+    expect(focusedGroup(layout).active).toBe('artifact:art_2')
+
+    layout = replace(layout, 'artifact:art_2', 'artifact:art_1')
+    expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts', 'artifact:art_1', 'thread:a']])
+    expect(focusedGroup(layout).active).toBe('artifact:art_1')
+  })
+
+  test('activates an already-open target tab without breaking splits and ignores pinned sources', () => {
+    let layout = open(defaultLayout(), 'artifact:art_1')
+    layout = open(layout, 'artifact:art_2', { beside: 'horizontal' })
+    layout = activate(layout, 'artifact:art_1')
+
+    layout = replace(layout, 'artifact:art_1', 'artifact:art_2')
+    expect(tabs(layout)).toEqual([
+      ['plan', 'threads', 'artifacts', 'artifact:art_1'],
+      ['artifact:art_2'],
+    ])
+    expect(focusedGroup(layout).active).toBe('artifact:art_2')
+
+    const guarded = replace(defaultLayout(), 'plan', 'artifact:art_3')
+    expect(tabs(guarded)).toEqual([['plan', 'threads', 'artifacts', 'artifact:art_3']])
   })
 })

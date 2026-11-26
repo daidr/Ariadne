@@ -3,19 +3,22 @@ import type { ArtifactCommentElement } from '@ariadne/core'
 import type { NodeViewProps } from '@dou-ui/flow'
 import { CloseIcon, MousePointerClickIcon, SlidersIcon } from '@dou-ui/icons'
 import { DouButton, DouPopover, DouTag, DouText } from 'dou-ui'
-import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { t } from '../i18n'
-import { registerPrototypeInspector } from './prototype-bridge'
+import { PROTOTYPE_TWEAKS_BRIDGE_KEY, registerPrototypeInspector } from './prototype-bridge'
 import {
   PROTOTYPE_DEFAULT_VIEWPORT_HEIGHT,
   PROTOTYPE_DEFAULT_VIEWPORT_WIDTH,
   PROTOTYPE_HEADER_HEIGHT,
   buildSandboxedPrototypeDoc,
   countModifiedTweaks,
+  diffTweakValues,
   effectiveTweakValues,
   extractTweaksFromHtml,
+  hasTweakValuesDiff,
   isValidPrototypeSrc,
   normalizePrototypeTweaks,
+  resolvePrototypeHeaderLayout,
   sanitizeCommentElement,
   type PrototypeNodeData,
   type PrototypeTweakSpec,
@@ -84,19 +87,85 @@ const tweakSpecs = computed<PrototypeTweakSpec[]>(() => {
   return extractTweaksFromHtml(rawHtml.value)
 })
 
+const tweaksBridge = inject(PROTOTYPE_TWEAKS_BRIDGE_KEY, null)
+const sendingTweaks = computed(() => tweaksBridge?.sendingNodeId.value === props.node.id)
 const liveValues = ref<PrototypeTweakValues>({})
+const savedValues = computed<PrototypeTweakValues>(() =>
+  effectiveTweakValues(tweakSpecs.value, props.data.tweakValues),
+)
+
+function serializeTweakValues(
+  specs: readonly PrototypeTweakSpec[],
+  values: PrototypeTweakValues,
+): string {
+  return JSON.stringify(specs.map((spec) => [spec.key, values[spec.key] ?? spec.default]))
+}
+
+function persistPreview(values: PrototypeTweakValues) {
+  if (props.readonly || !tweaksBridge) return
+  const specs = tweakSpecs.value
+  tweaksBridge.setPreview(props.node.id, {
+    specsKey: JSON.stringify(specs),
+    savedKey: serializeTweakValues(specs, savedValues.value),
+    liveValues: { ...values },
+  })
+}
+
+let lastNodeId: string | null = null
+let lastSpecsKey: string | null = null
+let lastSavedKey: string | null = null
+let lastPreviewRevision = -1
 
 watch(
-  [tweakSpecs, () => props.data.tweakValues],
-  ([specs, saved]) => {
-    const next = effectiveTweakValues(specs, saved)
-    liveValues.value = next
-    postTweaks(next)
+  [() => props.node.id, tweakSpecs, savedValues, () => tweaksBridge?.previewRevision.value ?? 0],
+  ([nodeId, specs, saved, previewRev]) => {
+    const nextSpecsKey = JSON.stringify(specs)
+    const nextSavedKey = serializeTweakValues(specs, saved)
+    if (
+      nodeId === lastNodeId &&
+      nextSpecsKey === lastSpecsKey &&
+      nextSavedKey === lastSavedKey &&
+      previewRev === lastPreviewRevision
+    ) {
+      return
+    }
+    lastNodeId = nodeId
+    lastSpecsKey = nextSpecsKey
+    lastSavedKey = nextSavedKey
+    lastPreviewRevision = previewRev
+
+    if (!props.readonly && tweaksBridge) {
+      const cached = tweaksBridge.getPreview(nodeId)
+      if (cached && cached.specsKey === nextSpecsKey && cached.savedKey === nextSavedKey) {
+        const restored = effectiveTweakValues(specs, cached.liveValues)
+        liveValues.value = restored
+        postTweaks(restored)
+        return
+      }
+      if (cached && (specs.length > 0 || !loading.value)) {
+        tweaksBridge.clearPreview(nodeId)
+      }
+    }
+
+    liveValues.value = saved
+    postTweaks(saved)
   },
-  { immediate: true, deep: true },
+  { immediate: true },
 )
 
 const modifiedCount = computed(() => countModifiedTweaks(tweakSpecs.value, liveValues.value))
+const hasUnsentChanges = computed(() =>
+  hasTweakValuesDiff(tweakSpecs.value, liveValues.value, savedValues.value),
+)
+const canSendTweaks = computed(
+  () =>
+    !props.readonly &&
+    !!tweaksBridge &&
+    hasUnsentChanges.value &&
+    !sendingTweaks.value &&
+    !tweaksBridge.sending.value,
+)
+const tweaksSent = computed(() => modifiedCount.value > 0 && !hasUnsentChanges.value)
 
 // Rebuild srcdoc only when the source HTML changes; live tweaks update via postMessage without reload.
 const sandboxedDoc = ref('')
@@ -108,7 +177,7 @@ watch(
       return
     }
     const specs = tweakSpecs.value
-    const initial = effectiveTweakValues(specs, props.data.tweakValues)
+    const initial = effectiveTweakValues(specs, liveValues.value)
     sandboxedDoc.value = buildSandboxedPrototypeDoc(html, frameId, specs, initial)
   },
   { immediate: true },
@@ -124,34 +193,45 @@ function onIframeLoad() {
   postTweaks(liveValues.value)
 }
 
-function onTweakPreview(next: PrototypeTweakValues) {
+function onTweakChange(next: PrototypeTweakValues) {
   liveValues.value = next
+  persistPreview(next)
   postTweaks(next)
-}
-
-function onTweakCommit(next: PrototypeTweakValues) {
-  liveValues.value = next
-  postTweaks(next)
-  if (props.readonly) return
-  const diffOnly: PrototypeTweakValues = {}
-  for (const spec of tweakSpecs.value) {
-    const val = next[spec.key]
-    if (val !== undefined && val !== spec.default) {
-      diffOnly[spec.key] = val
-    }
-  }
-  props.updateData({
-    tweakValues: Object.keys(diffOnly).length > 0 ? diffOnly : undefined,
-  })
 }
 
 function onTweakReset() {
   const defaults = effectiveTweakValues(tweakSpecs.value)
   liveValues.value = defaults
+  persistPreview(defaults)
   postTweaks(defaults)
-  if (!props.readonly) {
-    props.updateData({ tweakValues: undefined })
+}
+
+async function onTweakSend() {
+  if (
+    !tweaksBridge ||
+    props.readonly ||
+    !hasUnsentChanges.value ||
+    sendingTweaks.value ||
+    tweaksBridge.sending.value
+  ) {
+    return
   }
+  const specs = tweakSpecs.value
+  const nextDiff = diffTweakValues(specs, liveValues.value)
+  const prevDiff = props.data.tweakValues ? { ...props.data.tweakValues } : undefined
+  const nextSavedKey = serializeTweakValues(specs, effectiveTweakValues(specs, nextDiff))
+  const prevSavedKey = serializeTweakValues(specs, effectiveTweakValues(specs, prevDiff))
+
+  // Keep the local preview cached at room level so rollback or node remount restores it cleanly.
+  persistPreview(liveValues.value)
+
+  await tweaksBridge.submitTweaks({
+    nodeId: props.node.id,
+    nextDiff,
+    prevDiff,
+    nextSavedKey,
+    prevSavedKey,
+  })
 }
 
 // ---- logical viewport scaling ----
@@ -264,12 +344,21 @@ function inspectPoint(
 }
 
 let unregisterInspector: (() => void) | null = null
+let resizeObserver: ResizeObserver | null = null
+const measuredWidth = ref(0)
 
 onMounted(() => {
   window.addEventListener('message', onWindowMessage)
   window.addEventListener('keydown', onWindowKeydown, true)
   window.addEventListener('pointerdown', onWindowPointerDown, true)
   unregisterInspector = registerPrototypeInspector(props.node.id, inspectPoint)
+  if (rootEl.value && typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width
+      if (typeof width === 'number' && width > 0) measuredWidth.value = width
+    })
+    resizeObserver.observe(rootEl.value)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -277,20 +366,43 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onWindowKeydown, true)
   window.removeEventListener('pointerdown', onWindowPointerDown, true)
   unregisterInspector?.()
+  resizeObserver?.disconnect()
+  resizeObserver = null
   for (const resolve of pendingInspects.values()) resolve(null)
   pendingInspects.clear()
 })
 
 const displayTitle = computed(() => props.data.title || t('artifact.prototype.defaultTitle'))
+const sizeLabel = computed(() => `${viewportWidth.value}×${viewportHeight.value}`)
+const titleTooltip = computed(() => `${displayTitle.value} (${sizeLabel.value})`)
+const cardWidth = computed(() =>
+  typeof props.node.width === 'number' && props.node.width > 0
+    ? props.node.width
+    : measuredWidth.value || 480,
+)
+const headerLayout = computed(() =>
+  resolvePrototypeHeaderLayout(cardWidth.value, {
+    hasTweaks: tweakSpecs.value.length > 0,
+    interacting: interacting.value,
+  }),
+)
 </script>
 
 <template>
   <div ref="rootEl" class="proto-node" :class="{ 'is-interacting': interacting }">
     <div class="proto-head">
       <div class="proto-title">
-        <DouText weight="medium" size="sm" truncate>{{ displayTitle }}</DouText>
-        <DouText variant="tertiary" size="sm" class="proto-size">
-          {{ viewportWidth }}×{{ viewportHeight }}
+        <DouText weight="medium" size="sm" truncate class="proto-title-text" :title="titleTooltip">
+          {{ displayTitle }}
+        </DouText>
+        <DouText
+          v-if="headerLayout.showSize"
+          variant="tertiary"
+          size="sm"
+          class="proto-size"
+          :title="sizeLabel"
+        >
+          {{ sizeLabel }}
         </DouText>
       </div>
 
@@ -303,34 +415,59 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
           :aria-label="t('artifact.prototype.tweaksTitle')"
         >
           <DouButton
-            size="sm"
+            size="xs"
+            class="proto-action-btn"
             :variant="tweaksOpen || modifiedCount > 0 ? 'soft' : 'ghost'"
             :tone="modifiedCount > 0 ? 'primary' : 'neutral'"
+            :aria-label="t('artifact.prototype.tweaksTitle')"
+            :title="t('artifact.prototype.tweaksTitle')"
             @click.stop
           >
             <template #leading><SlidersIcon /></template>
-            {{ t('artifact.prototype.tweaks') }}
-            <span v-if="modifiedCount > 0" class="proto-tweak-count">{{ modifiedCount }}</span>
+            <template v-if="!headerLayout.compactTweaks">
+              {{ t('artifact.prototype.tweaks') }}
+            </template>
+            <span
+              v-if="modifiedCount > 0"
+              class="proto-tweak-count"
+              :class="{ 'is-compact': headerLayout.compactTweaks }"
+            >
+              {{ modifiedCount }}
+            </span>
           </DouButton>
           <template #content>
             <PrototypeTweaksPanel
               :specs="tweakSpecs"
               :values="liveValues"
               :readonly="readonly"
-              @preview="onTweakPreview"
-              @commit="onTweakCommit"
+              :show-send="!!tweaksBridge"
+              :can-send="canSendTweaks"
+              :sending="sendingTweaks"
+              :sent="tweaksSent"
+              @change="onTweakChange"
               @reset="onTweakReset"
+              @send="onTweakSend"
             />
           </template>
         </DouPopover>
 
         <template v-if="interacting">
-          <DouTag size="sm" tone="primary" class="proto-mode-tag">
-            {{ t('artifact.prototype.interacting') }}
+          <DouTag
+            size="sm"
+            tone="primary"
+            class="proto-mode-tag"
+            :title="t('artifact.prototype.interacting')"
+          >
+            {{
+              headerLayout.compactModeTag
+                ? t('artifact.prototype.interactingShort')
+                : t('artifact.prototype.interacting')
+            }}
           </DouTag>
           <DouButton
-            size="sm"
+            size="xs"
             variant="ghost"
+            class="proto-action-btn"
             :aria-label="t('artifact.prototype.exitInteract')"
             :title="t('artifact.prototype.exitInteract')"
             @click.stop="exitInteract"
@@ -340,13 +477,17 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
         </template>
         <DouButton
           v-else
-          size="sm"
+          size="xs"
           variant="ghost"
+          class="proto-action-btn"
+          :aria-label="t('artifact.prototype.interact')"
           :title="t('artifact.prototype.doubleClickHint')"
           @click.stop="enterInteract"
         >
           <template #leading><MousePointerClickIcon /></template>
-          {{ t('artifact.prototype.interact') }}
+          <template v-if="!headerLayout.compactInteract">
+            {{ t('artifact.prototype.interact') }}
+          </template>
         </DouButton>
       </div>
     </div>
@@ -388,17 +529,24 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
 
 <style scoped>
 .proto-node {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  border-radius: inherit;
+  border-radius: calc(var(--dou-flow-editor-node-radius, var(--dou-radius-container)) - 1px);
   background: var(--dou-color-bg-surface);
 }
 
-.proto-node.is-interacting {
+.proto-node.is-interacting::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: inherit;
   box-shadow: inset 0 0 0 2px var(--dou-color-primary);
+  pointer-events: none;
 }
 
 .proto-head {
@@ -406,32 +554,47 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
   flex: none;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   box-sizing: border-box;
   height: 36px;
+  min-width: 0;
   padding: 0 6px 0 10px;
-  border-bottom: 1px solid var(--dou-color-border-subtle);
+  overflow: hidden;
+  border-bottom: 1px solid var(--dou-color-border);
   background: var(--dou-color-bg-muted);
 }
 
 .proto-title {
   display: flex;
-  flex: 1;
+  flex: 1 1 0;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.proto-title-text {
+  flex: 0 1 auto;
   min-width: 0;
 }
 
 .proto-size {
   flex: none;
+  white-space: nowrap;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .proto-actions {
   display: flex;
   flex: none;
+  flex-shrink: 0;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+}
+
+.proto-action-btn {
+  flex: none;
 }
 
 .proto-tweak-count {
@@ -447,6 +610,10 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
   color: var(--dou-color-primary-on);
   font-size: 11px;
   line-height: 1;
+}
+
+.proto-tweak-count.is-compact {
+  margin-left: 0;
 }
 
 .proto-mode-tag {

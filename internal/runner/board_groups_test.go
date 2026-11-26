@@ -231,3 +231,153 @@ func TestWhiteboardStandaloneImagesAndBaselineComparison(t *testing.T) {
 		t.Fatalf("expected side-by-side actual image node v-hero-image-1, got nodes=%+v", byID)
 	}
 }
+
+func TestWhiteboardOptionNoteInsetAndPureTextHeight(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	rooms := collab.NewRooms(repo, nil)
+	defer rooms.Close()
+
+	project, err := repo.CreateProject(ctx, new("Fixture"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := &turn{
+		Runner: &Runner{Repository: repo, Rooms: rooms},
+		conversation: core.ConversationView{
+			ID:        project.CoordinatorID,
+			ProjectID: project.ID,
+			Role:      "coordinator",
+		},
+	}
+
+	longMixedText := "采用三栏工作台：左侧对话列表 + 中间主内容区 + 右侧产物预览面板，支持 Responsive 自适应折叠与 Keyboard 快捷键切换。\n第二段补充说明：验证中英文混排、全角标点「——」以及多行段落底部不会出现裁切。"
+	longNote := "适合高频多任务切换场景，将标题与说明分层展示并支持自动换行，避免溢出到右侧相邻决策卡片。"
+
+	created, err := agent.createWhiteboard(ctx, args{
+		"title": "决策选项排版验证",
+		"groups": []any{
+			args{"id": "grp-1", "title": "方案对比", "pick": "one", "round": float64(1)},
+		},
+		"options": []any{
+			args{
+				"id":          "opt-plain",
+				"title":       "纯文字方案",
+				"group":       "grp-1",
+				"recommended": true,
+				"text":        longMixedText,
+			},
+			args{
+				"id":    "opt-with-note",
+				"title": "带长说明方案",
+				"group": "grp-1",
+				"note":  longNote,
+				"text":  longMixedText,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("createWhiteboard failed: %v", err)
+	}
+	var createReply args
+	if err := json.Unmarshal([]byte(created), &createReply); err != nil {
+		t.Fatal(err)
+	}
+	artifactID := text(createReply, "artifactId")
+	artifact, err := repo.GetArtifact(ctx, artifactID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var board whiteboard
+	if err := json.Unmarshal([]byte(artifact.Content), &board); err != nil {
+		t.Fatal(err)
+	}
+	byID := boardItems(board.Nodes)
+
+	optPlain := byID["opt-plain"]
+	textPlain := byID["opt-plain-text"]
+	optWithNote := byID["opt-with-note"]
+	textWithNote := byID["opt-with-note-text"]
+	if optPlain == nil || textPlain == nil || optWithNote == nil || textWithNote == nil {
+		t.Fatalf("expected option and text child nodes to exist")
+	}
+
+	// Without note, child starts at y + 40.
+	if got := asNumber(textPlain["y"]) - asNumber(optPlain["y"]); got != 40 {
+		t.Fatalf("expected plain option child inset 40, got %.1f", got)
+	}
+	// With multi-line note, child starts well below 40 (at least 88 for a 2+ line note).
+	noteInset := asNumber(textWithNote["y"]) - asNumber(optWithNote["y"])
+	if noteInset < 88 {
+		t.Fatalf("expected option with multi-line note to reserve >= 88px header inset, got %.1f", noteInset)
+	}
+	// Text node height must use 24px line height + padding cushion and fit inside its option frame.
+	wantTextH := boardTextNodeHeight(longMixedText, asNumber(textPlain["width"]))
+	if got := asNumber(textPlain["height"]); got != wantTextH || got < 160 {
+		t.Fatalf("expected generous pure-text height %.1f (>=160), got %.1f", wantTextH, got)
+	}
+	if asNumber(textPlain["y"])+asNumber(textPlain["height"])+16 > asNumber(optPlain["y"])+asNumber(optPlain["height"]) {
+		t.Fatalf("expected plain option card height (%.1f) to leave bottom padding below text child", asNumber(optPlain["height"]))
+	}
+	if asNumber(textWithNote["y"])+asNumber(textWithNote["height"])+16 > asNumber(optWithNote["y"])+asNumber(optWithNote["height"]) {
+		t.Fatalf("expected noted option card height (%.1f) to leave bottom padding below text child", asNumber(optWithNote["height"]))
+	}
+	// Layout problem checker should report zero issues.
+	if problems := board.problems(); len(problems) > 0 {
+		t.Fatalf("expected zero whiteboard layout problems, got: %v", problems)
+	}
+
+	// Updating without passing note preserves existing note inset; clearing note resets inset to 40.
+	if _, err := agent.updateWhiteboard(ctx, args{
+		"artifactId": artifactID,
+		"reason":     "update text while keeping existing note",
+		"options": []any{
+			args{"id": "opt-with-note", "title": "带长说明方案", "group": "grp-1", "text": "更新后的正文"},
+		},
+	}); err != nil {
+		t.Fatalf("updateWhiteboard preserve note failed: %v", err)
+	}
+	updatedArt, err := repo.GetArtifact(ctx, artifactID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updatedBoard whiteboard
+	if err := json.Unmarshal([]byte(updatedArt.Content), &updatedBoard); err != nil {
+		t.Fatal(err)
+	}
+	uByID := boardItems(updatedBoard.Nodes)
+	if got := asNumber(uByID["opt-with-note-text"]["y"]) - asNumber(uByID["opt-with-note"]["y"]); got != noteInset {
+		t.Fatalf("expected preserved note inset %.1f, got %.1f", noteInset, got)
+	}
+
+	if _, err := agent.updateWhiteboard(ctx, args{
+		"artifactId": artifactID,
+		"reason":     "clear note",
+		"options": []any{
+			args{"id": "opt-with-note", "title": "带长说明方案", "group": "grp-1", "note": "", "text": "更新后的正文"},
+		},
+	}); err != nil {
+		t.Fatalf("updateWhiteboard clear note failed: %v", err)
+	}
+	clearedArt, err := repo.GetArtifact(ctx, artifactID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var clearedBoard whiteboard
+	if err := json.Unmarshal([]byte(clearedArt.Content), &clearedBoard); err != nil {
+		t.Fatal(err)
+	}
+	cByID := boardItems(clearedBoard.Nodes)
+	if got := asNumber(cByID["opt-with-note-text"]["y"]) - asNumber(cByID["opt-with-note"]["y"]); got != 40 {
+		t.Fatalf("expected cleared note inset 40, got %.1f", got)
+	}
+	if _, exists := objectField(cByID["opt-with-note"], "data")["note"]; exists {
+		t.Fatalf("expected empty note to be deleted from option data")
+	}
+}

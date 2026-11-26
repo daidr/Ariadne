@@ -30,12 +30,15 @@ export const prototypeNode = defineNodeType<PrototypeNodeData>({
     const mutedColor = draw.color('var(--dou-color-text-tertiary)')
     const bgSubtle = draw.color('var(--dou-color-bg-muted)')
 
+    const showSize = draw.width >= 300
+    const titleWidth = showSize ? Math.max(0, draw.width - 96) : Math.max(0, draw.width - 20)
+
     return (
       drawCard(draw, []) +
       `<line x1="0" y1="${headH}" x2="${draw.width}" y2="${headH}" stroke="${borderColor}" stroke-width="1"/>` +
       draw.text(
         title,
-        { x: 10, y: 0, width: Math.max(0, draw.width - 90), height: headH },
+        { x: 10, y: 0, width: titleWidth, height: headH },
         {
           size: Number.parseFloat(titleStyle.fontSize) || 12,
           weight: 600,
@@ -45,19 +48,21 @@ export const prototypeNode = defineNodeType<PrototypeNodeData>({
           lineHeight: headH,
         },
       ) +
-      draw.text(
-        `${vw}×${vh}`,
-        { x: Math.max(10, draw.width - 80), y: 0, width: 70, height: headH },
-        {
-          size: 11,
-          weight: 400,
-          color: mutedColor,
-          align: 'end',
-          valign: 'middle',
-          nowrap: true,
-          lineHeight: headH,
-        },
-      ) +
+      (showSize
+        ? draw.text(
+            `${vw}×${vh}`,
+            { x: Math.max(10, draw.width - 80), y: 0, width: 70, height: headH },
+            {
+              size: 11,
+              weight: 400,
+              color: mutedColor,
+              align: 'end',
+              valign: 'middle',
+              nowrap: true,
+              lineHeight: headH,
+            },
+          )
+        : '') +
       `<rect x="1" y="${bodyY + 1}" width="${Math.max(0, draw.width - 2)}" height="${Math.max(0, bodyH - 2)}" fill="${bgSubtle}"/>` +
       draw.text(
         'HTML Prototype',

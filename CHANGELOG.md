@@ -1,5 +1,23 @@
 # 更新日志
 
+## 0.1.0-alpha.24 (2026-11-26)
+
+- chore(web): 升级 DouUI 至 0.1.0-alpha.29 并修复 MCP 工具行分段控件收缩问题 (#263)
+- fix(artifacts): 原型参数面板长枚举选项改用可折行单选标签组避免截断 (#261)
+- fix(collab): support CJK-friendly emphasis and strikethrough in document Markdown (#257)
+- fix(artifacts): 修复原型参数发送中切换产物失败后残留脏参数与丢失重试状态 (#262)
+- feat(artifacts,i18n): 原型参数调整改为默认本地预览并支持手动发送 (#259)
+- feat(web,i18n): 产物视图点击引用产物改为就地切换并支持 Header 前进后退 (#260)
+- fix(artifacts,runner): 修复画板原型节点与决策选项卡片的重叠和溢出问题 (#258)
+- chore(web): 升级 DouUI 至 0.1.0-alpha.28 并清理浮层与选择器 scoped 样式兼容 (#256)
+- refactor(runner): avoid duplicating thread cards and inline thread links in prompts (#255)
+- feat: 重设计自动重启空闲等待逻辑并修复讨论串排空阻塞与并发边界 (#254)
+- feat(web,i18n): 文档支持左侧目录及宽表左滚碰撞自动收起 (#249)
+- feat(notifications,plugins,web): 实现服务端离线通知三通道与通知设置页 (#252)
+- fix(artifacts): 隐藏已提交且无变更的文档内联回答提交栏 (#250)
+- feat(core,server,web): 支持跨项目“需我关注”聚合队列与 ⌘K 跨项目搜索 (#251)
+- Merge pull request #247 from daidr/release/alpha
+
 ## 0.1.0-alpha.23 (2026-11-25)
 
 - Merge pull request #248 from daidr/ariadne/5ef7c6071e43

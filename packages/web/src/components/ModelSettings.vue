@@ -1012,13 +1012,12 @@ async function saveModels(): Promise<boolean> {
                             <DouText size="sm" weight="medium" variant="secondary">
                               {{ t('settings.price') }}
                             </DouText>
-                            <div class="settings-currency">
-                              <DouSelect
-                                v-model="model.currency"
-                                :options="currencyOptions"
-                                :aria-label="t('settings.currency')"
-                              />
-                            </div>
+                            <DouSelect
+                              v-model="model.currency"
+                              class="settings-currency"
+                              :options="currencyOptions"
+                              :aria-label="t('settings.currency')"
+                            />
                           </div>
                           <div class="settings-model-grid">
                             <DouFormItem :label="t('usage.input')">
@@ -1222,8 +1221,7 @@ async function saveModels(): Promise<boolean> {
   </DouDialog>
 </template>
 
-<style>
-/* The dialog panel teleports outside this component, so safe-area padding stays unscoped. */
+<style scoped>
 .settings-dialog-fullscreen {
   padding-top: var(--ariadne-safe-top);
   padding-right: var(--ariadne-safe-right);
@@ -1234,9 +1232,7 @@ async function saveModels(): Promise<boolean> {
 .settings-dialog-narrow {
   --dou-dialog-padding: 16px;
 }
-</style>
 
-<style scoped>
 .settings-tab-label {
   display: inline-flex;
   align-items: center;

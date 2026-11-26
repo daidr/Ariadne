@@ -380,8 +380,8 @@ func prototypeCardSize(viewportWidth, viewportHeight int, targetWidth float64) (
 		bodyH := min(max(math.Round(w*vh/vw), 220.0), 420.0)
 		return w, bodyH + prototypeHeaderHeight
 	}
-	w := 280.0
-	bodyH := min(max(math.Round(w*vh/vw), 320.0), 560.0)
+	w := 300.0
+	bodyH := min(max(math.Round(w*vh/vw), 320.0), 650.0)
 	return w, bodyH + prototypeHeaderHeight
 }
 

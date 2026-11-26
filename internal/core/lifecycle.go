@@ -270,6 +270,10 @@ func threadEvent(w *projectionWriter, e eventstore.Event, d object) {
 			aside_until = NULL, aside_reason = NULL, aside_by = NULL, aside_due = 0, changed_seq = ?2 WHERE id = ?3`, e.At, e.Seq, id)
 	case "thread.resumed":
 		w.run("UPDATE threads SET stopped_reason = NULL, stopped_by = NULL, stopped_at = NULL, updated_at = ?, changed_seq = ? WHERE id = ?", e.At, e.Seq, id)
+	case "thread.reopened":
+		w.run(`UPDATE threads SET started = 1, last_report = 'idle', last_headline = NULL, reported_at = ?1, updated_at = ?1,
+			user_at = CASE WHEN ?4 = 'user' THEN ?1 ELSE user_at END, check_failures = 0,
+			aside_until = NULL, aside_reason = NULL, aside_by = NULL, aside_due = 0, changed_seq = ?2 WHERE id = ?3`, e.At, e.Seq, id, d.str("by"))
 	}
 }
 
@@ -332,7 +336,7 @@ func conversationEvent(w *projectionWriter, e eventstore.Event, d object) {
 		w.run("INSERT INTO conversations (id, project_id, role) VALUES (?, ?, 'coordinator')", d["coordinatorId"], e.ProjectID)
 	case "thread.created":
 		w.run("INSERT INTO conversations (id, project_id, role) VALUES (?, ?, 'thread')", d["threadId"], e.ProjectID)
-	case "thread.completed":
+	case "thread.completed", "thread.reopened":
 		w.run("UPDATE conversations SET pending_seq = 0, pending_since = 0, last_outcome = NULL, last_error = NULL WHERE id = ?", d["threadId"])
 	case "turn.started":
 		w.run("UPDATE conversations SET turn_id = ?1, turn_started_at = ?2, last_turn_at = ?2, turn_started_seq = ?3, model = ?4, activity = NULL, fallback = 0 WHERE id = ?5", d["turnId"], e.At, e.Seq, d["model"], id)

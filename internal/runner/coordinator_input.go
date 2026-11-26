@@ -70,7 +70,7 @@ func (turn *turn) trackCoordinatorInput(entries []transcript.Entry) {
 					reports = append(reports, text(note, "threadId"))
 				}
 			case "instructions-changed", "thread-stopped-by-user", "thread-auto-started",
-				"thread-reviewed", "thread-resumed", "user-reacted", "artifact-edited":
+				"thread-reviewed", "thread-resumed", "thread-reopened", "user-reacted", "artifact-edited":
 				// These notes provide context and do not wake the coordinator.
 			default:
 				independent = true

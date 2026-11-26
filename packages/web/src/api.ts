@@ -859,6 +859,10 @@ export const api = {
     const response = await threadClient.resumeThread({ threadId })
     return { thread: fromProtoThreadView(requireField(response.thread, 'thread')) }
   },
+  reopenThread: async (threadId: string): Promise<{ thread: ThreadView }> => {
+    const response = await threadClient.reopenThread({ threadId })
+    return { thread: fromProtoThreadView(requireField(response.thread, 'thread')) }
+  },
   removeThreadReference: async (
     threadId: string,
     referenceId: string,
