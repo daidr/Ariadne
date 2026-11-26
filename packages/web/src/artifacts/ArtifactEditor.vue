@@ -8,8 +8,10 @@ import type {
   DocumentAskAnswerBaseline,
 } from '@ariadne/core'
 import type * as Y from 'yjs'
-import { DouButton, DouInput, DouPopover, DouText, type CommentAction } from 'dou-ui'
+import { DouButton, DouInput, DouPopover, DouText, DouTooltip, type CommentAction } from 'dou-ui'
 import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
@@ -35,8 +37,15 @@ import {
 import { defineAsyncView } from '../components/async-view'
 import { api, ApiError } from '../api'
 import { t } from '../i18n'
-import { report, state } from '../store'
+import {
+  artifactNavigation,
+  navigateArtifactInPlace,
+  report,
+  state,
+  stepArtifactNavigation,
+} from '../store'
 import ViewActions from '../full/ViewActions.vue'
+import type { ArtifactNavigationTarget } from './artifact-history'
 import ArtifactHistory from './ArtifactHistory.vue'
 import CommentList from './CommentList.vue'
 import type { DecisionGroupSummary } from './decision-groups'
@@ -96,6 +105,44 @@ const switchingVersion = ref(false)
 const renaming = ref(false)
 const title = ref('')
 const titleInput = ref<InstanceType<typeof DouInput> | null>(null)
+
+const artifactSummary = computed(() => state.artifacts.find((a) => a.id === props.id) ?? null)
+const displayKind = computed(() => artifact.value?.kind ?? artifactSummary.value?.kind ?? null)
+const displayTitle = computed(() => artifact.value?.title ?? artifactSummary.value?.title ?? '')
+
+const nav = computed(() => artifactNavigation(props.place, props.id))
+const canBack = computed(() => Boolean(nav.value.back))
+const canForward = computed(() => Boolean(nav.value.forward))
+const showNav = computed(() => canBack.value || canForward.value)
+const titleById = (id: string | undefined) =>
+  id ? (state.artifacts.find((a) => a.id === id)?.title ?? '') : ''
+const backLabel = computed(() => {
+  const targetTitle = titleById(nav.value.back?.id)
+  return targetTitle ? t('artifact.nav.backTo', { title: targetTitle }) : t('artifact.nav.back')
+})
+const forwardLabel = computed(() => {
+  const targetTitle = titleById(nav.value.forward?.id)
+  return targetTitle
+    ? t('artifact.nav.forwardTo', { title: targetTitle })
+    : t('artifact.nav.forward')
+})
+
+function goBack() {
+  stepArtifactNavigation(props.place, props.id, -1)
+}
+
+function goForward() {
+  stepArtifactNavigation(props.place, props.id, 1)
+}
+
+function onNavigateArtifact(target: ArtifactNavigationTarget) {
+  navigateArtifactInPlace({
+    place: props.place,
+    fromId: props.id,
+    toId: target.artifactId,
+    focusNodeId: target.focusNodeId,
+  })
+}
 
 /** The newest version is edited together: changes go out as they are made. */
 const viewingOld = computed(() => !!artifact.value && artifact.value.version !== latest.value)
@@ -279,9 +326,14 @@ function startSentRoundCountdown() {
 
 watch(
   () => props.id,
-  () => {
+  (_id, prevId) => {
+    if (prevId !== undefined) leave()
     renaming.value = false
     menu.value = null
+    activeComment.value = null
+    comments.value = []
+    versions.value = []
+    latest.value = 0
     artifact.value = null
     decisionSummary.value = null
     documentAsks.value = []
@@ -295,11 +347,17 @@ watch(
 // Keep the live view in sync while the user is editing.
 watch(
   () => {
-    const summary = state.artifacts.find((a) => a.id === props.id)
-    return summary ? { version: summary.version, updatedBy: summary.updatedBy } : null
+    const item = state.artifacts.find((a) => a.id === props.id)
+    return item ? { id: props.id, version: item.version, updatedBy: item.updatedBy } : null
   },
   (next) => {
-    if (next && next.version !== latest.value && !viewingOld.value && !switchingVersion.value) {
+    if (
+      next &&
+      artifact.value?.id === next.id &&
+      next.version !== latest.value &&
+      !viewingOld.value &&
+      !switchingVersion.value
+    ) {
       if (next.updatedBy !== 'user') clearSentRound()
       void load()
     }
@@ -307,13 +365,17 @@ watch(
 )
 // Someone commented (an agent answering): take the comments in, leaving edits open.
 watch(
-  () => state.artifacts.find((a) => a.id === props.id)?.commentedAt,
-  async (at, before) => {
-    if (!at || at === before) return
+  () => ({
+    id: props.id,
+    at: state.artifacts.find((a) => a.id === props.id)?.commentedAt,
+  }),
+  async (next, prev) => {
+    if (!next.at || next.id !== prev?.id || next.at === prev?.at) return
     try {
-      comments.value = (await api.getArtifact(props.id, { versions: false })).comments
+      const detail = await api.getArtifact(next.id, { versions: false })
+      if (props.id === next.id) comments.value = detail.comments
     } catch (error) {
-      report(error)
+      if (props.id === next.id) report(error)
     }
   },
 )
@@ -961,8 +1023,34 @@ async function rename() {
 
 <template>
   <div class="artifact" :class="`is-${place}`">
-    <div class="artifact-header">
-      <component :is="kindIcon[artifact.kind]" v-if="artifact" class="artifact-kind" />
+    <div class="artifact-header" :class="{ 'has-nav': showNav }">
+      <div v-if="showNav" class="artifact-nav" role="group" :aria-label="t('artifact.nav.group')">
+        <DouTooltip :content="backLabel" placement="bottom" :disabled="!canBack">
+          <DouButton
+            size="sm"
+            variant="ghost"
+            :aria-label="backLabel"
+            :disabled="!canBack"
+            data-artifact-nav="back"
+            @click="goBack"
+          >
+            <ArrowLeftIcon />
+          </DouButton>
+        </DouTooltip>
+        <DouTooltip :content="forwardLabel" placement="bottom" :disabled="!canForward">
+          <DouButton
+            size="sm"
+            variant="ghost"
+            :aria-label="forwardLabel"
+            :disabled="!canForward"
+            data-artifact-nav="forward"
+            @click="goForward"
+          >
+            <ArrowRightIcon />
+          </DouButton>
+        </DouTooltip>
+      </div>
+      <component :is="kindIcon[displayKind]" v-if="displayKind" class="artifact-kind" />
       <form v-if="renaming" class="artifact-title" @submit.prevent="rename">
         <DouInput
           ref="titleInput"
@@ -982,7 +1070,7 @@ async function rename() {
         </DouButton>
       </form>
       <div v-else class="artifact-title">
-        <DouText weight="medium" truncate>{{ artifact?.title }}</DouText>
+        <DouText weight="medium" truncate>{{ displayTitle }}</DouText>
         <DouButton
           v-if="artifact && !viewingOld"
           size="sm"
@@ -1112,6 +1200,7 @@ async function rename() {
         :label="artifact.title"
         @decision-summary="onDecisionSummary"
         @asks="onDocumentAsks"
+        @navigate="onNavigateArtifact"
       />
     </div>
     <div v-if="feedbackBarState" class="artifact-feedback-bar" role="status" aria-live="polite">
@@ -1214,6 +1303,17 @@ async function rename() {
   gap: 8px;
   padding: 4px 8px 4px 16px;
   border-bottom: 1px solid var(--dou-color-border);
+}
+
+.artifact-header.has-nav {
+  padding-left: 8px;
+}
+
+.artifact-nav {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
 }
 
 .artifact-kind {

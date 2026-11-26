@@ -47,6 +47,17 @@ import {
 } from './api'
 import { t, tm } from './i18n'
 import { modelLabels } from './model-label'
+import { clearAllArtifactFocus, requestArtifactFocus } from './artifacts/artifact-focus'
+import {
+  artifactHistoryNeighbors,
+  parseArtifactHistoryStack,
+  pruneArtifactHistory,
+  pushArtifactHistory,
+  stepArtifactHistoryStack,
+  syncArtifactHistoryCursor,
+  type ArtifactHistoryNeighbors,
+  type ArtifactHistoryStack,
+} from './artifacts/artifact-history'
 import { clearBoardThumbnails } from './artifacts/board-thumbnail'
 import { clearLinkCaches } from './markdown/link-summaries'
 import {
@@ -525,6 +536,7 @@ function validateWorkspace(
 ) {
   setSide(side.prune(state.side, (key) => stillThere(key, threads, artifacts)))
   if (state.full && !fullStillThere(state.full.view, threads, artifacts)) setFull(null)
+  if (artifacts) pruneArtifactHistories((id) => artifacts.has(id))
   if (
     state.main.kind === 'trace' &&
     state.main.conversationId !== detail.project.coordinatorId &&
@@ -772,11 +784,84 @@ function settleSide() {
   if (side.activeOf(side.focusedGroup(state.side)) !== front) state.side = side.defaultLayout(front)
 }
 
+/** Per-panel artifact Back/Forward history stacks: one for full-screen, one per open side tab. */
+const fullArtifactHistory = ref<ArtifactHistoryStack | undefined>(undefined)
+const sideArtifactHistories = reactive<Record<string, ArtifactHistoryStack>>({})
+
+function clearArtifactHistories() {
+  fullArtifactHistory.value = undefined
+  for (const id of Object.keys(sideArtifactHistories)) delete sideArtifactHistories[id]
+}
+
+function syncSideArtifactHistories(layout: SideLayout) {
+  const keys = new Set(side.groupsOf(layout.root).flatMap(side.tabsOf) as string[])
+  for (const id of Object.keys(sideArtifactHistories)) {
+    if (!keys.has(side.artifactKey(id))) delete sideArtifactHistories[id]
+  }
+}
+
+function captureArtifactHistory(): WorkspaceSnapshot['artifactHistory'] {
+  const full = fullArtifactHistory.value
+  const sideEntries = Object.entries(sideArtifactHistories)
+  if (!full && !sideEntries.length) return undefined
+  return {
+    ...(full ? { full } : {}),
+    ...(sideEntries.length ? { side: Object.fromEntries(sideEntries) } : {}),
+  }
+}
+
+function restoreSideArtifactHistories(
+  layout: SideLayout,
+  saved?: Record<string, ArtifactHistoryStack>,
+) {
+  const previous = Object.entries(sideArtifactHistories)
+  for (const id of Object.keys(sideArtifactHistories)) delete sideArtifactHistories[id]
+
+  const openIds = new Set<string>()
+  for (const key of side.groupsOf(layout.root).flatMap(side.tabsOf)) {
+    const view = side.viewOf(key)
+    if (view?.kind === 'artifact') openIds.add(view.id)
+  }
+
+  if (saved && typeof saved === 'object') {
+    for (const [id, raw] of Object.entries(saved)) {
+      if (!openIds.has(id)) continue
+      const parsed = parseArtifactHistoryStack(raw, id)
+      if (parsed) sideArtifactHistories[id] = parsed
+    }
+  }
+
+  for (const [oldId, stack] of previous) {
+    if (openIds.has(oldId)) {
+      if (!sideArtifactHistories[oldId]) sideArtifactHistories[oldId] = stack
+      continue
+    }
+    for (const neighborId of openIds) {
+      if (sideArtifactHistories[neighborId]) continue
+      const aligned = syncArtifactHistoryCursor(stack, neighborId)
+      if (aligned) {
+        sideArtifactHistories[neighborId] = aligned
+        break
+      }
+    }
+  }
+}
+
+function pruneArtifactHistories(keep: (id: string) => boolean) {
+  fullArtifactHistory.value = pruneArtifactHistory(fullArtifactHistory.value, keep)
+  for (const [id, stack] of Object.entries(sideArtifactHistories)) {
+    const pruned = pruneArtifactHistory(stack, keep)
+    if (pruned) sideArtifactHistories[id] = pruned
+    else delete sideArtifactHistories[id]
+  }
+}
+
 /** Show another project's right side: its loaded thread conversations start fresh. */
 function showSide(layout: SideLayout) {
   state.side = layout
   state.paneParams = {}
   state.full = null
+  clearArtifactHistories()
   state.threads = {}
 }
 
@@ -788,6 +873,7 @@ export function setSide(next: SideLayout) {
   syncThreads()
   const keys = new Set(side.groupsOf(next.root).flatMap(side.tabsOf) as string[])
   for (const key of Object.keys(state.paneParams)) if (!keys.has(key)) delete state.paneParams[key]
+  syncSideArtifactHistories(next)
   const projectId = state.currentId
   if (!projectId) return
   try {
@@ -819,8 +905,12 @@ function syncThreads() {
 }
 
 /** Show a view full screen, or none; the thread beside it loads. */
-function setFull(full: FullView | null) {
+function setFull(full: FullView | null, history?: ArtifactHistoryStack) {
   state.full = full
+  fullArtifactHistory.value =
+    full?.view.kind === 'artifact' && history && history.entries[history.index]?.id === full.view.id
+      ? history
+      : undefined
   syncThreads()
 }
 
@@ -926,7 +1016,7 @@ export async function openThread(threadId: string, options: OpenOptions = {}) {
   if (!full) return openPane(side.threadKey(threadId), options)
   if (full.threadId === threadId) return
   const loading = !state.threads[threadId]
-  setFull({ ...full, threadId })
+  setFull({ ...full, threadId }, fullArtifactHistory.value)
   if (loading) await openedThreads
 }
 
@@ -1235,6 +1325,7 @@ export function captureWorkspace(): { location: WorkspaceLocation; snapshot: Wor
       full: state.full,
       planWide: state.planWide,
       mainTrail,
+      ...(captureArtifactHistory() ? { artifactHistory: captureArtifactHistory() } : {}),
     },
   }
 }
@@ -1274,6 +1365,13 @@ export async function restoreWorkspace(location: WorkspaceLocation, saved?: Work
       : modal
         ? { view: modal, threadId: location.from, fromSide: false }
         : null
+  const savedHistory = useProject && stored && saved ? saved.artifactHistory : undefined
+  fullArtifactHistory.value =
+    state.full?.view.kind === 'artifact'
+      ? (parseArtifactHistoryStack(savedHistory?.full, state.full.view.id) ??
+        syncArtifactHistoryCursor(fullArtifactHistory.value, state.full.view.id))
+      : undefined
+  restoreSideArtifactHistories(state.side, savedHistory?.side)
   state.starting = location.starting && (useProject || !location.projectId)
   state.workspaceLevel = state.starting ? 'coordinator' : useProject ? location.level : 'projects'
   state.main = useProject && projectId ? location.main : { kind: 'conversation' }
@@ -1326,11 +1424,134 @@ export async function openView(view: OpenedView, options: OpenViewOptions = {}) 
   if (from || options.full) {
     // One taken from the right side goes back there rather than being lost.
     const before = state.full
-    if (before?.fromSide && !sameOpened(before.view, view)) await openInPane(before.view)
-    setFull({ view, threadId: from, fromSide: false })
+    const nextHistory =
+      before?.view.kind === 'artifact' &&
+      view.kind === 'artifact' &&
+      !before.fromSide &&
+      before.threadId === from
+        ? before.view.id === view.id
+          ? fullArtifactHistory.value
+          : pushArtifactHistory(fullArtifactHistory.value, before.view.id, view.id)
+        : undefined
+    if (before?.fromSide && !sameOpened(before.view, view)) {
+      const carried = before.view.kind === 'artifact' ? fullArtifactHistory.value : undefined
+      await openInPane(before.view)
+      if (carried && before.view.kind === 'artifact') {
+        sideArtifactHistories[before.view.id] = carried
+      }
+    }
+    setFull({ view, threadId: from, fromSide: false }, nextHistory)
     return
   }
   await openInPane(view)
+}
+
+/** Immediate Back/Forward targets for an artifact panel in `place` showing `id`. */
+export function artifactNavigation(place: 'side' | 'full', id: string): ArtifactHistoryNeighbors {
+  const stack = place === 'full' ? fullArtifactHistory.value : sideArtifactHistories[id]
+  return artifactHistoryNeighbors(stack, id)
+}
+
+/**
+ * Switch the current artifact panel in place to `toId` and record the jump in that panel's
+ * Back/Forward history stack so referenced artifacts replace the active document instead of
+ * opening behind it in a side tab.
+ */
+export function navigateArtifactInPlace(options: {
+  place: 'side' | 'full'
+  fromId: string
+  toId: string
+  focusNodeId?: string
+}) {
+  const { place, fromId, toId, focusNodeId } = options
+  if (!toId) return
+  if (focusNodeId) requestArtifactFocus(toId, focusNodeId)
+  else clearAllArtifactFocus()
+  if (fromId === toId) return
+
+  if (place === 'full') {
+    const current = state.full
+    if (current && (current.view.kind !== 'artifact' || current.view.id !== fromId)) return
+    const nextHistory = pushArtifactHistory(fullArtifactHistory.value, fromId, toId, focusNodeId)
+    setFull(
+      {
+        view: { kind: 'artifact', id: toId },
+        threadId: current?.threadId ?? null,
+        fromSide: current?.fromSide ?? false,
+      },
+      nextHistory,
+    )
+    return
+  }
+
+  const fromKey = side.artifactKey(fromId)
+  const toKey = side.artifactKey(toId)
+  if (side.groupWith(state.side, toKey)) {
+    // Target artifact is already open in another tab or split group: focus it in place
+    // without removing `fromId` or overwriting either tab's navigation history.
+    showWorkspace('side')
+    setSide(side.activate(state.side, toKey))
+    return
+  }
+  const nextHistory = pushArtifactHistory(sideArtifactHistories[fromId], fromId, toId, focusNodeId)
+  delete sideArtifactHistories[fromId]
+  sideArtifactHistories[toId] = nextHistory
+  showWorkspace('side')
+  setSide(side.replace(state.side, fromKey, toKey))
+}
+
+/** Step one entry back (`-1`) or forward (`1`) in an artifact panel's navigation history. */
+export function stepArtifactNavigation(place: 'side' | 'full', id: string, delta: -1 | 1): boolean {
+  if (place === 'full') {
+    const current = state.full
+    if (!current || current.view.kind !== 'artifact' || current.view.id !== id) return false
+  }
+  const knownIds = state.artifactsLoaded ? new Set(state.artifacts.map((a) => a.id)) : null
+  const currentStack = place === 'full' ? fullArtifactHistory.value : sideArtifactHistories[id]
+  // Keep the current entry during stepping so users can still go back from a newly created
+  // artifact not yet synced into `state.artifacts` or from a broken/deleted target.
+  const usable = knownIds
+    ? pruneArtifactHistory(currentStack, (entryId) => entryId === id || knownIds.has(entryId))
+    : currentStack
+  const stepped = stepArtifactHistoryStack(usable, id, delta)
+  if (!stepped) {
+    if (place === 'full') fullArtifactHistory.value = usable
+    else if (usable) sideArtifactHistories[id] = usable
+    else delete sideArtifactHistories[id]
+    return false
+  }
+  const nextStack = knownIds
+    ? pruneArtifactHistory(stepped.stack, (entryId) => knownIds.has(entryId))
+    : stepped.stack
+
+  if (stepped.entry.focusNodeId) {
+    requestArtifactFocus(stepped.entry.id, stepped.entry.focusNodeId)
+  } else {
+    clearAllArtifactFocus()
+  }
+
+  if (place === 'full') {
+    setFull({ ...state.full!, view: { kind: 'artifact', id: stepped.entry.id } }, nextStack)
+    return true
+  }
+
+  const fromKey = side.artifactKey(id)
+  const targetKey = side.artifactKey(stepped.entry.id)
+  if (side.groupWith(state.side, targetKey)) {
+    // Target artifact is already open in another tab or split group: focus it while keeping
+    // both tabs' own histories intact.
+    if (usable) sideArtifactHistories[id] = usable
+    else delete sideArtifactHistories[id]
+    showWorkspace('side')
+    setSide(side.activate(state.side, targetKey))
+    return true
+  }
+
+  delete sideArtifactHistories[id]
+  if (nextStack) sideArtifactHistories[stepped.entry.id] = nextStack
+  showWorkspace('side')
+  setSide(side.replace(state.side, fromKey, targetKey))
+  return true
 }
 
 function openInPane(view: OpenedView) {
@@ -1344,15 +1565,20 @@ export function fullScreenPane(key: PaneKey) {
   const view = openedViewOf(key)
   if (!view) return
   const threadId = view.kind === 'changes' ? view.threadId : null
-  setFull({ view, threadId, fromSide: true })
+  const carried = view.kind === 'artifact' ? sideArtifactHistories[view.id] : undefined
+  setFull({ view, threadId, fromSide: true }, carried)
   closePane(key)
 }
 
 /** Put the full-screen view in a tab on the right side. */
 export function fullToSide() {
   const full = state.full
+  const carried = full?.view.kind === 'artifact' ? fullArtifactHistory.value : undefined
   setFull(null)
-  if (full && state.currentId) void openView(full.view)
+  if (full && state.currentId) {
+    void openView(full.view)
+    if (carried && full.view.kind === 'artifact') sideArtifactHistories[full.view.id] = carried
+  }
 }
 
 /** Close a view, full screen or in its tab, once it has nothing left to show, e.g. merged. */
@@ -1366,8 +1592,13 @@ const sameOpened = (a: OpenedView, b: OpenedView) => paneKeyOf(a) === paneKeyOf(
 /** Close the full-screen view; one taken from the right side goes back there. */
 export function closeFull() {
   const full = state.full
+  const carried =
+    full?.fromSide && full.view.kind === 'artifact' ? fullArtifactHistory.value : undefined
   setFull(null)
-  if (full?.fromSide && state.currentId) void openView(full.view)
+  if (full?.fromSide && state.currentId) {
+    void openView(full.view)
+    if (carried && full.view.kind === 'artifact') sideArtifactHistories[full.view.id] = carried
+  }
 }
 
 /** Start an empty artifact of the user's own and open it. */

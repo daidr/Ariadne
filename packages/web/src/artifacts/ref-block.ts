@@ -1,4 +1,6 @@
-import { defineBlock, type EditorExtension } from '@dou-ui/editor'
+import { defineBlock, type BlockViewProps, type EditorExtension } from '@dou-ui/editor'
+import { defineComponent, h } from 'vue'
+import type { ArtifactNavigationTarget } from './artifact-history'
 import {
   DEFAULT_REF_PROPS,
   normalizeRefProps,
@@ -9,6 +11,10 @@ import RefBlockView from './RefBlockView.vue'
 
 export type { RefBlockProps } from './document-block-data'
 export { normalizeRefProps, serializeRefPayload } from './document-block-data'
+
+export interface RefDocumentBlockOptions {
+  onOpen?: (target: ArtifactNavigationTarget) => void
+}
 
 function escapeHTML(text: string): string {
   return text
@@ -85,67 +91,85 @@ function attrsFromDom(dom: HTMLElement): Record<string, unknown> {
   return normalized ? { ...normalized } : { ...DEFAULT_REF_PROPS, ...collected }
 }
 
-const baseRefBlock = defineBlock({
-  type: 'ref',
-  props: { ...DEFAULT_REF_PROPS },
-  content: 'none',
-  component: RefBlockView,
-  spec: {
-    parseDOM: [
-      {
-        tag: 'div[data-content-type="ref"]',
-        priority: 70,
-        getAttrs: (dom) => attrsFromDom(dom as HTMLElement),
-      },
-    ],
-  },
-})
-
 /**
  * A live cross-artifact reference card inside a document. Shows the current title, version,
  * and live decision/verification status of a referenced artifact or whiteboard node, and jumps
  * directly to it on click.
  */
-export const refDocumentBlock: EditorExtension = {
-  ...baseRefBlock,
-  name: 'ariadne-ref',
-  prepareHTML: (root) => {
-    for (const code of Array.from(root.querySelectorAll('pre > code.language-ref'))) {
-      const parsed = parseRefJson(code.textContent ?? '')
-      if (!parsed || !code.parentElement) continue
-      code.parentElement.replaceWith(createRefElement(root.ownerDocument, parsed))
-    }
-    for (const element of Array.from(root.querySelectorAll('ref'))) {
-      const parsed = parseRefTag(element)
-      if (!parsed) continue
-      const block = createRefElement(element.ownerDocument, parsed)
-      const paragraph = element.parentElement
-      if (paragraph?.tagName !== 'P') {
-        element.replaceWith(block)
-        continue
-      }
-      paragraph.before(block)
-      element.remove()
-      if (!paragraph.textContent?.trim() && !paragraph.querySelector('img')) paragraph.remove()
-    }
-  },
-  output: {
-    blocks: {
-      ref: {
-        html: (block, { children }) => {
-          const payload = serializeRefPayload(block.props)
-          if (!payload) return children
-          const encoded = escapeHTML(JSON.stringify(payload))
-          const label = escapeHTML(String(payload.label ?? payload.artifactId ?? ''))
-          return `<div data-content-type="ref" data-prop-ref="${encoded}">${label}</div>${children}`
+export function createRefDocumentBlock(options: RefDocumentBlockOptions = {}): EditorExtension {
+  const component = options.onOpen
+    ? defineComponent({
+        name: 'BoundRefBlockView',
+        inheritAttrs: false,
+        setup(_, { attrs }) {
+          return () =>
+            h(RefBlockView, {
+              ...(attrs as unknown as BlockViewProps),
+              navigate: options.onOpen,
+            })
         },
-        markdown: (block, { children }) => {
-          const payload = serializeRefPayload(block.props)
-          if (!payload) return children
-          const written = `\`\`\`ref\n${JSON.stringify(payload)}\n\`\`\``
-          return children ? `${written}\n\n${children}` : written
+      })
+    : RefBlockView
+
+  const baseRefBlock = defineBlock({
+    type: 'ref',
+    props: { ...DEFAULT_REF_PROPS },
+    content: 'none',
+    component,
+    spec: {
+      parseDOM: [
+        {
+          tag: 'div[data-content-type="ref"]',
+          priority: 70,
+          getAttrs: (dom) => attrsFromDom(dom as HTMLElement),
+        },
+      ],
+    },
+  })
+
+  return {
+    ...baseRefBlock,
+    name: 'ariadne-ref',
+    prepareHTML: (root) => {
+      for (const code of Array.from(root.querySelectorAll('pre > code.language-ref'))) {
+        const parsed = parseRefJson(code.textContent ?? '')
+        if (!parsed || !code.parentElement) continue
+        code.parentElement.replaceWith(createRefElement(root.ownerDocument, parsed))
+      }
+      for (const element of Array.from(root.querySelectorAll('ref'))) {
+        const parsed = parseRefTag(element)
+        if (!parsed) continue
+        const block = createRefElement(element.ownerDocument, parsed)
+        const paragraph = element.parentElement
+        if (paragraph?.tagName !== 'P') {
+          element.replaceWith(block)
+          continue
+        }
+        paragraph.before(block)
+        element.remove()
+        if (!paragraph.textContent?.trim() && !paragraph.querySelector('img')) paragraph.remove()
+      }
+    },
+    output: {
+      blocks: {
+        ref: {
+          html: (block, { children }) => {
+            const payload = serializeRefPayload(block.props)
+            if (!payload) return children
+            const encoded = escapeHTML(JSON.stringify(payload))
+            const label = escapeHTML(String(payload.label ?? payload.artifactId ?? ''))
+            return `<div data-content-type="ref" data-prop-ref="${encoded}">${label}</div>${children}`
+          },
+          markdown: (block, { children }) => {
+            const payload = serializeRefPayload(block.props)
+            if (!payload) return children
+            const written = `\`\`\`ref\n${JSON.stringify(payload)}\n\`\`\``
+            return children ? `${written}\n\n${children}` : written
+          },
         },
       },
     },
-  },
+  }
 }
+
+export const refDocumentBlock: EditorExtension = createRefDocumentBlock()

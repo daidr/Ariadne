@@ -21,3 +21,7 @@ export function clearArtifactFocus(seq: number) {
     artifactFocusTarget.value = null
   }
 }
+
+export function clearAllArtifactFocus() {
+  artifactFocusTarget.value = null
+}

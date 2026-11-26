@@ -11,9 +11,11 @@ import { createMemoryHistory } from 'vue-router'
 import { api } from './api'
 import * as side from './side/layout'
 import {
+  artifactNavigation,
   captureWorkspace,
   closeFull,
   closePane,
+  navigateArtifactInPlace,
   openProject,
   openThread,
   openView,
@@ -29,6 +31,7 @@ const projects = ['prj_first', 'prj_second'].map(
 )
 const thread = { id: 'thr_second' } as ThreadView
 const artifact = { id: 'art_second', kind: 'document' } as ArtifactSummary
+const boardArtifact = { id: 'art_board', kind: 'whiteboard' } as ArtifactSummary
 const app = { render: () => null }
 const bindings: ReturnType<typeof connectWorkspaceRouter>[] = []
 
@@ -53,7 +56,7 @@ beforeEach(() => {
     lastSeq: 1,
   }))
   vi.spyOn(api, 'getPlan').mockResolvedValue({ plan: { nodes: [] } as unknown as PlanView })
-  vi.spyOn(api, 'listArtifacts').mockResolvedValue({ artifacts: [artifact] })
+  vi.spyOn(api, 'listArtifacts').mockResolvedValue({ artifacts: [artifact, boardArtifact] })
   vi.spyOn(api, 'listMemories').mockResolvedValue({ memories: [] })
 })
 
@@ -148,5 +151,44 @@ describe('workspace routes', () => {
     expect(state.workspaceLevel).toBe('side')
     showWorkspace('coordinator')
     await vi.waitFor(() => expect(router.currentRoute.value.query.pane).toBeUndefined())
+  })
+
+  test('refresh and browser back preserve artifact Back/Forward history', async () => {
+    const { router, history, binding } = await enter('/projects/prj_second')
+    await openView({ kind: 'artifact', id: artifact.id }, { from: thread.id })
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.query.modal).toBe(`artifact:${artifact.id}`),
+    )
+
+    navigateArtifactInPlace({
+      place: 'full',
+      fromId: artifact.id,
+      toId: boardArtifact.id,
+      focusNodeId: 'grp-nav',
+    })
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.query.modal).toBe(`artifact:${boardArtifact.id}`),
+    )
+    const address = router.currentRoute.value.fullPath
+    const savedState = history.state
+
+    // Browser back moves back to the original document while keeping forward history.
+    router.back()
+    await vi.waitFor(() => expect(state.full?.view).toEqual({ kind: 'artifact', id: artifact.id }))
+    expect(artifactNavigation('full', artifact.id)).toEqual({
+      back: null,
+      forward: { id: boardArtifact.id, focusNodeId: 'grp-nav' },
+    })
+
+    // Refreshing on the navigated artifact restores its Back history from history.state.
+    binding.stop()
+    state.currentId = null
+    state.detail = null
+    await enter(address, savedState)
+    expect(state.full?.view).toEqual({ kind: 'artifact', id: boardArtifact.id })
+    expect(artifactNavigation('full', boardArtifact.id)).toEqual({
+      back: { id: artifact.id },
+      forward: null,
+    })
   })
 })

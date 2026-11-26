@@ -270,6 +270,25 @@ export function open(layout: SideLayout, key: PaneKey, options: OpenOptions = {}
   return withRoot(layout, root, target.id)
 }
 
+/**
+ * Replace `from` with `to` in the same group and tab position, bringing `to` to the front.
+ * If `to` is already open elsewhere in the dock, focus it in place without duplicating keys
+ * or breaking an existing split. If `from` is no longer present, fall back to opening `to`.
+ */
+export function replace(layout: SideLayout, from: PaneKey, to: PaneKey): SideLayout {
+  if (from === to) return activate(layout, to)
+  if (isPinned(from)) return open(layout, to)
+  if (groupWith(layout, to)) return activate(layout, to)
+  const source = groupWith(layout, from)
+  if (!source) return open(layout, to)
+  const root = mapGroups(layout.root, (group) => {
+    if (group.id !== source.id) return group
+    const tabs = tabsOf(group).map((key) => (key === from ? to : key))
+    return { ...group, tabs, active: to }
+  })
+  return withRoot(layout, root, source.id)
+}
+
 /** Close a tab. A group left empty goes, and the group beside it takes its room. */
 export function close(layout: SideLayout, key: PaneKey, acrossGroups = false): SideLayout {
   if (isPinned(key)) return layout
