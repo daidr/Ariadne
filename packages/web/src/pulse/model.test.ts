@@ -1,8 +1,17 @@
-import type { PulseConcurrency, PulseLane, PulseSpan } from '@ariadne/core'
+import type {
+  AllNeedsMeResult,
+  AttentionView,
+  NeedsMeItem,
+  PulseConcurrency,
+  PulseLane,
+  PulseMarker,
+  PulseSpan,
+} from '@ariadne/core'
 import { describe, expect, test } from 'vitest'
 import {
   buildAxisTicks,
   buildConcurrencyBars,
+  buildPulseFeed,
   classifyHandoffTone,
   classifyMarkerTone,
   computeFetchBounds,
@@ -15,6 +24,7 @@ import {
   MIN_VIEW_SPAN_MS,
   needsRefetch,
   panViewport,
+  resolveLaneAttentions,
   resolveSpanVisualKind,
   WINDOW_DURATION_MS,
   zoomViewport,
@@ -308,5 +318,202 @@ describe('buildConcurrencyBars and axis ticks', () => {
     expect(isPulseRelevantEvent('message.read')).toBe(false)
     expect(isPulseRelevantEvent('message.reacted')).toBe(false)
     expect(isPulseRelevantEvent('message.edited')).toBe(false)
+  })
+
+  test('filterAndPartitionLanes groups by project in cross-project scope with current project first', () => {
+    const lanes = [
+      lane({
+        conversationId: 'crd_other',
+        projectId: 'prj_other',
+        projectName: 'Docs',
+        role: 'coordinator',
+        stage: 'idle',
+        activeAt: NOW - MINUTE,
+      }),
+      lane({
+        conversationId: 'thr_other_needs',
+        projectId: 'prj_other',
+        projectName: 'Docs',
+        stage: 'answer',
+        attentionId: 'att_other',
+        activeAt: NOW - 2 * MINUTE,
+      }),
+      lane({
+        conversationId: 'crd_cur',
+        projectId: 'prj_cur',
+        projectName: 'Ariadne',
+        role: 'coordinator',
+        stage: 'idle',
+        activeAt: NOW - 10 * MINUTE,
+      }),
+      lane({
+        conversationId: 'thr_cur_author',
+        projectId: 'prj_cur',
+        projectName: 'Ariadne',
+        stage: 'review',
+        activeAt: NOW - 5 * MINUTE,
+      }),
+      lane({
+        conversationId: 'thr_cur_rev',
+        projectId: 'prj_cur',
+        projectName: 'Ariadne',
+        role: 'reviewer',
+        reviewOf: 'thr_cur_author',
+        stage: 'working',
+        activeAt: NOW - 4 * MINUTE,
+      }),
+      lane({
+        conversationId: 'thr_idle_proj',
+        projectId: 'prj_quiet',
+        projectName: 'Tools',
+        stage: 'working',
+        activeAt: NOW - 3 * MINUTE,
+      }),
+    ]
+
+    const all = filterAndPartitionLanes(lanes, 'all', 'stage', new Map(), 'all', 'prj_cur')
+    expect(all.coordinator).toBeNull()
+    expect(all.groups.map((g) => g.key)).toEqual([
+      'project:prj_cur',
+      'project:prj_other',
+      'project:prj_quiet',
+    ])
+    expect(all.groups[0]!.isCurrent).toBe(true)
+    expect(all.groups[0]!.rows.map((r) => [r.lane.conversationId, r.nested])).toEqual([
+      ['crd_cur', false],
+      ['thr_cur_author', false],
+      ['thr_cur_rev', true],
+    ])
+
+    const needsOnly = filterAndPartitionLanes(lanes, 'needs', 'stage', new Map(), 'all', 'prj_cur')
+    expect(needsOnly.groups.map((g) => g.key)).toEqual(['project:prj_other'])
+    expect(needsOnly.groups[0]!.rows.map((r) => r.lane.conversationId)).toEqual(['thr_other_needs'])
+  })
+
+  test('resolveLaneAttentions matches current and cross-project attentions without duplicates', () => {
+    const attCurrent = {
+      id: 'att_cur',
+      conversationId: 'thr_1',
+      block: { type: 'confirm', title: '确认推送', prompt: '' },
+    } as unknown as AttentionView
+    const attOther = {
+      id: 'att_other',
+      conversationId: 'thr_2',
+      block: { type: 'confirm', title: '确认发布', prompt: '' },
+    } as unknown as AttentionView
+
+    const currentNeedsMe: NeedsMeItem[] = [
+      { kind: 'attention', attention: attCurrent, threadId: 'thr_1', joinedIds: ['thr_joined'] },
+    ]
+    const allNeedsMe: AllNeedsMeResult = {
+      items: [
+        {
+          projectId: 'prj_1',
+          projectName: 'Ariadne',
+          at: NOW,
+          item: {
+            kind: 'attention',
+            attention: attCurrent,
+            threadId: 'thr_1',
+            joinedIds: ['thr_joined'],
+          },
+        },
+        {
+          projectId: 'prj_2',
+          projectName: 'Docs',
+          at: NOW,
+          item: {
+            kind: 'attention',
+            attention: attOther,
+            threadId: 'thr_2',
+            joinedIds: [],
+          },
+        },
+      ],
+      threads: {},
+    }
+
+    expect(
+      resolveLaneAttentions(
+        { conversationId: 'thr_1', projectId: 'prj_1', role: 'worker', attentionId: 'att_cur' },
+        'prj_1',
+        currentNeedsMe,
+        allNeedsMe,
+      ).map((item) => item.id),
+    ).toEqual(['att_cur'])
+
+    expect(
+      resolveLaneAttentions(
+        { conversationId: 'thr_joined', projectId: 'prj_1', role: 'worker', attentionId: null },
+        'prj_1',
+        currentNeedsMe,
+        allNeedsMe,
+      ).map((item) => item.id),
+    ).toEqual(['att_cur'])
+
+    expect(
+      resolveLaneAttentions(
+        { conversationId: 'thr_2', projectId: 'prj_2', role: 'worker', attentionId: 'att_other' },
+        'prj_1',
+        currentNeedsMe,
+        allNeedsMe,
+      ).map((item) => item.id),
+    ).toEqual(['att_other'])
+  })
+
+  test('buildPulseFeed filters window/return markers and sorts newest-first', () => {
+    const lanes = [
+      lane({
+        conversationId: 'thr_1',
+        projectId: 'prj_1',
+        projectName: 'Ariadne',
+        title: '切片 C',
+      }),
+      lane({ conversationId: 'thr_2', projectId: 'prj_2', projectName: 'Docs', title: '文档构建' }),
+    ]
+    const markers: PulseMarker[] = [
+      {
+        conversationId: 'thr_1',
+        projectId: 'prj_1',
+        at: NOW - 50 * MINUTE,
+        kind: 'user_returned',
+        label: '',
+        relatedThreadId: null,
+        seq: 1,
+      },
+      {
+        conversationId: 'thr_1',
+        projectId: 'prj_1',
+        at: NOW - 20 * MINUTE,
+        kind: 'pr_opened',
+        label: '#275',
+        relatedThreadId: null,
+        seq: 2,
+      },
+      {
+        conversationId: 'thr_2',
+        projectId: 'prj_2',
+        at: NOW - 5 * MINUTE,
+        kind: 'ci_failed',
+        label: 'unit',
+        relatedThreadId: null,
+        seq: 3,
+      },
+      {
+        conversationId: 'thr_2',
+        projectId: 'prj_2',
+        at: NOW - 90 * MINUTE,
+        kind: 'pr_merged',
+        label: '#10',
+        relatedThreadId: null,
+        seq: 4,
+      },
+    ]
+
+    const feed = buildPulseFeed(lanes, markers, NOW - 60 * MINUTE, NOW)
+    expect(feed.map((item) => [item.conversationId, item.kind, item.projectName])).toEqual([
+      ['thr_2', 'ci_failed', 'Docs'],
+      ['thr_1', 'pr_opened', 'Ariadne'],
+    ])
   })
 })

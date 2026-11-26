@@ -8,7 +8,7 @@ import type {
   PulseSpan,
   ThreadView,
 } from '@ariadne/core'
-import { ChevronDownIcon, ChevronRightIcon } from '@dou-ui/icons'
+import { ChevronDownIcon, ChevronRightIcon, FolderIcon } from '@dou-ui/icons'
 import {
   computed,
   nextTick,
@@ -31,6 +31,8 @@ import {
   formatClockShort,
   formatDurationCompact,
   isNeedsLane,
+  laneStatusDotClass,
+  liveCommandLabel,
   percentOf,
   resolveSpanVisualKind,
   type PulseDensity,
@@ -38,6 +40,7 @@ import {
   type PulseLaneRow,
   type PulsePartitionedLanes,
   type PulseRibbonBar,
+  type PulseScope,
   type PulseSpanVisualKind,
   type PulseTooltipData,
 } from './model'
@@ -63,6 +66,7 @@ const props = defineProps<{
   showCompleted: boolean
   selectedLaneId: string | null
   selectedSpanId: number | null
+  scope?: PulseScope
   threads: ReadonlyMap<string, ThreadView>
   liveCommands: Readonly<Record<string, LiveCommand>>
 }>()
@@ -177,11 +181,7 @@ interface RenderedSpan {
 }
 
 function liveCommandText(lane: PulseLane): string | null {
-  const raw = props.liveCommands[lane.conversationId]?.command ?? lane.liveCommand
-  if (!raw) return null
-  const firstLine = raw.split('\n')[0]?.trim() ?? ''
-  if (!firstLine) return null
-  return firstLine.length > 64 ? `${firstLine.slice(0, 64)}…` : firstLine
+  return liveCommandLabel(lane, props.liveCommands, 64)
 }
 
 function spansForLane(lane: PulseLane): RenderedSpan[] {
@@ -245,17 +245,11 @@ function laneTitle(lane: PulseLane): string {
 }
 
 function laneDotClass(lane: PulseLane): string {
-  if (lane.role === 'coordinator') return 'is-neutral'
-  if (lane.stage === 'answer' || lane.attentionId !== null) return 'is-warning'
-  if (lane.stage === 'blocked' || lane.stage === 'halted') return 'is-danger'
-  if (lane.completed || lane.stage === 'done') return 'is-success'
-  if (lane.stage === 'review') return 'is-ci'
-  if (lane.role === 'reviewer' && lane.stage === 'working') return 'is-review is-pulse'
-  if (lane.stage === 'working') return 'is-primary is-pulse'
-  return 'is-neutral'
+  return laneStatusDotClass(lane)
 }
 
 interface LaneMetaSummary {
+  project: string | null
   pr: string | null
   diff: { added: number; removed: number } | null
   progress: string | null
@@ -264,8 +258,11 @@ interface LaneMetaSummary {
 
 function laneMeta(lane: PulseLane): LaneMetaSummary {
   const liveCmd = liveCommandText(lane)
+  const project =
+    props.scope === 'all' && lane.completed && lane.projectName ? lane.projectName : null
   if (lane.role === 'coordinator') {
     return {
+      project,
       pr: null,
       diff: null,
       progress: null,
@@ -282,7 +279,7 @@ function laneMeta(lane: PulseLane): LaneMetaSummary {
       : null
   const fallback =
     pr || diff || progress ? null : liveCmd ? `$ ${liveCmd}` : (lane.lastHeadline ?? null)
-  return { pr, diff, progress, fallback }
+  return { project, pr, diff, progress, fallback }
 }
 
 function laneAlertBadge(lane: PulseLane): { tone: 'warning' | 'danger'; text: string } | null {
@@ -314,6 +311,7 @@ function laneRowClasses(row: PulseLaneRow): Record<string, boolean> {
 function groupHeaderTitle(group: PulsePartitionedLanes['groups'][number]): string {
   if (group.kind === 'needs') return t('pulse.group.needsTitle')
   if (group.kind === 'active') return t('pulse.group.activeTitle')
+  if (group.kind === 'project') return group.title ?? group.projectId ?? ''
   if (group.kind === 'node') return t('pulse.group.nodePrefix', { title: group.title ?? '' })
   return t('pulse.group.unlinkedNode')
 }
@@ -443,7 +441,14 @@ onMounted(() => {
 })
 
 // --- Pointer drag pan & wheel zoom ---
-let panState: { pointerId: number; lastX: number; width: number } | null = null
+let panState: {
+  pointerId: number
+  startX: number
+  lastX: number
+  width: number
+  moved: boolean
+} | null = null
+let suppressTrackClickUntil = 0
 const panning = ref(false)
 
 function getTrackRect(): DOMRect | null {
@@ -462,8 +467,10 @@ function onTrackPointerDown(event: PointerEvent) {
   if (!rect) return
   panState = {
     pointerId: event.pointerId,
+    startX: event.clientX,
     lastX: event.clientX,
     width: Math.max(1, rect.width),
+    moved: false,
   }
   panning.value = true
   window.addEventListener('pointermove', onWindowPointerMove)
@@ -475,6 +482,7 @@ function onWindowPointerMove(event: PointerEvent) {
   if (!panState || event.pointerId !== panState.pointerId) return
   const dx = event.clientX - panState.lastX
   if (dx === 0) return
+  if (Math.abs(event.clientX - panState.startX) >= 4) panState.moved = true
   panState.lastX = event.clientX
   const deltaMs = -(dx / panState.width) * (props.viewEnd - props.viewStart)
   emit('pan', deltaMs)
@@ -482,11 +490,17 @@ function onWindowPointerMove(event: PointerEvent) {
 
 function stopPan() {
   if (!panState) return
+  if (panState.moved) suppressTrackClickUntil = Date.now() + 80
   panState = null
   panning.value = false
   window.removeEventListener('pointermove', onWindowPointerMove)
   window.removeEventListener('pointerup', onWindowPointerUp)
   window.removeEventListener('pointercancel', onWindowPointerUp)
+}
+
+function onLaneTrackClick(laneId: string) {
+  if (Date.now() < suppressTrackClickUntil) return
+  emit('select', laneId, null)
 }
 
 function onWindowPointerUp(event: PointerEvent) {
@@ -802,6 +816,7 @@ onBeforeUnmount(() => {
           <div
             class="pulse-track-col pulse-lane-track"
             @pointerdown="onTrackPointerDown"
+            @click="onLaneTrackClick(partitioned.coordinator.conversationId)"
             @dblclick="emit('resetWindow')"
           >
             <div
@@ -843,13 +858,21 @@ onBeforeUnmount(() => {
         <template v-for="group in partitioned.groups" :key="group.key">
           <div class="pulse-grid-row pulse-group-row" :data-pulse-group="group.key">
             <div class="pulse-label-col pulse-group-label">
+              <FolderIcon
+                v-if="group.kind === 'project'"
+                class="pulse-group-icon"
+                aria-hidden="true"
+              />
               <span
-                v-if="group.kind === 'needs' || group.kind === 'active'"
+                v-else-if="group.kind === 'needs' || group.kind === 'active'"
                 class="pulse-dot"
                 :class="group.kind === 'needs' ? 'is-warning' : 'is-primary'"
                 aria-hidden="true"
               />
               <span class="pulse-group-title">{{ groupHeaderTitle(group) }}</span>
+              <span v-if="group.kind === 'project' && group.isCurrent" class="pulse-group-current">
+                {{ t('pulse.group.projectCurrent') }}
+              </span>
               <span
                 class="pulse-badge pulse-mono"
                 :class="
@@ -883,7 +906,11 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="pulse-lane-title"
-                  :title="t('pulse.openThread', { title: laneTitle(row.lane) })"
+                  :title="
+                    row.lane.role === 'coordinator'
+                      ? t('pulse.openCoordinator')
+                      : t('pulse.openThread', { title: laneTitle(row.lane) })
+                  "
                   @click.stop="onLaneOpenClick(row.lane)"
                 >
                   <span v-if="row.nested" class="pulse-nested-prefix" aria-hidden="true">↳</span>
@@ -912,6 +939,7 @@ onBeforeUnmount(() => {
             <div
               class="pulse-track-col pulse-lane-track"
               @pointerdown="onTrackPointerDown"
+              @click="onLaneTrackClick(row.lane.conversationId)"
               @dblclick="emit('resetWindow')"
             >
               <div
@@ -1004,6 +1032,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div v-if="!isCompact" class="pulse-lane-meta">
                   <template v-for="meta in [laneMeta(row.lane)]" :key="row.lane.conversationId">
+                    <span v-if="meta.project" class="pulse-meta-project">{{ meta.project }}</span>
                     <span v-if="meta.pr" class="pulse-mono">{{ meta.pr }}</span>
                     <span v-if="meta.diff" class="pulse-mono pulse-diff">
                       <span class="pulse-diff-add">+{{ meta.diff.added }}</span>
@@ -1018,6 +1047,7 @@ onBeforeUnmount(() => {
               <div
                 class="pulse-track-col pulse-lane-track"
                 @pointerdown="onTrackPointerDown"
+                @click="onLaneTrackClick(row.lane.conversationId)"
                 @dblclick="emit('resetWindow')"
               >
                 <div
@@ -1425,6 +1455,33 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: var(--dou-color-text-secondary);
   user-select: none;
+}
+
+.pulse-group-icon {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--dou-color-text-tertiary);
+}
+
+.pulse-group-current {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  background: var(--dou-color-primary-soft);
+  color: var(--dou-color-primary-text);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.pulse-meta-project {
+  flex: none;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dou-color-text-secondary);
 }
 
 .pulse-group-title {

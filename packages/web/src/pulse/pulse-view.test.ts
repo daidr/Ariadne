@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import type {
+  AllNeedsMeResult,
+  AttentionView,
   ConversationView,
   PlanView,
   ProjectView,
@@ -13,6 +15,7 @@ import { defineComponent, h, nextTick } from 'vue'
 import { api } from '../api'
 import { douLocale } from '../i18n'
 import { openMain, state } from '../store'
+import type { WorkspaceLayoutMode } from '../workspace-layout'
 import PulseView from './PulseView.vue'
 
 const MINUTE = 60_000
@@ -235,10 +238,11 @@ function makeSnapshot(overrides: Partial<PulseSnapshot> = {}): PulseSnapshot {
   }
 }
 
-function mountPulse() {
+function mountPulse(layoutMode: WorkspaceLayoutMode = 'wide') {
   const Host = defineComponent({
     setup() {
-      return () => h(DouConfigProvider, { locale: douLocale.value }, () => h(PulseView))
+      return () =>
+        h(DouConfigProvider, { locale: douLocale.value }, () => h(PulseView, { layoutMode }))
     },
   })
   const wrapper = mount(Host, { attachTo: document.body })
@@ -263,6 +267,7 @@ describe('PulseView', () => {
     state.starting = false
     state.stream = 'open'
     state.live = {}
+    state.allNeedsMe = null
     state.detail = {
       project,
       threads: [
@@ -534,5 +539,344 @@ describe('PulseView', () => {
     const svg = wrapper.get('[data-pulse-handoff-svg]')
     expect(svg.attributes('style')).toContain('height: 260px')
     expect(svg.attributes('viewBox')).toBe('0 0 800 260')
+  })
+
+  test('opens right inspector on span click and supports in-place approval, retry, trace and title jump', async () => {
+    const confirmAttention = {
+      id: 'att_1',
+      conversationId: 'thr_needs',
+      block: {
+        type: 'confirm',
+        title: '允许推送到远端分支',
+        detail: 'git push origin feature/pulse-c',
+        approveText: '允许推送',
+        denyText: '拒绝',
+      },
+    } as unknown as AttentionView
+
+    state.detail!.needsMe = [
+      {
+        kind: 'attention',
+        attention: confirmAttention,
+        threadId: 'thr_needs',
+        joinedIds: [],
+      },
+    ]
+    state.detail!.threads.push({
+      id: 'thr_blocked',
+      title: '修复 Windows 打包脚本',
+      stage: 'halted',
+      pullRequest: {
+        number: 274,
+        title: 'fix: windows build',
+        url: 'https://github.com/daidr/Ariadne/pull/274',
+        state: 'open',
+        merged: false,
+        draft: false,
+        checks: { state: 'failing', passed: 2, failed: ['native-windows'], pending: 0 },
+      },
+    } as unknown as ThreadView)
+
+    const base = makeSnapshot()
+    const snap = makeSnapshot({
+      lanes: [
+        ...base.lanes,
+        {
+          conversationId: 'thr_blocked',
+          projectId: 'prj_1',
+          projectName: 'Ariadne',
+          title: '修复 Windows 打包脚本',
+          role: 'worker',
+          reviewOf: null,
+          stage: 'halted',
+          completed: false,
+          attentionId: null,
+          liveCommand: null,
+          liveTail: null,
+          lastHeadline: 'native-windows 检查失败',
+          activeAt: NOW - 90_000,
+        },
+      ],
+      spans: [
+        ...base.spans,
+        {
+          id: 99,
+          conversationId: 'thr_blocked',
+          projectId: 'prj_1',
+          stage: 'halted',
+          occupiesSlot: false,
+          startedAt: NOW - 4 * MINUTE,
+          endedAt: null,
+          label: 'CI 失败',
+          seqStart: 90,
+          seqEnd: null,
+        },
+      ],
+    })
+
+    const getPulseSpy = vi.spyOn(api, 'getPulse').mockResolvedValue(snap)
+    const answerSpy = vi.spyOn(api, 'answerAttention').mockResolvedValue({} as never)
+    const retrySpy = vi.spyOn(api, 'retryTurn').mockResolvedValue({} as never)
+
+    const wrapper = mountPulse('wide')
+    await flushPromises()
+    await nextTick()
+
+    // Click attention span -> opens docked right inspector with inline AskBlock.
+    await wrapper.get('[data-span-id="3"]').trigger('click')
+    await nextTick()
+    const inspector = wrapper.get('[data-pulse-inspector]')
+    expect(inspector.text()).toContain('接入推送渠道权限审批')
+    expect(inspector.find('[data-pulse-inline-ask]').exists()).toBe(true)
+
+    const approveBtn = inspector.findAll('button').find((btn) => btn.text().includes('允许推送'))
+    expect(approveBtn).toBeDefined()
+    await approveBtn!.trigger('click')
+    await flushPromises()
+    expect(answerSpy).toHaveBeenCalledWith('att_1', { type: 'confirm', approved: true })
+    expect(getPulseSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+
+    // Click blocked lane span -> shows failed check & triggers retryTurn.
+    await wrapper.get('[data-span-id="99"]').trigger('click')
+    await nextTick()
+    expect(wrapper.get('[data-pulse-retry-card]').text()).toContain('native-windows')
+    await wrapper.get('[data-pulse-retry]').trigger('click')
+    await flushPromises()
+    expect(retrySpy).toHaveBeenCalledWith('thr_blocked')
+
+    // Click Trace button -> navigates to trace view for that conversation.
+    await wrapper.get('[data-pulse-open-trace]').trigger('click')
+    await nextTick()
+    expect(state.main).toEqual({ kind: 'trace', conversationId: 'thr_blocked' })
+
+    // Reopen pulse, click inspector header title -> exits pulse to thread.
+    openMain({ kind: 'pulse' })
+    await wrapper.get('[data-span-id="4"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-pulse-inspector-title]').trigger('click')
+    await flushPromises()
+    expect(state.main.kind).toBe('conversation')
+    expect(state.workspaceLevel).toBe('side')
+  })
+
+  test('switches to all active projects scope and supports cross-project inline approval', async () => {
+    const project2 = {
+      id: 'prj_2',
+      name: 'DouUI',
+      coordinatorId: 'crd_2',
+      needsMe: 1,
+      runningTurns: 1,
+      slots: 2,
+    } as ProjectView
+    state.projects = [...state.projects, project2]
+
+    const crossAttention = {
+      id: 'att_cross',
+      conversationId: 'thr_cross',
+      block: {
+        type: 'confirm',
+        title: '发布 DouUI 0.9.1',
+        detail: 'npm publish --tag latest',
+        approveText: '确认发布',
+        denyText: '暂不',
+      },
+    } as unknown as AttentionView
+
+    const allNeedsResult: AllNeedsMeResult = {
+      items: [
+        {
+          projectId: 'prj_2',
+          projectName: 'DouUI',
+          at: NOW - MINUTE,
+          item: {
+            kind: 'attention',
+            attention: crossAttention,
+            threadId: 'thr_cross',
+            joinedIds: [],
+          },
+        },
+      ],
+      threads: {
+        thr_cross: {
+          id: 'thr_cross',
+          projectId: 'prj_2',
+          title: '发布 DouUI 0.9.1',
+          stage: 'answer',
+          lastHeadline: '等待确认发布 npm 包',
+          lastArtifacts: [],
+          aside: null,
+          review: null,
+          stopped: null,
+          autopilotHeld: null,
+        },
+      },
+    }
+
+    const base = makeSnapshot()
+    const allSnap = makeSnapshot({
+      lanes: [
+        ...base.lanes,
+        {
+          conversationId: 'crd_2',
+          projectId: 'prj_2',
+          projectName: 'DouUI',
+          title: '协调器',
+          role: 'coordinator',
+          reviewOf: null,
+          stage: 'idle',
+          completed: false,
+          attentionId: null,
+          liveCommand: null,
+          liveTail: null,
+          lastHeadline: null,
+          activeAt: NOW - 4 * MINUTE,
+        },
+        {
+          conversationId: 'thr_cross',
+          projectId: 'prj_2',
+          projectName: 'DouUI',
+          title: '发布 DouUI 0.9.1',
+          role: 'worker',
+          reviewOf: null,
+          stage: 'answer',
+          completed: false,
+          attentionId: 'att_cross',
+          liveCommand: null,
+          liveTail: null,
+          lastHeadline: '等待确认发布 npm 包',
+          activeAt: NOW - MINUTE,
+        },
+      ],
+      spans: [
+        ...base.spans,
+        {
+          id: 201,
+          conversationId: 'thr_cross',
+          projectId: 'prj_2',
+          stage: 'answer',
+          occupiesSlot: false,
+          startedAt: NOW - 8 * MINUTE,
+          endedAt: null,
+          label: '等待确认发布',
+          seqStart: 100,
+          seqEnd: null,
+        },
+      ],
+    })
+
+    const getPulseSpy = vi.spyOn(api, 'getPulse').mockImplementation(async (params) => {
+      return params?.projectId === '' ? allSnap : base
+    })
+    const listAllNeedsSpy = vi.spyOn(api, 'listAllNeedsMe').mockResolvedValue(allNeedsResult)
+    const answerSpy = vi.spyOn(api, 'answerAttention').mockResolvedValue({} as never)
+
+    const wrapper = mountPulse('wide')
+    await flushPromises()
+    await nextTick()
+
+    const allOption = wrapper
+      .findAll('[data-pulse-scope] label, [data-pulse-scope] button')
+      .find((el) => el.text().includes('全部活跃项目'))
+    expect(allOption).toBeDefined()
+    const radio = allOption!.find('input[type="radio"]')
+    if (radio.exists()) await radio.setValue(true)
+    else await allOption!.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(getPulseSpy).toHaveBeenLastCalledWith(expect.objectContaining({ projectId: '' }))
+    expect(listAllNeedsSpy).toHaveBeenCalled()
+    expect(wrapper.find('[data-pulse-group="project:prj_1"]').exists()).toBe(true)
+    expect(wrapper.find('[data-pulse-group="project:prj_2"]').exists()).toBe(true)
+
+    // Open cross-project lane inspector and approve in place.
+    await wrapper.get('[data-span-id="201"]').trigger('click')
+    await nextTick()
+    const inspector = wrapper.get('[data-pulse-inspector]')
+    expect(inspector.text()).toContain('DouUI')
+    const confirmBtn = inspector.findAll('button').find((btn) => btn.text().includes('确认发布'))
+    expect(confirmBtn).toBeDefined()
+    await confirmBtn!.trigger('click')
+    await flushPromises()
+    expect(answerSpy).toHaveBeenCalledWith('att_cross', { type: 'confirm', approved: true })
+  })
+
+  test('renders narrow pulse cards and key event feed with inline actions on narrow viewports', async () => {
+    const confirmAttention = {
+      id: 'att_1',
+      conversationId: 'thr_needs',
+      block: {
+        type: 'confirm',
+        title: '允许推送到远端分支',
+        detail: 'git push origin feature/pulse-c',
+        approveText: '允许',
+        denyText: '拒绝',
+      },
+    } as unknown as AttentionView
+
+    state.detail!.needsMe = [
+      {
+        kind: 'attention',
+        attention: confirmAttention,
+        threadId: 'thr_needs',
+        joinedIds: [],
+      },
+    ]
+
+    vi.spyOn(api, 'getPulse').mockResolvedValue(
+      makeSnapshot({
+        concurrency: {
+          slots: 3,
+          current: 2,
+          peak: 2,
+          points: [],
+        },
+      }),
+    )
+    const answerSpy = vi.spyOn(api, 'answerAttention').mockResolvedValue({} as never)
+
+    const wrapper = mountPulse('narrow')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('[data-pulse-narrow]').exists()).toBe(true)
+    expect(wrapper.find('[data-pulse-canvas]').exists()).toBe(false)
+    expect(wrapper.find('[data-pulse-narrow-cards]').exists()).toBe(true)
+    expect(wrapper.get('[data-pulse-narrow-slots]').text()).toContain('2 / 3')
+    expect(wrapper.find('[data-lane-id="thr_needs"] [data-pulse-inline-ask]').exists()).toBe(true)
+
+    const allowBtn = wrapper
+      .get('[data-lane-id="thr_needs"]')
+      .findAll('button')
+      .find((btn) => btn.text().includes('允许'))
+    expect(allowBtn).toBeDefined()
+    await allowBtn!.trigger('click')
+    await flushPromises()
+    expect(answerSpy).toHaveBeenCalledWith('att_1', { type: 'confirm', approved: true })
+
+    // Switch to key events feed tab.
+    const feedOption = wrapper
+      .findAll('[data-pulse-narrow-tabs] label, [data-pulse-narrow-tabs] button')
+      .find((el) => el.text().includes('关键事件'))
+    expect(feedOption).toBeDefined()
+    const radio = feedOption!.find('input[type="radio"]')
+    if (radio.exists()) await radio.setValue(true)
+    else await feedOption!.trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('[data-pulse-narrow-feed]').exists()).toBe(true)
+    expect(wrapper.find('[data-pulse-feed-return]').exists()).toBe(true)
+    expect(wrapper.findAll('.pulse-feed-row').length).toBeGreaterThan(0)
+
+    // Clicking a feed item opens the bottom sheet drawer, whose title jumps into the discussion thread.
+    await wrapper.get('[data-feed-lane-id="thr_author"]').trigger('click')
+    await nextTick()
+    const titleBtn = document.body.querySelector<HTMLButtonElement>('[data-pulse-inspector-title]')
+    expect(titleBtn).not.toBeNull()
+    expect(titleBtn!.textContent).toContain('Pulse 桌面端实时泳道画布')
+    titleBtn!.click()
+    await flushPromises()
+    expect(state.main.kind).toBe('conversation')
+    expect(state.workspaceLevel).toBe('side')
   })
 })

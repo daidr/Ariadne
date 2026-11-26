@@ -37,6 +37,7 @@ const props = defineProps<{
   answer: BlockAnswer | null
   withdrawn?: string | null
 }>()
+const emit = defineEmits<{ answered: [answer: BlockAnswer] }>()
 defineSlots<{ after?: () => unknown }>()
 
 const formTitleId = useId()
@@ -50,7 +51,10 @@ async function send(given: BlockAnswer) {
   if (!props.attentionId || sending.value) return
   sending.value = true
   try {
-    if (await answerAttention(props.attentionId, given)) sent.value = given
+    if (await answerAttention(props.attentionId, given)) {
+      sent.value = given
+      emit('answered', given)
+    }
   } finally {
     sending.value = false
   }

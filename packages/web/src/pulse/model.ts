@@ -1,19 +1,27 @@
 import type {
+  AllNeedsMeResult,
   AnyStoredEvent,
+  AttentionView,
+  LiveCommand,
+  NeedsMeItem,
+  NeedsMeThreadSummary,
   PulseConcurrency,
   PulseHandoff,
   PulseLane,
   PulseLaneRole,
   PulseMarker,
   PulseSpan,
+  ThreadView,
 } from '@ariadne/core'
 
 export const PULSE_WINDOW_KEYS = ['15m', '1h', '6h', '24h'] as const
 export type PulseWindowKey = (typeof PULSE_WINDOW_KEYS)[number]
 
+export type PulseScope = 'project' | 'all'
 export type PulseFilter = 'all' | 'needs' | 'active'
 export type PulseGroupBy = 'stage' | 'node'
 export type PulseDensity = 'comfortable' | 'compact'
+export type PulseNarrowTab = 'cards' | 'feed'
 
 export type PulseSpanVisualKind =
   | 'working'
@@ -43,8 +51,10 @@ export interface PulseLaneRow {
 
 export interface PulseLaneGroup {
   key: string
-  kind: 'needs' | 'active' | 'node' | 'unlinked'
+  kind: 'needs' | 'active' | 'node' | 'unlinked' | 'project'
   title?: string
+  projectId?: string
+  isCurrent?: boolean
   rows: PulseLaneRow[]
 }
 
@@ -335,8 +345,9 @@ export function filterAndPartitionLanes(
   filter: PulseFilter,
   groupBy: PulseGroupBy,
   threadNodes: ReadonlyMap<string, PulseNodeMeta> = new Map(),
+  scope: PulseScope = 'project',
+  currentProjectId: string | null = null,
 ): PulsePartitionedLanes {
-  const coordinator = lanes.find((lane) => lane.role === 'coordinator') ?? null
   const activePool = lanes.filter((lane) => lane.role !== 'coordinator' && !lane.completed)
   const completedPool = lanes.filter((lane) => lane.role !== 'coordinator' && lane.completed)
 
@@ -354,6 +365,101 @@ export function filterAndPartitionLanes(
         ? activePool.filter(isActiveLane)
         : activePool
 
+  if (scope === 'all') {
+    const coordinators = lanes.filter((lane) => {
+      if (lane.role !== 'coordinator' || lane.completed) return false
+      if (filter === 'needs') return isNeedsLane(lane)
+      if (filter === 'active') return isActiveLane(lane)
+      return true
+    })
+
+    const byProject = new Map<
+      string,
+      {
+        projectId: string
+        projectName: string
+        coordinators: PulseLane[]
+        workers: PulseLane[]
+        latestActiveAt: number
+        hasNeeds: boolean
+      }
+    >()
+
+    const ensureProject = (lane: PulseLane) => {
+      const pid = lane.projectId || 'unknown'
+      let bucket = byProject.get(pid)
+      if (!bucket) {
+        bucket = {
+          projectId: pid,
+          projectName: lane.projectName || pid,
+          coordinators: [],
+          workers: [],
+          latestActiveAt: lane.activeAt,
+          hasNeeds: false,
+        }
+        byProject.set(pid, bucket)
+      }
+      if (lane.activeAt > bucket.latestActiveAt) bucket.latestActiveAt = lane.activeAt
+      if (isNeedsLane(lane)) bucket.hasNeeds = true
+      if (!bucket.projectName && lane.projectName) bucket.projectName = lane.projectName
+      return bucket
+    }
+
+    for (const coord of coordinators) {
+      ensureProject(coord).coordinators.push(coord)
+    }
+    for (const worker of filtered) {
+      ensureProject(worker).workers.push(worker)
+    }
+
+    const sortedProjects = [...byProject.values()].toSorted((a, b) => {
+      const aCur = currentProjectId !== null && a.projectId === currentProjectId
+      const bCur = currentProjectId !== null && b.projectId === currentProjectId
+      if (aCur !== bCur) return aCur ? -1 : 1
+      if (a.hasNeeds !== b.hasNeeds) return a.hasNeeds ? -1 : 1
+      if (b.latestActiveAt !== a.latestActiveAt) return b.latestActiveAt - a.latestActiveAt
+      return a.projectName.localeCompare(b.projectName) || a.projectId.localeCompare(b.projectId)
+    })
+
+    const groups: PulseLaneGroup[] = []
+    let visibleCount = 0
+    for (const bucket of sortedProjects) {
+      const units = buildLaneUnits(bucket.workers)
+      const needsUnits: LaneUnit[] = []
+      const activeUnits: LaneUnit[] = []
+      for (const unit of units) {
+        const unitNeeds =
+          isNeedsLane(unit.primary) || unit.reviewers.some((reviewer) => isNeedsLane(reviewer))
+        if (unitNeeds) needsUnits.push(unit)
+        else activeUnits.push(unit)
+      }
+      const rows: PulseLaneRow[] = [
+        ...bucket.coordinators.map((lane) => ({ lane, nested: false })),
+        ...flattenUnits(needsUnits),
+        ...flattenUnits(activeUnits),
+      ]
+      if (!rows.length) continue
+      visibleCount += rows.length
+      groups.push({
+        key: `project:${bucket.projectId}`,
+        kind: 'project',
+        title: bucket.projectName,
+        projectId: bucket.projectId,
+        isCurrent: currentProjectId !== null && bucket.projectId === currentProjectId,
+        rows,
+      })
+    }
+
+    return {
+      coordinator: null,
+      groups,
+      completed: attachNestedFlags(completedPool),
+      counts,
+      visibleCount,
+    }
+  }
+
+  const coordinator = lanes.find((lane) => lane.role === 'coordinator') ?? null
   const units = buildLaneUnits(filtered)
   const groups: PulseLaneGroup[] = []
 
@@ -639,4 +745,131 @@ export function isPulseRelevantEvent(type: AnyStoredEvent['type']): boolean {
   if (PULSE_RELEVANT_EVENTS.has(type)) return true
   const prefix = type.split('.')[0] ?? ''
   return PULSE_RELEVANT_PREFIXES.has(prefix)
+}
+
+export function laneStatusDotClass(
+  lane: Pick<PulseLane, 'role' | 'stage' | 'attentionId' | 'completed'>,
+): string {
+  if (lane.role === 'coordinator') {
+    if (lane.attentionId !== null || lane.stage === 'answer') return 'is-warning'
+    if (lane.stage === 'working') return 'is-primary is-pulse'
+    return 'is-neutral'
+  }
+  if (lane.stage === 'answer' || lane.attentionId !== null) return 'is-warning'
+  if (lane.stage === 'blocked' || lane.stage === 'halted') return 'is-danger'
+  if (lane.completed || lane.stage === 'done') return 'is-success'
+  if (lane.stage === 'review') return 'is-ci'
+  if (lane.role === 'reviewer' && lane.stage === 'working') return 'is-review is-pulse'
+  if (lane.stage === 'working') return 'is-primary is-pulse'
+  return 'is-neutral'
+}
+
+export function liveCommandLabel(
+  lane: Pick<PulseLane, 'conversationId' | 'liveCommand'>,
+  liveCommands: Readonly<Record<string, LiveCommand>>,
+  maxChars = 64,
+): string | null {
+  const raw = liveCommands[lane.conversationId]?.command ?? lane.liveCommand
+  if (!raw) return null
+  const firstLine = raw.split('\n')[0]?.trim() ?? ''
+  if (!firstLine) return null
+  return firstLine.length > maxChars ? `${firstLine.slice(0, maxChars)}…` : firstLine
+}
+
+export function resolveLaneAttentions(
+  lane: Pick<PulseLane, 'conversationId' | 'projectId' | 'role' | 'attentionId'>,
+  currentProjectId: string | null,
+  currentNeedsMe: readonly NeedsMeItem[] | undefined,
+  allNeedsMe: AllNeedsMeResult | null | undefined,
+): AttentionView[] {
+  const seen = new Set<string>()
+  const out: AttentionView[] = []
+
+  const matches = (item: Extract<NeedsMeItem, { kind: 'attention' }>) => {
+    if (lane.attentionId !== null && item.attention.id === lane.attentionId) return true
+    if (item.threadId === lane.conversationId) return true
+    if (item.joinedIds.includes(lane.conversationId)) return true
+    if (
+      lane.role === 'coordinator' &&
+      item.threadId === null &&
+      item.attention.conversationId === lane.conversationId
+    ) {
+      return true
+    }
+    return false
+  }
+
+  const push = (attention: AttentionView) => {
+    if (seen.has(attention.id)) return
+    seen.add(attention.id)
+    out.push(attention)
+  }
+
+  if (lane.projectId === currentProjectId && currentNeedsMe) {
+    for (const item of currentNeedsMe) {
+      if (item.kind === 'attention' && matches(item)) push(item.attention)
+    }
+  }
+
+  if (allNeedsMe) {
+    for (const entry of allNeedsMe.items) {
+      if (entry.projectId !== lane.projectId) continue
+      if (entry.item.kind === 'attention' && matches(entry.item)) push(entry.item.attention)
+    }
+  }
+
+  return out
+}
+
+export function resolveLaneThreadSummary(
+  lane: Pick<PulseLane, 'conversationId' | 'role'>,
+  currentThreads: ReadonlyMap<string, ThreadView>,
+  allNeedsMe: AllNeedsMeResult | null | undefined,
+): ThreadView | NeedsMeThreadSummary | null {
+  if (lane.role === 'coordinator') return null
+  return currentThreads.get(lane.conversationId) ?? allNeedsMe?.threads[lane.conversationId] ?? null
+}
+
+export interface PulseFeedItem {
+  key: string
+  at: number
+  seq: number
+  conversationId: string
+  projectId: string
+  projectName: string
+  laneTitle: string
+  laneRole: PulseLaneRole
+  kind: PulseMarker['kind']
+  tone: PulseMarkerTone
+  label: string
+}
+
+export function buildPulseFeed(
+  lanes: readonly PulseLane[],
+  markers: readonly PulseMarker[],
+  viewStart: number,
+  viewEnd: number,
+): PulseFeedItem[] {
+  const lanesById = new Map(lanes.map((lane) => [lane.conversationId, lane]))
+  const items: PulseFeedItem[] = []
+  for (const marker of markers) {
+    if (marker.kind === 'user_returned') continue
+    if (marker.at < viewStart || marker.at > viewEnd) continue
+    const lane = lanesById.get(marker.conversationId)
+    items.push({
+      key: `${marker.conversationId}:${marker.seq}:${marker.kind}`,
+      at: marker.at,
+      seq: marker.seq,
+      conversationId: marker.conversationId,
+      projectId: marker.projectId || lane?.projectId || '',
+      projectName: lane?.projectName ?? '',
+      laneTitle: lane?.title || marker.conversationId,
+      laneRole: lane?.role ?? 'worker',
+      kind: marker.kind,
+      tone: classifyMarkerTone(marker),
+      label: marker.label,
+    })
+  }
+  items.sort((a, b) => b.at - a.at || b.seq - a.seq || a.key.localeCompare(b.key))
+  return items
 }
