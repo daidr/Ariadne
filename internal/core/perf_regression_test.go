@@ -89,6 +89,36 @@ func TestQueryPlansAvoidEventsScanAndUseProjectIndexes(t *testing.T) {
 		!strings.Contains(archiveCandidatePlan, "threads_project") {
 		t.Fatalf("archive candidate query did not use expected indexes:\n%s", archiveCandidatePlan)
 	}
+
+	assertPulsePlan := func(name, query, wantIndex, tableName string, allowCoveringScan bool, args ...any) {
+		t.Helper()
+		plan := strings.Join(explain(query, args...), "\n")
+		hasTableScan := false
+		for _, line := range strings.Split(plan, "\n") {
+			if strings.Contains(line, "SCAN "+tableName) {
+				if allowCoveringScan && strings.Contains(line, "USING COVERING INDEX "+wantIndex) {
+					continue
+				}
+				hasTableScan = true
+			}
+		}
+		if hasTableScan || strings.Contains(plan, "TEMP B-TREE") || !strings.Contains(plan, wantIndex) {
+			t.Fatalf("%s did not use expected index %s (no table SCAN %s / no TEMP B-TREE):\n%s", name, wantIndex, tableName, plan)
+		}
+	}
+
+	assertPulsePlan("pulseSpansProjectOpenSQL", pulseSpansProjectOpenSQL, "pulse_spans_project", "pulse_spans", false, "prj_a", 2000)
+	assertPulsePlan("pulseSpansProjectClosedSQL", pulseSpansProjectClosedSQL, "pulse_spans_project", "pulse_spans", false, "prj_a", 1000, 2000)
+	assertPulsePlan("pulseSpansGlobalOpenSQL", pulseSpansGlobalOpenSQL, "pulse_spans_range", "pulse_spans", false, 2000)
+	assertPulsePlan("pulseSpansGlobalClosedSQL", pulseSpansGlobalClosedSQL, "pulse_spans_range", "pulse_spans", false, 1000, 2000)
+	assertPulsePlan("pulseMarkersProjectSQL", pulseMarkersProjectSQL, "pulse_markers_project_at", "pulse_markers", false, "prj_a", 1000, 2000)
+	assertPulsePlan("pulseMarkersGlobalSQL", pulseMarkersGlobalSQL, "pulse_markers_at", "pulse_markers", false, 1000, 2000)
+	assertPulsePlan("pulseLastReturnedProjectSQL", pulseLastReturnedProjectSQL, "pulse_markers_returned", "pulse_markers", false, "prj_a")
+	assertPulsePlan("pulseLastReturnedGlobalSQL", pulseLastReturnedGlobalSQL, "pulse_markers_returned_at", "pulse_markers", true)
+	assertPulsePlan("pulseLatestConversationSpan", "SELECT id, stage, occupies_slot, started_at, ended_at, label FROM pulse_spans WHERE conversation_id = ? ORDER BY id DESC LIMIT 1", "pulse_spans_conversation", "pulse_spans", false, "thr_1")
+	assertPulsePlan("pulsePruneSpans", "DELETE FROM pulse_spans WHERE ended_at IS NOT NULL AND ended_at < ?", "pulse_spans_range", "pulse_spans", false, 1000)
+	assertPulsePlan("pulsePruneMarkers", "DELETE FROM pulse_markers WHERE at < ?", "pulse_markers_at", "pulse_markers", false, 1000)
+	assertPulsePlan("pulseBackfillEventsSQL", pulseBackfillEventsSQL, "events_project", "events", false, "prj_a", 1)
 }
 
 func TestSchemaV68MigrationBackfillsWorkspaceSourceIDAndChangedSeq(t *testing.T) {
