@@ -14,7 +14,7 @@ import type { Message } from '@bufbuild/protobuf'
 export const file_ariadne_v1_artifacts: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'ChphcmlhZG5lL3YxL2FydGlmYWN0cy5wcm90bxIKYXJpYWRuZS52MSI4ChdEb2N1bWVudEFydGlmYWN0UHJldmlldxIPCgdleGNlcnB0GAEgASgJEgwKBGxlYWQYAiABKAkiTQoZV2hpdGVib2FyZEFydGlmYWN0UHJldmlldxINCgVpdGVtcxgBIAEoBRISCgpjb25uZWN0b3JzGAIgASgFEg0KBXRleHRzGAMgAygJIm0KE0FydGlmYWN0UHJldmlld1RpbGUSDAoEdHlwZRgBIAEoCRIJCgF4GAIgASgFEgkKAXkYAyABKAUSCQoBdxgEIAEoBRIJCgFoGAUgASgFEhIKBXRpdGxlGAYgASgJSACIAQFCCAoGX3RpdGxlIpMBChhEYXNoYm9hcmRBcnRpZmFjdFByZXZpZXcSDwoHd2lkZ2V0cxgBIAEoBRIZCgh0YWtlbl9hdBgCIAEoA0ICMAJIAIgBARIOCgZ0aXRsZXMYAyADKAkSLgoFdGlsZXMYBCADKAsyHy5hcmlhZG5lLnYxLkFydGlmYWN0UHJldmlld1RpbGVCCwoJX3Rha2VuX2F0Is0BCg9BcnRpZmFjdFByZXZpZXcSNwoIZG9jdW1lbnQYASABKAsyIy5hcmlhZG5lLnYxLkRvY3VtZW50QXJ0aWZhY3RQcmV2aWV3SAASOwoKd2hpdGVib2FyZBgCIAEoCzIlLmFyaWFkbmUudjEuV2hpdGVib2FyZEFydGlmYWN0UHJldmlld0gAEjkKCWRhc2hib2FyZBgDIAEoCzIkLmFyaWFkbmUudjEuRGFzaGJvYXJkQXJ0aWZhY3RQcmV2aWV3SABCCQoHcHJldmlldyLRAgoPQXJ0aWZhY3RTdW1tYXJ5EgoKAmlkGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSDAoEa2luZBgDIAEoCRINCgV0aXRsZRgEIAEoCRIUCgdub2RlX2lkGAUgASgJSACIAQESEwoHdmVyc2lvbhgGIAEoA0ICMAISEgoKY3JlYXRlZF9ieRgHIAEoCRISCgp1cGRhdGVkX2J5GAggASgJEhYKCmNyZWF0ZWRfYXQYCSABKANCAjACEhYKCnVwZGF0ZWRfYXQYCiABKANCAjACEjEKB3ByZXZpZXcYCyABKAsyGy5hcmlhZG5lLnYxLkFydGlmYWN0UHJldmlld0gBiAEBEhkKDW9wZW5fY29tbWVudHMYDCABKANCAjACEhgKDGNvbW1lbnRlZF9hdBgNIAEoA0ICMAJCCgoIX25vZGVfaWRCCgoIX3ByZXZpZXci3wIKDEFydGlmYWN0VmlldxIKCgJpZBgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEgwKBGtpbmQYAyABKAkSDQoFdGl0bGUYBCABKAkSFAoHbm9kZV9pZBgFIAEoCUgAiAEBEhMKB3ZlcnNpb24YBiABKANCAjACEhIKCmNyZWF0ZWRfYnkYByABKAkSEgoKdXBkYXRlZF9ieRgIIAEoCRIWCgpjcmVhdGVkX2F0GAkgASgDQgIwAhIWCgp1cGRhdGVkX2F0GAogASgDQgIwAhIxCgdwcmV2aWV3GAsgASgLMhsuYXJpYWRuZS52MS5BcnRpZmFjdFByZXZpZXdIAYgBARIZCg1vcGVuX2NvbW1lbnRzGAwgASgDQgIwAhIYCgxjb21tZW50ZWRfYXQYDSABKANCAjACEg8KB2NvbnRlbnQYDiABKAlCCgoIX25vZGVfaWRCCgoIX3ByZXZpZXcicQoTQXJ0aWZhY3RWZXJzaW9uVmlldxITCgd2ZXJzaW9uGAEgASgDQgIwAhINCgV0aXRsZRgCIAEoCRIOCgZhdXRob3IYAyABKAkSDgoGcmVhc29uGAQgASgJEhYKCmNyZWF0ZWRfYXQYBSABKANCAjACIkgKGkFydGlmYWN0Q29tbWVudEVsZW1lbnRSZWN0EgkKAXgYASABKAESCQoBeRgCIAEoARIJCgF3GAMgASgBEgkKAWgYBCABKAEi1AEKFkFydGlmYWN0Q29tbWVudEVsZW1lbnQSEgoFbGFiZWwYASABKAlIAIgBARIRCgRyb2xlGAIgASgJSAGIAQESEAoDdGFnGAMgASgJSAKIAQESFQoIc2VsZWN0b3IYBCABKAlIA4gBARI5CgRyZWN0GAUgASgLMiYuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRFbGVtZW50UmVjdEgEiAEBQggKBl9sYWJlbEIHCgVfcm9sZUIGCgRfdGFnQgsKCV9zZWxlY3RvckIHCgVfcmVjdCKlAQoVQXJ0aWZhY3RDb21tZW50QW5jaG9yEg4KBG5vZGUYASABKAlIABIOCgRlZGdlGAIgASgJSAASEgoFYmxvY2sYAyABKAlIAYgBARI4CgdlbGVtZW50GAQgASgLMiIuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRFbGVtZW50SAKIAQFCCAoGdGFyZ2V0QggKBl9ibG9ja0IKCghfZWxlbWVudCKBAQoTQXJ0aWZhY3RDb21tZW50VmlldxIKCgJpZBgBIAEoCRIOCgZhdXRob3IYAiABKAkSDAoEYm9keRgDIAEoCRIWCgpjcmVhdGVkX2F0GAQgASgDQgIwAhIaCgllZGl0ZWRfYXQYBSABKANCAjACSACIAQFCDAoKX2VkaXRlZF9hdCI3ChlBcnRpZmFjdENvbW1lbnRSZXNvbHV0aW9uEgoKAmJ5GAEgASgJEg4KAmF0GAIgASgDQgIwAiKkAgoZQXJ0aWZhY3RDb21tZW50VGhyZWFkVmlldxIKCgJpZBgBIAEoCRITCgthcnRpZmFjdF9pZBgCIAEoCRINCgVxdW90ZRgDIAEoCRI2CgZhbmNob3IYBCABKAsyIS5hcmlhZG5lLnYxLkFydGlmYWN0Q29tbWVudEFuY2hvckgAiAEBEjEKCGNvbW1lbnRzGAUgAygLMh8uYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRWaWV3EjwKCHJlc29sdmVkGAYgASgLMiUuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRSZXNvbHV0aW9uSAGIAQESFgoKY3JlYXRlZF9hdBgHIAEoA0ICMAJCCQoHX2FuY2hvckILCglfcmVzb2x2ZWQiUwoSQXJ0aWZhY3RBdHRhY2htZW50Eg8KB2ZpbGVfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIMCgRtaW1lGAMgASgJEhAKBHNpemUYBCABKANCAjACIsYCChRBcnRpZmFjdEZlZWRiYWNrVmlldxITCgthcnRpZmFjdF9pZBgBIAEoCRIRCgVyb3VuZBgCIAEoA0ICMAISEwoHdmVyc2lvbhgDIAEoA0ICMAISDgoGbm90aWZ5GAQgASgJEi8KBWl0ZW1zGAUgAygLMiAuYXJpYWRuZS52MS5BcnRpZmFjdEZlZWRiYWNrSXRlbRIuCgZpbWFnZXMYBiADKAsyHi5hcmlhZG5lLnYxLkFydGlmYWN0QXR0YWNobWVudBIUCgdkb25lX2J5GAcgASgJSACIAQESGAoHZG9uZV9hdBgIIAEoA0ICMAJIAYgBARIUCgdzdW1tYXJ5GAkgASgJSAKIAQESFgoKY3JlYXRlZF9hdBgKIAEoA0ICMAJCCgoIX2RvbmVfYnlCCgoIX2RvbmVfYXRCCgoIX3N1bW1hcnkiUQoUTGlzdEFydGlmYWN0c1JlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIRCglwYWdlX3NpemUYAiABKAUSEgoKcGFnZV90b2tlbhgDIAEoCSJyChVMaXN0QXJ0aWZhY3RzUmVzcG9uc2USLgoJYXJ0aWZhY3RzGAEgAygLMhsuYXJpYWRuZS52MS5BcnRpZmFjdFN1bW1hcnkSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJEhAKCGhhc19tb3JlGAMgASgIIkgKFUNyZWF0ZUFydGlmYWN0UmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEgwKBGtpbmQYAiABKAkSDQoFdGl0bGUYAyABKAkisAEKFkNyZWF0ZUFydGlmYWN0UmVzcG9uc2USKgoIYXJ0aWZhY3QYASABKAsyGC5hcmlhZG5lLnYxLkFydGlmYWN0VmlldxIxCgh2ZXJzaW9ucxgCIAMoCzIfLmFyaWFkbmUudjEuQXJ0aWZhY3RWZXJzaW9uVmlldxI3Cghjb21tZW50cxgDIAMoCzIlLmFyaWFkbmUudjEuQXJ0aWZhY3RDb21tZW50VGhyZWFkVmlldyKgAQoSR2V0QXJ0aWZhY3RSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAEgASgJEhgKB3ZlcnNpb24YAiABKANCAjACSACIAQESGAoQaW5jbHVkZV92ZXJzaW9ucxgDIAEoCBIZChF2ZXJzaW9uX3BhZ2Vfc2l6ZRgEIAEoBRIaChJ2ZXJzaW9uX3BhZ2VfdG9rZW4YBSABKAlCCgoIX3ZlcnNpb24iRwoZRG9jdW1lbnRBc2tBbnN3ZXJCYXNlbGluZRIKCgJpZBgBIAEoCRIQCghzZWxlY3RlZBgCIAMoCRIMCgRub3RlGAMgASgJIl8KE0RvY3VtZW50QXNrQmFzZWxpbmUSEwoHdmVyc2lvbhgBIAEoA0ICMAISMwoEYXNrcxgCIAMoCzIlLmFyaWFkbmUudjEuRG9jdW1lbnRBc2tBbnN3ZXJCYXNlbGluZSK2AgoTR2V0QXJ0aWZhY3RSZXNwb25zZRIqCghhcnRpZmFjdBgBIAEoCzIYLmFyaWFkbmUudjEuQXJ0aWZhY3RWaWV3EjEKCHZlcnNpb25zGAIgAygLMh8uYXJpYWRuZS52MS5BcnRpZmFjdFZlcnNpb25WaWV3EjcKCGNvbW1lbnRzGAMgAygLMiUuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRUaHJlYWRWaWV3Eh8KF25leHRfdmVyc2lvbl9wYWdlX3Rva2VuGAQgASgJEhkKEWhhc19tb3JlX3ZlcnNpb25zGAUgASgIEjoKDGFza19iYXNlbGluZRgGIAEoCzIfLmFyaWFkbmUudjEuRG9jdW1lbnRBc2tCYXNlbGluZUgAiAEBQg8KDV9hc2tfYmFzZWxpbmUiWQobTGlzdEFydGlmYWN0VmVyc2lvbnNSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAEgASgJEhEKCXBhZ2Vfc2l6ZRgCIAEoBRISCgpwYWdlX3Rva2VuGAMgASgJInwKHExpc3RBcnRpZmFjdFZlcnNpb25zUmVzcG9uc2USMQoIdmVyc2lvbnMYASADKAsyHy5hcmlhZG5lLnYxLkFydGlmYWN0VmVyc2lvblZpZXcSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJEhAKCGhhc19tb3JlGAMgASgIIpoCChNTYXZlQXJ0aWZhY3RSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAEgASgJEhQKB2NvbnRlbnQYAiABKAlIAIgBARIYCgxiYXNlX3ZlcnNpb24YAyABKANCAjACEg4KBnJlYXNvbhgEIAEoCRISCgV0aXRsZRgFIAEoCUgBiAEBEjsKBnF1b3RlcxgGIAMoCzIrLmFyaWFkbmUudjEuU2F2ZUFydGlmYWN0UmVxdWVzdC5RdW90ZXNFbnRyeRIYChBpbmNsdWRlX3ZlcnNpb25zGAcgASgIGi0KC1F1b3Rlc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAFCCgoIX2NvbnRlbnRCCAoGX3RpdGxlIq4BChRTYXZlQXJ0aWZhY3RSZXNwb25zZRIqCghhcnRpZmFjdBgBIAEoCzIYLmFyaWFkbmUudjEuQXJ0aWZhY3RWaWV3EjEKCHZlcnNpb25zGAIgAygLMh8uYXJpYWRuZS52MS5BcnRpZmFjdFZlcnNpb25WaWV3EjcKCGNvbW1lbnRzGAMgAygLMiUuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRUaHJlYWRWaWV3Ii4KF1JlZnJlc2hEYXNoYm9hcmRSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAEgASgJIkYKGFJlZnJlc2hEYXNoYm9hcmRSZXNwb25zZRIqCghhcnRpZmFjdBgBIAEoCzIYLmFyaWFkbmUudjEuQXJ0aWZhY3RWaWV3IkIKG1NlbmRBcnRpZmFjdEZlZWRiYWNrUmVxdWVzdBITCgthcnRpZmFjdF9pZBgBIAEoCRIOCgZpbWFnZXMYAiADKAkiZAocU2VuZEFydGlmYWN0RmVlZGJhY2tSZXNwb25zZRI3CghmZWVkYmFjaxgBIAEoCzIgLmFyaWFkbmUudjEuQXJ0aWZhY3RGZWVkYmFja1ZpZXdIAIgBAUILCglfZmVlZGJhY2siSQofV2l0aGRyYXdBcnRpZmFjdEZlZWRiYWNrUmVxdWVzdBITCgthcnRpZmFjdF9pZBgBIAEoCRIRCgVyb3VuZBgCIAEoA0ICMAIiNQogV2l0aGRyYXdBcnRpZmFjdEZlZWRiYWNrUmVzcG9uc2USEQoJd2l0aGRyYXduGAEgASgIIroBChxDcmVhdGVBcnRpZmFjdENvbW1lbnRSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAEgASgJEhEKCXRocmVhZF9pZBgCIAEoCRISCgpjb21tZW50X2lkGAMgASgJEg0KBXF1b3RlGAQgASgJEgwKBGJvZHkYBSABKAkSNgoGYW5jaG9yGAYgASgLMiEuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRBbmNob3JIAIgBAUIJCgdfYW5jaG9yIlgKHUNyZWF0ZUFydGlmYWN0Q29tbWVudFJlc3BvbnNlEjcKCGNvbW1lbnRzGAEgAygLMiUuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRUaHJlYWRWaWV3ImcKG1JlcGx5QXJ0aWZhY3RDb21tZW50UmVxdWVzdBITCgthcnRpZmFjdF9pZBgBIAEoCRIRCgl0aHJlYWRfaWQYAiABKAkSEgoKY29tbWVudF9pZBgDIAEoCRIMCgRib2R5GAQgASgJIlcKHFJlcGx5QXJ0aWZhY3RDb21tZW50UmVzcG9uc2USNwoIY29tbWVudHMYASADKAsyJS5hcmlhZG5lLnYxLkFydGlmYWN0Q29tbWVudFRocmVhZFZpZXciZgoaRWRpdEFydGlmYWN0Q29tbWVudFJlcXVlc3QSEwoLYXJ0aWZhY3RfaWQYASABKAkSEQoJdGhyZWFkX2lkGAIgASgJEhIKCmNvbW1lbnRfaWQYAyABKAkSDAoEYm9keRgEIAEoCSJWChtFZGl0QXJ0aWZhY3RDb21tZW50UmVzcG9uc2USNwoIY29tbWVudHMYASADKAsyJS5hcmlhZG5lLnYxLkFydGlmYWN0Q29tbWVudFRocmVhZFZpZXciWgocRGVsZXRlQXJ0aWZhY3RDb21tZW50UmVxdWVzdBITCgthcnRpZmFjdF9pZBgBIAEoCRIRCgl0aHJlYWRfaWQYAiABKAkSEgoKY29tbWVudF9pZBgDIAEoCSJYCh1EZWxldGVBcnRpZmFjdENvbW1lbnRSZXNwb25zZRI3Cghjb21tZW50cxgBIAMoCzIlLmFyaWFkbmUudjEuQXJ0aWZhY3RDb21tZW50VGhyZWFkVmlldyJNCiNSZXNvbHZlQXJ0aWZhY3RDb21tZW50VGhyZWFkUmVxdWVzdBITCgthcnRpZmFjdF9pZBgBIAEoCRIRCgl0aHJlYWRfaWQYAiABKAkiXwokUmVzb2x2ZUFydGlmYWN0Q29tbWVudFRocmVhZFJlc3BvbnNlEjcKCGNvbW1lbnRzGAEgAygLMiUuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRUaHJlYWRWaWV3IkwKIlJlb3BlbkFydGlmYWN0Q29tbWVudFRocmVhZFJlcXVlc3QSEwoLYXJ0aWZhY3RfaWQYASABKAkSEQoJdGhyZWFkX2lkGAIgASgJIl4KI1Jlb3BlbkFydGlmYWN0Q29tbWVudFRocmVhZFJlc3BvbnNlEjcKCGNvbW1lbnRzGAEgAygLMiUuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRUaHJlYWRWaWV3IkwKIlJlbW92ZUFydGlmYWN0Q29tbWVudFRocmVhZFJlcXVlc3QSEwoLYXJ0aWZhY3RfaWQYASABKAkSEQoJdGhyZWFkX2lkGAIgASgJIl4KI1JlbW92ZUFydGlmYWN0Q29tbWVudFRocmVhZFJlc3BvbnNlEjcKCGNvbW1lbnRzGAEgAygLMiUuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRUaHJlYWRWaWV3MsIMCg9BcnRpZmFjdFNlcnZpY2USVAoNTGlzdEFydGlmYWN0cxIgLmFyaWFkbmUudjEuTGlzdEFydGlmYWN0c1JlcXVlc3QaIS5hcmlhZG5lLnYxLkxpc3RBcnRpZmFjdHNSZXNwb25zZRJXCg5DcmVhdGVBcnRpZmFjdBIhLmFyaWFkbmUudjEuQ3JlYXRlQXJ0aWZhY3RSZXF1ZXN0GiIuYXJpYWRuZS52MS5DcmVhdGVBcnRpZmFjdFJlc3BvbnNlEk4KC0dldEFydGlmYWN0Eh4uYXJpYWRuZS52MS5HZXRBcnRpZmFjdFJlcXVlc3QaHy5hcmlhZG5lLnYxLkdldEFydGlmYWN0UmVzcG9uc2USaQoUTGlzdEFydGlmYWN0VmVyc2lvbnMSJy5hcmlhZG5lLnYxLkxpc3RBcnRpZmFjdFZlcnNpb25zUmVxdWVzdBooLmFyaWFkbmUudjEuTGlzdEFydGlmYWN0VmVyc2lvbnNSZXNwb25zZRJRCgxTYXZlQXJ0aWZhY3QSHy5hcmlhZG5lLnYxLlNhdmVBcnRpZmFjdFJlcXVlc3QaIC5hcmlhZG5lLnYxLlNhdmVBcnRpZmFjdFJlc3BvbnNlEl0KEFJlZnJlc2hEYXNoYm9hcmQSIy5hcmlhZG5lLnYxLlJlZnJlc2hEYXNoYm9hcmRSZXF1ZXN0GiQuYXJpYWRuZS52MS5SZWZyZXNoRGFzaGJvYXJkUmVzcG9uc2USaQoUU2VuZEFydGlmYWN0RmVlZGJhY2sSJy5hcmlhZG5lLnYxLlNlbmRBcnRpZmFjdEZlZWRiYWNrUmVxdWVzdBooLmFyaWFkbmUudjEuU2VuZEFydGlmYWN0RmVlZGJhY2tSZXNwb25zZRJ1ChhXaXRoZHJhd0FydGlmYWN0RmVlZGJhY2sSKy5hcmlhZG5lLnYxLldpdGhkcmF3QXJ0aWZhY3RGZWVkYmFja1JlcXVlc3QaLC5hcmlhZG5lLnYxLldpdGhkcmF3QXJ0aWZhY3RGZWVkYmFja1Jlc3BvbnNlEmwKFUNyZWF0ZUFydGlmYWN0Q29tbWVudBIoLmFyaWFkbmUudjEuQ3JlYXRlQXJ0aWZhY3RDb21tZW50UmVxdWVzdBopLmFyaWFkbmUudjEuQ3JlYXRlQXJ0aWZhY3RDb21tZW50UmVzcG9uc2USaQoUUmVwbHlBcnRpZmFjdENvbW1lbnQSJy5hcmlhZG5lLnYxLlJlcGx5QXJ0aWZhY3RDb21tZW50UmVxdWVzdBooLmFyaWFkbmUudjEuUmVwbHlBcnRpZmFjdENvbW1lbnRSZXNwb25zZRJmChNFZGl0QXJ0aWZhY3RDb21tZW50EiYuYXJpYWRuZS52MS5FZGl0QXJ0aWZhY3RDb21tZW50UmVxdWVzdBonLmFyaWFkbmUudjEuRWRpdEFydGlmYWN0Q29tbWVudFJlc3BvbnNlEmwKFURlbGV0ZUFydGlmYWN0Q29tbWVudBIoLmFyaWFkbmUudjEuRGVsZXRlQXJ0aWZhY3RDb21tZW50UmVxdWVzdBopLmFyaWFkbmUudjEuRGVsZXRlQXJ0aWZhY3RDb21tZW50UmVzcG9uc2USgQEKHFJlc29sdmVBcnRpZmFjdENvbW1lbnRUaHJlYWQSLy5hcmlhZG5lLnYxLlJlc29sdmVBcnRpZmFjdENvbW1lbnRUaHJlYWRSZXF1ZXN0GjAuYXJpYWRuZS52MS5SZXNvbHZlQXJ0aWZhY3RDb21tZW50VGhyZWFkUmVzcG9uc2USfgobUmVvcGVuQXJ0aWZhY3RDb21tZW50VGhyZWFkEi4uYXJpYWRuZS52MS5SZW9wZW5BcnRpZmFjdENvbW1lbnRUaHJlYWRSZXF1ZXN0Gi8uYXJpYWRuZS52MS5SZW9wZW5BcnRpZmFjdENvbW1lbnRUaHJlYWRSZXNwb25zZRJ+ChtSZW1vdmVBcnRpZmFjdENvbW1lbnRUaHJlYWQSLi5hcmlhZG5lLnYxLlJlbW92ZUFydGlmYWN0Q29tbWVudFRocmVhZFJlcXVlc3QaLy5hcmlhZG5lLnYxLlJlbW92ZUFydGlmYWN0Q29tbWVudFRocmVhZFJlc3BvbnNlQqsBCg5jb20uYXJpYWRuZS52MUIOQXJ0aWZhY3RzUHJvdG9QAVpAZ2l0aHViLmNvbS9kYWlkci9BcmlhZG5lL2ludGVybmFsL2dlbi9wcm90by9hcmlhZG5lL3YxO2FyaWFkbmV2MaICA0FYWKoCCkFyaWFkbmUuVjHKAgpBcmlhZG5lXFYx4gIWQXJpYWRuZVxWMVxHUEJNZXRhZGF0YeoCC0FyaWFkbmU6OlYxYgZwcm90bzM',
+    'ChphcmlhZG5lL3YxL2FydGlmYWN0cy5wcm90bxIKYXJpYWRuZS52MSI4ChdEb2N1bWVudEFydGlmYWN0UHJldmlldxIPCgdleGNlcnB0GAEgASgJEgwKBGxlYWQYAiABKAkiUAoUV2hpdGVib2FyZE1pbmltYXBCb3gSCQoBeBgBIAEoARIJCgF5GAIgASgBEgkKAXcYAyABKAESCQoBaBgEIAEoARIMCgRraW5kGAUgASgJIt0BChlXaGl0ZWJvYXJkQXJ0aWZhY3RQcmV2aWV3Eg0KBWl0ZW1zGAEgASgFEhIKCmNvbm5lY3RvcnMYAiABKAUSDQoFdGV4dHMYAyADKAkSFwoPcHJvdG90eXBlX2NvdW50GAQgASgFEhQKDG9wdGlvbl9jb3VudBgFIAEoBRIaCg1wcmV2aWV3X2ltYWdlGAYgASgJSACIAQESMQoHbWluaW1hcBgHIAMoCzIgLmFyaWFkbmUudjEuV2hpdGVib2FyZE1pbmltYXBCb3hCEAoOX3ByZXZpZXdfaW1hZ2UibQoTQXJ0aWZhY3RQcmV2aWV3VGlsZRIMCgR0eXBlGAEgASgJEgkKAXgYAiABKAUSCQoBeRgDIAEoBRIJCgF3GAQgASgFEgkKAWgYBSABKAUSEgoFdGl0bGUYBiABKAlIAIgBAUIICgZfdGl0bGUipAEKGERhc2hib2FyZEFydGlmYWN0UHJldmlldxIPCgd3aWRnZXRzGAEgASgFEhkKCHRha2VuX2F0GAIgASgDQgIwAkgAiAEBEg4KBnRpdGxlcxgDIAMoCRIuCgV0aWxlcxgEIAMoCzIfLmFyaWFkbmUudjEuQXJ0aWZhY3RQcmV2aWV3VGlsZRIPCgdpc19saXZlGAUgASgIQgsKCV90YWtlbl9hdCLNAQoPQXJ0aWZhY3RQcmV2aWV3EjcKCGRvY3VtZW50GAEgASgLMiMuYXJpYWRuZS52MS5Eb2N1bWVudEFydGlmYWN0UHJldmlld0gAEjsKCndoaXRlYm9hcmQYAiABKAsyJS5hcmlhZG5lLnYxLldoaXRlYm9hcmRBcnRpZmFjdFByZXZpZXdIABI5CglkYXNoYm9hcmQYAyABKAsyJC5hcmlhZG5lLnYxLkRhc2hib2FyZEFydGlmYWN0UHJldmlld0gAQgkKB3ByZXZpZXci0QIKD0FydGlmYWN0U3VtbWFyeRIKCgJpZBgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEgwKBGtpbmQYAyABKAkSDQoFdGl0bGUYBCABKAkSFAoHbm9kZV9pZBgFIAEoCUgAiAEBEhMKB3ZlcnNpb24YBiABKANCAjACEhIKCmNyZWF0ZWRfYnkYByABKAkSEgoKdXBkYXRlZF9ieRgIIAEoCRIWCgpjcmVhdGVkX2F0GAkgASgDQgIwAhIWCgp1cGRhdGVkX2F0GAogASgDQgIwAhIxCgdwcmV2aWV3GAsgASgLMhsuYXJpYWRuZS52MS5BcnRpZmFjdFByZXZpZXdIAYgBARIZCg1vcGVuX2NvbW1lbnRzGAwgASgDQgIwAhIYCgxjb21tZW50ZWRfYXQYDSABKANCAjACQgoKCF9ub2RlX2lkQgoKCF9wcmV2aWV3It8CCgxBcnRpZmFjdFZpZXcSCgoCaWQYASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIMCgRraW5kGAMgASgJEg0KBXRpdGxlGAQgASgJEhQKB25vZGVfaWQYBSABKAlIAIgBARITCgd2ZXJzaW9uGAYgASgDQgIwAhISCgpjcmVhdGVkX2J5GAcgASgJEhIKCnVwZGF0ZWRfYnkYCCABKAkSFgoKY3JlYXRlZF9hdBgJIAEoA0ICMAISFgoKdXBkYXRlZF9hdBgKIAEoA0ICMAISMQoHcHJldmlldxgLIAEoCzIbLmFyaWFkbmUudjEuQXJ0aWZhY3RQcmV2aWV3SAGIAQESGQoNb3Blbl9jb21tZW50cxgMIAEoA0ICMAISGAoMY29tbWVudGVkX2F0GA0gASgDQgIwAhIPCgdjb250ZW50GA4gASgJQgoKCF9ub2RlX2lkQgoKCF9wcmV2aWV3InEKE0FydGlmYWN0VmVyc2lvblZpZXcSEwoHdmVyc2lvbhgBIAEoA0ICMAISDQoFdGl0bGUYAiABKAkSDgoGYXV0aG9yGAMgASgJEg4KBnJlYXNvbhgEIAEoCRIWCgpjcmVhdGVkX2F0GAUgASgDQgIwAiJIChpBcnRpZmFjdENvbW1lbnRFbGVtZW50UmVjdBIJCgF4GAEgASgBEgkKAXkYAiABKAESCQoBdxgDIAEoARIJCgFoGAQgASgBItQBChZBcnRpZmFjdENvbW1lbnRFbGVtZW50EhIKBWxhYmVsGAEgASgJSACIAQESEQoEcm9sZRgCIAEoCUgBiAEBEhAKA3RhZxgDIAEoCUgCiAEBEhUKCHNlbGVjdG9yGAQgASgJSAOIAQESOQoEcmVjdBgFIAEoCzImLmFyaWFkbmUudjEuQXJ0aWZhY3RDb21tZW50RWxlbWVudFJlY3RIBIgBAUIICgZfbGFiZWxCBwoFX3JvbGVCBgoEX3RhZ0ILCglfc2VsZWN0b3JCBwoFX3JlY3QipQEKFUFydGlmYWN0Q29tbWVudEFuY2hvchIOCgRub2RlGAEgASgJSAASDgoEZWRnZRgCIAEoCUgAEhIKBWJsb2NrGAMgASgJSAGIAQESOAoHZWxlbWVudBgEIAEoCzIiLmFyaWFkbmUudjEuQXJ0aWZhY3RDb21tZW50RWxlbWVudEgCiAEBQggKBnRhcmdldEIICgZfYmxvY2tCCgoIX2VsZW1lbnQigQEKE0FydGlmYWN0Q29tbWVudFZpZXcSCgoCaWQYASABKAkSDgoGYXV0aG9yGAIgASgJEgwKBGJvZHkYAyABKAkSFgoKY3JlYXRlZF9hdBgEIAEoA0ICMAISGgoJZWRpdGVkX2F0GAUgASgDQgIwAkgAiAEBQgwKCl9lZGl0ZWRfYXQiNwoZQXJ0aWZhY3RDb21tZW50UmVzb2x1dGlvbhIKCgJieRgBIAEoCRIOCgJhdBgCIAEoA0ICMAIipAIKGUFydGlmYWN0Q29tbWVudFRocmVhZFZpZXcSCgoCaWQYASABKAkSEwoLYXJ0aWZhY3RfaWQYAiABKAkSDQoFcXVvdGUYAyABKAkSNgoGYW5jaG9yGAQgASgLMiEuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRBbmNob3JIAIgBARIxCghjb21tZW50cxgFIAMoCzIfLmFyaWFkbmUudjEuQXJ0aWZhY3RDb21tZW50VmlldxI8CghyZXNvbHZlZBgGIAEoCzIlLmFyaWFkbmUudjEuQXJ0aWZhY3RDb21tZW50UmVzb2x1dGlvbkgBiAEBEhYKCmNyZWF0ZWRfYXQYByABKANCAjACQgkKB19hbmNob3JCCwoJX3Jlc29sdmVkIlMKEkFydGlmYWN0QXR0YWNobWVudBIPCgdmaWxlX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEbWltZRgDIAEoCRIQCgRzaXplGAQgASgDQgIwAiLGAgoUQXJ0aWZhY3RGZWVkYmFja1ZpZXcSEwoLYXJ0aWZhY3RfaWQYASABKAkSEQoFcm91bmQYAiABKANCAjACEhMKB3ZlcnNpb24YAyABKANCAjACEg4KBm5vdGlmeRgEIAEoCRIvCgVpdGVtcxgFIAMoCzIgLmFyaWFkbmUudjEuQXJ0aWZhY3RGZWVkYmFja0l0ZW0SLgoGaW1hZ2VzGAYgAygLMh4uYXJpYWRuZS52MS5BcnRpZmFjdEF0dGFjaG1lbnQSFAoHZG9uZV9ieRgHIAEoCUgAiAEBEhgKB2RvbmVfYXQYCCABKANCAjACSAGIAQESFAoHc3VtbWFyeRgJIAEoCUgCiAEBEhYKCmNyZWF0ZWRfYXQYCiABKANCAjACQgoKCF9kb25lX2J5QgoKCF9kb25lX2F0QgoKCF9zdW1tYXJ5IlEKFExpc3RBcnRpZmFjdHNSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSEQoJcGFnZV9zaXplGAIgASgFEhIKCnBhZ2VfdG9rZW4YAyABKAkicgoVTGlzdEFydGlmYWN0c1Jlc3BvbnNlEi4KCWFydGlmYWN0cxgBIAMoCzIbLmFyaWFkbmUudjEuQXJ0aWZhY3RTdW1tYXJ5EhcKD25leHRfcGFnZV90b2tlbhgCIAEoCRIQCghoYXNfbW9yZRgDIAEoCCKjAgoWR2FsbGVyeUFydGlmYWN0U3VtbWFyeRItCghhcnRpZmFjdBgBIAEoCzIbLmFyaWFkbmUudjEuQXJ0aWZhY3RTdW1tYXJ5EhQKDHByb2plY3RfbmFtZRgCIAEoCRIdChB1cGRhdGVkX2J5X2xhYmVsGAMgASgJSACIAQESHgoWdXBkYXRlZF9ieV9jb29yZGluYXRvchgEIAEoCBIVCg1oYXNfcHJvdG90eXBlGAUgASgIEhcKD3BlbmRpbmdfYWN0aW9ucxgGIAEoBRIYChBwZW5kaW5nX2ZlZWRiYWNrGAcgASgFEhcKCm5vZGVfdGl0bGUYCCABKAlIAYgBAUITChFfdXBkYXRlZF9ieV9sYWJlbEINCgtfbm9kZV90aXRsZSJOChNHYWxsZXJ5UHJvamVjdENvdW50EhIKCnByb2plY3RfaWQYASABKAkSFAoMcHJvamVjdF9uYW1lGAIgASgJEg0KBWNvdW50GAMgASgFIs0BCg1HYWxsZXJ5Q291bnRzEg0KBXRvdGFsGAEgASgFEhEKCWRvY3VtZW50cxgCIAEoBRITCgt3aGl0ZWJvYXJkcxgDIAEoBRISCgpkYXNoYm9hcmRzGAQgASgFEhIKCnByb3RvdHlwZXMYBSABKAUSEAoIbmVlZHNfbWUYBiABKAUSGAoQZmVlZGJhY2tfcGVuZGluZxgHIAEoBRIxCghwcm9qZWN0cxgIIAMoCzIfLmFyaWFkbmUudjEuR2FsbGVyeVByb2plY3RDb3VudCLEAQobTGlzdEdhbGxlcnlBcnRpZmFjdHNSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDAoEa2luZBgCIAEoCRIXCg9vbmx5X3Byb3RvdHlwZXMYAyABKAgSDgoGc3RhdHVzGAQgASgJEg0KBXF1ZXJ5GAUgASgJEgwKBHNvcnQYBiABKAkSEQoJcGFnZV9zaXplGAcgASgFEhIKCnBhZ2VfdG9rZW4YCCABKAkSFgoOaW5jbHVkZV9jb3VudHMYCSABKAgitwEKHExpc3RHYWxsZXJ5QXJ0aWZhY3RzUmVzcG9uc2USMQoFaXRlbXMYASADKAsyIi5hcmlhZG5lLnYxLkdhbGxlcnlBcnRpZmFjdFN1bW1hcnkSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJEhAKCGhhc19tb3JlGAMgASgIEi4KBmNvdW50cxgEIAEoCzIZLmFyaWFkbmUudjEuR2FsbGVyeUNvdW50c0gAiAEBQgkKB19jb3VudHMiSAoVQ3JlYXRlQXJ0aWZhY3RSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSDAoEa2luZBgCIAEoCRINCgV0aXRsZRgDIAEoCSKwAQoWQ3JlYXRlQXJ0aWZhY3RSZXNwb25zZRIqCghhcnRpZmFjdBgBIAEoCzIYLmFyaWFkbmUudjEuQXJ0aWZhY3RWaWV3EjEKCHZlcnNpb25zGAIgAygLMh8uYXJpYWRuZS52MS5BcnRpZmFjdFZlcnNpb25WaWV3EjcKCGNvbW1lbnRzGAMgAygLMiUuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRUaHJlYWRWaWV3IrUBChJHZXRBcnRpZmFjdFJlcXVlc3QSEwoLYXJ0aWZhY3RfaWQYASABKAkSGAoHdmVyc2lvbhgCIAEoA0ICMAJIAIgBARIYChBpbmNsdWRlX3ZlcnNpb25zGAMgASgIEhkKEXZlcnNpb25fcGFnZV9zaXplGAQgASgFEhoKEnZlcnNpb25fcGFnZV90b2tlbhgFIAEoCRITCgtsaWdodHdlaWdodBgGIAEoCEIKCghfdmVyc2lvbiJHChlEb2N1bWVudEFza0Fuc3dlckJhc2VsaW5lEgoKAmlkGAEgASgJEhAKCHNlbGVjdGVkGAIgAygJEgwKBG5vdGUYAyABKAkiXwoTRG9jdW1lbnRBc2tCYXNlbGluZRITCgd2ZXJzaW9uGAEgASgDQgIwAhIzCgRhc2tzGAIgAygLMiUuYXJpYWRuZS52MS5Eb2N1bWVudEFza0Fuc3dlckJhc2VsaW5lIrYCChNHZXRBcnRpZmFjdFJlc3BvbnNlEioKCGFydGlmYWN0GAEgASgLMhguYXJpYWRuZS52MS5BcnRpZmFjdFZpZXcSMQoIdmVyc2lvbnMYAiADKAsyHy5hcmlhZG5lLnYxLkFydGlmYWN0VmVyc2lvblZpZXcSNwoIY29tbWVudHMYAyADKAsyJS5hcmlhZG5lLnYxLkFydGlmYWN0Q29tbWVudFRocmVhZFZpZXcSHwoXbmV4dF92ZXJzaW9uX3BhZ2VfdG9rZW4YBCABKAkSGQoRaGFzX21vcmVfdmVyc2lvbnMYBSABKAgSOgoMYXNrX2Jhc2VsaW5lGAYgASgLMh8uYXJpYWRuZS52MS5Eb2N1bWVudEFza0Jhc2VsaW5lSACIAQFCDwoNX2Fza19iYXNlbGluZSJZChtMaXN0QXJ0aWZhY3RWZXJzaW9uc1JlcXVlc3QSEwoLYXJ0aWZhY3RfaWQYASABKAkSEQoJcGFnZV9zaXplGAIgASgFEhIKCnBhZ2VfdG9rZW4YAyABKAkifAocTGlzdEFydGlmYWN0VmVyc2lvbnNSZXNwb25zZRIxCgh2ZXJzaW9ucxgBIAMoCzIfLmFyaWFkbmUudjEuQXJ0aWZhY3RWZXJzaW9uVmlldxIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkSEAoIaGFzX21vcmUYAyABKAgimgIKE1NhdmVBcnRpZmFjdFJlcXVlc3QSEwoLYXJ0aWZhY3RfaWQYASABKAkSFAoHY29udGVudBgCIAEoCUgAiAEBEhgKDGJhc2VfdmVyc2lvbhgDIAEoA0ICMAISDgoGcmVhc29uGAQgASgJEhIKBXRpdGxlGAUgASgJSAGIAQESOwoGcXVvdGVzGAYgAygLMisuYXJpYWRuZS52MS5TYXZlQXJ0aWZhY3RSZXF1ZXN0LlF1b3Rlc0VudHJ5EhgKEGluY2x1ZGVfdmVyc2lvbnMYByABKAgaLQoLUXVvdGVzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4AUIKCghfY29udGVudEIICgZfdGl0bGUirgEKFFNhdmVBcnRpZmFjdFJlc3BvbnNlEioKCGFydGlmYWN0GAEgASgLMhguYXJpYWRuZS52MS5BcnRpZmFjdFZpZXcSMQoIdmVyc2lvbnMYAiADKAsyHy5hcmlhZG5lLnYxLkFydGlmYWN0VmVyc2lvblZpZXcSNwoIY29tbWVudHMYAyADKAsyJS5hcmlhZG5lLnYxLkFydGlmYWN0Q29tbWVudFRocmVhZFZpZXciLgoXUmVmcmVzaERhc2hib2FyZFJlcXVlc3QSEwoLYXJ0aWZhY3RfaWQYASABKAkiRgoYUmVmcmVzaERhc2hib2FyZFJlc3BvbnNlEioKCGFydGlmYWN0GAEgASgLMhguYXJpYWRuZS52MS5BcnRpZmFjdFZpZXciQgobU2VuZEFydGlmYWN0RmVlZGJhY2tSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAEgASgJEg4KBmltYWdlcxgCIAMoCSJkChxTZW5kQXJ0aWZhY3RGZWVkYmFja1Jlc3BvbnNlEjcKCGZlZWRiYWNrGAEgASgLMiAuYXJpYWRuZS52MS5BcnRpZmFjdEZlZWRiYWNrVmlld0gAiAEBQgsKCV9mZWVkYmFjayJJCh9XaXRoZHJhd0FydGlmYWN0RmVlZGJhY2tSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAEgASgJEhEKBXJvdW5kGAIgASgDQgIwAiI1CiBXaXRoZHJhd0FydGlmYWN0RmVlZGJhY2tSZXNwb25zZRIRCgl3aXRoZHJhd24YASABKAgiugEKHENyZWF0ZUFydGlmYWN0Q29tbWVudFJlcXVlc3QSEwoLYXJ0aWZhY3RfaWQYASABKAkSEQoJdGhyZWFkX2lkGAIgASgJEhIKCmNvbW1lbnRfaWQYAyABKAkSDQoFcXVvdGUYBCABKAkSDAoEYm9keRgFIAEoCRI2CgZhbmNob3IYBiABKAsyIS5hcmlhZG5lLnYxLkFydGlmYWN0Q29tbWVudEFuY2hvckgAiAEBQgkKB19hbmNob3IiWAodQ3JlYXRlQXJ0aWZhY3RDb21tZW50UmVzcG9uc2USNwoIY29tbWVudHMYASADKAsyJS5hcmlhZG5lLnYxLkFydGlmYWN0Q29tbWVudFRocmVhZFZpZXciZwobUmVwbHlBcnRpZmFjdENvbW1lbnRSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAEgASgJEhEKCXRocmVhZF9pZBgCIAEoCRISCgpjb21tZW50X2lkGAMgASgJEgwKBGJvZHkYBCABKAkiVwocUmVwbHlBcnRpZmFjdENvbW1lbnRSZXNwb25zZRI3Cghjb21tZW50cxgBIAMoCzIlLmFyaWFkbmUudjEuQXJ0aWZhY3RDb21tZW50VGhyZWFkVmlldyJmChpFZGl0QXJ0aWZhY3RDb21tZW50UmVxdWVzdBITCgthcnRpZmFjdF9pZBgBIAEoCRIRCgl0aHJlYWRfaWQYAiABKAkSEgoKY29tbWVudF9pZBgDIAEoCRIMCgRib2R5GAQgASgJIlYKG0VkaXRBcnRpZmFjdENvbW1lbnRSZXNwb25zZRI3Cghjb21tZW50cxgBIAMoCzIlLmFyaWFkbmUudjEuQXJ0aWZhY3RDb21tZW50VGhyZWFkVmlldyJaChxEZWxldGVBcnRpZmFjdENvbW1lbnRSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAEgASgJEhEKCXRocmVhZF9pZBgCIAEoCRISCgpjb21tZW50X2lkGAMgASgJIlgKHURlbGV0ZUFydGlmYWN0Q29tbWVudFJlc3BvbnNlEjcKCGNvbW1lbnRzGAEgAygLMiUuYXJpYWRuZS52MS5BcnRpZmFjdENvbW1lbnRUaHJlYWRWaWV3Ik0KI1Jlc29sdmVBcnRpZmFjdENvbW1lbnRUaHJlYWRSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAEgASgJEhEKCXRocmVhZF9pZBgCIAEoCSJfCiRSZXNvbHZlQXJ0aWZhY3RDb21tZW50VGhyZWFkUmVzcG9uc2USNwoIY29tbWVudHMYASADKAsyJS5hcmlhZG5lLnYxLkFydGlmYWN0Q29tbWVudFRocmVhZFZpZXciTAoiUmVvcGVuQXJ0aWZhY3RDb21tZW50VGhyZWFkUmVxdWVzdBITCgthcnRpZmFjdF9pZBgBIAEoCRIRCgl0aHJlYWRfaWQYAiABKAkiXgojUmVvcGVuQXJ0aWZhY3RDb21tZW50VGhyZWFkUmVzcG9uc2USNwoIY29tbWVudHMYASADKAsyJS5hcmlhZG5lLnYxLkFydGlmYWN0Q29tbWVudFRocmVhZFZpZXciTAoiUmVtb3ZlQXJ0aWZhY3RDb21tZW50VGhyZWFkUmVxdWVzdBITCgthcnRpZmFjdF9pZBgBIAEoCRIRCgl0aHJlYWRfaWQYAiABKAkiXgojUmVtb3ZlQXJ0aWZhY3RDb21tZW50VGhyZWFkUmVzcG9uc2USNwoIY29tbWVudHMYASADKAsyJS5hcmlhZG5lLnYxLkFydGlmYWN0Q29tbWVudFRocmVhZFZpZXcyrQ0KD0FydGlmYWN0U2VydmljZRJUCg1MaXN0QXJ0aWZhY3RzEiAuYXJpYWRuZS52MS5MaXN0QXJ0aWZhY3RzUmVxdWVzdBohLmFyaWFkbmUudjEuTGlzdEFydGlmYWN0c1Jlc3BvbnNlEmkKFExpc3RHYWxsZXJ5QXJ0aWZhY3RzEicuYXJpYWRuZS52MS5MaXN0R2FsbGVyeUFydGlmYWN0c1JlcXVlc3QaKC5hcmlhZG5lLnYxLkxpc3RHYWxsZXJ5QXJ0aWZhY3RzUmVzcG9uc2USVwoOQ3JlYXRlQXJ0aWZhY3QSIS5hcmlhZG5lLnYxLkNyZWF0ZUFydGlmYWN0UmVxdWVzdBoiLmFyaWFkbmUudjEuQ3JlYXRlQXJ0aWZhY3RSZXNwb25zZRJOCgtHZXRBcnRpZmFjdBIeLmFyaWFkbmUudjEuR2V0QXJ0aWZhY3RSZXF1ZXN0Gh8uYXJpYWRuZS52MS5HZXRBcnRpZmFjdFJlc3BvbnNlEmkKFExpc3RBcnRpZmFjdFZlcnNpb25zEicuYXJpYWRuZS52MS5MaXN0QXJ0aWZhY3RWZXJzaW9uc1JlcXVlc3QaKC5hcmlhZG5lLnYxLkxpc3RBcnRpZmFjdFZlcnNpb25zUmVzcG9uc2USUQoMU2F2ZUFydGlmYWN0Eh8uYXJpYWRuZS52MS5TYXZlQXJ0aWZhY3RSZXF1ZXN0GiAuYXJpYWRuZS52MS5TYXZlQXJ0aWZhY3RSZXNwb25zZRJdChBSZWZyZXNoRGFzaGJvYXJkEiMuYXJpYWRuZS52MS5SZWZyZXNoRGFzaGJvYXJkUmVxdWVzdBokLmFyaWFkbmUudjEuUmVmcmVzaERhc2hib2FyZFJlc3BvbnNlEmkKFFNlbmRBcnRpZmFjdEZlZWRiYWNrEicuYXJpYWRuZS52MS5TZW5kQXJ0aWZhY3RGZWVkYmFja1JlcXVlc3QaKC5hcmlhZG5lLnYxLlNlbmRBcnRpZmFjdEZlZWRiYWNrUmVzcG9uc2USdQoYV2l0aGRyYXdBcnRpZmFjdEZlZWRiYWNrEisuYXJpYWRuZS52MS5XaXRoZHJhd0FydGlmYWN0RmVlZGJhY2tSZXF1ZXN0GiwuYXJpYWRuZS52MS5XaXRoZHJhd0FydGlmYWN0RmVlZGJhY2tSZXNwb25zZRJsChVDcmVhdGVBcnRpZmFjdENvbW1lbnQSKC5hcmlhZG5lLnYxLkNyZWF0ZUFydGlmYWN0Q29tbWVudFJlcXVlc3QaKS5hcmlhZG5lLnYxLkNyZWF0ZUFydGlmYWN0Q29tbWVudFJlc3BvbnNlEmkKFFJlcGx5QXJ0aWZhY3RDb21tZW50EicuYXJpYWRuZS52MS5SZXBseUFydGlmYWN0Q29tbWVudFJlcXVlc3QaKC5hcmlhZG5lLnYxLlJlcGx5QXJ0aWZhY3RDb21tZW50UmVzcG9uc2USZgoTRWRpdEFydGlmYWN0Q29tbWVudBImLmFyaWFkbmUudjEuRWRpdEFydGlmYWN0Q29tbWVudFJlcXVlc3QaJy5hcmlhZG5lLnYxLkVkaXRBcnRpZmFjdENvbW1lbnRSZXNwb25zZRJsChVEZWxldGVBcnRpZmFjdENvbW1lbnQSKC5hcmlhZG5lLnYxLkRlbGV0ZUFydGlmYWN0Q29tbWVudFJlcXVlc3QaKS5hcmlhZG5lLnYxLkRlbGV0ZUFydGlmYWN0Q29tbWVudFJlc3BvbnNlEoEBChxSZXNvbHZlQXJ0aWZhY3RDb21tZW50VGhyZWFkEi8uYXJpYWRuZS52MS5SZXNvbHZlQXJ0aWZhY3RDb21tZW50VGhyZWFkUmVxdWVzdBowLmFyaWFkbmUudjEuUmVzb2x2ZUFydGlmYWN0Q29tbWVudFRocmVhZFJlc3BvbnNlEn4KG1Jlb3BlbkFydGlmYWN0Q29tbWVudFRocmVhZBIuLmFyaWFkbmUudjEuUmVvcGVuQXJ0aWZhY3RDb21tZW50VGhyZWFkUmVxdWVzdBovLmFyaWFkbmUudjEuUmVvcGVuQXJ0aWZhY3RDb21tZW50VGhyZWFkUmVzcG9uc2USfgobUmVtb3ZlQXJ0aWZhY3RDb21tZW50VGhyZWFkEi4uYXJpYWRuZS52MS5SZW1vdmVBcnRpZmFjdENvbW1lbnRUaHJlYWRSZXF1ZXN0Gi8uYXJpYWRuZS52MS5SZW1vdmVBcnRpZmFjdENvbW1lbnRUaHJlYWRSZXNwb25zZUKrAQoOY29tLmFyaWFkbmUudjFCDkFydGlmYWN0c1Byb3RvUAFaQGdpdGh1Yi5jb20vZGFpZHIvQXJpYWRuZS9pbnRlcm5hbC9nZW4vcHJvdG8vYXJpYWRuZS92MTthcmlhZG5ldjGiAgNBWFiqAgpBcmlhZG5lLlYxygIKQXJpYWRuZVxWMeICFkFyaWFkbmVcVjFcR1BCTWV0YWRhdGHqAgtBcmlhZG5lOjpWMWIGcHJvdG8z',
     [file_ariadne_v1_conversations],
   )
 
@@ -42,6 +42,44 @@ export const DocumentArtifactPreviewSchema: GenMessage<DocumentArtifactPreview> 
   messageDesc(file_ariadne_v1_artifacts, 0)
 
 /**
+ * @generated from message ariadne.v1.WhiteboardMinimapBox
+ */
+export type WhiteboardMinimapBox = Message<'ariadne.v1.WhiteboardMinimapBox'> & {
+  /**
+   * @generated from field: double x = 1;
+   */
+  x: number
+
+  /**
+   * @generated from field: double y = 2;
+   */
+  y: number
+
+  /**
+   * @generated from field: double w = 3;
+   */
+  w: number
+
+  /**
+   * @generated from field: double h = 4;
+   */
+  h: number
+
+  /**
+   * @generated from field: string kind = 5;
+   */
+  kind: string
+}
+
+/**
+ * Describes the message ariadne.v1.WhiteboardMinimapBox.
+ * Use `create(WhiteboardMinimapBoxSchema)` to create a new message.
+ */
+export const WhiteboardMinimapBoxSchema: GenMessage<WhiteboardMinimapBox> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_artifacts, 1)
+
+/**
  * @generated from message ariadne.v1.WhiteboardArtifactPreview
  */
 export type WhiteboardArtifactPreview = Message<'ariadne.v1.WhiteboardArtifactPreview'> & {
@@ -59,6 +97,26 @@ export type WhiteboardArtifactPreview = Message<'ariadne.v1.WhiteboardArtifactPr
    * @generated from field: repeated string texts = 3;
    */
   texts: string[]
+
+  /**
+   * @generated from field: int32 prototype_count = 4;
+   */
+  prototypeCount: number
+
+  /**
+   * @generated from field: int32 option_count = 5;
+   */
+  optionCount: number
+
+  /**
+   * @generated from field: optional string preview_image = 6;
+   */
+  previewImage?: string | undefined
+
+  /**
+   * @generated from field: repeated ariadne.v1.WhiteboardMinimapBox minimap = 7;
+   */
+  minimap: WhiteboardMinimapBox[]
 }
 
 /**
@@ -67,7 +125,7 @@ export type WhiteboardArtifactPreview = Message<'ariadne.v1.WhiteboardArtifactPr
  */
 export const WhiteboardArtifactPreviewSchema: GenMessage<WhiteboardArtifactPreview> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 1)
+  messageDesc(file_ariadne_v1_artifacts, 2)
 
 /**
  * @generated from message ariadne.v1.ArtifactPreviewTile
@@ -110,7 +168,7 @@ export type ArtifactPreviewTile = Message<'ariadne.v1.ArtifactPreviewTile'> & {
  */
 export const ArtifactPreviewTileSchema: GenMessage<ArtifactPreviewTile> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 2)
+  messageDesc(file_ariadne_v1_artifacts, 3)
 
 /**
  * @generated from message ariadne.v1.DashboardArtifactPreview
@@ -135,6 +193,11 @@ export type DashboardArtifactPreview = Message<'ariadne.v1.DashboardArtifactPrev
    * @generated from field: repeated ariadne.v1.ArtifactPreviewTile tiles = 4;
    */
   tiles: ArtifactPreviewTile[]
+
+  /**
+   * @generated from field: bool is_live = 5;
+   */
+  isLive: boolean
 }
 
 /**
@@ -143,7 +206,7 @@ export type DashboardArtifactPreview = Message<'ariadne.v1.DashboardArtifactPrev
  */
 export const DashboardArtifactPreviewSchema: GenMessage<DashboardArtifactPreview> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 3)
+  messageDesc(file_ariadne_v1_artifacts, 4)
 
 /**
  * @generated from message ariadne.v1.ArtifactPreview
@@ -183,7 +246,7 @@ export type ArtifactPreview = Message<'ariadne.v1.ArtifactPreview'> & {
  */
 export const ArtifactPreviewSchema: GenMessage<ArtifactPreview> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 4)
+  messageDesc(file_ariadne_v1_artifacts, 5)
 
 /**
  * @generated from message ariadne.v1.ArtifactSummary
@@ -261,7 +324,7 @@ export type ArtifactSummary = Message<'ariadne.v1.ArtifactSummary'> & {
  */
 export const ArtifactSummarySchema: GenMessage<ArtifactSummary> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 5)
+  messageDesc(file_ariadne_v1_artifacts, 6)
 
 /**
  * @generated from message ariadne.v1.ArtifactView
@@ -344,7 +407,7 @@ export type ArtifactView = Message<'ariadne.v1.ArtifactView'> & {
  */
 export const ArtifactViewSchema: GenMessage<ArtifactView> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 6)
+  messageDesc(file_ariadne_v1_artifacts, 7)
 
 /**
  * @generated from message ariadne.v1.ArtifactVersionView
@@ -382,7 +445,7 @@ export type ArtifactVersionView = Message<'ariadne.v1.ArtifactVersionView'> & {
  */
 export const ArtifactVersionViewSchema: GenMessage<ArtifactVersionView> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 7)
+  messageDesc(file_ariadne_v1_artifacts, 8)
 
 /**
  * @generated from message ariadne.v1.ArtifactCommentElementRect
@@ -415,7 +478,7 @@ export type ArtifactCommentElementRect = Message<'ariadne.v1.ArtifactCommentElem
  */
 export const ArtifactCommentElementRectSchema: GenMessage<ArtifactCommentElementRect> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 8)
+  messageDesc(file_ariadne_v1_artifacts, 9)
 
 /**
  * @generated from message ariadne.v1.ArtifactCommentElement
@@ -453,7 +516,7 @@ export type ArtifactCommentElement = Message<'ariadne.v1.ArtifactCommentElement'
  */
 export const ArtifactCommentElementSchema: GenMessage<ArtifactCommentElement> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 9)
+  messageDesc(file_ariadne_v1_artifacts, 10)
 
 /**
  * @generated from message ariadne.v1.ArtifactCommentAnchor
@@ -496,7 +559,7 @@ export type ArtifactCommentAnchor = Message<'ariadne.v1.ArtifactCommentAnchor'> 
  */
 export const ArtifactCommentAnchorSchema: GenMessage<ArtifactCommentAnchor> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 10)
+  messageDesc(file_ariadne_v1_artifacts, 11)
 
 /**
  * @generated from message ariadne.v1.ArtifactCommentView
@@ -534,7 +597,7 @@ export type ArtifactCommentView = Message<'ariadne.v1.ArtifactCommentView'> & {
  */
 export const ArtifactCommentViewSchema: GenMessage<ArtifactCommentView> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 11)
+  messageDesc(file_ariadne_v1_artifacts, 12)
 
 /**
  * @generated from message ariadne.v1.ArtifactCommentResolution
@@ -557,7 +620,7 @@ export type ArtifactCommentResolution = Message<'ariadne.v1.ArtifactCommentResol
  */
 export const ArtifactCommentResolutionSchema: GenMessage<ArtifactCommentResolution> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 12)
+  messageDesc(file_ariadne_v1_artifacts, 13)
 
 /**
  * @generated from message ariadne.v1.ArtifactCommentThreadView
@@ -605,7 +668,7 @@ export type ArtifactCommentThreadView = Message<'ariadne.v1.ArtifactCommentThrea
  */
 export const ArtifactCommentThreadViewSchema: GenMessage<ArtifactCommentThreadView> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 13)
+  messageDesc(file_ariadne_v1_artifacts, 14)
 
 /**
  * @generated from message ariadne.v1.ArtifactAttachment
@@ -638,7 +701,7 @@ export type ArtifactAttachment = Message<'ariadne.v1.ArtifactAttachment'> & {
  */
 export const ArtifactAttachmentSchema: GenMessage<ArtifactAttachment> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 14)
+  messageDesc(file_ariadne_v1_artifacts, 15)
 
 /**
  * @generated from message ariadne.v1.ArtifactFeedbackView
@@ -701,7 +764,7 @@ export type ArtifactFeedbackView = Message<'ariadne.v1.ArtifactFeedbackView'> & 
  */
 export const ArtifactFeedbackViewSchema: GenMessage<ArtifactFeedbackView> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 15)
+  messageDesc(file_ariadne_v1_artifacts, 16)
 
 /**
  * @generated from message ariadne.v1.ListArtifactsRequest
@@ -729,7 +792,7 @@ export type ListArtifactsRequest = Message<'ariadne.v1.ListArtifactsRequest'> & 
  */
 export const ListArtifactsRequestSchema: GenMessage<ListArtifactsRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 16)
+  messageDesc(file_ariadne_v1_artifacts, 17)
 
 /**
  * @generated from message ariadne.v1.ListArtifactsResponse
@@ -757,7 +820,232 @@ export type ListArtifactsResponse = Message<'ariadne.v1.ListArtifactsResponse'> 
  */
 export const ListArtifactsResponseSchema: GenMessage<ListArtifactsResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 17)
+  messageDesc(file_ariadne_v1_artifacts, 18)
+
+/**
+ * @generated from message ariadne.v1.GalleryArtifactSummary
+ */
+export type GalleryArtifactSummary = Message<'ariadne.v1.GalleryArtifactSummary'> & {
+  /**
+   * @generated from field: ariadne.v1.ArtifactSummary artifact = 1;
+   */
+  artifact?: ArtifactSummary | undefined
+
+  /**
+   * @generated from field: string project_name = 2;
+   */
+  projectName: string
+
+  /**
+   * @generated from field: optional string updated_by_label = 3;
+   */
+  updatedByLabel?: string | undefined
+
+  /**
+   * @generated from field: bool updated_by_coordinator = 4;
+   */
+  updatedByCoordinator: boolean
+
+  /**
+   * @generated from field: bool has_prototype = 5;
+   */
+  hasPrototype: boolean
+
+  /**
+   * @generated from field: int32 pending_actions = 6;
+   */
+  pendingActions: number
+
+  /**
+   * @generated from field: int32 pending_feedback = 7;
+   */
+  pendingFeedback: number
+
+  /**
+   * @generated from field: optional string node_title = 8;
+   */
+  nodeTitle?: string | undefined
+}
+
+/**
+ * Describes the message ariadne.v1.GalleryArtifactSummary.
+ * Use `create(GalleryArtifactSummarySchema)` to create a new message.
+ */
+export const GalleryArtifactSummarySchema: GenMessage<GalleryArtifactSummary> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_artifacts, 19)
+
+/**
+ * @generated from message ariadne.v1.GalleryProjectCount
+ */
+export type GalleryProjectCount = Message<'ariadne.v1.GalleryProjectCount'> & {
+  /**
+   * @generated from field: string project_id = 1;
+   */
+  projectId: string
+
+  /**
+   * @generated from field: string project_name = 2;
+   */
+  projectName: string
+
+  /**
+   * @generated from field: int32 count = 3;
+   */
+  count: number
+}
+
+/**
+ * Describes the message ariadne.v1.GalleryProjectCount.
+ * Use `create(GalleryProjectCountSchema)` to create a new message.
+ */
+export const GalleryProjectCountSchema: GenMessage<GalleryProjectCount> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_artifacts, 20)
+
+/**
+ * @generated from message ariadne.v1.GalleryCounts
+ */
+export type GalleryCounts = Message<'ariadne.v1.GalleryCounts'> & {
+  /**
+   * @generated from field: int32 total = 1;
+   */
+  total: number
+
+  /**
+   * @generated from field: int32 documents = 2;
+   */
+  documents: number
+
+  /**
+   * @generated from field: int32 whiteboards = 3;
+   */
+  whiteboards: number
+
+  /**
+   * @generated from field: int32 dashboards = 4;
+   */
+  dashboards: number
+
+  /**
+   * @generated from field: int32 prototypes = 5;
+   */
+  prototypes: number
+
+  /**
+   * @generated from field: int32 needs_me = 6;
+   */
+  needsMe: number
+
+  /**
+   * @generated from field: int32 feedback_pending = 7;
+   */
+  feedbackPending: number
+
+  /**
+   * @generated from field: repeated ariadne.v1.GalleryProjectCount projects = 8;
+   */
+  projects: GalleryProjectCount[]
+}
+
+/**
+ * Describes the message ariadne.v1.GalleryCounts.
+ * Use `create(GalleryCountsSchema)` to create a new message.
+ */
+export const GalleryCountsSchema: GenMessage<GalleryCounts> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_artifacts, 21)
+
+/**
+ * @generated from message ariadne.v1.ListGalleryArtifactsRequest
+ */
+export type ListGalleryArtifactsRequest = Message<'ariadne.v1.ListGalleryArtifactsRequest'> & {
+  /**
+   * @generated from field: string project_id = 1;
+   */
+  projectId: string
+
+  /**
+   * @generated from field: string kind = 2;
+   */
+  kind: string
+
+  /**
+   * @generated from field: bool only_prototypes = 3;
+   */
+  onlyPrototypes: boolean
+
+  /**
+   * @generated from field: string status = 4;
+   */
+  status: string
+
+  /**
+   * @generated from field: string query = 5;
+   */
+  query: string
+
+  /**
+   * @generated from field: string sort = 6;
+   */
+  sort: string
+
+  /**
+   * @generated from field: int32 page_size = 7;
+   */
+  pageSize: number
+
+  /**
+   * @generated from field: string page_token = 8;
+   */
+  pageToken: string
+
+  /**
+   * @generated from field: bool include_counts = 9;
+   */
+  includeCounts: boolean
+}
+
+/**
+ * Describes the message ariadne.v1.ListGalleryArtifactsRequest.
+ * Use `create(ListGalleryArtifactsRequestSchema)` to create a new message.
+ */
+export const ListGalleryArtifactsRequestSchema: GenMessage<ListGalleryArtifactsRequest> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_artifacts, 22)
+
+/**
+ * @generated from message ariadne.v1.ListGalleryArtifactsResponse
+ */
+export type ListGalleryArtifactsResponse = Message<'ariadne.v1.ListGalleryArtifactsResponse'> & {
+  /**
+   * @generated from field: repeated ariadne.v1.GalleryArtifactSummary items = 1;
+   */
+  items: GalleryArtifactSummary[]
+
+  /**
+   * @generated from field: string next_page_token = 2;
+   */
+  nextPageToken: string
+
+  /**
+   * @generated from field: bool has_more = 3;
+   */
+  hasMore: boolean
+
+  /**
+   * @generated from field: optional ariadne.v1.GalleryCounts counts = 4;
+   */
+  counts?: GalleryCounts | undefined
+}
+
+/**
+ * Describes the message ariadne.v1.ListGalleryArtifactsResponse.
+ * Use `create(ListGalleryArtifactsResponseSchema)` to create a new message.
+ */
+export const ListGalleryArtifactsResponseSchema: GenMessage<ListGalleryArtifactsResponse> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_artifacts, 23)
 
 /**
  * @generated from message ariadne.v1.CreateArtifactRequest
@@ -785,7 +1073,7 @@ export type CreateArtifactRequest = Message<'ariadne.v1.CreateArtifactRequest'> 
  */
 export const CreateArtifactRequestSchema: GenMessage<CreateArtifactRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 18)
+  messageDesc(file_ariadne_v1_artifacts, 24)
 
 /**
  * @generated from message ariadne.v1.CreateArtifactResponse
@@ -813,7 +1101,7 @@ export type CreateArtifactResponse = Message<'ariadne.v1.CreateArtifactResponse'
  */
 export const CreateArtifactResponseSchema: GenMessage<CreateArtifactResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 19)
+  messageDesc(file_ariadne_v1_artifacts, 25)
 
 /**
  * @generated from message ariadne.v1.GetArtifactRequest
@@ -843,6 +1131,11 @@ export type GetArtifactRequest = Message<'ariadne.v1.GetArtifactRequest'> & {
    * @generated from field: string version_page_token = 5;
    */
   versionPageToken: string
+
+  /**
+   * @generated from field: bool lightweight = 6;
+   */
+  lightweight: boolean
 }
 
 /**
@@ -851,7 +1144,7 @@ export type GetArtifactRequest = Message<'ariadne.v1.GetArtifactRequest'> & {
  */
 export const GetArtifactRequestSchema: GenMessage<GetArtifactRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 20)
+  messageDesc(file_ariadne_v1_artifacts, 26)
 
 /**
  * @generated from message ariadne.v1.DocumentAskAnswerBaseline
@@ -879,7 +1172,7 @@ export type DocumentAskAnswerBaseline = Message<'ariadne.v1.DocumentAskAnswerBas
  */
 export const DocumentAskAnswerBaselineSchema: GenMessage<DocumentAskAnswerBaseline> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 21)
+  messageDesc(file_ariadne_v1_artifacts, 27)
 
 /**
  * @generated from message ariadne.v1.DocumentAskBaseline
@@ -902,7 +1195,7 @@ export type DocumentAskBaseline = Message<'ariadne.v1.DocumentAskBaseline'> & {
  */
 export const DocumentAskBaselineSchema: GenMessage<DocumentAskBaseline> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 22)
+  messageDesc(file_ariadne_v1_artifacts, 28)
 
 /**
  * @generated from message ariadne.v1.GetArtifactResponse
@@ -945,7 +1238,7 @@ export type GetArtifactResponse = Message<'ariadne.v1.GetArtifactResponse'> & {
  */
 export const GetArtifactResponseSchema: GenMessage<GetArtifactResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 23)
+  messageDesc(file_ariadne_v1_artifacts, 29)
 
 /**
  * @generated from message ariadne.v1.ListArtifactVersionsRequest
@@ -973,7 +1266,7 @@ export type ListArtifactVersionsRequest = Message<'ariadne.v1.ListArtifactVersio
  */
 export const ListArtifactVersionsRequestSchema: GenMessage<ListArtifactVersionsRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 24)
+  messageDesc(file_ariadne_v1_artifacts, 30)
 
 /**
  * @generated from message ariadne.v1.ListArtifactVersionsResponse
@@ -1001,7 +1294,7 @@ export type ListArtifactVersionsResponse = Message<'ariadne.v1.ListArtifactVersi
  */
 export const ListArtifactVersionsResponseSchema: GenMessage<ListArtifactVersionsResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 25)
+  messageDesc(file_ariadne_v1_artifacts, 31)
 
 /**
  * @generated from message ariadne.v1.SaveArtifactRequest
@@ -1049,7 +1342,7 @@ export type SaveArtifactRequest = Message<'ariadne.v1.SaveArtifactRequest'> & {
  */
 export const SaveArtifactRequestSchema: GenMessage<SaveArtifactRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 26)
+  messageDesc(file_ariadne_v1_artifacts, 32)
 
 /**
  * @generated from message ariadne.v1.SaveArtifactResponse
@@ -1077,7 +1370,7 @@ export type SaveArtifactResponse = Message<'ariadne.v1.SaveArtifactResponse'> & 
  */
 export const SaveArtifactResponseSchema: GenMessage<SaveArtifactResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 27)
+  messageDesc(file_ariadne_v1_artifacts, 33)
 
 /**
  * @generated from message ariadne.v1.RefreshDashboardRequest
@@ -1095,7 +1388,7 @@ export type RefreshDashboardRequest = Message<'ariadne.v1.RefreshDashboardReques
  */
 export const RefreshDashboardRequestSchema: GenMessage<RefreshDashboardRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 28)
+  messageDesc(file_ariadne_v1_artifacts, 34)
 
 /**
  * @generated from message ariadne.v1.RefreshDashboardResponse
@@ -1113,7 +1406,7 @@ export type RefreshDashboardResponse = Message<'ariadne.v1.RefreshDashboardRespo
  */
 export const RefreshDashboardResponseSchema: GenMessage<RefreshDashboardResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 29)
+  messageDesc(file_ariadne_v1_artifacts, 35)
 
 /**
  * @generated from message ariadne.v1.SendArtifactFeedbackRequest
@@ -1136,7 +1429,7 @@ export type SendArtifactFeedbackRequest = Message<'ariadne.v1.SendArtifactFeedba
  */
 export const SendArtifactFeedbackRequestSchema: GenMessage<SendArtifactFeedbackRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 30)
+  messageDesc(file_ariadne_v1_artifacts, 36)
 
 /**
  * @generated from message ariadne.v1.SendArtifactFeedbackResponse
@@ -1154,7 +1447,7 @@ export type SendArtifactFeedbackResponse = Message<'ariadne.v1.SendArtifactFeedb
  */
 export const SendArtifactFeedbackResponseSchema: GenMessage<SendArtifactFeedbackResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 31)
+  messageDesc(file_ariadne_v1_artifacts, 37)
 
 /**
  * @generated from message ariadne.v1.WithdrawArtifactFeedbackRequest
@@ -1178,7 +1471,7 @@ export type WithdrawArtifactFeedbackRequest =
  */
 export const WithdrawArtifactFeedbackRequestSchema: GenMessage<WithdrawArtifactFeedbackRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 32)
+  messageDesc(file_ariadne_v1_artifacts, 38)
 
 /**
  * @generated from message ariadne.v1.WithdrawArtifactFeedbackResponse
@@ -1197,7 +1490,7 @@ export type WithdrawArtifactFeedbackResponse =
  */
 export const WithdrawArtifactFeedbackResponseSchema: GenMessage<WithdrawArtifactFeedbackResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 33)
+  messageDesc(file_ariadne_v1_artifacts, 39)
 
 /**
  * @generated from message ariadne.v1.CreateArtifactCommentRequest
@@ -1240,7 +1533,7 @@ export type CreateArtifactCommentRequest = Message<'ariadne.v1.CreateArtifactCom
  */
 export const CreateArtifactCommentRequestSchema: GenMessage<CreateArtifactCommentRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 34)
+  messageDesc(file_ariadne_v1_artifacts, 40)
 
 /**
  * @generated from message ariadne.v1.CreateArtifactCommentResponse
@@ -1258,7 +1551,7 @@ export type CreateArtifactCommentResponse = Message<'ariadne.v1.CreateArtifactCo
  */
 export const CreateArtifactCommentResponseSchema: GenMessage<CreateArtifactCommentResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 35)
+  messageDesc(file_ariadne_v1_artifacts, 41)
 
 /**
  * @generated from message ariadne.v1.ReplyArtifactCommentRequest
@@ -1291,7 +1584,7 @@ export type ReplyArtifactCommentRequest = Message<'ariadne.v1.ReplyArtifactComme
  */
 export const ReplyArtifactCommentRequestSchema: GenMessage<ReplyArtifactCommentRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 36)
+  messageDesc(file_ariadne_v1_artifacts, 42)
 
 /**
  * @generated from message ariadne.v1.ReplyArtifactCommentResponse
@@ -1309,7 +1602,7 @@ export type ReplyArtifactCommentResponse = Message<'ariadne.v1.ReplyArtifactComm
  */
 export const ReplyArtifactCommentResponseSchema: GenMessage<ReplyArtifactCommentResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 37)
+  messageDesc(file_ariadne_v1_artifacts, 43)
 
 /**
  * @generated from message ariadne.v1.EditArtifactCommentRequest
@@ -1342,7 +1635,7 @@ export type EditArtifactCommentRequest = Message<'ariadne.v1.EditArtifactComment
  */
 export const EditArtifactCommentRequestSchema: GenMessage<EditArtifactCommentRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 38)
+  messageDesc(file_ariadne_v1_artifacts, 44)
 
 /**
  * @generated from message ariadne.v1.EditArtifactCommentResponse
@@ -1360,7 +1653,7 @@ export type EditArtifactCommentResponse = Message<'ariadne.v1.EditArtifactCommen
  */
 export const EditArtifactCommentResponseSchema: GenMessage<EditArtifactCommentResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 39)
+  messageDesc(file_ariadne_v1_artifacts, 45)
 
 /**
  * @generated from message ariadne.v1.DeleteArtifactCommentRequest
@@ -1388,7 +1681,7 @@ export type DeleteArtifactCommentRequest = Message<'ariadne.v1.DeleteArtifactCom
  */
 export const DeleteArtifactCommentRequestSchema: GenMessage<DeleteArtifactCommentRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 40)
+  messageDesc(file_ariadne_v1_artifacts, 46)
 
 /**
  * @generated from message ariadne.v1.DeleteArtifactCommentResponse
@@ -1406,7 +1699,7 @@ export type DeleteArtifactCommentResponse = Message<'ariadne.v1.DeleteArtifactCo
  */
 export const DeleteArtifactCommentResponseSchema: GenMessage<DeleteArtifactCommentResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 41)
+  messageDesc(file_ariadne_v1_artifacts, 47)
 
 /**
  * @generated from message ariadne.v1.ResolveArtifactCommentThreadRequest
@@ -1430,7 +1723,7 @@ export type ResolveArtifactCommentThreadRequest =
  */
 export const ResolveArtifactCommentThreadRequestSchema: GenMessage<ResolveArtifactCommentThreadRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 42)
+  messageDesc(file_ariadne_v1_artifacts, 48)
 
 /**
  * @generated from message ariadne.v1.ResolveArtifactCommentThreadResponse
@@ -1449,7 +1742,7 @@ export type ResolveArtifactCommentThreadResponse =
  */
 export const ResolveArtifactCommentThreadResponseSchema: GenMessage<ResolveArtifactCommentThreadResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 43)
+  messageDesc(file_ariadne_v1_artifacts, 49)
 
 /**
  * @generated from message ariadne.v1.ReopenArtifactCommentThreadRequest
@@ -1473,7 +1766,7 @@ export type ReopenArtifactCommentThreadRequest =
  */
 export const ReopenArtifactCommentThreadRequestSchema: GenMessage<ReopenArtifactCommentThreadRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 44)
+  messageDesc(file_ariadne_v1_artifacts, 50)
 
 /**
  * @generated from message ariadne.v1.ReopenArtifactCommentThreadResponse
@@ -1492,7 +1785,7 @@ export type ReopenArtifactCommentThreadResponse =
  */
 export const ReopenArtifactCommentThreadResponseSchema: GenMessage<ReopenArtifactCommentThreadResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 45)
+  messageDesc(file_ariadne_v1_artifacts, 51)
 
 /**
  * @generated from message ariadne.v1.RemoveArtifactCommentThreadRequest
@@ -1516,7 +1809,7 @@ export type RemoveArtifactCommentThreadRequest =
  */
 export const RemoveArtifactCommentThreadRequestSchema: GenMessage<RemoveArtifactCommentThreadRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 46)
+  messageDesc(file_ariadne_v1_artifacts, 52)
 
 /**
  * @generated from message ariadne.v1.RemoveArtifactCommentThreadResponse
@@ -1535,7 +1828,7 @@ export type RemoveArtifactCommentThreadResponse =
  */
 export const RemoveArtifactCommentThreadResponseSchema: GenMessage<RemoveArtifactCommentThreadResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_artifacts, 47)
+  messageDesc(file_ariadne_v1_artifacts, 53)
 
 /**
  * ArtifactService manages documents, whiteboards, dashboards, paginated artifact
@@ -1551,6 +1844,14 @@ export const ArtifactService: GenService<{
     methodKind: 'unary'
     input: typeof ListArtifactsRequestSchema
     output: typeof ListArtifactsResponseSchema
+  }
+  /**
+   * @generated from rpc ariadne.v1.ArtifactService.ListGalleryArtifacts
+   */
+  listGalleryArtifacts: {
+    methodKind: 'unary'
+    input: typeof ListGalleryArtifactsRequestSchema
+    output: typeof ListGalleryArtifactsResponseSchema
   }
   /**
    * @generated from rpc ariadne.v1.ArtifactService.CreateArtifact

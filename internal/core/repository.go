@@ -106,7 +106,18 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 			return err
 		}
 	}
-	if version == schema.Version || version == 67 || version == 68 || version == 69 || version == 70 || version == 71 || version == 72 || version == 73 {
+	if version >= 67 && version <= 74 {
+		if err := addColumnIfMissing(ctx, tx, "artifacts", "has_prototype", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		if err := addColumnIfMissing(ctx, tx, "artifacts", "pending_actions", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		if err := backfillArtifactGalleryMetadata(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if version == schema.Version || (version >= 67 && version < schema.Version) {
 		return schema.Create(ctx, tx)
 	}
 	if err := dropProjectionTables(ctx, tx); err != nil {
@@ -173,6 +184,58 @@ func addColumnIfMissing(ctx context.Context, tx *sql.Tx, table, column, definiti
 	}
 	_, err = tx.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
 	return err
+}
+
+func backfillArtifactGalleryMetadata(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, "SELECT id, kind, content FROM artifacts")
+	if err != nil {
+		return err
+	}
+	type artifactRow struct {
+		id, kind, content string
+	}
+	var items []artifactRow
+	for rows.Next() {
+		var item artifactRow
+		if err := rows.Scan(&item.id, &item.kind, &item.content); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, item := range items {
+		meta := computeArtifactMetadata(item.kind, item.content)
+		hasProto := 0
+		if meta.hasPrototype {
+			hasProto = 1
+		}
+		if _, err := tx.ExecContext(
+			ctx,
+			"UPDATE artifacts SET preview = ?, has_prototype = ?, pending_actions = ? WHERE id = ?",
+			encoded(meta.preview), hasProto, meta.pendingActions, item.id,
+		); err != nil {
+			return err
+		}
+		if item.kind == "whiteboard" {
+			var docID int64
+			err := tx.QueryRowContext(ctx, "SELECT id FROM search_docs WHERE kind = 'artifact' AND ref_id = ?", item.id).Scan(&docID)
+			if err == nil {
+				if _, err := tx.ExecContext(ctx, "UPDATE search_text SET body = ? WHERE rowid = ?", searchText(item.kind, item.content), docID); err != nil {
+					return err
+				}
+			} else if err != sql.ErrNoRows {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func dropProjectionTables(ctx context.Context, tx *sql.Tx) error {

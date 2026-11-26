@@ -14,7 +14,9 @@ import {
   captureWorkspace,
   closeFull,
   closePane,
+  openGallery,
   openProject,
+  openProjectArtifact,
   openThread,
   openView,
   setSide,
@@ -148,5 +150,27 @@ describe('workspace routes', () => {
     expect(state.workspaceLevel).toBe('side')
     showWorkspace('coordinator')
     await vi.waitFor(() => expect(router.currentRoute.value.query.pane).toBeUndefined())
+  })
+
+  test('gallery route loads directly and browser back returns to gallery after opening a project artifact', async () => {
+    const { router } = await enter('/gallery')
+    expect(state.main).toEqual({ kind: 'gallery' })
+    expect(state.workspaceLevel).toBe('coordinator')
+    expect(router.currentRoute.value.fullPath).toBe('/gallery')
+
+    await openProjectArtifact('prj_second', artifact.id)
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.fullPath).toContain('/projects/prj_second'),
+    )
+    expect(state.main.kind).toBe('conversation')
+
+    router.back()
+    await vi.waitFor(() => expect(state.main).toEqual({ kind: 'gallery' }))
+    expect(router.currentRoute.value.fullPath).toBe('/gallery')
+
+    await openProject('prj_first')
+    await vi.waitFor(() => expect(router.currentRoute.value.params.projectId).toBe('prj_first'))
+    openGallery()
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/gallery'))
   })
 })

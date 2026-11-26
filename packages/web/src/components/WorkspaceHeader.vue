@@ -50,16 +50,19 @@ const mediumSideLabel = computed(() =>
 )
 const atProjects = computed(() => state.workspaceLevel === 'projects')
 const atSide = computed(() => state.workspaceLevel === 'side')
+const isGallery = computed(() => state.main.kind === 'gallery')
 const backLabel = computed(() => t(atSide.value ? 'nav.backToCoordinator' : 'nav.backToProjects'))
 const currentProjectName = computed(
   () => state.projects.find((project) => project.id === state.currentId)?.name ?? null,
 )
 const title = computed(() => {
   if (props.unauthorized || !isNarrow.value || atProjects.value) return t('app.name')
+  if (isGallery.value) return t('gallery.title')
   if (state.starting) return t('nav.newProject')
   return currentProjectName.value ?? t('app.name')
 })
 const mediumProjectTitle = computed(() => {
+  if (isGallery.value) return t('gallery.title')
   if (state.starting) return t('nav.newProject')
   return currentProjectName.value ?? t('nav.projects')
 })
@@ -79,6 +82,7 @@ const hasSidePane = computed(
   () =>
     !!state.currentId &&
     !state.starting &&
+    !isGallery.value &&
     state.main.kind !== 'trace' &&
     !(state.main.kind === 'plan' && state.planWide),
 )
@@ -173,7 +177,7 @@ watch(showMediumProjectPopover, (allowed) => {
       <div v-if="!unauthorized" class="header-actions">
         <ProjectSearch />
         <AttentionBar :compact="actionsCompact" />
-        <template v-if="state.detail && (!isNarrow || !atProjects)">
+        <template v-if="state.detail && !isGallery && (!isNarrow || !atProjects)">
           <AutopilotSwitch :compact="actionsCompact" />
           <DouButton
             variant="ghost"
@@ -211,6 +215,7 @@ watch(showMediumProjectPopover, (allowed) => {
             !atSide &&
             state.currentId &&
             !state.starting &&
+            !isGallery &&
             state.main.kind !== 'trace'
           "
           variant="ghost"

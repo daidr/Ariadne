@@ -64,6 +64,8 @@ export type MainView =
   | { kind: 'conversation' }
   | { kind: 'plan' }
   | { kind: 'artifacts' }
+  /** Cross-project artifact & knowledge gallery. */
+  | { kind: 'gallery' }
   /** What a conversation's agent did, turn by turn, for finding out what went wrong. */
   | { kind: 'trace'; conversationId: string }
 
@@ -721,7 +723,6 @@ export async function openMessage(conversationId: string, messageId: string) {
 
 function prepareProject(id: string | null) {
   parts.clear()
-  clearBoardThumbnails()
   clearLinkCaches()
   messageRenderKeys.clear()
   state.starting = false
@@ -964,8 +965,18 @@ export async function openProjectConversation(projectId: string) {
 
 /** Open an artifact in any project, switching projects first when needed. */
 export async function openProjectArtifact(projectId: string, artifactId: string) {
-  if (!(await ensureProjectOpen(projectId))) return
-  if (state.main.kind === 'trace') openMain({ kind: 'conversation' })
+  if (projectId !== state.currentId || state.starting || !state.detail) {
+    prepareProject(projectId)
+    // Open the target artifact pane synchronously before awaiting refreshCurrent so the
+    // router pushes one atomic history entry and Browser Back returns straight to the caller.
+    showWorkspace('side')
+    setSide(side.open(state.side, side.artifactKey(artifactId)))
+    await refreshCurrent().catch(report)
+    return
+  }
+  if (state.main.kind === 'trace' || state.main.kind === 'gallery') {
+    openMain({ kind: 'conversation' })
+  }
   await openView({ kind: 'artifact', id: artifactId })
 }
 
@@ -976,7 +987,9 @@ export async function openProjectMessage(
   messageId: string,
 ) {
   if (!(await ensureProjectOpen(projectId))) return
-  if (state.main.kind === 'trace') openMain({ kind: 'conversation' })
+  if (state.main.kind === 'trace' || state.main.kind === 'gallery') {
+    openMain({ kind: 'conversation' })
+  }
   await openMessage(conversationId, messageId)
 }
 
@@ -1185,7 +1198,11 @@ export function showWorkspace(level: WorkspaceLevel) {
 export function startNewProject() {
   state.starting = true
   showWorkspace('coordinator')
-  if (state.main.kind === 'trace') resetMain()
+  if (state.main.kind === 'trace' || state.main.kind === 'gallery') resetMain()
+}
+
+export function openGallery() {
+  openMain({ kind: 'gallery' })
 }
 
 function resetMain() {
@@ -1241,6 +1258,15 @@ export function captureWorkspace(): { location: WorkspaceLocation; snapshot: Wor
 
 /** Apply a URL before loading its project, so all its open conversations load together. */
 export async function restoreWorkspace(location: WorkspaceLocation, saved?: WorkspaceSnapshot) {
+  if (location.main.kind === 'gallery') {
+    state.full = null
+    state.starting = false
+    state.workspaceLevel = location.level === 'projects' ? 'projects' : 'coordinator'
+    state.main = { kind: 'gallery' }
+    state.planWide = false
+    mainTrail = saved ? saved.mainTrail : []
+    return
+  }
   const exists = (id: string | null) => state.projects.some((project) => project.id === id)
   const projectId = exists(location.projectId)
     ? location.projectId

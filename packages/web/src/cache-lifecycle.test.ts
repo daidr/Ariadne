@@ -3,6 +3,7 @@ import { api } from './api'
 import {
   boardThumbnail,
   clearBoardThumbnails,
+  THUMBNAIL_CONCURRENCY,
   THUMBNAIL_LIMIT,
   THUMBNAIL_TTL_MS,
   MAX_THUMBNAIL_CHARS,
@@ -88,6 +89,38 @@ test('a burst has bounded queued render work and oversized SVGs are not retained
   const { renderFlowSVG } = await import('@dou-ui/flow')
   vi.mocked(renderFlowSVG).mockResolvedValueOnce('x'.repeat(MAX_THUMBNAIL_CHARS + 1))
   expect(await boardThumbnail('too-large', 1, 'light')).toBeNull()
+})
+
+test('thumbnails fetch lightweight whiteboard payloads with bounded concurrency', async () => {
+  const resolvers: Array<() => void> = []
+  let inFlight = 0
+  let maxInFlight = 0
+  vi.mocked(api.getArtifact).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        inFlight++
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        resolvers.push(() => {
+          inFlight--
+          resolve({ artifact: { content: '{"nodes":[{}]}' } } as never)
+        })
+      }),
+  )
+  const jobs = Array.from({ length: THUMBNAIL_CONCURRENCY + 2 }, (_, i) =>
+    boardThumbnail(`concurrent-${i}`, 1, 'light'),
+  )
+  await Promise.resolve()
+  expect(maxInFlight).toBe(THUMBNAIL_CONCURRENCY)
+  expect(vi.mocked(api.getArtifact).mock.calls[0]?.[1]).toMatchObject({
+    versions: false,
+    lightweight: true,
+  })
+  for (let done = 0; done < jobs.length; done++) {
+    await vi.waitFor(() => expect(resolvers.length).toBeGreaterThan(0))
+    resolvers.shift()!()
+  }
+  const results = await Promise.all(jobs)
+  expect(results.every((url) => url?.includes('data:image/svg+xml'))).toBe(true)
 })
 
 test('summaries deduplicate and batch, then release all results (including misses) on expiry or clear', async () => {

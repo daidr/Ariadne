@@ -878,6 +878,14 @@ export interface ArtifactFeedbackView {
  * reads the whole content: a document's opening Markdown, a whiteboard's counts and texts
  * (the card draws the board itself), a dashboard's tiles.
  */
+export interface WhiteboardMinimapBox {
+  x: number
+  y: number
+  w: number
+  h: number
+  kind: string
+}
+
 export type ArtifactPreview =
   | { kind: 'document'; excerpt: string; lead: string }
   | {
@@ -885,6 +893,10 @@ export type ArtifactPreview =
       items: number
       connectors: number
       texts: string[]
+      prototypeCount?: number
+      optionCount?: number
+      previewImage?: string | null
+      minimap?: WhiteboardMinimapBox[]
     }
   | {
       kind: 'dashboard'
@@ -893,7 +905,59 @@ export type ArtifactPreview =
       titles: string[]
       /** The first widgets on the widest layout's grid, 12 columns wide. */
       tiles: PreviewTile[]
+      isLive?: boolean
     }
+
+export type GallerySort = 'updated_desc' | 'created_desc' | 'title_asc'
+export type GalleryStatusFilter = '' | 'needs_me' | 'has_comments' | 'feedback_pending'
+export type GalleryKindFilter = '' | ArtifactKind | 'prototype'
+
+export interface GalleryProjectCount {
+  projectId: string
+  projectName: string
+  count: number
+}
+
+export interface GalleryCounts {
+  total: number
+  documents: number
+  whiteboards: number
+  dashboards: number
+  prototypes: number
+  needsMe: number
+  feedbackPending: number
+  projects: GalleryProjectCount[]
+}
+
+export interface GalleryArtifactSummary {
+  artifact: ArtifactSummary
+  projectName: string
+  updatedByLabel: string | null
+  updatedByCoordinator: boolean
+  hasPrototype: boolean
+  pendingActions: number
+  pendingFeedback: number
+  nodeTitle: string | null
+}
+
+export interface GalleryArtifactsQuery {
+  projectId?: string
+  kind?: ArtifactKind | ''
+  onlyPrototypes?: boolean
+  status?: GalleryStatusFilter
+  query?: string
+  sort?: GallerySort
+  pageSize?: number
+  pageToken?: string
+  includeCounts?: boolean
+}
+
+export interface GalleryArtifactsPage {
+  items: GalleryArtifactSummary[]
+  nextPageToken: string
+  hasMore: boolean
+  counts: GalleryCounts | null
+}
 
 export interface PreviewTile {
   type: string
