@@ -36,7 +36,7 @@ import { kindIcon } from './kinds'
 const props = defineProps<{
   item: GalleryArtifactSummary | null
   open: boolean
-  narrow: boolean
+  drawerMode: 'bottom' | 'right' | 'docked'
   hasPrev: boolean
   hasNext: boolean
 }>()
@@ -184,13 +184,14 @@ function openMarkdownInnerLink(href: string, event: MouseEvent) {
 </script>
 
 <template>
-  <!-- Narrow screen: bottom sheet Drawer -->
+  <!-- Narrow (bottom sheet) or medium (right slide-over drawer) -->
   <DouDrawer
-    v-if="narrow"
+    v-if="drawerMode !== 'docked'"
     :open="open && Boolean(item)"
-    placement="bottom"
-    swipeable
-    :snap-points="['72%', '92%']"
+    :placement="drawerMode"
+    :swipeable="drawerMode === 'bottom'"
+    :snap-points="drawerMode === 'bottom' ? ['72%', '92%'] : undefined"
+    :size="drawerMode === 'right' ? 384 : undefined"
     :title="artifact?.title ?? t('gallery.quickView')"
     @update:open="(value) => !value && emit('close')"
   >
@@ -546,7 +547,7 @@ function openMarkdownInnerLink(href: string, event: MouseEvent) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--dou-color-border-subtle);
 }
 
@@ -573,6 +574,7 @@ function openMarkdownInnerLink(href: string, event: MouseEvent) {
 
 .quick-pane-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--dou-color-border-subtle);
@@ -607,7 +609,6 @@ function openMarkdownInnerLink(href: string, event: MouseEvent) {
 
 .sheet-action-btn {
   flex: 1;
-  min-height: 44px;
 }
 
 .quick-visual {

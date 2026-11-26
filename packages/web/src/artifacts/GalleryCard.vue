@@ -173,8 +173,9 @@ function onProjectClick(event: MouseEvent) {
               :title="t('gallery.quickView')"
               @click="onQuickViewClick"
             >
-              <template #leading><EyeIcon /></template>
+              <template v-if="!narrow && density !== 'compact'" #leading><EyeIcon /></template>
               <span v-if="!narrow && density !== 'compact'">{{ t('gallery.quickView') }}</span>
+              <EyeIcon v-else />
             </DouButton>
           </div>
         </div>
@@ -261,13 +262,29 @@ function onProjectClick(event: MouseEvent) {
         <div class="list-main">
           <div class="list-title-row">
             <DouText weight="medium" truncate class="list-title">{{ artifact.title }}</DouText>
-            <DouTag v-if="item.hasPrototype" size="sm" variant="soft" tone="primary" round>
-              {{ t('gallery.kind.prototype') }}
-            </DouTag>
-            <DouTag v-else size="sm" variant="soft" tone="neutral" round>
-              {{ kindLabel }}
-            </DouTag>
-            <DouTag v-if="item.pendingActions > 0" size="sm" tone="warning" variant="soft" round>
+            <template v-if="!narrow">
+              <DouTag
+                v-if="item.hasPrototype"
+                size="sm"
+                variant="soft"
+                tone="primary"
+                round
+                class="list-tag"
+              >
+                {{ t('gallery.kind.prototype') }}
+              </DouTag>
+              <DouTag v-else size="sm" variant="soft" tone="neutral" round class="list-tag">
+                {{ kindLabel }}
+              </DouTag>
+            </template>
+            <DouTag
+              v-if="item.pendingActions > 0"
+              size="sm"
+              tone="warning"
+              variant="soft"
+              round
+              class="list-tag"
+            >
               {{ t('gallery.status.needsMe') }}
             </DouTag>
             <DouTag
@@ -276,39 +293,63 @@ function onProjectClick(event: MouseEvent) {
               tone="primary"
               variant="soft"
               round
+              class="list-tag"
             >
               {{ t('gallery.status.feedbackPending') }}
             </DouTag>
           </div>
           <div class="list-meta-row">
-            <button type="button" class="project-pill" @click="onProjectClick">
-              <FolderIcon class="project-pill-icon" aria-hidden="true" />
-              <span class="project-pill-name">{{ item.projectName }}</span>
-            </button>
-            <span v-if="item.nodeTitle" class="meta-sep" aria-hidden="true">·</span>
-            <DouText v-if="item.nodeTitle" variant="tertiary" size="sm" truncate class="list-node">
-              {{ item.nodeTitle }}
-            </DouText>
-            <span class="meta-sep" aria-hidden="true">·</span>
-            <DouText variant="tertiary" size="sm" truncate>{{ updaterLabel }}</DouText>
-            <span class="meta-sep" aria-hidden="true">·</span>
-            <DouText variant="tertiary" size="sm">{{
-              t('gallery.meta.version', { version: artifact.version })
-            }}</DouText>
-            <span v-if="artifact.openComments > 0" class="meta-sep" aria-hidden="true">·</span>
-            <DouText
-              v-if="artifact.openComments > 0"
-              variant="secondary"
-              size="sm"
-              class="list-comments"
-            >
-              <MessageDotsIcon class="inline-icon" aria-hidden="true" />
-              {{ artifact.openComments }}
-            </DouText>
+            <template v-if="narrow">
+              <DouText variant="tertiary" size="sm" class="list-meta-fixed">{{
+                kindLabel
+              }}</DouText>
+              <span class="meta-sep" aria-hidden="true">·</span>
+              <DouText variant="secondary" size="sm" truncate class="list-meta-project">
+                {{ item.projectName }}
+              </DouText>
+              <span class="meta-sep" aria-hidden="true">·</span>
+              <DouText variant="tertiary" size="sm" class="list-meta-fixed">{{
+                timeLabel
+              }}</DouText>
+            </template>
+            <template v-else>
+              <button type="button" class="project-pill" @click="onProjectClick">
+                <FolderIcon class="project-pill-icon" aria-hidden="true" />
+                <span class="project-pill-name">{{ item.projectName }}</span>
+              </button>
+              <span v-if="item.nodeTitle" class="meta-sep" aria-hidden="true">·</span>
+              <DouText
+                v-if="item.nodeTitle"
+                variant="tertiary"
+                size="sm"
+                truncate
+                class="list-node"
+              >
+                {{ item.nodeTitle }}
+              </DouText>
+              <span class="meta-sep" aria-hidden="true">·</span>
+              <DouText variant="tertiary" size="sm" truncate>{{ updaterLabel }}</DouText>
+              <span class="meta-sep" aria-hidden="true">·</span>
+              <DouText variant="tertiary" size="sm" class="list-meta-fixed">{{
+                t('gallery.meta.version', { version: artifact.version })
+              }}</DouText>
+              <span v-if="artifact.openComments > 0" class="meta-sep" aria-hidden="true">·</span>
+              <DouText
+                v-if="artifact.openComments > 0"
+                variant="secondary"
+                size="sm"
+                class="list-comments"
+              >
+                <MessageDotsIcon class="inline-icon" aria-hidden="true" />
+                {{ artifact.openComments }}
+              </DouText>
+            </template>
           </div>
         </div>
         <div class="list-end">
-          <DouText variant="tertiary" size="sm" class="list-time">{{ timeLabel }}</DouText>
+          <DouText v-if="!narrow" variant="tertiary" size="sm" class="list-time">{{
+            timeLabel
+          }}</DouText>
           <DouButton
             size="sm"
             variant="ghost"
@@ -423,13 +464,17 @@ function onProjectClick(event: MouseEvent) {
 }
 
 .quick-view-btn {
-  background: var(--dou-color-bg-surface);
+  background: color-mix(in srgb, var(--dou-color-bg-surface) 90%, transparent);
+  backdrop-filter: blur(6px);
   box-shadow: var(--dou-shadow-sm);
 }
 
-.gallery-card-narrow .quick-view-btn {
-  min-width: 44px;
-  min-height: 44px;
+.gallery-card-grid.gallery-card-narrow :deep(.thumb) {
+  height: 132px;
+}
+
+.gallery-card-grid.gallery-card-narrow.gallery-card-compact :deep(.thumb) {
+  height: 108px;
 }
 
 .card-body {
@@ -587,11 +632,21 @@ function onProjectClick(event: MouseEvent) {
   padding: 8px 10px;
 }
 
+.gallery-card-list.gallery-card-narrow {
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.gallery-card-list.gallery-card-narrow :deep(.thumb-size-mini) {
+  width: 56px;
+  height: 40px;
+}
+
 .list-main {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -606,12 +661,26 @@ function onProjectClick(event: MouseEvent) {
   min-width: 0;
 }
 
+.list-tag {
+  flex: none;
+}
+
 .list-meta-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
+  overflow: hidden;
   flex-wrap: nowrap;
+}
+
+.list-meta-fixed {
+  flex: none;
+  white-space: nowrap;
+}
+
+.list-meta-project {
+  min-width: 0;
 }
 
 .list-node {
@@ -634,16 +703,11 @@ function onProjectClick(event: MouseEvent) {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .list-time {
   white-space: nowrap;
-}
-
-.gallery-card-narrow .list-quick-btn {
-  min-width: 44px;
-  min-height: 44px;
 }
 
 /* Hover quick preview popover */

@@ -8,11 +8,12 @@ import type {
 import {
   FilterIcon,
   FolderIcon,
+  GridIcon,
   LayoutGridIcon,
   LayoutListIcon,
+  LayoutThreeRowsIcon,
   RefreshIcon,
   SearchIcon,
-  SlidersIcon,
 } from '@dou-ui/icons'
 import {
   DouAlert,
@@ -59,19 +60,28 @@ const props = defineProps<{
 }>()
 
 const isNarrow = computed(() => props.layoutMode === 'narrow')
+const isWide = computed(() => props.layoutMode === 'wide')
 const now = useServerNow()
 
+const pageRef = useTemplateRef<HTMLElement>('pageRef')
 const canvasRef = useTemplateRef<HTMLElement>('canvasRef')
 const virtualListRef = useTemplateRef<VirtualListExpose>('virtualListRef')
 const sentinelRef = useTemplateRef<HTMLElement>('sentinelRef')
 const searchInputRef = useTemplateRef<InstanceType<typeof DouInput>>('searchInputRef')
+const { width: pageWidth } = useElementSize(pageRef)
 const { width: canvasWidth } = useElementSize(canvasRef)
 
 const mobileFilterOpen = ref(false)
 
+const quickPreviewMode = computed<'bottom' | 'right' | 'docked'>(() => {
+  if (isNarrow.value) return 'bottom'
+  if (pageWidth.value > 0 && pageWidth.value < 960) return 'right'
+  return 'docked'
+})
+
 const cardMinWidth = computed(() => (galleryState.density === 'compact' ? 216 : 264))
 const cardGap = computed(() => (galleryState.density === 'compact' ? 12 : 16))
-const horizontalPadding = computed(() => (isNarrow.value ? 24 : 40))
+const horizontalPadding = computed(() => (isNarrow.value ? 24 : 32))
 
 const columns = computed(() =>
   gridColumnCount(
@@ -163,6 +173,11 @@ const viewModeOptions = computed(() => [
   { value: 'list', label: t('gallery.view.list') },
 ])
 
+const densityOptions = computed(() => [
+  { value: 'comfortable', label: t('gallery.density.comfortable') },
+  { value: 'compact', label: t('gallery.density.compact') },
+])
+
 const subtitleText = computed(() => {
   if (!galleryState.counts) return ''
   return t('gallery.subtitle', {
@@ -246,9 +261,10 @@ function toggleDensity() {
   saveGalleryPrefs()
 }
 
-function setDensity(value: GalleryDensity) {
-  if (galleryState.density === value) return
-  galleryState.density = value
+function setDensity(value: unknown) {
+  const next = value === 'compact' ? 'compact' : ('comfortable' as GalleryDensity)
+  if (galleryState.density === next) return
+  galleryState.density = next
   saveGalleryPrefs()
 }
 
@@ -454,28 +470,33 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="gallery-page" :class="{ 'gallery-narrow': isNarrow }">
+  <div ref="pageRef" class="gallery-page" :class="{ 'gallery-narrow': isNarrow }">
     <header class="gallery-header">
       <div class="gallery-header-top">
         <div v-if="!isNarrow" class="gallery-title-group">
-          <div class="gallery-title-row">
-            <DouText weight="bold" size="lg">{{ t('gallery.title') }}</DouText>
-            <DouBadge
-              v-if="galleryState.counts"
-              :value="galleryState.counts.total"
-              tone="neutral"
-            />
-          </div>
-          <DouText v-if="subtitleText" variant="tertiary" size="sm">
+          <DouText weight="bold" size="md" class="gallery-title-text">{{
+            t('gallery.title')
+          }}</DouText>
+          <DouText
+            v-if="isWide && subtitleText"
+            variant="tertiary"
+            size="sm"
+            class="gallery-subtitle"
+          >
             {{ subtitleText }}
           </DouText>
+          <DouBadge
+            v-else-if="galleryState.counts"
+            :value="galleryState.counts.total"
+            tone="neutral"
+          />
         </div>
 
         <div class="gallery-search-controls">
           <DouInput
             ref="searchInputRef"
             v-model="galleryState.query"
-            size="sm"
+            :size="isNarrow ? 'md' : 'sm'"
             clearable
             :placeholder="t('gallery.search')"
             :aria-label="t('gallery.search')"
@@ -486,21 +507,40 @@ onBeforeUnmount(() => {
 
           <DouButton
             v-if="isNarrow"
-            variant="outline"
+            size="md"
+            :variant="activeGalleryFilterCount > 0 ? 'soft' : 'outline'"
+            :tone="activeGalleryFilterCount > 0 ? 'primary' : 'neutral'"
             class="mobile-filter-trigger"
+            :class="{ 'mobile-filter-trigger-active': activeGalleryFilterCount > 0 }"
             :aria-label="t('gallery.filters')"
+            :title="t('gallery.filters')"
             @click="mobileFilterOpen = true"
           >
-            <template #leading><FilterIcon /></template>
-            {{ t('gallery.filters') }}
-            <DouBadge
-              v-if="activeGalleryFilterCount > 0"
-              :value="activeGalleryFilterCount"
-              tone="primary"
-            />
+            <FilterIcon aria-hidden="true" />
+            <span v-if="activeGalleryFilterCount > 0" class="mobile-filter-count">
+              {{ activeGalleryFilterCount }}
+            </span>
           </DouButton>
 
           <template v-else>
+            <div class="gallery-select-wrap">
+              <DouSelect
+                :model-value="galleryState.sort"
+                :options="sortOptions"
+                size="sm"
+                :aria-label="t('gallery.sort.label')"
+                @update:model-value="setSort"
+              />
+            </div>
+            <div class="gallery-select-wrap">
+              <DouSelect
+                :model-value="galleryState.groupBy"
+                :options="groupOptions"
+                size="sm"
+                :aria-label="t('gallery.group.label')"
+                @update:model-value="setGroupBy"
+              />
+            </div>
             <DouSegmentedControl
               :model-value="galleryState.viewMode"
               :options="viewModeOptions"
@@ -526,33 +566,16 @@ onBeforeUnmount(() => {
             >
               <DouButton
                 size="sm"
-                :variant="galleryState.density === 'compact' ? 'solid' : 'outline'"
+                :variant="galleryState.density === 'compact' ? 'soft' : 'outline'"
                 :tone="galleryState.density === 'compact' ? 'primary' : 'neutral'"
                 :aria-label="t('gallery.density.compact')"
                 :aria-pressed="galleryState.density === 'compact'"
                 @click="toggleDensity"
               >
-                <SlidersIcon />
+                <GridIcon v-if="galleryState.viewMode === 'grid'" />
+                <LayoutThreeRowsIcon v-else />
               </DouButton>
             </DouTooltip>
-            <div class="gallery-select-wrap">
-              <DouSelect
-                :model-value="galleryState.sort"
-                :options="sortOptions"
-                size="sm"
-                :aria-label="t('gallery.sort.label')"
-                @update:model-value="setSort"
-              />
-            </div>
-            <div class="gallery-select-wrap">
-              <DouSelect
-                :model-value="galleryState.groupBy"
-                :options="groupOptions"
-                size="sm"
-                :aria-label="t('gallery.group.label')"
-                @update:model-value="setGroupBy"
-              />
-            </div>
           </template>
         </div>
       </div>
@@ -568,6 +591,7 @@ onBeforeUnmount(() => {
           v-for="opt in kindOptions"
           :key="opt.value"
           :checked="galleryState.kindFilter === opt.value"
+          size="sm"
           round
           class="narrow-kind-chip"
           @update:checked="() => setKindFilter(opt.value)"
@@ -817,7 +841,7 @@ onBeforeUnmount(() => {
       <GalleryQuickPreview
         :item="quickViewItem"
         :open="Boolean(quickViewItem)"
-        :narrow="isNarrow"
+        :drawer-mode="quickPreviewMode"
         :has-prev="hasPrevQuickView"
         :has-next="hasNextQuickView"
         @close="closeQuickView"
@@ -834,7 +858,7 @@ onBeforeUnmount(() => {
       v-model:open="mobileFilterOpen"
       placement="bottom"
       swipeable
-      :snap-points="['75%', '92%']"
+      :snap-points="['62%', '88%']"
       :title="t('gallery.filters')"
     >
       <div class="mobile-filter-sheet">
@@ -859,8 +883,8 @@ onBeforeUnmount(() => {
             <DouCheckTag
               :checked="galleryState.status === 'needs_me'"
               tone="warning"
+              size="sm"
               round
-              class="sheet-chip"
               @update:checked="() => toggleStatus('needs_me')"
             >
               {{ t('gallery.status.needsMe') }}
@@ -868,8 +892,8 @@ onBeforeUnmount(() => {
             <DouCheckTag
               :checked="galleryState.status === 'has_comments'"
               tone="neutral"
+              size="sm"
               round
-              class="sheet-chip"
               @update:checked="() => toggleStatus('has_comments')"
             >
               {{ t('gallery.status.hasComments') }}
@@ -877,8 +901,8 @@ onBeforeUnmount(() => {
             <DouCheckTag
               :checked="galleryState.status === 'feedback_pending'"
               tone="primary"
+              size="sm"
               round
-              class="sheet-chip"
               @update:checked="() => toggleStatus('feedback_pending')"
             >
               {{ t('gallery.status.feedbackPending') }}
@@ -888,78 +912,54 @@ onBeforeUnmount(() => {
 
         <DouDivider />
 
-        <div class="sheet-field">
-          <DouText size="sm" variant="secondary" weight="medium">{{
-            t('gallery.sort.label')
-          }}</DouText>
-          <DouSelect
-            :model-value="galleryState.sort"
-            :options="sortOptions"
-            :aria-label="t('gallery.sort.label')"
-            @update:model-value="setSort"
-          />
-        </div>
+        <div class="sheet-row-2">
+          <div class="sheet-field">
+            <DouText size="sm" variant="secondary" weight="medium">{{
+              t('gallery.sort.label')
+            }}</DouText>
+            <DouSelect
+              :model-value="galleryState.sort"
+              :options="sortOptions"
+              :aria-label="t('gallery.sort.label')"
+              @update:model-value="setSort"
+            />
+          </div>
 
-        <div class="sheet-field">
-          <DouText size="sm" variant="secondary" weight="medium">{{
-            t('gallery.group.label')
-          }}</DouText>
-          <DouSelect
-            :model-value="galleryState.groupBy"
-            :options="groupOptions"
-            :aria-label="t('gallery.group.label')"
-            @update:model-value="setGroupBy"
-          />
+          <div class="sheet-field">
+            <DouText size="sm" variant="secondary" weight="medium">{{
+              t('gallery.group.label')
+            }}</DouText>
+            <DouSelect
+              :model-value="galleryState.groupBy"
+              :options="groupOptions"
+              :aria-label="t('gallery.group.label')"
+              @update:model-value="setGroupBy"
+            />
+          </div>
         </div>
 
         <div class="sheet-field">
           <DouText size="sm" variant="secondary" weight="medium">{{
             t('gallery.view.label')
           }}</DouText>
-          <div class="sheet-chips">
-            <DouButton
-              :variant="galleryState.viewMode === 'grid' ? 'solid' : 'outline'"
-              :tone="galleryState.viewMode === 'grid' ? 'primary' : 'neutral'"
-              class="sheet-toggle-btn"
-              @click="setViewMode('grid')"
-            >
-              <template #leading><LayoutGridIcon /></template>
-              {{ t('gallery.view.grid') }}
-            </DouButton>
-            <DouButton
-              :variant="galleryState.viewMode === 'list' ? 'solid' : 'outline'"
-              :tone="galleryState.viewMode === 'list' ? 'primary' : 'neutral'"
-              class="sheet-toggle-btn"
-              @click="setViewMode('list')"
-            >
-              <template #leading><LayoutListIcon /></template>
-              {{ t('gallery.view.list') }}
-            </DouButton>
-          </div>
+          <DouSegmentedControl
+            :model-value="galleryState.viewMode"
+            :options="viewModeOptions"
+            block
+            @update:model-value="setViewMode"
+          />
         </div>
 
         <div class="sheet-field">
           <DouText size="sm" variant="secondary" weight="medium">{{
             t('gallery.density.label')
           }}</DouText>
-          <div class="sheet-chips">
-            <DouButton
-              :variant="galleryState.density === 'comfortable' ? 'solid' : 'outline'"
-              :tone="galleryState.density === 'comfortable' ? 'primary' : 'neutral'"
-              class="sheet-toggle-btn"
-              @click="setDensity('comfortable')"
-            >
-              {{ t('gallery.density.comfortable') }}
-            </DouButton>
-            <DouButton
-              :variant="galleryState.density === 'compact' ? 'solid' : 'outline'"
-              :tone="galleryState.density === 'compact' ? 'primary' : 'neutral'"
-              class="sheet-toggle-btn"
-              @click="setDensity('compact')"
-            >
-              {{ t('gallery.density.compact') }}
-            </DouButton>
-          </div>
+          <DouSegmentedControl
+            :model-value="galleryState.density"
+            :options="densityOptions"
+            block
+            @update:model-value="setDensity"
+          />
         </div>
       </div>
 
@@ -990,66 +990,69 @@ onBeforeUnmount(() => {
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 20px 12px;
+  gap: 8px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--dou-color-border-subtle);
   background: var(--dou-color-bg-surface);
 }
 
 .gallery-narrow .gallery-header {
-  padding: 10px 12px;
+  padding: 8px 12px;
   gap: 8px;
 }
 
 .gallery-header-top {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
 .gallery-title-group {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex: none;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
-.gallery-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.gallery-title-text,
+.gallery-subtitle {
+  white-space: nowrap;
 }
 
 .gallery-search-controls {
   display: flex;
   flex: 1;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  min-width: 220px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .gallery-narrow .gallery-search-controls {
   width: 100%;
   justify-content: stretch;
-  flex-wrap: nowrap;
+  gap: 8px;
 }
 
 .gallery-search {
-  flex: 1 1 220px;
-  max-width: 340px;
+  flex: 1 1 160px;
+  min-width: 120px;
+  max-width: 280px;
 }
 
 .gallery-narrow .gallery-search {
+  min-width: 0;
   max-width: none;
 }
 
 .gallery-select-wrap {
   flex: none;
-  width: 124px;
+  width: 112px;
 }
 
 .view-mode-option {
@@ -1074,7 +1077,17 @@ onBeforeUnmount(() => {
 
 .mobile-filter-trigger {
   flex: none;
-  min-height: 44px;
+}
+
+.mobile-filter-trigger-active {
+  gap: 4px;
+  padding-inline: 10px;
+}
+
+.mobile-filter-count {
+  font-size: 12px;
+  font-weight: var(--dou-font-weight-medium);
+  line-height: 1;
 }
 
 .gallery-filter-bar {
@@ -1082,33 +1095,33 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 
 .gallery-filter-right {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .project-select-wrap {
   flex: none;
-  width: 180px;
+  width: 140px;
 }
 
 .status-chips {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .narrow-kind-strip {
   display: flex;
+  align-items: center;
   gap: 6px;
   overflow-x: auto;
-  padding-bottom: 2px;
   scrollbar-width: none;
 }
 
@@ -1118,7 +1131,6 @@ onBeforeUnmount(() => {
 
 .narrow-kind-chip {
   flex: none;
-  min-height: 36px;
 }
 
 .gallery-body {
@@ -1134,7 +1146,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  padding: 16px 20px 28px;
+  padding: 14px 16px 24px;
   overflow-y: auto;
 }
 
@@ -1230,6 +1242,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   min-height: 280px;
+  padding: 24px 16px;
 }
 
 .gallery-load-more {
@@ -1242,29 +1255,27 @@ onBeforeUnmount(() => {
 .mobile-filter-sheet {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding-bottom: 12px;
+  gap: 12px;
+  padding-bottom: 8px;
+}
+
+.sheet-row-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .sheet-field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .sheet-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-}
-
-.sheet-chip {
-  min-height: 40px;
-}
-
-.sheet-toggle-btn {
-  flex: 1;
-  min-height: 44px;
+  gap: 6px;
 }
 
 .sheet-footer {
@@ -1275,6 +1286,5 @@ onBeforeUnmount(() => {
 
 .sheet-footer-btn {
   flex: 1;
-  min-height: 44px;
 }
 </style>

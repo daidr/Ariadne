@@ -472,6 +472,11 @@ describe('ArtifactGallery interactions', () => {
 
     const filterBtn = wrapper.find('.mobile-filter-trigger')
     expect(filterBtn.exists()).toBe(true)
+    expect(filterBtn.attributes('aria-label')).toBe('筛选与排序')
+    expect(filterBtn.text()).not.toContain('筛选与排序')
+    // Active sort filter ('title_asc') renders a compact numeric badge on the trigger button.
+    expect(filterBtn.find('.mobile-filter-count').text()).toBe('1')
+
     await filterBtn.trigger('click')
     await nextTick()
     expect(document.body.textContent).toContain('筛选与排序')
@@ -480,8 +485,16 @@ describe('ArtifactGallery interactions', () => {
       ...document.body.querySelectorAll('.mobile-filter-sheet .sheet-field > :first-child'),
     ].map((el) => el.textContent?.trim())
     expect(fieldHeadings).toEqual(['项目', '状态', '排序', '分组', '视图', '密度'])
+    expect(
+      document.body.querySelectorAll('.mobile-filter-sheet .dou-segmented-control').length,
+    ).toBe(2)
 
-    await wrapper.find('[data-artifact-id="art_doc"] .list-quick-btn').trigger('click')
+    // Narrow list row keeps the kind label in metadata so the title keeps full width.
+    const docRow = wrapper.find('[data-artifact-id="art_doc"]')
+    expect(docRow.find('.list-meta-row').text()).toContain('文档')
+    expect(docRow.find('.list-end .list-time').exists()).toBe(false)
+
+    await docRow.find('.list-quick-btn').trigger('click')
     await flushPromises()
     expect(wrapper.find('aside.quick-pane').exists()).toBe(false)
     expect(galleryState.quickViewId).toBe('art_doc')
