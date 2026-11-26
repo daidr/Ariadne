@@ -89,6 +89,7 @@ interface DraftProvider {
   settings: Record<string, unknown>
   secretsSet: string[]
   headers: DraftPair[]
+  env: DraftPair[]
   /** The extra body fields as JSON text, checked on save. */
   extraBody: string
   timeoutSeconds: number | null
@@ -158,6 +159,7 @@ function modelDraft() {
       provider.name,
       provider.settings,
       provider.headers,
+      provider.env,
       provider.extraBody,
       provider.timeoutSeconds,
     ]),
@@ -349,9 +351,15 @@ function load(settings: ModelSettings) {
       secretsSet: provider.secretsSet,
       settings: { ...provider.settings },
       headers: storedPairs(provider.headers),
+      env: storedPairs(provider.env ?? []),
       extraBody: extra ? JSON.stringify(provider.extraBody, null, 2) : '',
       timeoutSeconds: provider.timeoutSeconds,
-      advanced: !!(extra || provider.headers.length || provider.timeoutSeconds),
+      advanced: !!(
+        extra ||
+        provider.headers.length ||
+        provider.timeoutSeconds ||
+        (provider.env?.length ?? 0)
+      ),
     }
   })
   models.value = settings.models.map((model) => ({
@@ -461,6 +469,7 @@ async function reloadKinds() {
       if (!saved || saved.kind !== provider.kind) continue
       provider.settings = { ...saved.settings }
       provider.secretsSet = [...saved.secretsSet]
+      provider.env = storedPairs(saved.env ?? [])
     }
     if (cleanBefore) {
       savedModelDraft.value = modelDraft()
@@ -513,6 +522,7 @@ function addProvider() {
     settings: {},
     secretsSet: [],
     headers: [],
+    env: [],
     extraBody: '',
     timeoutSeconds: null,
     advanced: false,
@@ -522,6 +532,7 @@ function addProvider() {
 
 /** A new type brings its own settings; a name still the old type's follows the new one. */
 function setKind(provider: (typeof providers.value)[number], kind: string) {
+  if (provider.kind === kind) return
   const before = kindOf(provider.kind)
   const after = kindOf(kind)
   const oldName = before ? (lt(before.title) ?? before.kind) : provider.kind
@@ -530,6 +541,10 @@ function setKind(provider: (typeof providers.value)[number], kind: string) {
   }
   provider.kind = kind
   provider.secretsSet = []
+  provider.env = []
+  provider.advanced = after?.program
+    ? false
+    : !!(provider.extraBody.trim() || provider.headers.length || provider.timeoutSeconds)
   for (const model of modelsOf(provider)) presetModel(model)
 }
 
@@ -595,11 +610,21 @@ const listings = new Map<string, { key: string; models: Promise<ListedModel[]> }
 const listProblems = ref<Record<string, string>>({})
 
 function listed(provider: DraftProvider): Promise<ListedModel[]> {
-  const key = JSON.stringify([provider.kind, provider.settings, provider.secretsSet])
+  const draftEnv = kindOf(provider.kind)?.program
+    ? provider.env
+        .filter((pair) => pair.name.trim() && (pair.stored || pair.value !== ''))
+        .map((pair) => ({ name: pair.name.trim(), value: pair.value }))
+    : undefined
+  const key = JSON.stringify([provider.kind, provider.settings, provider.secretsSet, draftEnv])
   const known = listings.get(provider.id)
   if (known?.key === key) return known.models
   const asked = api
-    .listModels({ id: provider.id, kind: provider.kind, settings: provider.settings })
+    .listModels({
+      id: provider.id,
+      kind: provider.kind,
+      settings: provider.settings,
+      ...(draftEnv !== undefined ? { env: draftEnv } : {}),
+    })
     .then(
       (result) => {
         delete listProblems.value[provider.id]
@@ -793,6 +818,8 @@ async function saveModels(): Promise<boolean> {
         name: provider.name,
         settings: provider.settings,
         headers: pairsInput(provider.headers),
+        env:
+          !kindOf(provider.kind) || kindOf(provider.kind)?.program ? pairsInput(provider.env) : [],
         extraBody: bodies[at]!,
         timeoutSeconds: provider.timeoutSeconds || null,
       })),
@@ -1084,7 +1111,25 @@ async function saveModels(): Promise<boolean> {
                   </div>
                 </div>
                 <DouButton
-                  v-if="!kindOf(provider.kind)?.program"
+                  v-if="kindOf(provider.kind)?.program"
+                  size="sm"
+                  variant="ghost"
+                  class="settings-more"
+                  :aria-expanded="provider.advanced"
+                  @click="provider.advanced = !provider.advanced"
+                >
+                  <template #leading>
+                    <ChevronDownIcon v-if="provider.advanced" />
+                    <ChevronRightIcon v-else />
+                  </template>
+                  {{ t('settings.env') }}
+                </DouButton>
+                <SecretPairs
+                  v-if="provider.advanced && kindOf(provider.kind)?.program"
+                  v-model="provider.env"
+                />
+                <DouButton
+                  v-if="kindOf(provider.kind) && !kindOf(provider.kind)!.program"
                   size="sm"
                   variant="ghost"
                   class="settings-more"
@@ -1097,7 +1142,11 @@ async function saveModels(): Promise<boolean> {
                   </template>
                   {{ t('settings.request') }}
                 </DouButton>
-                <template v-if="provider.advanced && !kindOf(provider.kind)?.program">
+                <template
+                  v-if="
+                    provider.advanced && kindOf(provider.kind) && !kindOf(provider.kind)!.program
+                  "
+                >
                   <DouFormItem :label="t('settings.headers')">
                     <SecretPairs v-model="provider.headers" />
                   </DouFormItem>

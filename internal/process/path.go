@@ -22,6 +22,12 @@ func executable(path string) bool {
 	return err == nil && !info.IsDir() && (runtime.GOOS == "windows" || info.Mode().Perm()&0111 != 0)
 }
 
+// LookPath resolves program using the given environment (or the current
+// process environment when env is nil).
+func LookPath(program string, env map[string]string) (string, error) {
+	return resolveProgram(program, environment(Options{Env: env, ReplaceEnv: env != nil}), "")
+}
+
 // exec.Command normally looks up PATH in the backend's environment. Commands
 // need the environment and working directory chosen for their own workspace.
 func resolveProgram(program string, environment []string, directory string) (string, error) {

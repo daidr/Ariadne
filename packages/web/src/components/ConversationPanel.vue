@@ -340,11 +340,16 @@ const modelLabel = computed(() => {
   return formatModelEffort(model.label, view.value.model?.effort ?? null)
 })
 const defaultLabel = computed(() => {
-  const model = state.models.find((item) => item.id === state.threadDefault)
+  const projectThread = state.detail?.project.settings?.models?.thread
+  const projectModel = projectThread?.model
+    ? state.models.find((item) => item.id === projectThread.model)
+    : undefined
+  const model = projectModel ?? state.models.find((item) => item.id === state.threadDefault)
   if (!model) return ''
-  const defaultEffort = state.threadDefaultEffort
-    ? effortWithin(state.threadDefaultEffort, effortsOf(model.efforts))
-    : null
+  const rawEffort = projectModel
+    ? (projectThread?.effort as Effort | null | undefined)
+    : state.threadDefaultEffort
+  const defaultEffort = rawEffort ? effortWithin(rawEffort, effortsOf(model.efforts)) : null
   return formatModelEffort(model.label, defaultEffort)
 })
 // A model since removed from the settings falls back to the default, so that is shown.

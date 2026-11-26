@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -341,6 +342,16 @@ func AgentEnv(extra map[string]string) map[string]string {
 		}
 	}
 	for key, value := range extra {
+		if strings.HasPrefix(strings.ToUpper(key), "ARIADNE_") {
+			continue
+		}
+		if runtime.GOOS == "windows" {
+			for existing := range result {
+				if strings.EqualFold(existing, key) {
+					delete(result, existing)
+				}
+			}
+		}
 		result[key] = value
 	}
 	return result

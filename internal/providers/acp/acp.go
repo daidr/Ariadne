@@ -19,7 +19,8 @@ import (
 )
 
 type Settings struct {
-	Command string `json:"command,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 // TurnUsage reports token counters returned by an ACP session/prompt response.
@@ -178,7 +179,7 @@ func ListModelsWithOptions(ctx context.Context, settings Settings, directory str
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	stdio, err := rpc.StartStdio(ctx, process.JSONOptions{Argv: argv, Directory: directory, Env: process.AgentEnv(nil), ReplaceEnv: true}, rpc.Options{Strict: true})
+	stdio, err := rpc.StartStdio(ctx, process.JSONOptions{Argv: argv, Directory: directory, Env: process.AgentEnv(settings.Env), ReplaceEnv: true}, rpc.Options{Strict: true})
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +229,7 @@ func NewKind(name string, bridge *agentruntime.ToolBridge, shim agentruntime.Std
 			}
 			return &acpDriver{
 				ctx:      ctx,
-				settings: Settings{Command: command},
+				settings: Settings{Command: command, Env: agentruntime.EnvSetting(ctx.Settings)},
 				bridge:   bridge,
 				shim:     shim,
 				hooks:    hooks,
@@ -449,7 +450,7 @@ func (d *acpDriver) Start(life context.Context) error {
 		}
 	}
 	d.life = life
-	lines := process.NewJSONLines(process.JSONOptions{Argv: argv, Directory: d.ctx.Directory, Env: process.AgentEnv(nil), ReplaceEnv: true})
+	lines := process.NewJSONLines(process.JSONOptions{Argv: argv, Directory: d.ctx.Directory, Env: process.AgentEnv(d.settings.Env), ReplaceEnv: true})
 	peer, err := rpc.New(rpc.Options{Context: life, Strict: true, Send: lines.SendJSON, Request: d.request, Notification: d.notification})
 	if err != nil {
 		return err

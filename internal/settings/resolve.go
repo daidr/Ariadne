@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
+	"github.com/daidr/Ariadne/internal/projectsettings"
 	"github.com/daidr/Ariadne/internal/transcript"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -26,34 +27,77 @@ func ValidEffort(value string) bool {
 	return hasString(efforts, value)
 }
 
-func modelFor(config Object, role, given string) (Object, bool) {
+func projectRoleOverride(items []any, overrides *projectsettings.Models, role string) (Object, string, bool) {
+	if overrides == nil {
+		return nil, "", false
+	}
+	var entry projectsettings.ModelRole
+	switch role {
+	case "thread":
+		entry = overrides.Thread
+	case "coordinator":
+		entry = overrides.Coordinator
+	case "research":
+		entry = overrides.Research
+	default:
+		return nil, "", false
+	}
+	if entry.Model == "" {
+		return nil, "", false
+	}
+	chosen := findByID(items, entry.Model)
+	if chosen == nil {
+		return nil, "", false
+	}
+	return chosen, entry.Effort, true
+}
+
+func modelFor(config Object, role, given string, overrides *projectsettings.Models) (Object, string, bool, bool) {
 	models := object(config["models"])
 	items := list(models["models"])
 	configured := object(models["roles"])
 	find := func(role string) Object { return findByID(items, text(object(configured[role])["model"])) }
 	switch role {
 	case "triage":
+		if chosen, effort, ok := projectRoleOverride(items, overrides, "coordinator"); ok {
+			return chosen, effort, false, true
+		}
 		if own := find("triage"); own != nil {
-			return own, false
+			return own, "", false, false
 		}
 		if coordinator := find("coordinator"); coordinator != nil {
-			return coordinator, false
+			return coordinator, "", false, false
 		}
-		return find("thread"), false
+		if chosen, _, ok := projectRoleOverride(items, overrides, "thread"); ok {
+			return chosen, "", false, false
+		}
+		return find("thread"), "", false, false
 	case "research":
-		return find("research"), false
-	case "coordinator":
-		if own := find("coordinator"); own != nil {
-			return own, false
+		if chosen, effort, ok := projectRoleOverride(items, overrides, "research"); ok {
+			return chosen, effort, false, true
 		}
-		return find("thread"), false
+		return find("research"), "", false, false
+	case "coordinator":
+		if chosen, effort, ok := projectRoleOverride(items, overrides, "coordinator"); ok {
+			return chosen, effort, false, true
+		}
+		if own := find("coordinator"); own != nil {
+			return own, "", false, false
+		}
+		if chosen, _, ok := projectRoleOverride(items, overrides, "thread"); ok {
+			return chosen, "", false, false
+		}
+		return find("thread"), "", false, false
 	default:
 		if given != "" {
 			if own := findByID(items, given); own != nil {
-				return own, true
+				return own, "", true, false
 			}
 		}
-		return find("thread"), false
+		if chosen, effort, ok := projectRoleOverride(items, overrides, "thread"); ok {
+			return chosen, effort, false, true
+		}
+		return find("thread"), "", false, false
 	}
 }
 func effortFor(config Object, role string) string {
@@ -103,16 +147,18 @@ func acceptsEffort(chosen Object, wanted string) bool {
 	}
 	return hasString(*accepted, wanted)
 }
-func resolveEffort(config Object, role, givenEffort string, chosen Object, matchedGiven bool) string {
+func resolveEffort(config Object, role, givenEffort, projectEffort string, chosen Object, matchedGiven, matchedProject bool) string {
 	wanted := effortFor(config, role)
 	if role == "thread" && matchedGiven {
 		wanted = givenEffort
+	} else if matchedProject {
+		wanted = projectEffort
 	}
 	if wanted == defaultEffort {
 		return ""
 	}
 	if wanted == "" {
-		if roleUsesCoordinatorDefault(config, role) && acceptsEffort(chosen, "low") {
+		if !matchedProject && roleUsesCoordinatorDefault(config, role) && acceptsEffort(chosen, "low") {
 			return "low"
 		}
 		return ""
@@ -127,7 +173,7 @@ func modelLabel(config, model Object) string {
 	}
 	return name + " / " + text(model["model"])
 }
-func resolveConfig(config Object, role, givenEffort string, chosen Object, matchedGiven bool, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
+func resolveConfig(config Object, role, givenEffort, projectEffort string, chosen Object, matchedGiven, matchedProject bool, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
 	if chosen == nil {
 		return nil, nil
 	}
@@ -140,12 +186,19 @@ func resolveConfig(config Object, role, givenEffort string, chosen Object, match
 		return nil, domainerr.New("error.modelUnknown", Object{"provider": provider["kind"]})
 	}
 	accepted := acceptedEfforts(chosen)
-	effort := resolveEffort(config, role, givenEffort, chosen, matchedGiven)
+	effort := resolveEffort(config, role, givenEffort, projectEffort, chosen, matchedGiven, matchedProject)
 	request, _ := clone(object(provider["request"]))
 	if truthy(chosen["maxTokens"]) {
 		request["maxTokens"] = chosen["maxTokens"]
 	}
 	ownedSettings, _ := clone(effective(info, object(provider["settings"])))
+	if info.Program {
+		if env := cloneMap(object(provider["env"])); len(env) > 0 {
+			ownedSettings["env"] = env
+		} else if _, inSchema := info.Settings.Properties["env"]; !inSchema {
+			delete(ownedSettings, "env")
+		}
+	}
 	result := &ResolvedModel{Provider: info, Settings: ownedSettings, Model: text(chosen["model"]), Label: modelLabel(config, chosen), Images: chosen["images"] != false, Effort: effort, Request: request, acceptedEfforts: accepted}
 	if size, ok := number(chosen["contextTokens"]); ok && size != 0 {
 		result.ContextTokens = &size
@@ -155,20 +208,27 @@ func resolveConfig(config Object, role, givenEffort string, chosen Object, match
 	}
 	return result, nil
 }
-func resolveModel(config Object, role, given, givenEffort string, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
-	chosen, matchedGiven := modelFor(config, role, given)
-	return resolveConfig(config, role, givenEffort, chosen, matchedGiven, kinds)
+func resolveModel(config Object, role, given, givenEffort string, overrides *projectsettings.Models, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
+	chosen, projectEffort, matchedGiven, matchedProject := modelFor(config, role, given, overrides)
+	return resolveConfig(config, role, givenEffort, projectEffort, chosen, matchedGiven, matchedProject, kinds)
 }
 func (store *Store) ResolveModel(role, given, givenEffort string, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
+	return store.ResolveModelForProject(role, given, givenEffort, nil, kinds)
+}
+func (store *Store) ResolveModelForProject(role, given, givenEffort string, overrides *projectsettings.Models, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
 	if !hasString(roles, role) {
 		return nil, bad("role")
 	}
-	return resolveModel(store.snapshot(), role, given, givenEffort, kinds)
+	return resolveModel(store.snapshot(), role, given, givenEffort, overrides, kinds)
 }
 
 func (store *Store) ResolveResearch(parent *ResolvedModel, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
+	return store.ResolveResearchForProject(parent, nil, kinds)
+}
+
+func (store *Store) ResolveResearchForProject(parent *ResolvedModel, overrides *projectsettings.Models, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
 	config := store.snapshot()
-	model, err := resolveModel(config, "research", "", "", kinds)
+	model, err := resolveModel(config, "research", "", "", overrides, kinds)
 	if err != nil {
 		return nil, err
 	}
@@ -188,8 +248,12 @@ func (store *Store) ResolveResearch(parent *ResolvedModel, kinds []sdk.ModelProv
 }
 
 func (store *Store) ConversationModel(role, given, givenEffort string) Object {
+	return store.ConversationModelForProject(role, given, givenEffort, nil)
+}
+
+func (store *Store) ConversationModelForProject(role, given, givenEffort string, overrides *projectsettings.Models) Object {
 	config := store.snapshot()
-	chosen, matchedGiven := modelFor(config, role, given)
+	chosen, projectEffort, matchedGiven, matchedProject := modelFor(config, role, given, overrides)
 	if chosen == nil {
 		return nil
 	}
@@ -199,21 +263,24 @@ func (store *Store) ConversationModel(role, given, givenEffort string) Object {
 	}
 	share, _ := number(object(config["limits"])["compactShare"])
 	out := Object{"id": chosen["id"], "contextTokens": size, "compactAt": transcript.CompactAt(size, share)}
-	if effort := resolveEffort(config, role, givenEffort, chosen, matchedGiven); effort != "" {
+	if effort := resolveEffort(config, role, givenEffort, projectEffort, chosen, matchedGiven, matchedProject); effort != "" {
 		out["effort"] = effort
 	}
 	return out
 }
 func (store *Store) ResolveSaved(model Object, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
-	return resolveConfig(store.snapshot(), "thread", "", model, false, kinds)
+	return resolveConfig(store.snapshot(), "thread", "", "", model, false, false, kinds)
 }
 func (store *Store) ResolveCoordinator(triage bool, contextTokens float64, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
+	return store.ResolveCoordinatorForProject(triage, contextTokens, nil, kinds)
+}
+func (store *Store) ResolveCoordinatorForProject(triage bool, contextTokens float64, overrides *projectsettings.Models, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
 	config := store.snapshot()
-	coordinator, err := resolveModel(config, "coordinator", "", "", kinds)
+	coordinator, err := resolveModel(config, "coordinator", "", "", overrides, kinds)
 	if !triage || err != nil {
 		return coordinator, err
 	}
-	quick, err := resolveModel(config, "triage", "", "", kinds)
+	quick, err := resolveModel(config, "triage", "", "", overrides, kinds)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +302,7 @@ func (store *Store) ModelChoices(kinds []sdk.ModelProviderInfo) []any {
 	config := store.snapshot()
 	models := object(config["models"])
 	providers := list(models["providers"])
-	thread, _ := modelFor(config, "thread", "")
+	thread, _, _, _ := modelFor(config, "thread", "", nil)
 	choices := []any{}
 	for _, raw := range list(models["models"]) {
 		model := object(raw)
@@ -308,7 +375,7 @@ func (store *Store) ResolvedModels(role string, kinds []sdk.ModelProviderInfo) [
 	config := store.snapshot()
 	result := []*ResolvedModel{}
 	for _, raw := range list(object(config["models"])["models"]) {
-		model, err := resolveConfig(config, role, "", object(raw), false, kinds)
+		model, err := resolveConfig(config, role, "", "", object(raw), false, false, kinds)
 		if err == nil && model != nil {
 			result = append(result, model)
 		}

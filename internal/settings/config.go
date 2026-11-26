@@ -304,6 +304,10 @@ func validProjectEnv(name string) bool {
 	upper := strings.ToUpper(name)
 	return envName.MatchString(name) && !strings.HasPrefix(upper, "GIT_CONFIG") && !strings.HasPrefix(upper, "ARIADNE_")
 }
+func validProviderEnv(name string) bool {
+	upper := strings.ToUpper(name)
+	return envName.MatchString(name) && !strings.HasPrefix(upper, "ARIADNE_")
+}
 func secretPairs(raw any, valid func(string) bool, before Object, at string) (Object, error) {
 	if raw == nil {
 		return Object{}, nil

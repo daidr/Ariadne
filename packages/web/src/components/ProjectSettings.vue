@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import type { MergeMethod, ProjectSettings } from '@ariadne/core'
+import type { MergeMethod, ProjectModelRole, ProjectSettings } from '@ariadne/core'
 import {
   DouAlert,
   DouButton,
+  DouCascader,
   DouCheckTagGroup,
   DouEmpty,
   DouDialog,
@@ -17,9 +18,12 @@ import {
   DouTextarea,
   DouTimePicker,
   useBreakpoints,
+  type CascaderOption,
+  type CascaderValue,
 } from 'dou-ui'
 import {
   CoinsIcon,
+  CpuIcon,
   FolderGitIcon,
   PlusIcon,
   RocketIcon,
@@ -28,7 +32,8 @@ import {
   WrenchIcon,
 } from '@dou-ui/icons'
 import { computed, inject, ref, watch } from 'vue'
-import { api, ApiError, type McpServerView } from '../api'
+import { api, ApiError, type Effort, type McpServerView } from '../api'
+import { coordinatorDefaultEffort, EFFORTS, effortsOf, effortWithin } from '../effort'
 import { clockText, t, tm } from '../i18n'
 import { nextRunOf, WEEK } from './routines'
 import { saveProjectSettings, state } from '../store'
@@ -149,6 +154,147 @@ function openMcp() {
   state.projectSettingsOpen = false
   openSettings('mcp')
 }
+function openModels() {
+  state.projectSettingsOpen = false
+  openSettings('models')
+}
+
+function formatModelEffort(label: string, effort: Effort | null | undefined): string {
+  return effort ? `${label} · ${t(`settings.effort.${effort}`)}` : label
+}
+
+const modelById = (id: string | null | undefined) =>
+  id ? state.models.find((item) => item.id === id) : undefined
+
+const globalThreadId = computed(
+  () => state.globalRoles?.thread.model ?? state.threadDefault ?? null,
+)
+const globalThreadEffort = computed<Effort | null>(
+  () => state.globalRoles?.thread.effort ?? state.threadDefaultEffort ?? null,
+)
+const effectiveThreadId = computed(() => {
+  const override = settings.value?.models.thread.model
+  return override && modelById(override) ? override : globalThreadId.value
+})
+
+const globalThreadSummary = computed(() => {
+  const model = modelById(globalThreadId.value)
+  if (!model) return ''
+  const effort = globalThreadEffort.value
+    ? effortWithin(globalThreadEffort.value, effortsOf(model.efforts))
+    : null
+  return formatModelEffort(model.label, effort)
+})
+
+const inheritedCoordinatorSummary = computed(() => {
+  const globalCoord = state.globalRoles?.coordinator
+  const explicit = modelById(globalCoord?.model)
+  if (explicit) {
+    const rawEffort = globalCoord?.effort
+    const effort =
+      rawEffort && rawEffort !== 'default'
+        ? effortWithin(rawEffort, effortsOf(explicit.efforts))
+        : null
+    return formatModelEffort(explicit.label, effort)
+  }
+  const inherited = modelById(effectiveThreadId.value)
+  if (!inherited) return ''
+  const rawEffort = globalCoord?.effort
+  let effort: Effort | null = null
+  if (rawEffort === 'default') {
+    effort = null
+  } else if (rawEffort) {
+    effort = effortWithin(rawEffort, effortsOf(inherited.efforts))
+  } else {
+    effort = coordinatorDefaultEffort(inherited.efforts ?? null)
+  }
+  return formatModelEffort(inherited.label, effort)
+})
+
+const inheritedResearchSummary = computed(() => {
+  const globalResearch = state.globalRoles?.research
+  const explicit = modelById(globalResearch?.model)
+  if (explicit) {
+    const effort = globalResearch?.effort
+      ? effortWithin(globalResearch.effort, effortsOf(explicit.efforts))
+      : null
+    return formatModelEffort(explicit.label, effort)
+  }
+  const base = t('settings.sameAsAsking')
+  return globalResearch?.effort
+    ? `${base} · ${t(`settings.effort.${globalResearch.effort}`)}`
+    : base
+})
+
+function followLabel(summary: string): string {
+  return summary
+    ? t('projectSettings.followGlobalValue', { value: summary })
+    : t('projectSettings.followGlobal')
+}
+
+const modelBranches = computed<CascaderOption[]>(() =>
+  state.models.map((model) => {
+    const efforts = effortsOf(model.efforts)
+    if (!efforts.length) return { value: model.id, label: model.label }
+    return {
+      value: model.id,
+      label: model.label,
+      children: [
+        { value: '', label: t('settings.effort.default') },
+        ...efforts.map((effort) => ({ value: effort, label: t(`settings.effort.${effort}`) })),
+      ],
+    }
+  }),
+)
+
+const threadModelOptions = computed<CascaderOption[]>(() => [
+  { value: '', label: followLabel(globalThreadSummary.value) },
+  ...modelBranches.value,
+])
+const coordinatorModelOptions = computed<CascaderOption[]>(() => [
+  { value: '', label: followLabel(inheritedCoordinatorSummary.value) },
+  ...modelBranches.value,
+])
+const researchModelOptions = computed<CascaderOption[]>(() => [
+  { value: '', label: followLabel(inheritedResearchSummary.value) },
+  ...modelBranches.value,
+])
+
+function projectModelPath(
+  roleKey: 'thread' | 'coordinator' | 'research',
+  options: { value: CascaderOption[] },
+) {
+  return computed({
+    get(): CascaderValue[] | null {
+      const role: ProjectModelRole | undefined = settings.value?.models[roleKey]
+      const current =
+        (role?.model && options.value.find((option) => option.value === role.model)) ||
+        options.value[0]
+      if (!current) return null
+      if (!current.children?.length) return [current.value]
+      const effort = role?.effort
+        ? (effortWithin(role.effort as Effort, effortsOf(modelById(role.model)?.efforts)) ?? '')
+        : ''
+      const depth = current.children.find((child) => child.value === effort) ?? current.children[0]
+      return depth ? [current.value, depth.value] : [current.value]
+    },
+    set(path: CascaderValue[] | CascaderValue[][] | null) {
+      if (!settings.value) return
+      const [id, depth] = path ?? []
+      if (typeof id !== 'string') return
+      if (!id) {
+        settings.value.models[roleKey] = { model: null, effort: null }
+        return
+      }
+      const explicit = EFFORTS.find((value) => value === depth) ?? null
+      settings.value.models[roleKey] = { model: id, effort: explicit }
+    },
+  })
+}
+
+const threadModelPath = projectModelPath('thread', threadModelOptions)
+const coordinatorModelPath = projectModelPath('coordinator', coordinatorModelOptions)
+const researchModelPath = projectModelPath('research', researchModelOptions)
 
 const mcpOptions = computed(() =>
   mcpServers.value.map((server) => ({ value: server.id, label: server.name })),
@@ -319,6 +465,42 @@ async function save() {
             />
             <SourceNotes />
           </div>
+        </DouTabPanel>
+        <DouTabPanel value="models" :label="t('projectSettings.tab.models')" :icon="CpuIcon">
+          <DouForm v-if="state.models.length" layout="vertical" size="sm">
+            <DouFormItem :label="t('settings.threadModel')">
+              <DouCascader
+                v-model="threadModelPath"
+                :options="threadModelOptions"
+                separator=" · "
+              />
+            </DouFormItem>
+            <DouFormItem :label="t('settings.coordinatorModel')">
+              <DouCascader
+                v-model="coordinatorModelPath"
+                :options="coordinatorModelOptions"
+                separator=" · "
+              />
+            </DouFormItem>
+            <DouFormItem>
+              <template #label>
+                <SettingsLabelHelp
+                  :label="t('settings.researchModel')"
+                  :content="t('settings.researchModelHelp')"
+                />
+              </template>
+              <DouCascader
+                v-model="researchModelPath"
+                :options="researchModelOptions"
+                separator=" · "
+              />
+            </DouFormItem>
+          </DouForm>
+          <DouEmpty v-else :description="t('projectSettings.modelsEmpty')">
+            <DouButton size="sm" variant="outline" @click="openModels">
+              {{ t('projectSettings.modelsConfigure') }}
+            </DouButton>
+          </DouEmpty>
         </DouTabPanel>
         <DouTabPanel
           value="instructions"

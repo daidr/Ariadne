@@ -26,6 +26,11 @@ function makeProjectSettingsView(): ProjectSettingsView {
       routines: [],
       review: { enabled: false },
       autopilot: { enabled: false, method: 'squash' },
+      models: {
+        thread: { model: null, effort: null },
+        coordinator: { model: null, effort: null },
+        research: { model: null, effort: null },
+      },
     },
     detected: { setup: null, check: null },
     env: [],
@@ -116,7 +121,7 @@ describe('ProjectSettings', () => {
     await flushPromises()
 
     const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(5)
+    expect(tabs).toHaveLength(6)
     for (const tab of tabs) {
       expect(tab.find('.dou-tabs__icon').exists()).toBe(true)
     }
@@ -187,7 +192,7 @@ describe('ProjectSettings', () => {
 
     expect(getProjectSettings).toHaveBeenCalledTimes(1)
     expect(getProjectSettings).toHaveBeenCalledWith('prj_test')
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(5)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(6)
   })
 
   test('tracks FileSourcesForm dirty state on usage tab and across close/reopen', async () => {
@@ -268,5 +273,112 @@ describe('ProjectSettings', () => {
     state.projectSettingsOpen = true
     await flushPromises()
     expect(getProjectSettings).toHaveBeenCalledTimes(1)
+  })
+
+  test('edits and saves per-project thread, coordinator, and research model overrides', async () => {
+    const view = makeProjectSettingsView()
+    vi.spyOn(api, 'getProjectSettings').mockResolvedValue(view)
+    vi.spyOn(api, 'getMcpSettings').mockResolvedValue({ servers: [], status: [] })
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+    const updateSpy = vi.spyOn(api, 'updateProject').mockResolvedValue({
+      project: state.detail!.project,
+      ...view,
+    })
+    vi.spyOn(api, 'getProject').mockResolvedValue({
+      ...state.detail!,
+      sync: { cursor: 'c1', partial: false },
+    })
+    const getConvSpy = vi.spyOn(api, 'getConversation').mockResolvedValue({
+      conversation: {
+        id: 'thr_coord',
+        projectId: 'prj_test',
+        role: 'coordinator',
+        pendingSeq: 0,
+        turn: null,
+        lastOutcome: null,
+        lastError: null,
+        usage: state.detail!.project.usage,
+        contextTokens: 0,
+        compactions: 0,
+        wait: null,
+      },
+      messages: [],
+      notices: [],
+      more: false,
+      lastSeq: 0,
+      todo: { conversationId: 'thr_coord', items: [], updatedAt: 0 },
+      model: { id: 'm-global', contextTokens: 128000, compactAt: 96000, effort: 'low' },
+    })
+
+    state.currentId = 'prj_test'
+    state.models = [
+      { id: 'm-global', label: 'OpenAI / gpt-5', efforts: ['low', 'medium', 'high'] },
+      { id: 'm-special', label: 'Claude Code / opus', efforts: ['low', 'medium', 'high', 'max'] },
+    ]
+    state.threadDefault = 'm-global'
+    state.threadDefaultEffort = 'high'
+    state.globalRoles = {
+      thread: { model: 'm-global', effort: 'high' },
+      coordinator: { model: null, effort: null },
+      triage: { model: null, effort: null },
+      research: { model: null, effort: null },
+    }
+    state.projectSettingsTab = 'models'
+
+    const wrapper = mount(ProjectSettingsDialog, {
+      props: { layoutMode: 'wide' },
+      global: {
+        stubs: {
+          FileSourcesForm: true,
+          SourceNotes: true,
+          MemoryList: true,
+          ProjectUsage: true,
+          SecretPairs: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+
+    state.projectSettingsOpen = true
+    await flushPromises()
+
+    const cascaders = wrapper.findAllComponents({ name: 'DouCascader' })
+    expect(cascaders).toHaveLength(3)
+
+    // Initially all three roles show dynamic global inheritance previews.
+    expect(cascaders[0]!.props('options')[0].label).toBe('跟随全局（OpenAI / gpt-5 · 高）')
+    expect(cascaders[1]!.props('options')[0].label).toBe('跟随全局（OpenAI / gpt-5 · 低）')
+    expect(cascaders[2]!.props('options')[0].label).toBe('跟随全局（和提问的一方相同）')
+
+    // Overriding thread model immediately updates coordinator's inherited preview.
+    await cascaders[0]!.vm.$emit('update:modelValue', ['m-special', 'medium'])
+    await flushPromises()
+    expect(cascaders[1]!.props('options')[0].label).toBe('跟随全局（Claude Code / opus · 低）')
+
+    // Override coordinator and research as well, then save.
+    await cascaders[1]!.vm.$emit('update:modelValue', ['m-global', 'low'])
+    await cascaders[2]!.vm.$emit('update:modelValue', ['m-special', ''])
+    await flushPromises()
+
+    const saveButton = wrapper.findAll('button').find((btn) => btn.text().trim() === '保存')
+    expect(saveButton).toBeTruthy()
+    await saveButton!.trigger('click')
+    await flushPromises()
+
+    expect(updateSpy).toHaveBeenCalledTimes(1)
+    expect(updateSpy.mock.calls[0]?.[1]?.settings?.models).toEqual({
+      thread: { model: 'm-special', effort: 'medium' },
+      coordinator: { model: 'm-global', effort: 'low' },
+      research: { model: 'm-special', effort: null },
+    })
+    expect(getConvSpy).toHaveBeenCalledWith('thr_coord', expect.any(Object))
+
+    // Cleanup shared model state for subsequent tests.
+    state.currentId = null
+    state.models = []
+    state.threadDefault = null
+    state.threadDefaultEffort = null
+    state.globalRoles = null
   })
 })

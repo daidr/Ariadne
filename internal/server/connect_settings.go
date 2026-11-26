@@ -306,6 +306,7 @@ func (h *settingsServiceHandler) SaveModelSettings(
 			"name":      p.GetName(),
 			"settings":  structToMap(p.GetSettings()),
 			"headers":   secretPairsToAny(p.GetHeaders()),
+			"env":       secretPairsToAny(p.GetEnv()),
 			"extraBody": structToMap(p.GetExtraBody()),
 		}
 		if p.TimeoutSeconds != nil {
@@ -369,6 +370,9 @@ func (h *settingsServiceHandler) ListProviderModels(
 		raw["id"] = provider.GetId()
 		raw["kind"] = provider.GetKind()
 		raw["settings"] = structToMap(provider.GetSettings())
+		if provider.Env != nil {
+			raw["env"] = secretPairsToAny(provider.Env.GetItems())
+		}
 	}
 	listed, hasList, err := h.api.listProviderModels(ctx, raw)
 	if err != nil {
@@ -1028,6 +1032,7 @@ func toProtoModelSettings(raw map[string]any) *ariadnev1.ModelSettings {
 			Settings:   mapToStruct(settingsMap),
 			SecretsSet: asStringSlice(obj["secretsSet"]),
 			Headers:    asStringSlice(obj["headers"]),
+			Env:        asStringSlice(obj["env"]),
 			ExtraBody:  mapToStruct(extraMap),
 		}
 		if timeout, ok := asOptionalInt32(obj["timeoutSeconds"]); ok {

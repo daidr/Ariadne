@@ -20,7 +20,8 @@ import (
 )
 
 type Settings struct {
-	Command string `json:"command,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 func Argv(settings Settings, model, effort string) []string {
@@ -103,7 +104,7 @@ func ParseModels(data json.RawMessage) []sdk.ListedModel {
 func ListModels(ctx context.Context, settings Settings, directory string) ([]sdk.ListedModel, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	proc := process.NewJSONLines(process.JSONOptions{Argv: Argv(settings, "default", ""), Directory: directory, Env: process.AgentEnv(nil), ReplaceEnv: true})
+	proc := process.NewJSONLines(process.JSONOptions{Argv: Argv(settings, "default", ""), Directory: directory, Env: process.AgentEnv(settings.Env), ReplaceEnv: true})
 	type answer struct {
 		models []sdk.ListedModel
 		err    error
@@ -163,7 +164,7 @@ func ListModels(ctx context.Context, settings Settings, directory string) ([]sdk
 }
 func Kind(bridge *agentruntime.ToolBridge) agentruntime.Kind {
 	return agentruntime.Kind{Name: ProviderKind, Create: func(ctx agentruntime.DriverContext) (agentruntime.Driver, error) {
-		settings := Settings{}
+		settings := Settings{Env: agentruntime.EnvSetting(ctx.Settings)}
 		if command, ok := ctx.Settings["command"].(string); ok {
 			settings.Command = command
 		}
@@ -378,7 +379,11 @@ func (d *claudeDriver) Start(ctx context.Context) error {
 		}
 		argv = append(argv, "--mcp-config", mcpFile)
 	}
-	d.proc = process.NewJSONLines(process.JSONOptions{Argv: argv, Directory: d.ctx.Directory, Env: process.AgentEnv(map[string]string{"MCP_TOOL_TIMEOUT": "86400000", "MAX_MCP_OUTPUT_TOKENS": "200000"}), ReplaceEnv: true})
+	env := process.AgentEnv(agentruntime.MergeEnv(
+		map[string]string{"MCP_TOOL_TIMEOUT": "86400000", "MAX_MCP_OUTPUT_TOKENS": "200000"},
+		d.settings.Env,
+	))
+	d.proc = process.NewJSONLines(process.JSONOptions{Argv: argv, Directory: d.ctx.Directory, Env: env, ReplaceEnv: true})
 	return d.proc.Start(ctx, d.onLine, func(err error) {
 		d.mu.Lock()
 		saw, closing := d.sawOutput, d.closing

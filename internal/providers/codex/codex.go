@@ -22,7 +22,8 @@ import (
 )
 
 type Settings struct {
-	Command string `json:"command,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 var codexOwnTools = []string{
@@ -189,7 +190,7 @@ func ParseModels(data json.RawMessage) []sdk.ListedModel {
 func ListModels(ctx context.Context, settings Settings, directory string) ([]sdk.ListedModel, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	stdio, err := rpc.StartStdio(ctx, process.JSONOptions{Argv: Argv(settings), Directory: directory, Env: process.AgentEnv(nil), ReplaceEnv: true}, rpc.Options{})
+	stdio, err := rpc.StartStdio(ctx, process.JSONOptions{Argv: Argv(settings), Directory: directory, Env: process.AgentEnv(settings.Env), ReplaceEnv: true}, rpc.Options{})
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +229,7 @@ func ListModels(ctx context.Context, settings Settings, directory string) ([]sdk
 }
 func Kind() agentruntime.Kind {
 	return agentruntime.Kind{Name: ProviderKind, Persistent: true, MutableEffort: true, Fingerprint: agentruntime.NativeFingerprint, Create: func(ctx agentruntime.DriverContext) (agentruntime.Driver, error) {
-		settings := Settings{}
+		settings := Settings{Env: agentruntime.EnvSetting(ctx.Settings)}
 		if command, ok := ctx.Settings["command"].(string); ok {
 			settings.Command = command
 		}
@@ -416,7 +417,7 @@ func (d *codexDriver) notification(method string, raw json.RawMessage) {
 	}
 }
 func (d *codexDriver) Start(life context.Context) error {
-	env := process.AgentEnv(nil)
+	env := process.AgentEnv(d.settings.Env)
 	catalog, err := writeCodexToolFreeCatalog(life, d.settings, d.ctx.Directory, env)
 	if err != nil {
 		return err

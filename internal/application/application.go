@@ -34,6 +34,7 @@ import (
 	"github.com/daidr/Ariadne/internal/notifications"
 	"github.com/daidr/Ariadne/internal/plugins"
 	"github.com/daidr/Ariadne/internal/process"
+	"github.com/daidr/Ariadne/internal/projectsettings"
 	"github.com/daidr/Ariadne/internal/providers"
 	"github.com/daidr/Ariadne/internal/realtime"
 	"github.com/daidr/Ariadne/internal/repowatch"
@@ -339,7 +340,11 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 				model, _ = thread.Model.(string)
 				effort, _ = thread.Effort.(string)
 			}
-			return user.ConversationModel(conversation.Role, model, effort), nil
+			var overrides *projectsettings.Models
+			if project, err := repo.GetProject(r.Context(), conversation.ProjectID); err == nil {
+				overrides = &project.Settings.Models
+			}
+			return user.ConversationModelForProject(conversation.Role, model, effort, overrides), nil
 		},
 		OnProjectDeleted: func(id string) {
 			drafts.DropProject(id)

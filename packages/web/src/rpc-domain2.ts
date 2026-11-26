@@ -344,6 +344,20 @@ function fromProtoProjectSettings(settings?: ProtoProjectSettings): ProjectSetti
       enabled: settings?.autopilot?.enabled ?? false,
       method: (settings?.autopilot?.method || 'merge') as ProjectSettings['autopilot']['method'],
     },
+    models: {
+      thread: {
+        model: settings?.models?.thread?.model ?? null,
+        effort: settings?.models?.thread?.effort ?? null,
+      },
+      coordinator: {
+        model: settings?.models?.coordinator?.model ?? null,
+        effort: settings?.models?.coordinator?.effort ?? null,
+      },
+      research: {
+        model: settings?.models?.research?.model ?? null,
+        effort: settings?.models?.research?.effort ?? null,
+      },
+    },
   }
 }
 
@@ -379,6 +393,24 @@ function toProtoProjectSettingsInput(settings: ProjectSettings) {
     autopilot: {
       enabled: settings.autopilot.enabled,
       method: settings.autopilot.method,
+    },
+    models: {
+      thread: {
+        ...(settings.models?.thread?.model ? { model: settings.models.thread.model } : {}),
+        ...(settings.models?.thread?.effort ? { effort: settings.models.thread.effort } : {}),
+      },
+      coordinator: {
+        ...(settings.models?.coordinator?.model
+          ? { model: settings.models.coordinator.model }
+          : {}),
+        ...(settings.models?.coordinator?.effort
+          ? { effort: settings.models.coordinator.effort }
+          : {}),
+      },
+      research: {
+        ...(settings.models?.research?.model ? { model: settings.models.research.model } : {}),
+        ...(settings.models?.research?.effort ? { effort: settings.models.research.effort } : {}),
+      },
     },
   }
 }

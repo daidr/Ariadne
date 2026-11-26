@@ -23,6 +23,7 @@ const DefaultBranchPrefix = "ariadne/"
 const MaxReviewRounds = 2
 
 var ShellChoices = []string{"auto", "bash", "zsh", "sh", "pwsh", "powershell", "cmd"}
+var modelEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 var prefixPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 var slugPattern = regexp.MustCompile(`[^a-z0-9]+`)
 var routineID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
@@ -58,6 +59,15 @@ type Autopilot struct {
 	Enabled bool   `json:"enabled"`
 	Method  string `json:"method"`
 }
+type ModelRole struct {
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
+}
+type Models struct {
+	Thread      ModelRole `json:"thread"`
+	Coordinator ModelRole `json:"coordinator"`
+	Research    ModelRole `json:"research"`
+}
 type Settings struct {
 	Instructions string    `json:"instructions"`
 	Delivery     Delivery  `json:"delivery"`
@@ -66,6 +76,7 @@ type Settings struct {
 	Routines     []Routine `json:"routines"`
 	Review       Review    `json:"review"`
 	Autopilot    Autopilot `json:"autopilot"`
+	Models       Models    `json:"models"`
 }
 
 func Defaults() Settings {
@@ -279,6 +290,80 @@ func Parse(input any, allowedTools []string) (Settings, error) {
 			return Settings{}, bad("autopilot.method")
 		}
 		out.Autopilot = Autopilot{Enabled: enabled, Method: method}
+	}
+	if raw, exists := body["models"]; exists {
+		models, err := parseModels(raw)
+		if err != nil {
+			return Settings{}, err
+		}
+		out.Models = models
+	}
+	return out, nil
+}
+
+func parseModels(raw any) (Models, error) {
+	if raw == nil {
+		return Models{}, nil
+	}
+	if typed, ok := raw.(Models); ok {
+		data, err := json.Marshal(typed)
+		if err != nil {
+			return Models{}, bad("models")
+		}
+		var body map[string]any
+		if err := json.Unmarshal(data, &body); err != nil {
+			return Models{}, bad("models")
+		}
+		raw = body
+	}
+	value, ok := raw.(map[string]any)
+	if !ok {
+		return Models{}, bad("models")
+	}
+	parseRole := func(name string) (ModelRole, error) {
+		given, exists := value[name]
+		if !exists || given == nil {
+			return ModelRole{}, nil
+		}
+		entry, ok := given.(map[string]any)
+		if !ok {
+			return ModelRole{}, bad("models." + name)
+		}
+		var model, effort string
+		if rawModel, present := entry["model"]; present && rawModel != nil {
+			text, ok := rawModel.(string)
+			if !ok {
+				return ModelRole{}, bad("models." + name + ".model")
+			}
+			model = Trim(text)
+			if length(model) > 200 || strings.ContainsAny(model, " \t\r\n\x00") {
+				return ModelRole{}, bad("models." + name + ".model")
+			}
+		}
+		if rawEffort, present := entry["effort"]; present && rawEffort != nil {
+			text, ok := rawEffort.(string)
+			if !ok {
+				return ModelRole{}, bad("models." + name + ".effort")
+			}
+			effort = Trim(text)
+			if effort != "" {
+				if model == "" || !contains(modelEfforts, effort) {
+					return ModelRole{}, bad("models." + name + ".effort")
+				}
+			}
+		}
+		return ModelRole{Model: model, Effort: effort}, nil
+	}
+	var out Models
+	var err error
+	if out.Thread, err = parseRole("thread"); err != nil {
+		return Models{}, err
+	}
+	if out.Coordinator, err = parseRole("coordinator"); err != nil {
+		return Models{}, err
+	}
+	if out.Research, err = parseRole("research"); err != nil {
+		return Models{}, err
 	}
 	return out, nil
 }

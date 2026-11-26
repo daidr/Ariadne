@@ -166,6 +166,51 @@ func (x *SecretPair) GetValue() string {
 	return ""
 }
 
+// SecretPairList wraps a repeated SecretPair so callers can distinguish omitted vs empty.
+type SecretPairList struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*SecretPair          `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretPairList) Reset() {
+	*x = SecretPairList{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretPairList) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretPairList) ProtoMessage() {}
+
+func (x *SecretPairList) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretPairList.ProtoReflect.Descriptor instead.
+func (*SecretPairList) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *SecretPairList) GetItems() []*SecretPair {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
 type SettingField struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
@@ -182,7 +227,7 @@ type SettingField struct {
 
 func (x *SettingField) Reset() {
 	*x = SettingField{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[3]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -194,7 +239,7 @@ func (x *SettingField) String() string {
 func (*SettingField) ProtoMessage() {}
 
 func (x *SettingField) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[3]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -207,7 +252,7 @@ func (x *SettingField) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SettingField.ProtoReflect.Descriptor instead.
 func (*SettingField) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{3}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SettingField) GetType() string {
@@ -278,7 +323,7 @@ type SettingsSchema struct {
 
 func (x *SettingsSchema) Reset() {
 	*x = SettingsSchema{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[4]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -290,7 +335,7 @@ func (x *SettingsSchema) String() string {
 func (*SettingsSchema) ProtoMessage() {}
 
 func (x *SettingsSchema) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[4]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -303,7 +348,7 @@ func (x *SettingsSchema) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SettingsSchema.ProtoReflect.Descriptor instead.
 func (*SettingsSchema) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{4}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SettingsSchema) GetType() string {
@@ -344,7 +389,7 @@ type ConcurrencySettings struct {
 
 func (x *ConcurrencySettings) Reset() {
 	*x = ConcurrencySettings{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[5]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -356,7 +401,7 @@ func (x *ConcurrencySettings) String() string {
 func (*ConcurrencySettings) ProtoMessage() {}
 
 func (x *ConcurrencySettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[5]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -369,7 +414,7 @@ func (x *ConcurrencySettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConcurrencySettings.ProtoReflect.Descriptor instead.
 func (*ConcurrencySettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{5}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ConcurrencySettings) GetSlots() int32 {
@@ -394,7 +439,7 @@ type GetConcurrencyRequest struct {
 
 func (x *GetConcurrencyRequest) Reset() {
 	*x = GetConcurrencyRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[6]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -406,7 +451,7 @@ func (x *GetConcurrencyRequest) String() string {
 func (*GetConcurrencyRequest) ProtoMessage() {}
 
 func (x *GetConcurrencyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[6]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -419,7 +464,7 @@ func (x *GetConcurrencyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConcurrencyRequest.ProtoReflect.Descriptor instead.
 func (*GetConcurrencyRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{6}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{7}
 }
 
 type GetConcurrencyResponse struct {
@@ -431,7 +476,7 @@ type GetConcurrencyResponse struct {
 
 func (x *GetConcurrencyResponse) Reset() {
 	*x = GetConcurrencyResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[7]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -443,7 +488,7 @@ func (x *GetConcurrencyResponse) String() string {
 func (*GetConcurrencyResponse) ProtoMessage() {}
 
 func (x *GetConcurrencyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[7]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -456,7 +501,7 @@ func (x *GetConcurrencyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConcurrencyResponse.ProtoReflect.Descriptor instead.
 func (*GetConcurrencyResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{7}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetConcurrencyResponse) GetConcurrency() *ConcurrencySettings {
@@ -476,7 +521,7 @@ type SaveConcurrencyRequest struct {
 
 func (x *SaveConcurrencyRequest) Reset() {
 	*x = SaveConcurrencyRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[8]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -488,7 +533,7 @@ func (x *SaveConcurrencyRequest) String() string {
 func (*SaveConcurrencyRequest) ProtoMessage() {}
 
 func (x *SaveConcurrencyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[8]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -501,7 +546,7 @@ func (x *SaveConcurrencyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveConcurrencyRequest.ProtoReflect.Descriptor instead.
 func (*SaveConcurrencyRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{8}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SaveConcurrencyRequest) GetSlots() int32 {
@@ -527,7 +572,7 @@ type SaveConcurrencyResponse struct {
 
 func (x *SaveConcurrencyResponse) Reset() {
 	*x = SaveConcurrencyResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[9]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -539,7 +584,7 @@ func (x *SaveConcurrencyResponse) String() string {
 func (*SaveConcurrencyResponse) ProtoMessage() {}
 
 func (x *SaveConcurrencyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[9]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -552,7 +597,7 @@ func (x *SaveConcurrencyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveConcurrencyResponse.ProtoReflect.Descriptor instead.
 func (*SaveConcurrencyResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{9}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SaveConcurrencyResponse) GetConcurrency() *ConcurrencySettings {
@@ -573,7 +618,7 @@ type Snippet struct {
 
 func (x *Snippet) Reset() {
 	*x = Snippet{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[10]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -585,7 +630,7 @@ func (x *Snippet) String() string {
 func (*Snippet) ProtoMessage() {}
 
 func (x *Snippet) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[10]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -598,7 +643,7 @@ func (x *Snippet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Snippet.ProtoReflect.Descriptor instead.
 func (*Snippet) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{10}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Snippet) GetId() string {
@@ -633,7 +678,7 @@ type InputSettings struct {
 
 func (x *InputSettings) Reset() {
 	*x = InputSettings{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[11]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -645,7 +690,7 @@ func (x *InputSettings) String() string {
 func (*InputSettings) ProtoMessage() {}
 
 func (x *InputSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[11]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -658,7 +703,7 @@ func (x *InputSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InputSettings.ProtoReflect.Descriptor instead.
 func (*InputSettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{11}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *InputSettings) GetSubmitOn() string {
@@ -690,7 +735,7 @@ type GetInputSettingsRequest struct {
 
 func (x *GetInputSettingsRequest) Reset() {
 	*x = GetInputSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[12]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -702,7 +747,7 @@ func (x *GetInputSettingsRequest) String() string {
 func (*GetInputSettingsRequest) ProtoMessage() {}
 
 func (x *GetInputSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[12]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -715,7 +760,7 @@ func (x *GetInputSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetInputSettingsRequest.ProtoReflect.Descriptor instead.
 func (*GetInputSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{12}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{13}
 }
 
 type GetInputSettingsResponse struct {
@@ -727,7 +772,7 @@ type GetInputSettingsResponse struct {
 
 func (x *GetInputSettingsResponse) Reset() {
 	*x = GetInputSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[13]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -739,7 +784,7 @@ func (x *GetInputSettingsResponse) String() string {
 func (*GetInputSettingsResponse) ProtoMessage() {}
 
 func (x *GetInputSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[13]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -752,7 +797,7 @@ func (x *GetInputSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetInputSettingsResponse.ProtoReflect.Descriptor instead.
 func (*GetInputSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{13}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetInputSettingsResponse) GetInput() *InputSettings {
@@ -773,7 +818,7 @@ type SaveInputSettingsRequest struct {
 
 func (x *SaveInputSettingsRequest) Reset() {
 	*x = SaveInputSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[14]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -785,7 +830,7 @@ func (x *SaveInputSettingsRequest) String() string {
 func (*SaveInputSettingsRequest) ProtoMessage() {}
 
 func (x *SaveInputSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[14]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -798,7 +843,7 @@ func (x *SaveInputSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveInputSettingsRequest.ProtoReflect.Descriptor instead.
 func (*SaveInputSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{14}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SaveInputSettingsRequest) GetSubmitOn() string {
@@ -831,7 +876,7 @@ type SaveInputSettingsResponse struct {
 
 func (x *SaveInputSettingsResponse) Reset() {
 	*x = SaveInputSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[15]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -843,7 +888,7 @@ func (x *SaveInputSettingsResponse) String() string {
 func (*SaveInputSettingsResponse) ProtoMessage() {}
 
 func (x *SaveInputSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[15]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -856,7 +901,7 @@ func (x *SaveInputSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveInputSettingsResponse.ProtoReflect.Descriptor instead.
 func (*SaveInputSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{15}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SaveInputSettingsResponse) GetInput() *InputSettings {
@@ -876,7 +921,7 @@ type CommandRule struct {
 
 func (x *CommandRule) Reset() {
 	*x = CommandRule{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[16]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -888,7 +933,7 @@ func (x *CommandRule) String() string {
 func (*CommandRule) ProtoMessage() {}
 
 func (x *CommandRule) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[16]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -901,7 +946,7 @@ func (x *CommandRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandRule.ProtoReflect.Descriptor instead.
 func (*CommandRule) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{16}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CommandRule) GetPattern() string {
@@ -927,7 +972,7 @@ type CommandRuleList struct {
 
 func (x *CommandRuleList) Reset() {
 	*x = CommandRuleList{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[17]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -939,7 +984,7 @@ func (x *CommandRuleList) String() string {
 func (*CommandRuleList) ProtoMessage() {}
 
 func (x *CommandRuleList) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[17]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -952,7 +997,7 @@ func (x *CommandRuleList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandRuleList.ProtoReflect.Descriptor instead.
 func (*CommandRuleList) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{17}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CommandRuleList) GetItems() []*CommandRule {
@@ -976,7 +1021,7 @@ type WorkLimits struct {
 
 func (x *WorkLimits) Reset() {
 	*x = WorkLimits{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[18]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -988,7 +1033,7 @@ func (x *WorkLimits) String() string {
 func (*WorkLimits) ProtoMessage() {}
 
 func (x *WorkLimits) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[18]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1001,7 +1046,7 @@ func (x *WorkLimits) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkLimits.ProtoReflect.Descriptor instead.
 func (*WorkLimits) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{18}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *WorkLimits) GetCommandTimeout() int32 {
@@ -1060,7 +1105,7 @@ type WorkLimitsInput struct {
 
 func (x *WorkLimitsInput) Reset() {
 	*x = WorkLimitsInput{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[19]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1072,7 +1117,7 @@ func (x *WorkLimitsInput) String() string {
 func (*WorkLimitsInput) ProtoMessage() {}
 
 func (x *WorkLimitsInput) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[19]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1085,7 +1130,7 @@ func (x *WorkLimitsInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkLimitsInput.ProtoReflect.Descriptor instead.
 func (*WorkLimitsInput) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{19}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *WorkLimitsInput) GetCommandTimeout() int32 {
@@ -1142,7 +1187,7 @@ type WorkSettings struct {
 
 func (x *WorkSettings) Reset() {
 	*x = WorkSettings{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[20]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1154,7 +1199,7 @@ func (x *WorkSettings) String() string {
 func (*WorkSettings) ProtoMessage() {}
 
 func (x *WorkSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[20]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1167,7 +1212,7 @@ func (x *WorkSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkSettings.ProtoReflect.Descriptor instead.
 func (*WorkSettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{20}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *WorkSettings) GetInstructions() string {
@@ -1206,7 +1251,7 @@ type GetWorkSettingsRequest struct {
 
 func (x *GetWorkSettingsRequest) Reset() {
 	*x = GetWorkSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[21]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1218,7 +1263,7 @@ func (x *GetWorkSettingsRequest) String() string {
 func (*GetWorkSettingsRequest) ProtoMessage() {}
 
 func (x *GetWorkSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[21]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1231,7 +1276,7 @@ func (x *GetWorkSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorkSettingsRequest.ProtoReflect.Descriptor instead.
 func (*GetWorkSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{21}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{22}
 }
 
 type GetWorkSettingsResponse struct {
@@ -1243,7 +1288,7 @@ type GetWorkSettingsResponse struct {
 
 func (x *GetWorkSettingsResponse) Reset() {
 	*x = GetWorkSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[22]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1255,7 +1300,7 @@ func (x *GetWorkSettingsResponse) String() string {
 func (*GetWorkSettingsResponse) ProtoMessage() {}
 
 func (x *GetWorkSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[22]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1268,7 +1313,7 @@ func (x *GetWorkSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorkSettingsResponse.ProtoReflect.Descriptor instead.
 func (*GetWorkSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{22}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *GetWorkSettingsResponse) GetWork() *WorkSettings {
@@ -1289,7 +1334,7 @@ type SaveWorkSettingsRequest struct {
 
 func (x *SaveWorkSettingsRequest) Reset() {
 	*x = SaveWorkSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[23]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1301,7 +1346,7 @@ func (x *SaveWorkSettingsRequest) String() string {
 func (*SaveWorkSettingsRequest) ProtoMessage() {}
 
 func (x *SaveWorkSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[23]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1314,7 +1359,7 @@ func (x *SaveWorkSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveWorkSettingsRequest.ProtoReflect.Descriptor instead.
 func (*SaveWorkSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{23}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *SaveWorkSettingsRequest) GetInstructions() string {
@@ -1347,7 +1392,7 @@ type SaveWorkSettingsResponse struct {
 
 func (x *SaveWorkSettingsResponse) Reset() {
 	*x = SaveWorkSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[24]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1359,7 +1404,7 @@ func (x *SaveWorkSettingsResponse) String() string {
 func (*SaveWorkSettingsResponse) ProtoMessage() {}
 
 func (x *SaveWorkSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[24]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1372,7 +1417,7 @@ func (x *SaveWorkSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveWorkSettingsResponse.ProtoReflect.Descriptor instead.
 func (*SaveWorkSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{24}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *SaveWorkSettingsResponse) GetWork() *WorkSettings {
@@ -1394,7 +1439,7 @@ type SearchCapabilities struct {
 
 func (x *SearchCapabilities) Reset() {
 	*x = SearchCapabilities{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[25]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1406,7 +1451,7 @@ func (x *SearchCapabilities) String() string {
 func (*SearchCapabilities) ProtoMessage() {}
 
 func (x *SearchCapabilities) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[25]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1419,7 +1464,7 @@ func (x *SearchCapabilities) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchCapabilities.ProtoReflect.Descriptor instead.
 func (*SearchCapabilities) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{25}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *SearchCapabilities) GetMaxQueryRunes() int32 {
@@ -1466,7 +1511,7 @@ type SearchServiceView struct {
 
 func (x *SearchServiceView) Reset() {
 	*x = SearchServiceView{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[26]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1478,7 +1523,7 @@ func (x *SearchServiceView) String() string {
 func (*SearchServiceView) ProtoMessage() {}
 
 func (x *SearchServiceView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[26]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1491,7 +1536,7 @@ func (x *SearchServiceView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchServiceView.ProtoReflect.Descriptor instead.
 func (*SearchServiceView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{26}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *SearchServiceView) GetKind() string {
@@ -1566,7 +1611,7 @@ type SearchSettings struct {
 
 func (x *SearchSettings) Reset() {
 	*x = SearchSettings{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[27]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1578,7 +1623,7 @@ func (x *SearchSettings) String() string {
 func (*SearchSettings) ProtoMessage() {}
 
 func (x *SearchSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[27]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1591,7 +1636,7 @@ func (x *SearchSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchSettings.ProtoReflect.Descriptor instead.
 func (*SearchSettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{27}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *SearchSettings) GetProvider() string {
@@ -1658,7 +1703,7 @@ type GetSearchSettingsRequest struct {
 
 func (x *GetSearchSettingsRequest) Reset() {
 	*x = GetSearchSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[28]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1670,7 +1715,7 @@ func (x *GetSearchSettingsRequest) String() string {
 func (*GetSearchSettingsRequest) ProtoMessage() {}
 
 func (x *GetSearchSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[28]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1683,7 +1728,7 @@ func (x *GetSearchSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSearchSettingsRequest.ProtoReflect.Descriptor instead.
 func (*GetSearchSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{28}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{29}
 }
 
 type GetSearchSettingsResponse struct {
@@ -1695,7 +1740,7 @@ type GetSearchSettingsResponse struct {
 
 func (x *GetSearchSettingsResponse) Reset() {
 	*x = GetSearchSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[29]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1707,7 +1752,7 @@ func (x *GetSearchSettingsResponse) String() string {
 func (*GetSearchSettingsResponse) ProtoMessage() {}
 
 func (x *GetSearchSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[29]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1720,7 +1765,7 @@ func (x *GetSearchSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSearchSettingsResponse.ProtoReflect.Descriptor instead.
 func (*GetSearchSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{29}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *GetSearchSettingsResponse) GetSearch() *SearchSettings {
@@ -1740,7 +1785,7 @@ type SaveSearchSettingsRequest struct {
 
 func (x *SaveSearchSettingsRequest) Reset() {
 	*x = SaveSearchSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[30]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1752,7 +1797,7 @@ func (x *SaveSearchSettingsRequest) String() string {
 func (*SaveSearchSettingsRequest) ProtoMessage() {}
 
 func (x *SaveSearchSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[30]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1765,7 +1810,7 @@ func (x *SaveSearchSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveSearchSettingsRequest.ProtoReflect.Descriptor instead.
 func (*SaveSearchSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{30}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *SaveSearchSettingsRequest) GetProvider() string {
@@ -1791,7 +1836,7 @@ type SaveSearchSettingsResponse struct {
 
 func (x *SaveSearchSettingsResponse) Reset() {
 	*x = SaveSearchSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[31]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1803,7 +1848,7 @@ func (x *SaveSearchSettingsResponse) String() string {
 func (*SaveSearchSettingsResponse) ProtoMessage() {}
 
 func (x *SaveSearchSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[31]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1816,7 +1861,7 @@ func (x *SaveSearchSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveSearchSettingsResponse.ProtoReflect.Descriptor instead.
 func (*SaveSearchSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{31}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *SaveSearchSettingsResponse) GetSearch() *SearchSettings {
@@ -1836,7 +1881,7 @@ type CheckSearchSettingsRequest struct {
 
 func (x *CheckSearchSettingsRequest) Reset() {
 	*x = CheckSearchSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[32]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1848,7 +1893,7 @@ func (x *CheckSearchSettingsRequest) String() string {
 func (*CheckSearchSettingsRequest) ProtoMessage() {}
 
 func (x *CheckSearchSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[32]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1861,7 +1906,7 @@ func (x *CheckSearchSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckSearchSettingsRequest.ProtoReflect.Descriptor instead.
 func (*CheckSearchSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{32}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *CheckSearchSettingsRequest) GetProvider() string {
@@ -1889,7 +1934,7 @@ type CheckSearchSettingsResponse struct {
 
 func (x *CheckSearchSettingsResponse) Reset() {
 	*x = CheckSearchSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[33]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1901,7 +1946,7 @@ func (x *CheckSearchSettingsResponse) String() string {
 func (*CheckSearchSettingsResponse) ProtoMessage() {}
 
 func (x *CheckSearchSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[33]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1914,7 +1959,7 @@ func (x *CheckSearchSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckSearchSettingsResponse.ProtoReflect.Descriptor instead.
 func (*CheckSearchSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{33}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *CheckSearchSettingsResponse) GetOk() bool {
@@ -1951,7 +1996,7 @@ type ModelPrice struct {
 
 func (x *ModelPrice) Reset() {
 	*x = ModelPrice{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[34]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1963,7 +2008,7 @@ func (x *ModelPrice) String() string {
 func (*ModelPrice) ProtoMessage() {}
 
 func (x *ModelPrice) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[34]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1976,7 +2021,7 @@ func (x *ModelPrice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelPrice.ProtoReflect.Descriptor instead.
 func (*ModelPrice) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{34}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ModelPrice) GetCurrency() string {
@@ -2026,7 +2071,7 @@ type ModelKind struct {
 
 func (x *ModelKind) Reset() {
 	*x = ModelKind{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[35]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2038,7 +2083,7 @@ func (x *ModelKind) String() string {
 func (*ModelKind) ProtoMessage() {}
 
 func (x *ModelKind) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[35]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2051,7 +2096,7 @@ func (x *ModelKind) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelKind.ProtoReflect.Descriptor instead.
 func (*ModelKind) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{35}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ModelKind) GetKind() string {
@@ -2092,13 +2137,14 @@ type ModelProviderView struct {
 	Headers        []string               `protobuf:"bytes,6,rep,name=headers,proto3" json:"headers,omitempty"`
 	ExtraBody      *structpb.Struct       `protobuf:"bytes,7,opt,name=extra_body,json=extraBody,proto3" json:"extra_body,omitempty"`
 	TimeoutSeconds *int32                 `protobuf:"varint,8,opt,name=timeout_seconds,json=timeoutSeconds,proto3,oneof" json:"timeout_seconds,omitempty"`
+	Env            []string               `protobuf:"bytes,9,rep,name=env,proto3" json:"env,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ModelProviderView) Reset() {
 	*x = ModelProviderView{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[36]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2110,7 +2156,7 @@ func (x *ModelProviderView) String() string {
 func (*ModelProviderView) ProtoMessage() {}
 
 func (x *ModelProviderView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[36]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2123,7 +2169,7 @@ func (x *ModelProviderView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelProviderView.ProtoReflect.Descriptor instead.
 func (*ModelProviderView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{36}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ModelProviderView) GetId() string {
@@ -2182,6 +2228,13 @@ func (x *ModelProviderView) GetTimeoutSeconds() int32 {
 	return 0
 }
 
+func (x *ModelProviderView) GetEnv() []string {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
 type ModelProviderInput struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -2191,13 +2244,14 @@ type ModelProviderInput struct {
 	Headers        []*SecretPair          `protobuf:"bytes,5,rep,name=headers,proto3" json:"headers,omitempty"`
 	ExtraBody      *structpb.Struct       `protobuf:"bytes,6,opt,name=extra_body,json=extraBody,proto3" json:"extra_body,omitempty"`
 	TimeoutSeconds *int32                 `protobuf:"varint,7,opt,name=timeout_seconds,json=timeoutSeconds,proto3,oneof" json:"timeout_seconds,omitempty"`
+	Env            []*SecretPair          `protobuf:"bytes,8,rep,name=env,proto3" json:"env,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ModelProviderInput) Reset() {
 	*x = ModelProviderInput{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[37]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2209,7 +2263,7 @@ func (x *ModelProviderInput) String() string {
 func (*ModelProviderInput) ProtoMessage() {}
 
 func (x *ModelProviderInput) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[37]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2222,7 +2276,7 @@ func (x *ModelProviderInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelProviderInput.ProtoReflect.Descriptor instead.
 func (*ModelProviderInput) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{37}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ModelProviderInput) GetId() string {
@@ -2274,6 +2328,13 @@ func (x *ModelProviderInput) GetTimeoutSeconds() int32 {
 	return 0
 }
 
+func (x *ModelProviderInput) GetEnv() []*SecretPair {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
 type ModelEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -2291,7 +2352,7 @@ type ModelEntry struct {
 
 func (x *ModelEntry) Reset() {
 	*x = ModelEntry{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[38]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2303,7 +2364,7 @@ func (x *ModelEntry) String() string {
 func (*ModelEntry) ProtoMessage() {}
 
 func (x *ModelEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[38]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2316,7 +2377,7 @@ func (x *ModelEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelEntry.ProtoReflect.Descriptor instead.
 func (*ModelEntry) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{38}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ModelEntry) GetId() string {
@@ -2392,7 +2453,7 @@ type RoleConfig struct {
 
 func (x *RoleConfig) Reset() {
 	*x = RoleConfig{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[39]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2404,7 +2465,7 @@ func (x *RoleConfig) String() string {
 func (*RoleConfig) ProtoMessage() {}
 
 func (x *RoleConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[39]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2417,7 +2478,7 @@ func (x *RoleConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoleConfig.ProtoReflect.Descriptor instead.
 func (*RoleConfig) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{39}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *RoleConfig) GetModel() string {
@@ -2446,7 +2507,7 @@ type ModelRoles struct {
 
 func (x *ModelRoles) Reset() {
 	*x = ModelRoles{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[40]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2458,7 +2519,7 @@ func (x *ModelRoles) String() string {
 func (*ModelRoles) ProtoMessage() {}
 
 func (x *ModelRoles) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[40]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2471,7 +2532,7 @@ func (x *ModelRoles) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelRoles.ProtoReflect.Descriptor instead.
 func (*ModelRoles) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{40}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ModelRoles) GetThread() *RoleConfig {
@@ -2515,7 +2576,7 @@ type ModelSettings struct {
 
 func (x *ModelSettings) Reset() {
 	*x = ModelSettings{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[41]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2527,7 +2588,7 @@ func (x *ModelSettings) String() string {
 func (*ModelSettings) ProtoMessage() {}
 
 func (x *ModelSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[41]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2540,7 +2601,7 @@ func (x *ModelSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelSettings.ProtoReflect.Descriptor instead.
 func (*ModelSettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{41}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ModelSettings) GetKinds() []*ModelKind {
@@ -2589,7 +2650,7 @@ type ModelProblem struct {
 
 func (x *ModelProblem) Reset() {
 	*x = ModelProblem{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[42]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2601,7 +2662,7 @@ func (x *ModelProblem) String() string {
 func (*ModelProblem) ProtoMessage() {}
 
 func (x *ModelProblem) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[42]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2614,7 +2675,7 @@ func (x *ModelProblem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelProblem.ProtoReflect.Descriptor instead.
 func (*ModelProblem) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{42}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ModelProblem) GetModel() string {
@@ -2646,7 +2707,7 @@ type GetModelSettingsRequest struct {
 
 func (x *GetModelSettingsRequest) Reset() {
 	*x = GetModelSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[43]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2658,7 +2719,7 @@ func (x *GetModelSettingsRequest) String() string {
 func (*GetModelSettingsRequest) ProtoMessage() {}
 
 func (x *GetModelSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[43]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2671,7 +2732,7 @@ func (x *GetModelSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetModelSettingsRequest.ProtoReflect.Descriptor instead.
 func (*GetModelSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{43}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{44}
 }
 
 type GetModelSettingsResponse struct {
@@ -2683,7 +2744,7 @@ type GetModelSettingsResponse struct {
 
 func (x *GetModelSettingsResponse) Reset() {
 	*x = GetModelSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[44]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2695,7 +2756,7 @@ func (x *GetModelSettingsResponse) String() string {
 func (*GetModelSettingsResponse) ProtoMessage() {}
 
 func (x *GetModelSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[44]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2708,7 +2769,7 @@ func (x *GetModelSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetModelSettingsResponse.ProtoReflect.Descriptor instead.
 func (*GetModelSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{44}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *GetModelSettingsResponse) GetSettings() *ModelSettings {
@@ -2730,7 +2791,7 @@ type SaveModelSettingsRequest struct {
 
 func (x *SaveModelSettingsRequest) Reset() {
 	*x = SaveModelSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[45]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2742,7 +2803,7 @@ func (x *SaveModelSettingsRequest) String() string {
 func (*SaveModelSettingsRequest) ProtoMessage() {}
 
 func (x *SaveModelSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[45]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2755,7 +2816,7 @@ func (x *SaveModelSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveModelSettingsRequest.ProtoReflect.Descriptor instead.
 func (*SaveModelSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{45}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *SaveModelSettingsRequest) GetProviders() []*ModelProviderInput {
@@ -2796,7 +2857,7 @@ type SaveModelSettingsResponse struct {
 
 func (x *SaveModelSettingsResponse) Reset() {
 	*x = SaveModelSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[46]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2808,7 +2869,7 @@ func (x *SaveModelSettingsResponse) String() string {
 func (*SaveModelSettingsResponse) ProtoMessage() {}
 
 func (x *SaveModelSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[46]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2821,7 +2882,7 @@ func (x *SaveModelSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveModelSettingsResponse.ProtoReflect.Descriptor instead.
 func (*SaveModelSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{46}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *SaveModelSettingsResponse) GetSettings() *ModelSettings {
@@ -2853,7 +2914,7 @@ type ModelInfo struct {
 
 func (x *ModelInfo) Reset() {
 	*x = ModelInfo{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[47]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2865,7 +2926,7 @@ func (x *ModelInfo) String() string {
 func (*ModelInfo) ProtoMessage() {}
 
 func (x *ModelInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[47]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2878,7 +2939,7 @@ func (x *ModelInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelInfo.ProtoReflect.Descriptor instead.
 func (*ModelInfo) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{47}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ModelInfo) GetContextTokens() int64 {
@@ -2941,7 +3002,7 @@ type ListedModel struct {
 
 func (x *ListedModel) Reset() {
 	*x = ListedModel{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[48]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2953,7 +3014,7 @@ func (x *ListedModel) String() string {
 func (*ListedModel) ProtoMessage() {}
 
 func (x *ListedModel) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[48]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2966,7 +3027,7 @@ func (x *ListedModel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListedModel.ProtoReflect.Descriptor instead.
 func (*ListedModel) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{48}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ListedModel) GetId() string {
@@ -2999,7 +3060,7 @@ type ListedModelList struct {
 
 func (x *ListedModelList) Reset() {
 	*x = ListedModelList{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[49]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3011,7 +3072,7 @@ func (x *ListedModelList) String() string {
 func (*ListedModelList) ProtoMessage() {}
 
 func (x *ListedModelList) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[49]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3024,7 +3085,7 @@ func (x *ListedModelList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListedModelList.ProtoReflect.Descriptor instead.
 func (*ListedModelList) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{49}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ListedModelList) GetItems() []*ListedModel {
@@ -3039,13 +3100,14 @@ type DraftModelProviderInput struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
 	Settings      *structpb.Struct       `protobuf:"bytes,3,opt,name=settings,proto3" json:"settings,omitempty"`
+	Env           *SecretPairList        `protobuf:"bytes,4,opt,name=env,proto3,oneof" json:"env,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DraftModelProviderInput) Reset() {
 	*x = DraftModelProviderInput{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[50]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3057,7 +3119,7 @@ func (x *DraftModelProviderInput) String() string {
 func (*DraftModelProviderInput) ProtoMessage() {}
 
 func (x *DraftModelProviderInput) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[50]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3070,7 +3132,7 @@ func (x *DraftModelProviderInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DraftModelProviderInput.ProtoReflect.Descriptor instead.
 func (*DraftModelProviderInput) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{50}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *DraftModelProviderInput) GetId() string {
@@ -3094,6 +3156,13 @@ func (x *DraftModelProviderInput) GetSettings() *structpb.Struct {
 	return nil
 }
 
+func (x *DraftModelProviderInput) GetEnv() *SecretPairList {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
 type ListProviderModelsRequest struct {
 	state         protoimpl.MessageState   `protogen:"open.v1"`
 	Provider      *DraftModelProviderInput `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
@@ -3103,7 +3172,7 @@ type ListProviderModelsRequest struct {
 
 func (x *ListProviderModelsRequest) Reset() {
 	*x = ListProviderModelsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[51]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3115,7 +3184,7 @@ func (x *ListProviderModelsRequest) String() string {
 func (*ListProviderModelsRequest) ProtoMessage() {}
 
 func (x *ListProviderModelsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[51]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3128,7 +3197,7 @@ func (x *ListProviderModelsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProviderModelsRequest.ProtoReflect.Descriptor instead.
 func (*ListProviderModelsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{51}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ListProviderModelsRequest) GetProvider() *DraftModelProviderInput {
@@ -3147,7 +3216,7 @@ type ListProviderModelsResponse struct {
 
 func (x *ListProviderModelsResponse) Reset() {
 	*x = ListProviderModelsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[52]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3159,7 +3228,7 @@ func (x *ListProviderModelsResponse) String() string {
 func (*ListProviderModelsResponse) ProtoMessage() {}
 
 func (x *ListProviderModelsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[52]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3172,7 +3241,7 @@ func (x *ListProviderModelsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProviderModelsResponse.ProtoReflect.Descriptor instead.
 func (*ListProviderModelsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{52}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *ListProviderModelsResponse) GetModels() *ListedModelList {
@@ -3192,7 +3261,7 @@ type GetModelInfoRequest struct {
 
 func (x *GetModelInfoRequest) Reset() {
 	*x = GetModelInfoRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[53]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3204,7 +3273,7 @@ func (x *GetModelInfoRequest) String() string {
 func (*GetModelInfoRequest) ProtoMessage() {}
 
 func (x *GetModelInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[53]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3217,7 +3286,7 @@ func (x *GetModelInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetModelInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetModelInfoRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{53}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *GetModelInfoRequest) GetModel() string {
@@ -3243,7 +3312,7 @@ type GetModelInfoResponse struct {
 
 func (x *GetModelInfoResponse) Reset() {
 	*x = GetModelInfoResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[54]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3255,7 +3324,7 @@ func (x *GetModelInfoResponse) String() string {
 func (*GetModelInfoResponse) ProtoMessage() {}
 
 func (x *GetModelInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[54]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3268,7 +3337,7 @@ func (x *GetModelInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetModelInfoResponse.ProtoReflect.Descriptor instead.
 func (*GetModelInfoResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{54}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *GetModelInfoResponse) GetInfo() *ModelInfo {
@@ -3294,7 +3363,7 @@ type FoundSetup struct {
 
 func (x *FoundSetup) Reset() {
 	*x = FoundSetup{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[55]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3306,7 +3375,7 @@ func (x *FoundSetup) String() string {
 func (*FoundSetup) ProtoMessage() {}
 
 func (x *FoundSetup) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[55]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3319,7 +3388,7 @@ func (x *FoundSetup) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FoundSetup.ProtoReflect.Descriptor instead.
 func (*FoundSetup) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{55}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *FoundSetup) GetId() string {
@@ -3392,7 +3461,7 @@ type ListFoundSetupsRequest struct {
 
 func (x *ListFoundSetupsRequest) Reset() {
 	*x = ListFoundSetupsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[56]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3404,7 +3473,7 @@ func (x *ListFoundSetupsRequest) String() string {
 func (*ListFoundSetupsRequest) ProtoMessage() {}
 
 func (x *ListFoundSetupsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[56]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3417,7 +3486,7 @@ func (x *ListFoundSetupsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListFoundSetupsRequest.ProtoReflect.Descriptor instead.
 func (*ListFoundSetupsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{56}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{57}
 }
 
 type ListFoundSetupsResponse struct {
@@ -3429,7 +3498,7 @@ type ListFoundSetupsResponse struct {
 
 func (x *ListFoundSetupsResponse) Reset() {
 	*x = ListFoundSetupsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[57]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3441,7 +3510,7 @@ func (x *ListFoundSetupsResponse) String() string {
 func (*ListFoundSetupsResponse) ProtoMessage() {}
 
 func (x *ListFoundSetupsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[57]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3454,7 +3523,7 @@ func (x *ListFoundSetupsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListFoundSetupsResponse.ProtoReflect.Descriptor instead.
 func (*ListFoundSetupsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{57}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *ListFoundSetupsResponse) GetFound() []*FoundSetup {
@@ -3473,7 +3542,7 @@ type UseFoundSetupRequest struct {
 
 func (x *UseFoundSetupRequest) Reset() {
 	*x = UseFoundSetupRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[58]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3485,7 +3554,7 @@ func (x *UseFoundSetupRequest) String() string {
 func (*UseFoundSetupRequest) ProtoMessage() {}
 
 func (x *UseFoundSetupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[58]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3498,7 +3567,7 @@ func (x *UseFoundSetupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UseFoundSetupRequest.ProtoReflect.Descriptor instead.
 func (*UseFoundSetupRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{58}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *UseFoundSetupRequest) GetId() string {
@@ -3518,7 +3587,7 @@ type UseFoundSetupResponse struct {
 
 func (x *UseFoundSetupResponse) Reset() {
 	*x = UseFoundSetupResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[59]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3530,7 +3599,7 @@ func (x *UseFoundSetupResponse) String() string {
 func (*UseFoundSetupResponse) ProtoMessage() {}
 
 func (x *UseFoundSetupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[59]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3543,7 +3612,7 @@ func (x *UseFoundSetupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UseFoundSetupResponse.ProtoReflect.Descriptor instead.
 func (*UseFoundSetupResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{59}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *UseFoundSetupResponse) GetSettings() *ModelSettings {
@@ -3578,7 +3647,7 @@ type McpServerView struct {
 
 func (x *McpServerView) Reset() {
 	*x = McpServerView{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[60]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3590,7 +3659,7 @@ func (x *McpServerView) String() string {
 func (*McpServerView) ProtoMessage() {}
 
 func (x *McpServerView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[60]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3603,7 +3672,7 @@ func (x *McpServerView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpServerView.ProtoReflect.Descriptor instead.
 func (*McpServerView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{60}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *McpServerView) GetId() string {
@@ -3694,7 +3763,7 @@ type McpServerInput struct {
 
 func (x *McpServerInput) Reset() {
 	*x = McpServerInput{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[61]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3706,7 +3775,7 @@ func (x *McpServerInput) String() string {
 func (*McpServerInput) ProtoMessage() {}
 
 func (x *McpServerInput) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[61]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3719,7 +3788,7 @@ func (x *McpServerInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpServerInput.ProtoReflect.Descriptor instead.
 func (*McpServerInput) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{61}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *McpServerInput) GetId() string {
@@ -3803,7 +3872,7 @@ type McpServerInfo struct {
 
 func (x *McpServerInfo) Reset() {
 	*x = McpServerInfo{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[62]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3815,7 +3884,7 @@ func (x *McpServerInfo) String() string {
 func (*McpServerInfo) ProtoMessage() {}
 
 func (x *McpServerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[62]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3828,7 +3897,7 @@ func (x *McpServerInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpServerInfo.ProtoReflect.Descriptor instead.
 func (*McpServerInfo) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{62}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *McpServerInfo) GetName() string {
@@ -3863,7 +3932,7 @@ type McpToolInfo struct {
 
 func (x *McpToolInfo) Reset() {
 	*x = McpToolInfo{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[63]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3875,7 +3944,7 @@ func (x *McpToolInfo) String() string {
 func (*McpToolInfo) ProtoMessage() {}
 
 func (x *McpToolInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[63]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3888,7 +3957,7 @@ func (x *McpToolInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpToolInfo.ProtoReflect.Descriptor instead.
 func (*McpToolInfo) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{63}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *McpToolInfo) GetName() string {
@@ -3921,7 +3990,7 @@ type McpToolInfoList struct {
 
 func (x *McpToolInfoList) Reset() {
 	*x = McpToolInfoList{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[64]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3933,7 +4002,7 @@ func (x *McpToolInfoList) String() string {
 func (*McpToolInfoList) ProtoMessage() {}
 
 func (x *McpToolInfoList) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[64]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3946,7 +4015,7 @@ func (x *McpToolInfoList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpToolInfoList.ProtoReflect.Descriptor instead.
 func (*McpToolInfoList) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{64}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *McpToolInfoList) GetItems() []*McpToolInfo {
@@ -3970,7 +4039,7 @@ type McpServerStatus struct {
 
 func (x *McpServerStatus) Reset() {
 	*x = McpServerStatus{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[65]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3982,7 +4051,7 @@ func (x *McpServerStatus) String() string {
 func (*McpServerStatus) ProtoMessage() {}
 
 func (x *McpServerStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[65]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3995,7 +4064,7 @@ func (x *McpServerStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpServerStatus.ProtoReflect.Descriptor instead.
 func (*McpServerStatus) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{65}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *McpServerStatus) GetId() string {
@@ -4048,7 +4117,7 @@ type GetMcpSettingsRequest struct {
 
 func (x *GetMcpSettingsRequest) Reset() {
 	*x = GetMcpSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[66]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4060,7 +4129,7 @@ func (x *GetMcpSettingsRequest) String() string {
 func (*GetMcpSettingsRequest) ProtoMessage() {}
 
 func (x *GetMcpSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[66]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4073,7 +4142,7 @@ func (x *GetMcpSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMcpSettingsRequest.ProtoReflect.Descriptor instead.
 func (*GetMcpSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{66}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{67}
 }
 
 type GetMcpSettingsResponse struct {
@@ -4086,7 +4155,7 @@ type GetMcpSettingsResponse struct {
 
 func (x *GetMcpSettingsResponse) Reset() {
 	*x = GetMcpSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[67]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4098,7 +4167,7 @@ func (x *GetMcpSettingsResponse) String() string {
 func (*GetMcpSettingsResponse) ProtoMessage() {}
 
 func (x *GetMcpSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[67]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4111,7 +4180,7 @@ func (x *GetMcpSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMcpSettingsResponse.ProtoReflect.Descriptor instead.
 func (*GetMcpSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{67}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *GetMcpSettingsResponse) GetServers() []*McpServerView {
@@ -4137,7 +4206,7 @@ type SaveMcpSettingsRequest struct {
 
 func (x *SaveMcpSettingsRequest) Reset() {
 	*x = SaveMcpSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[68]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4149,7 +4218,7 @@ func (x *SaveMcpSettingsRequest) String() string {
 func (*SaveMcpSettingsRequest) ProtoMessage() {}
 
 func (x *SaveMcpSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[68]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4162,7 +4231,7 @@ func (x *SaveMcpSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveMcpSettingsRequest.ProtoReflect.Descriptor instead.
 func (*SaveMcpSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{68}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *SaveMcpSettingsRequest) GetServers() []*McpServerInput {
@@ -4182,7 +4251,7 @@ type SaveMcpSettingsResponse struct {
 
 func (x *SaveMcpSettingsResponse) Reset() {
 	*x = SaveMcpSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[69]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4194,7 +4263,7 @@ func (x *SaveMcpSettingsResponse) String() string {
 func (*SaveMcpSettingsResponse) ProtoMessage() {}
 
 func (x *SaveMcpSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[69]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4207,7 +4276,7 @@ func (x *SaveMcpSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveMcpSettingsResponse.ProtoReflect.Descriptor instead.
 func (*SaveMcpSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{69}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *SaveMcpSettingsResponse) GetServers() []*McpServerView {
@@ -4233,7 +4302,7 @@ type CheckMcpServerRequest struct {
 
 func (x *CheckMcpServerRequest) Reset() {
 	*x = CheckMcpServerRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[70]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4245,7 +4314,7 @@ func (x *CheckMcpServerRequest) String() string {
 func (*CheckMcpServerRequest) ProtoMessage() {}
 
 func (x *CheckMcpServerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[70]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4258,7 +4327,7 @@ func (x *CheckMcpServerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckMcpServerRequest.ProtoReflect.Descriptor instead.
 func (*CheckMcpServerRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{70}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *CheckMcpServerRequest) GetServerId() string {
@@ -4277,7 +4346,7 @@ type CheckMcpServerResponse struct {
 
 func (x *CheckMcpServerResponse) Reset() {
 	*x = CheckMcpServerResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[71]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4289,7 +4358,7 @@ func (x *CheckMcpServerResponse) String() string {
 func (*CheckMcpServerResponse) ProtoMessage() {}
 
 func (x *CheckMcpServerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[71]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4302,7 +4371,7 @@ func (x *CheckMcpServerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckMcpServerResponse.ProtoReflect.Descriptor instead.
 func (*CheckMcpServerResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{71}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *CheckMcpServerResponse) GetStatus() *McpServerStatus {
@@ -4327,7 +4396,7 @@ type PushSubscriptionView struct {
 
 func (x *PushSubscriptionView) Reset() {
 	*x = PushSubscriptionView{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[72]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4339,7 +4408,7 @@ func (x *PushSubscriptionView) String() string {
 func (*PushSubscriptionView) ProtoMessage() {}
 
 func (x *PushSubscriptionView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[72]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4352,7 +4421,7 @@ func (x *PushSubscriptionView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PushSubscriptionView.ProtoReflect.Descriptor instead.
 func (*PushSubscriptionView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{72}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *PushSubscriptionView) GetId() string {
@@ -4418,7 +4487,7 @@ type WebhookView struct {
 
 func (x *WebhookView) Reset() {
 	*x = WebhookView{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[73]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4430,7 +4499,7 @@ func (x *WebhookView) String() string {
 func (*WebhookView) ProtoMessage() {}
 
 func (x *WebhookView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[73]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4443,7 +4512,7 @@ func (x *WebhookView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebhookView.ProtoReflect.Descriptor instead.
 func (*WebhookView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{73}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *WebhookView) GetId() string {
@@ -4503,7 +4572,7 @@ type WebhookInput struct {
 
 func (x *WebhookInput) Reset() {
 	*x = WebhookInput{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[74]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4515,7 +4584,7 @@ func (x *WebhookInput) String() string {
 func (*WebhookInput) ProtoMessage() {}
 
 func (x *WebhookInput) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[74]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4528,7 +4597,7 @@ func (x *WebhookInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebhookInput.ProtoReflect.Descriptor instead.
 func (*WebhookInput) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{74}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *WebhookInput) GetId() string {
@@ -4589,7 +4658,7 @@ type NotifierCapabilities struct {
 
 func (x *NotifierCapabilities) Reset() {
 	*x = NotifierCapabilities{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[75]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4601,7 +4670,7 @@ func (x *NotifierCapabilities) String() string {
 func (*NotifierCapabilities) ProtoMessage() {}
 
 func (x *NotifierCapabilities) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[75]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4614,7 +4683,7 @@ func (x *NotifierCapabilities) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotifierCapabilities.ProtoReflect.Descriptor instead.
 func (*NotifierCapabilities) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{75}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *NotifierCapabilities) GetSupportsCheck() bool {
@@ -4641,7 +4710,7 @@ type NotifierServiceView struct {
 
 func (x *NotifierServiceView) Reset() {
 	*x = NotifierServiceView{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[76]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4653,7 +4722,7 @@ func (x *NotifierServiceView) String() string {
 func (*NotifierServiceView) ProtoMessage() {}
 
 func (x *NotifierServiceView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[76]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4666,7 +4735,7 @@ func (x *NotifierServiceView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotifierServiceView.ProtoReflect.Descriptor instead.
 func (*NotifierServiceView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{76}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *NotifierServiceView) GetKind() string {
@@ -4742,7 +4811,7 @@ type NotifierServiceInput struct {
 
 func (x *NotifierServiceInput) Reset() {
 	*x = NotifierServiceInput{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[77]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4754,7 +4823,7 @@ func (x *NotifierServiceInput) String() string {
 func (*NotifierServiceInput) ProtoMessage() {}
 
 func (x *NotifierServiceInput) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[77]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4767,7 +4836,7 @@ func (x *NotifierServiceInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotifierServiceInput.ProtoReflect.Descriptor instead.
 func (*NotifierServiceInput) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{77}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *NotifierServiceInput) GetEnabled() bool {
@@ -4798,7 +4867,7 @@ type NotificationSettings struct {
 
 func (x *NotificationSettings) Reset() {
 	*x = NotificationSettings{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[78]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4810,7 +4879,7 @@ func (x *NotificationSettings) String() string {
 func (*NotificationSettings) ProtoMessage() {}
 
 func (x *NotificationSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[78]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4823,7 +4892,7 @@ func (x *NotificationSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotificationSettings.ProtoReflect.Descriptor instead.
 func (*NotificationSettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{78}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *NotificationSettings) GetEnabled() bool {
@@ -4876,7 +4945,7 @@ type GetNotificationSettingsRequest struct {
 
 func (x *GetNotificationSettingsRequest) Reset() {
 	*x = GetNotificationSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[79]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4888,7 +4957,7 @@ func (x *GetNotificationSettingsRequest) String() string {
 func (*GetNotificationSettingsRequest) ProtoMessage() {}
 
 func (x *GetNotificationSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[79]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4901,7 +4970,7 @@ func (x *GetNotificationSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNotificationSettingsRequest.ProtoReflect.Descriptor instead.
 func (*GetNotificationSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{79}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{80}
 }
 
 type GetNotificationSettingsResponse struct {
@@ -4913,7 +4982,7 @@ type GetNotificationSettingsResponse struct {
 
 func (x *GetNotificationSettingsResponse) Reset() {
 	*x = GetNotificationSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[80]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4925,7 +4994,7 @@ func (x *GetNotificationSettingsResponse) String() string {
 func (*GetNotificationSettingsResponse) ProtoMessage() {}
 
 func (x *GetNotificationSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[80]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4938,7 +5007,7 @@ func (x *GetNotificationSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNotificationSettingsResponse.ProtoReflect.Descriptor instead.
 func (*GetNotificationSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{80}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *GetNotificationSettingsResponse) GetNotifications() *NotificationSettings {
@@ -4960,7 +5029,7 @@ type SaveNotificationSettingsRequest struct {
 
 func (x *SaveNotificationSettingsRequest) Reset() {
 	*x = SaveNotificationSettingsRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[81]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4972,7 +5041,7 @@ func (x *SaveNotificationSettingsRequest) String() string {
 func (*SaveNotificationSettingsRequest) ProtoMessage() {}
 
 func (x *SaveNotificationSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[81]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4985,7 +5054,7 @@ func (x *SaveNotificationSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveNotificationSettingsRequest.ProtoReflect.Descriptor instead.
 func (*SaveNotificationSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{81}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *SaveNotificationSettingsRequest) GetEnabled() bool {
@@ -5025,7 +5094,7 @@ type SaveNotificationSettingsResponse struct {
 
 func (x *SaveNotificationSettingsResponse) Reset() {
 	*x = SaveNotificationSettingsResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[82]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5037,7 +5106,7 @@ func (x *SaveNotificationSettingsResponse) String() string {
 func (*SaveNotificationSettingsResponse) ProtoMessage() {}
 
 func (x *SaveNotificationSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[82]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5050,7 +5119,7 @@ func (x *SaveNotificationSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveNotificationSettingsResponse.ProtoReflect.Descriptor instead.
 func (*SaveNotificationSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{82}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *SaveNotificationSettingsResponse) GetNotifications() *NotificationSettings {
@@ -5073,7 +5142,7 @@ type SubscribePushRequest struct {
 
 func (x *SubscribePushRequest) Reset() {
 	*x = SubscribePushRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[83]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5085,7 +5154,7 @@ func (x *SubscribePushRequest) String() string {
 func (*SubscribePushRequest) ProtoMessage() {}
 
 func (x *SubscribePushRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[83]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5098,7 +5167,7 @@ func (x *SubscribePushRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribePushRequest.ProtoReflect.Descriptor instead.
 func (*SubscribePushRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{83}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *SubscribePushRequest) GetEndpoint() string {
@@ -5146,7 +5215,7 @@ type SubscribePushResponse struct {
 
 func (x *SubscribePushResponse) Reset() {
 	*x = SubscribePushResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[84]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5158,7 +5227,7 @@ func (x *SubscribePushResponse) String() string {
 func (*SubscribePushResponse) ProtoMessage() {}
 
 func (x *SubscribePushResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[84]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5171,7 +5240,7 @@ func (x *SubscribePushResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribePushResponse.ProtoReflect.Descriptor instead.
 func (*SubscribePushResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{84}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *SubscribePushResponse) GetSubscription() *PushSubscriptionView {
@@ -5197,7 +5266,7 @@ type UnsubscribePushRequest struct {
 
 func (x *UnsubscribePushRequest) Reset() {
 	*x = UnsubscribePushRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[85]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5209,7 +5278,7 @@ func (x *UnsubscribePushRequest) String() string {
 func (*UnsubscribePushRequest) ProtoMessage() {}
 
 func (x *UnsubscribePushRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[85]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5222,7 +5291,7 @@ func (x *UnsubscribePushRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribePushRequest.ProtoReflect.Descriptor instead.
 func (*UnsubscribePushRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{85}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *UnsubscribePushRequest) GetEndpoint() string {
@@ -5241,7 +5310,7 @@ type UnsubscribePushResponse struct {
 
 func (x *UnsubscribePushResponse) Reset() {
 	*x = UnsubscribePushResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[86]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5253,7 +5322,7 @@ func (x *UnsubscribePushResponse) String() string {
 func (*UnsubscribePushResponse) ProtoMessage() {}
 
 func (x *UnsubscribePushResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[86]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5266,7 +5335,7 @@ func (x *UnsubscribePushResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribePushResponse.ProtoReflect.Descriptor instead.
 func (*UnsubscribePushResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{86}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *UnsubscribePushResponse) GetSubscriptions() []*PushSubscriptionView {
@@ -5285,7 +5354,7 @@ type DeletePushSubscriptionRequest struct {
 
 func (x *DeletePushSubscriptionRequest) Reset() {
 	*x = DeletePushSubscriptionRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[87]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5297,7 +5366,7 @@ func (x *DeletePushSubscriptionRequest) String() string {
 func (*DeletePushSubscriptionRequest) ProtoMessage() {}
 
 func (x *DeletePushSubscriptionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[87]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5310,7 +5379,7 @@ func (x *DeletePushSubscriptionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePushSubscriptionRequest.ProtoReflect.Descriptor instead.
 func (*DeletePushSubscriptionRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{87}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *DeletePushSubscriptionRequest) GetId() string {
@@ -5329,7 +5398,7 @@ type DeletePushSubscriptionResponse struct {
 
 func (x *DeletePushSubscriptionResponse) Reset() {
 	*x = DeletePushSubscriptionResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[88]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5341,7 +5410,7 @@ func (x *DeletePushSubscriptionResponse) String() string {
 func (*DeletePushSubscriptionResponse) ProtoMessage() {}
 
 func (x *DeletePushSubscriptionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[88]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5354,7 +5423,7 @@ func (x *DeletePushSubscriptionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePushSubscriptionResponse.ProtoReflect.Descriptor instead.
 func (*DeletePushSubscriptionResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{88}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *DeletePushSubscriptionResponse) GetSubscriptions() []*PushSubscriptionView {
@@ -5376,7 +5445,7 @@ type TestNotificationRequest struct {
 
 func (x *TestNotificationRequest) Reset() {
 	*x = TestNotificationRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[89]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5388,7 +5457,7 @@ func (x *TestNotificationRequest) String() string {
 func (*TestNotificationRequest) ProtoMessage() {}
 
 func (x *TestNotificationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[89]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5401,7 +5470,7 @@ func (x *TestNotificationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestNotificationRequest.ProtoReflect.Descriptor instead.
 func (*TestNotificationRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{89}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *TestNotificationRequest) GetChannel() string {
@@ -5445,7 +5514,7 @@ type TestNotificationResponse struct {
 
 func (x *TestNotificationResponse) Reset() {
 	*x = TestNotificationResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[90]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5457,7 +5526,7 @@ func (x *TestNotificationResponse) String() string {
 func (*TestNotificationResponse) ProtoMessage() {}
 
 func (x *TestNotificationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[90]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5470,7 +5539,7 @@ func (x *TestNotificationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestNotificationResponse.ProtoReflect.Descriptor instead.
 func (*TestNotificationResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{90}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *TestNotificationResponse) GetOk() bool {
@@ -5520,7 +5589,7 @@ type ReportNotificationPresenceRequest struct {
 
 func (x *ReportNotificationPresenceRequest) Reset() {
 	*x = ReportNotificationPresenceRequest{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[91]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5532,7 +5601,7 @@ func (x *ReportNotificationPresenceRequest) String() string {
 func (*ReportNotificationPresenceRequest) ProtoMessage() {}
 
 func (x *ReportNotificationPresenceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[91]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5545,7 +5614,7 @@ func (x *ReportNotificationPresenceRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ReportNotificationPresenceRequest.ProtoReflect.Descriptor instead.
 func (*ReportNotificationPresenceRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{91}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *ReportNotificationPresenceRequest) GetClientId() string {
@@ -5585,7 +5654,7 @@ type ReportNotificationPresenceResponse struct {
 
 func (x *ReportNotificationPresenceResponse) Reset() {
 	*x = ReportNotificationPresenceResponse{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[92]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5597,7 +5666,7 @@ func (x *ReportNotificationPresenceResponse) String() string {
 func (*ReportNotificationPresenceResponse) ProtoMessage() {}
 
 func (x *ReportNotificationPresenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[92]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5610,7 +5679,7 @@ func (x *ReportNotificationPresenceResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ReportNotificationPresenceResponse.ProtoReflect.Descriptor instead.
 func (*ReportNotificationPresenceResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{92}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *ReportNotificationPresenceResponse) GetOk() bool {
@@ -5637,7 +5706,9 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"\n" +
 	"SecretPair\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\"\xd9\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\">\n" +
+	"\x0eSecretPairList\x12,\n" +
+	"\x05items\x18\x01 \x03(\v2\x16.ariadne.v1.SecretPairR\x05items\"\xd9\x02\n" +
 	"\fSettingField\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12/\n" +
 	"\x05title\x18\x02 \x01(\v2\x19.ariadne.v1.LocalizedTextR\x05title\x12@\n" +
@@ -5805,7 +5876,7 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12/\n" +
 	"\x05title\x18\x02 \x01(\v2\x19.ariadne.v1.LocalizedTextR\x05title\x126\n" +
 	"\bsettings\x18\x03 \x01(\v2\x1a.ariadne.v1.SettingsSchemaR\bsettings\x12\x18\n" +
-	"\aprogram\x18\x04 \x01(\bR\aprogram\"\xb5\x02\n" +
+	"\aprogram\x18\x04 \x01(\bR\aprogram\"\xc7\x02\n" +
 	"\x11ModelProviderView\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x12\n" +
@@ -5816,8 +5887,9 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"\aheaders\x18\x06 \x03(\tR\aheaders\x126\n" +
 	"\n" +
 	"extra_body\x18\a \x01(\v2\x17.google.protobuf.StructR\textraBody\x12,\n" +
-	"\x0ftimeout_seconds\x18\b \x01(\x05H\x00R\x0etimeoutSeconds\x88\x01\x01B\x12\n" +
-	"\x10_timeout_seconds\"\xad\x02\n" +
+	"\x0ftimeout_seconds\x18\b \x01(\x05H\x00R\x0etimeoutSeconds\x88\x01\x01\x12\x10\n" +
+	"\x03env\x18\t \x03(\tR\x03envB\x12\n" +
+	"\x10_timeout_seconds\"\xd7\x02\n" +
 	"\x12ModelProviderInput\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x12\n" +
@@ -5826,7 +5898,8 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"\aheaders\x18\x05 \x03(\v2\x16.ariadne.v1.SecretPairR\aheaders\x126\n" +
 	"\n" +
 	"extra_body\x18\x06 \x01(\v2\x17.google.protobuf.StructR\textraBody\x12,\n" +
-	"\x0ftimeout_seconds\x18\a \x01(\x05H\x00R\x0etimeoutSeconds\x88\x01\x01B\x12\n" +
+	"\x0ftimeout_seconds\x18\a \x01(\x05H\x00R\x0etimeoutSeconds\x88\x01\x01\x12(\n" +
+	"\x03env\x18\b \x03(\v2\x16.ariadne.v1.SecretPairR\x03envB\x12\n" +
 	"\x10_timeout_seconds\"\x92\x03\n" +
 	"\n" +
 	"ModelEntry\x12\x0e\n" +
@@ -5904,11 +5977,13 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"\x06_titleB\a\n" +
 	"\x05_info\"@\n" +
 	"\x0fListedModelList\x12-\n" +
-	"\x05items\x18\x01 \x03(\v2\x17.ariadne.v1.ListedModelR\x05items\"r\n" +
+	"\x05items\x18\x01 \x03(\v2\x17.ariadne.v1.ListedModelR\x05items\"\xad\x01\n" +
 	"\x17DraftModelProviderInput\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x123\n" +
-	"\bsettings\x18\x03 \x01(\v2\x17.google.protobuf.StructR\bsettings\"\\\n" +
+	"\bsettings\x18\x03 \x01(\v2\x17.google.protobuf.StructR\bsettings\x121\n" +
+	"\x03env\x18\x04 \x01(\v2\x1a.ariadne.v1.SecretPairListH\x00R\x03env\x88\x01\x01B\x06\n" +
+	"\x04_env\"\\\n" +
 	"\x19ListProviderModelsRequest\x12?\n" +
 	"\bprovider\x18\x01 \x01(\v2#.ariadne.v1.DraftModelProviderInputR\bprovider\"a\n" +
 	"\x1aListProviderModelsResponse\x128\n" +
@@ -6168,277 +6243,281 @@ func file_ariadne_v1_settings_proto_rawDescGZIP() []byte {
 	return file_ariadne_v1_settings_proto_rawDescData
 }
 
-var file_ariadne_v1_settings_proto_msgTypes = make([]protoimpl.MessageInfo, 102)
+var file_ariadne_v1_settings_proto_msgTypes = make([]protoimpl.MessageInfo, 103)
 var file_ariadne_v1_settings_proto_goTypes = []any{
 	(*LocalizedText)(nil),                      // 0: ariadne.v1.LocalizedText
 	(*StringList)(nil),                         // 1: ariadne.v1.StringList
 	(*SecretPair)(nil),                         // 2: ariadne.v1.SecretPair
-	(*SettingField)(nil),                       // 3: ariadne.v1.SettingField
-	(*SettingsSchema)(nil),                     // 4: ariadne.v1.SettingsSchema
-	(*ConcurrencySettings)(nil),                // 5: ariadne.v1.ConcurrencySettings
-	(*GetConcurrencyRequest)(nil),              // 6: ariadne.v1.GetConcurrencyRequest
-	(*GetConcurrencyResponse)(nil),             // 7: ariadne.v1.GetConcurrencyResponse
-	(*SaveConcurrencyRequest)(nil),             // 8: ariadne.v1.SaveConcurrencyRequest
-	(*SaveConcurrencyResponse)(nil),            // 9: ariadne.v1.SaveConcurrencyResponse
-	(*Snippet)(nil),                            // 10: ariadne.v1.Snippet
-	(*InputSettings)(nil),                      // 11: ariadne.v1.InputSettings
-	(*GetInputSettingsRequest)(nil),            // 12: ariadne.v1.GetInputSettingsRequest
-	(*GetInputSettingsResponse)(nil),           // 13: ariadne.v1.GetInputSettingsResponse
-	(*SaveInputSettingsRequest)(nil),           // 14: ariadne.v1.SaveInputSettingsRequest
-	(*SaveInputSettingsResponse)(nil),          // 15: ariadne.v1.SaveInputSettingsResponse
-	(*CommandRule)(nil),                        // 16: ariadne.v1.CommandRule
-	(*CommandRuleList)(nil),                    // 17: ariadne.v1.CommandRuleList
-	(*WorkLimits)(nil),                         // 18: ariadne.v1.WorkLimits
-	(*WorkLimitsInput)(nil),                    // 19: ariadne.v1.WorkLimitsInput
-	(*WorkSettings)(nil),                       // 20: ariadne.v1.WorkSettings
-	(*GetWorkSettingsRequest)(nil),             // 21: ariadne.v1.GetWorkSettingsRequest
-	(*GetWorkSettingsResponse)(nil),            // 22: ariadne.v1.GetWorkSettingsResponse
-	(*SaveWorkSettingsRequest)(nil),            // 23: ariadne.v1.SaveWorkSettingsRequest
-	(*SaveWorkSettingsResponse)(nil),           // 24: ariadne.v1.SaveWorkSettingsResponse
-	(*SearchCapabilities)(nil),                 // 25: ariadne.v1.SearchCapabilities
-	(*SearchServiceView)(nil),                  // 26: ariadne.v1.SearchServiceView
-	(*SearchSettings)(nil),                     // 27: ariadne.v1.SearchSettings
-	(*GetSearchSettingsRequest)(nil),           // 28: ariadne.v1.GetSearchSettingsRequest
-	(*GetSearchSettingsResponse)(nil),          // 29: ariadne.v1.GetSearchSettingsResponse
-	(*SaveSearchSettingsRequest)(nil),          // 30: ariadne.v1.SaveSearchSettingsRequest
-	(*SaveSearchSettingsResponse)(nil),         // 31: ariadne.v1.SaveSearchSettingsResponse
-	(*CheckSearchSettingsRequest)(nil),         // 32: ariadne.v1.CheckSearchSettingsRequest
-	(*CheckSearchSettingsResponse)(nil),        // 33: ariadne.v1.CheckSearchSettingsResponse
-	(*ModelPrice)(nil),                         // 34: ariadne.v1.ModelPrice
-	(*ModelKind)(nil),                          // 35: ariadne.v1.ModelKind
-	(*ModelProviderView)(nil),                  // 36: ariadne.v1.ModelProviderView
-	(*ModelProviderInput)(nil),                 // 37: ariadne.v1.ModelProviderInput
-	(*ModelEntry)(nil),                         // 38: ariadne.v1.ModelEntry
-	(*RoleConfig)(nil),                         // 39: ariadne.v1.RoleConfig
-	(*ModelRoles)(nil),                         // 40: ariadne.v1.ModelRoles
-	(*ModelSettings)(nil),                      // 41: ariadne.v1.ModelSettings
-	(*ModelProblem)(nil),                       // 42: ariadne.v1.ModelProblem
-	(*GetModelSettingsRequest)(nil),            // 43: ariadne.v1.GetModelSettingsRequest
-	(*GetModelSettingsResponse)(nil),           // 44: ariadne.v1.GetModelSettingsResponse
-	(*SaveModelSettingsRequest)(nil),           // 45: ariadne.v1.SaveModelSettingsRequest
-	(*SaveModelSettingsResponse)(nil),          // 46: ariadne.v1.SaveModelSettingsResponse
-	(*ModelInfo)(nil),                          // 47: ariadne.v1.ModelInfo
-	(*ListedModel)(nil),                        // 48: ariadne.v1.ListedModel
-	(*ListedModelList)(nil),                    // 49: ariadne.v1.ListedModelList
-	(*DraftModelProviderInput)(nil),            // 50: ariadne.v1.DraftModelProviderInput
-	(*ListProviderModelsRequest)(nil),          // 51: ariadne.v1.ListProviderModelsRequest
-	(*ListProviderModelsResponse)(nil),         // 52: ariadne.v1.ListProviderModelsResponse
-	(*GetModelInfoRequest)(nil),                // 53: ariadne.v1.GetModelInfoRequest
-	(*GetModelInfoResponse)(nil),               // 54: ariadne.v1.GetModelInfoResponse
-	(*FoundSetup)(nil),                         // 55: ariadne.v1.FoundSetup
-	(*ListFoundSetupsRequest)(nil),             // 56: ariadne.v1.ListFoundSetupsRequest
-	(*ListFoundSetupsResponse)(nil),            // 57: ariadne.v1.ListFoundSetupsResponse
-	(*UseFoundSetupRequest)(nil),               // 58: ariadne.v1.UseFoundSetupRequest
-	(*UseFoundSetupResponse)(nil),              // 59: ariadne.v1.UseFoundSetupResponse
-	(*McpServerView)(nil),                      // 60: ariadne.v1.McpServerView
-	(*McpServerInput)(nil),                     // 61: ariadne.v1.McpServerInput
-	(*McpServerInfo)(nil),                      // 62: ariadne.v1.McpServerInfo
-	(*McpToolInfo)(nil),                        // 63: ariadne.v1.McpToolInfo
-	(*McpToolInfoList)(nil),                    // 64: ariadne.v1.McpToolInfoList
-	(*McpServerStatus)(nil),                    // 65: ariadne.v1.McpServerStatus
-	(*GetMcpSettingsRequest)(nil),              // 66: ariadne.v1.GetMcpSettingsRequest
-	(*GetMcpSettingsResponse)(nil),             // 67: ariadne.v1.GetMcpSettingsResponse
-	(*SaveMcpSettingsRequest)(nil),             // 68: ariadne.v1.SaveMcpSettingsRequest
-	(*SaveMcpSettingsResponse)(nil),            // 69: ariadne.v1.SaveMcpSettingsResponse
-	(*CheckMcpServerRequest)(nil),              // 70: ariadne.v1.CheckMcpServerRequest
-	(*CheckMcpServerResponse)(nil),             // 71: ariadne.v1.CheckMcpServerResponse
-	(*PushSubscriptionView)(nil),               // 72: ariadne.v1.PushSubscriptionView
-	(*WebhookView)(nil),                        // 73: ariadne.v1.WebhookView
-	(*WebhookInput)(nil),                       // 74: ariadne.v1.WebhookInput
-	(*NotifierCapabilities)(nil),               // 75: ariadne.v1.NotifierCapabilities
-	(*NotifierServiceView)(nil),                // 76: ariadne.v1.NotifierServiceView
-	(*NotifierServiceInput)(nil),               // 77: ariadne.v1.NotifierServiceInput
-	(*NotificationSettings)(nil),               // 78: ariadne.v1.NotificationSettings
-	(*GetNotificationSettingsRequest)(nil),     // 79: ariadne.v1.GetNotificationSettingsRequest
-	(*GetNotificationSettingsResponse)(nil),    // 80: ariadne.v1.GetNotificationSettingsResponse
-	(*SaveNotificationSettingsRequest)(nil),    // 81: ariadne.v1.SaveNotificationSettingsRequest
-	(*SaveNotificationSettingsResponse)(nil),   // 82: ariadne.v1.SaveNotificationSettingsResponse
-	(*SubscribePushRequest)(nil),               // 83: ariadne.v1.SubscribePushRequest
-	(*SubscribePushResponse)(nil),              // 84: ariadne.v1.SubscribePushResponse
-	(*UnsubscribePushRequest)(nil),             // 85: ariadne.v1.UnsubscribePushRequest
-	(*UnsubscribePushResponse)(nil),            // 86: ariadne.v1.UnsubscribePushResponse
-	(*DeletePushSubscriptionRequest)(nil),      // 87: ariadne.v1.DeletePushSubscriptionRequest
-	(*DeletePushSubscriptionResponse)(nil),     // 88: ariadne.v1.DeletePushSubscriptionResponse
-	(*TestNotificationRequest)(nil),            // 89: ariadne.v1.TestNotificationRequest
-	(*TestNotificationResponse)(nil),           // 90: ariadne.v1.TestNotificationResponse
-	(*ReportNotificationPresenceRequest)(nil),  // 91: ariadne.v1.ReportNotificationPresenceRequest
-	(*ReportNotificationPresenceResponse)(nil), // 92: ariadne.v1.ReportNotificationPresenceResponse
-	nil,                     // 93: ariadne.v1.LocalizedText.ValuesEntry
-	nil,                     // 94: ariadne.v1.SettingsSchema.PropertiesEntry
-	nil,                     // 95: ariadne.v1.InputSettings.KeysEntry
-	nil,                     // 96: ariadne.v1.SaveInputSettingsRequest.KeysEntry
-	nil,                     // 97: ariadne.v1.SaveSearchSettingsRequest.ServicesEntry
-	nil,                     // 98: ariadne.v1.CheckSearchSettingsRequest.ServicesEntry
-	nil,                     // 99: ariadne.v1.McpServerView.ToolsEntry
-	nil,                     // 100: ariadne.v1.McpServerInput.ToolsEntry
-	nil,                     // 101: ariadne.v1.SaveNotificationSettingsRequest.NotifiersEntry
-	(*structpb.Value)(nil),  // 102: google.protobuf.Value
-	(*structpb.Struct)(nil), // 103: google.protobuf.Struct
-	(*LocalizedError)(nil),  // 104: ariadne.v1.LocalizedError
+	(*SecretPairList)(nil),                     // 3: ariadne.v1.SecretPairList
+	(*SettingField)(nil),                       // 4: ariadne.v1.SettingField
+	(*SettingsSchema)(nil),                     // 5: ariadne.v1.SettingsSchema
+	(*ConcurrencySettings)(nil),                // 6: ariadne.v1.ConcurrencySettings
+	(*GetConcurrencyRequest)(nil),              // 7: ariadne.v1.GetConcurrencyRequest
+	(*GetConcurrencyResponse)(nil),             // 8: ariadne.v1.GetConcurrencyResponse
+	(*SaveConcurrencyRequest)(nil),             // 9: ariadne.v1.SaveConcurrencyRequest
+	(*SaveConcurrencyResponse)(nil),            // 10: ariadne.v1.SaveConcurrencyResponse
+	(*Snippet)(nil),                            // 11: ariadne.v1.Snippet
+	(*InputSettings)(nil),                      // 12: ariadne.v1.InputSettings
+	(*GetInputSettingsRequest)(nil),            // 13: ariadne.v1.GetInputSettingsRequest
+	(*GetInputSettingsResponse)(nil),           // 14: ariadne.v1.GetInputSettingsResponse
+	(*SaveInputSettingsRequest)(nil),           // 15: ariadne.v1.SaveInputSettingsRequest
+	(*SaveInputSettingsResponse)(nil),          // 16: ariadne.v1.SaveInputSettingsResponse
+	(*CommandRule)(nil),                        // 17: ariadne.v1.CommandRule
+	(*CommandRuleList)(nil),                    // 18: ariadne.v1.CommandRuleList
+	(*WorkLimits)(nil),                         // 19: ariadne.v1.WorkLimits
+	(*WorkLimitsInput)(nil),                    // 20: ariadne.v1.WorkLimitsInput
+	(*WorkSettings)(nil),                       // 21: ariadne.v1.WorkSettings
+	(*GetWorkSettingsRequest)(nil),             // 22: ariadne.v1.GetWorkSettingsRequest
+	(*GetWorkSettingsResponse)(nil),            // 23: ariadne.v1.GetWorkSettingsResponse
+	(*SaveWorkSettingsRequest)(nil),            // 24: ariadne.v1.SaveWorkSettingsRequest
+	(*SaveWorkSettingsResponse)(nil),           // 25: ariadne.v1.SaveWorkSettingsResponse
+	(*SearchCapabilities)(nil),                 // 26: ariadne.v1.SearchCapabilities
+	(*SearchServiceView)(nil),                  // 27: ariadne.v1.SearchServiceView
+	(*SearchSettings)(nil),                     // 28: ariadne.v1.SearchSettings
+	(*GetSearchSettingsRequest)(nil),           // 29: ariadne.v1.GetSearchSettingsRequest
+	(*GetSearchSettingsResponse)(nil),          // 30: ariadne.v1.GetSearchSettingsResponse
+	(*SaveSearchSettingsRequest)(nil),          // 31: ariadne.v1.SaveSearchSettingsRequest
+	(*SaveSearchSettingsResponse)(nil),         // 32: ariadne.v1.SaveSearchSettingsResponse
+	(*CheckSearchSettingsRequest)(nil),         // 33: ariadne.v1.CheckSearchSettingsRequest
+	(*CheckSearchSettingsResponse)(nil),        // 34: ariadne.v1.CheckSearchSettingsResponse
+	(*ModelPrice)(nil),                         // 35: ariadne.v1.ModelPrice
+	(*ModelKind)(nil),                          // 36: ariadne.v1.ModelKind
+	(*ModelProviderView)(nil),                  // 37: ariadne.v1.ModelProviderView
+	(*ModelProviderInput)(nil),                 // 38: ariadne.v1.ModelProviderInput
+	(*ModelEntry)(nil),                         // 39: ariadne.v1.ModelEntry
+	(*RoleConfig)(nil),                         // 40: ariadne.v1.RoleConfig
+	(*ModelRoles)(nil),                         // 41: ariadne.v1.ModelRoles
+	(*ModelSettings)(nil),                      // 42: ariadne.v1.ModelSettings
+	(*ModelProblem)(nil),                       // 43: ariadne.v1.ModelProblem
+	(*GetModelSettingsRequest)(nil),            // 44: ariadne.v1.GetModelSettingsRequest
+	(*GetModelSettingsResponse)(nil),           // 45: ariadne.v1.GetModelSettingsResponse
+	(*SaveModelSettingsRequest)(nil),           // 46: ariadne.v1.SaveModelSettingsRequest
+	(*SaveModelSettingsResponse)(nil),          // 47: ariadne.v1.SaveModelSettingsResponse
+	(*ModelInfo)(nil),                          // 48: ariadne.v1.ModelInfo
+	(*ListedModel)(nil),                        // 49: ariadne.v1.ListedModel
+	(*ListedModelList)(nil),                    // 50: ariadne.v1.ListedModelList
+	(*DraftModelProviderInput)(nil),            // 51: ariadne.v1.DraftModelProviderInput
+	(*ListProviderModelsRequest)(nil),          // 52: ariadne.v1.ListProviderModelsRequest
+	(*ListProviderModelsResponse)(nil),         // 53: ariadne.v1.ListProviderModelsResponse
+	(*GetModelInfoRequest)(nil),                // 54: ariadne.v1.GetModelInfoRequest
+	(*GetModelInfoResponse)(nil),               // 55: ariadne.v1.GetModelInfoResponse
+	(*FoundSetup)(nil),                         // 56: ariadne.v1.FoundSetup
+	(*ListFoundSetupsRequest)(nil),             // 57: ariadne.v1.ListFoundSetupsRequest
+	(*ListFoundSetupsResponse)(nil),            // 58: ariadne.v1.ListFoundSetupsResponse
+	(*UseFoundSetupRequest)(nil),               // 59: ariadne.v1.UseFoundSetupRequest
+	(*UseFoundSetupResponse)(nil),              // 60: ariadne.v1.UseFoundSetupResponse
+	(*McpServerView)(nil),                      // 61: ariadne.v1.McpServerView
+	(*McpServerInput)(nil),                     // 62: ariadne.v1.McpServerInput
+	(*McpServerInfo)(nil),                      // 63: ariadne.v1.McpServerInfo
+	(*McpToolInfo)(nil),                        // 64: ariadne.v1.McpToolInfo
+	(*McpToolInfoList)(nil),                    // 65: ariadne.v1.McpToolInfoList
+	(*McpServerStatus)(nil),                    // 66: ariadne.v1.McpServerStatus
+	(*GetMcpSettingsRequest)(nil),              // 67: ariadne.v1.GetMcpSettingsRequest
+	(*GetMcpSettingsResponse)(nil),             // 68: ariadne.v1.GetMcpSettingsResponse
+	(*SaveMcpSettingsRequest)(nil),             // 69: ariadne.v1.SaveMcpSettingsRequest
+	(*SaveMcpSettingsResponse)(nil),            // 70: ariadne.v1.SaveMcpSettingsResponse
+	(*CheckMcpServerRequest)(nil),              // 71: ariadne.v1.CheckMcpServerRequest
+	(*CheckMcpServerResponse)(nil),             // 72: ariadne.v1.CheckMcpServerResponse
+	(*PushSubscriptionView)(nil),               // 73: ariadne.v1.PushSubscriptionView
+	(*WebhookView)(nil),                        // 74: ariadne.v1.WebhookView
+	(*WebhookInput)(nil),                       // 75: ariadne.v1.WebhookInput
+	(*NotifierCapabilities)(nil),               // 76: ariadne.v1.NotifierCapabilities
+	(*NotifierServiceView)(nil),                // 77: ariadne.v1.NotifierServiceView
+	(*NotifierServiceInput)(nil),               // 78: ariadne.v1.NotifierServiceInput
+	(*NotificationSettings)(nil),               // 79: ariadne.v1.NotificationSettings
+	(*GetNotificationSettingsRequest)(nil),     // 80: ariadne.v1.GetNotificationSettingsRequest
+	(*GetNotificationSettingsResponse)(nil),    // 81: ariadne.v1.GetNotificationSettingsResponse
+	(*SaveNotificationSettingsRequest)(nil),    // 82: ariadne.v1.SaveNotificationSettingsRequest
+	(*SaveNotificationSettingsResponse)(nil),   // 83: ariadne.v1.SaveNotificationSettingsResponse
+	(*SubscribePushRequest)(nil),               // 84: ariadne.v1.SubscribePushRequest
+	(*SubscribePushResponse)(nil),              // 85: ariadne.v1.SubscribePushResponse
+	(*UnsubscribePushRequest)(nil),             // 86: ariadne.v1.UnsubscribePushRequest
+	(*UnsubscribePushResponse)(nil),            // 87: ariadne.v1.UnsubscribePushResponse
+	(*DeletePushSubscriptionRequest)(nil),      // 88: ariadne.v1.DeletePushSubscriptionRequest
+	(*DeletePushSubscriptionResponse)(nil),     // 89: ariadne.v1.DeletePushSubscriptionResponse
+	(*TestNotificationRequest)(nil),            // 90: ariadne.v1.TestNotificationRequest
+	(*TestNotificationResponse)(nil),           // 91: ariadne.v1.TestNotificationResponse
+	(*ReportNotificationPresenceRequest)(nil),  // 92: ariadne.v1.ReportNotificationPresenceRequest
+	(*ReportNotificationPresenceResponse)(nil), // 93: ariadne.v1.ReportNotificationPresenceResponse
+	nil,                     // 94: ariadne.v1.LocalizedText.ValuesEntry
+	nil,                     // 95: ariadne.v1.SettingsSchema.PropertiesEntry
+	nil,                     // 96: ariadne.v1.InputSettings.KeysEntry
+	nil,                     // 97: ariadne.v1.SaveInputSettingsRequest.KeysEntry
+	nil,                     // 98: ariadne.v1.SaveSearchSettingsRequest.ServicesEntry
+	nil,                     // 99: ariadne.v1.CheckSearchSettingsRequest.ServicesEntry
+	nil,                     // 100: ariadne.v1.McpServerView.ToolsEntry
+	nil,                     // 101: ariadne.v1.McpServerInput.ToolsEntry
+	nil,                     // 102: ariadne.v1.SaveNotificationSettingsRequest.NotifiersEntry
+	(*structpb.Value)(nil),  // 103: google.protobuf.Value
+	(*structpb.Struct)(nil), // 104: google.protobuf.Struct
+	(*LocalizedError)(nil),  // 105: ariadne.v1.LocalizedError
 }
 var file_ariadne_v1_settings_proto_depIdxs = []int32{
-	93,  // 0: ariadne.v1.LocalizedText.values:type_name -> ariadne.v1.LocalizedText.ValuesEntry
-	0,   // 1: ariadne.v1.SettingField.title:type_name -> ariadne.v1.LocalizedText
-	0,   // 2: ariadne.v1.SettingField.description:type_name -> ariadne.v1.LocalizedText
-	102, // 3: ariadne.v1.SettingField.default_value:type_name -> google.protobuf.Value
-	94,  // 4: ariadne.v1.SettingsSchema.properties:type_name -> ariadne.v1.SettingsSchema.PropertiesEntry
-	5,   // 5: ariadne.v1.GetConcurrencyResponse.concurrency:type_name -> ariadne.v1.ConcurrencySettings
-	5,   // 6: ariadne.v1.SaveConcurrencyResponse.concurrency:type_name -> ariadne.v1.ConcurrencySettings
-	10,  // 7: ariadne.v1.InputSettings.snippets:type_name -> ariadne.v1.Snippet
-	95,  // 8: ariadne.v1.InputSettings.keys:type_name -> ariadne.v1.InputSettings.KeysEntry
-	11,  // 9: ariadne.v1.GetInputSettingsResponse.input:type_name -> ariadne.v1.InputSettings
-	10,  // 10: ariadne.v1.SaveInputSettingsRequest.snippets:type_name -> ariadne.v1.Snippet
-	96,  // 11: ariadne.v1.SaveInputSettingsRequest.keys:type_name -> ariadne.v1.SaveInputSettingsRequest.KeysEntry
-	11,  // 12: ariadne.v1.SaveInputSettingsResponse.input:type_name -> ariadne.v1.InputSettings
-	16,  // 13: ariadne.v1.CommandRuleList.items:type_name -> ariadne.v1.CommandRule
-	16,  // 14: ariadne.v1.WorkSettings.rules:type_name -> ariadne.v1.CommandRule
-	18,  // 15: ariadne.v1.WorkSettings.limits:type_name -> ariadne.v1.WorkLimits
-	18,  // 16: ariadne.v1.WorkSettings.defaults:type_name -> ariadne.v1.WorkLimits
-	20,  // 17: ariadne.v1.GetWorkSettingsResponse.work:type_name -> ariadne.v1.WorkSettings
-	17,  // 18: ariadne.v1.SaveWorkSettingsRequest.rules:type_name -> ariadne.v1.CommandRuleList
-	19,  // 19: ariadne.v1.SaveWorkSettingsRequest.limits:type_name -> ariadne.v1.WorkLimitsInput
-	20,  // 20: ariadne.v1.SaveWorkSettingsResponse.work:type_name -> ariadne.v1.WorkSettings
-	0,   // 21: ariadne.v1.SearchServiceView.title:type_name -> ariadne.v1.LocalizedText
-	0,   // 22: ariadne.v1.SearchServiceView.description:type_name -> ariadne.v1.LocalizedText
-	4,   // 23: ariadne.v1.SearchServiceView.settings:type_name -> ariadne.v1.SettingsSchema
-	25,  // 24: ariadne.v1.SearchServiceView.capabilities:type_name -> ariadne.v1.SearchCapabilities
-	103, // 25: ariadne.v1.SearchServiceView.values:type_name -> google.protobuf.Struct
-	0,   // 26: ariadne.v1.SearchSettings.plugins:type_name -> ariadne.v1.LocalizedText
-	26,  // 27: ariadne.v1.SearchSettings.services:type_name -> ariadne.v1.SearchServiceView
-	27,  // 28: ariadne.v1.GetSearchSettingsResponse.search:type_name -> ariadne.v1.SearchSettings
-	97,  // 29: ariadne.v1.SaveSearchSettingsRequest.services:type_name -> ariadne.v1.SaveSearchSettingsRequest.ServicesEntry
-	27,  // 30: ariadne.v1.SaveSearchSettingsResponse.search:type_name -> ariadne.v1.SearchSettings
-	98,  // 31: ariadne.v1.CheckSearchSettingsRequest.services:type_name -> ariadne.v1.CheckSearchSettingsRequest.ServicesEntry
-	0,   // 32: ariadne.v1.CheckSearchSettingsResponse.message:type_name -> ariadne.v1.LocalizedText
-	0,   // 33: ariadne.v1.ModelKind.title:type_name -> ariadne.v1.LocalizedText
-	4,   // 34: ariadne.v1.ModelKind.settings:type_name -> ariadne.v1.SettingsSchema
-	103, // 35: ariadne.v1.ModelProviderView.settings:type_name -> google.protobuf.Struct
-	103, // 36: ariadne.v1.ModelProviderView.extra_body:type_name -> google.protobuf.Struct
-	103, // 37: ariadne.v1.ModelProviderInput.settings:type_name -> google.protobuf.Struct
-	2,   // 38: ariadne.v1.ModelProviderInput.headers:type_name -> ariadne.v1.SecretPair
-	103, // 39: ariadne.v1.ModelProviderInput.extra_body:type_name -> google.protobuf.Struct
-	34,  // 40: ariadne.v1.ModelEntry.price:type_name -> ariadne.v1.ModelPrice
-	1,   // 41: ariadne.v1.ModelEntry.efforts:type_name -> ariadne.v1.StringList
-	39,  // 42: ariadne.v1.ModelRoles.thread:type_name -> ariadne.v1.RoleConfig
-	39,  // 43: ariadne.v1.ModelRoles.coordinator:type_name -> ariadne.v1.RoleConfig
-	39,  // 44: ariadne.v1.ModelRoles.triage:type_name -> ariadne.v1.RoleConfig
-	39,  // 45: ariadne.v1.ModelRoles.research:type_name -> ariadne.v1.RoleConfig
-	35,  // 46: ariadne.v1.ModelSettings.kinds:type_name -> ariadne.v1.ModelKind
-	36,  // 47: ariadne.v1.ModelSettings.providers:type_name -> ariadne.v1.ModelProviderView
-	38,  // 48: ariadne.v1.ModelSettings.models:type_name -> ariadne.v1.ModelEntry
-	40,  // 49: ariadne.v1.ModelSettings.roles:type_name -> ariadne.v1.ModelRoles
-	104, // 50: ariadne.v1.ModelProblem.problem:type_name -> ariadne.v1.LocalizedError
-	41,  // 51: ariadne.v1.GetModelSettingsResponse.settings:type_name -> ariadne.v1.ModelSettings
-	37,  // 52: ariadne.v1.SaveModelSettingsRequest.providers:type_name -> ariadne.v1.ModelProviderInput
-	38,  // 53: ariadne.v1.SaveModelSettingsRequest.models:type_name -> ariadne.v1.ModelEntry
-	40,  // 54: ariadne.v1.SaveModelSettingsRequest.roles:type_name -> ariadne.v1.ModelRoles
-	41,  // 55: ariadne.v1.SaveModelSettingsResponse.settings:type_name -> ariadne.v1.ModelSettings
-	42,  // 56: ariadne.v1.SaveModelSettingsResponse.problems:type_name -> ariadne.v1.ModelProblem
-	34,  // 57: ariadne.v1.ModelInfo.price:type_name -> ariadne.v1.ModelPrice
-	1,   // 58: ariadne.v1.ModelInfo.efforts:type_name -> ariadne.v1.StringList
-	47,  // 59: ariadne.v1.ListedModel.info:type_name -> ariadne.v1.ModelInfo
-	48,  // 60: ariadne.v1.ListedModelList.items:type_name -> ariadne.v1.ListedModel
-	103, // 61: ariadne.v1.DraftModelProviderInput.settings:type_name -> google.protobuf.Struct
-	50,  // 62: ariadne.v1.ListProviderModelsRequest.provider:type_name -> ariadne.v1.DraftModelProviderInput
-	49,  // 63: ariadne.v1.ListProviderModelsResponse.models:type_name -> ariadne.v1.ListedModelList
-	47,  // 64: ariadne.v1.GetModelInfoResponse.info:type_name -> ariadne.v1.ModelInfo
-	0,   // 65: ariadne.v1.FoundSetup.title:type_name -> ariadne.v1.LocalizedText
-	55,  // 66: ariadne.v1.ListFoundSetupsResponse.found:type_name -> ariadne.v1.FoundSetup
-	41,  // 67: ariadne.v1.UseFoundSetupResponse.settings:type_name -> ariadne.v1.ModelSettings
-	42,  // 68: ariadne.v1.UseFoundSetupResponse.problems:type_name -> ariadne.v1.ModelProblem
-	99,  // 69: ariadne.v1.McpServerView.tools:type_name -> ariadne.v1.McpServerView.ToolsEntry
-	2,   // 70: ariadne.v1.McpServerInput.env:type_name -> ariadne.v1.SecretPair
-	2,   // 71: ariadne.v1.McpServerInput.headers:type_name -> ariadne.v1.SecretPair
-	100, // 72: ariadne.v1.McpServerInput.tools:type_name -> ariadne.v1.McpServerInput.ToolsEntry
-	63,  // 73: ariadne.v1.McpToolInfoList.items:type_name -> ariadne.v1.McpToolInfo
-	62,  // 74: ariadne.v1.McpServerStatus.info:type_name -> ariadne.v1.McpServerInfo
-	64,  // 75: ariadne.v1.McpServerStatus.tools:type_name -> ariadne.v1.McpToolInfoList
-	60,  // 76: ariadne.v1.GetMcpSettingsResponse.servers:type_name -> ariadne.v1.McpServerView
-	65,  // 77: ariadne.v1.GetMcpSettingsResponse.status:type_name -> ariadne.v1.McpServerStatus
-	61,  // 78: ariadne.v1.SaveMcpSettingsRequest.servers:type_name -> ariadne.v1.McpServerInput
-	60,  // 79: ariadne.v1.SaveMcpSettingsResponse.servers:type_name -> ariadne.v1.McpServerView
-	65,  // 80: ariadne.v1.SaveMcpSettingsResponse.status:type_name -> ariadne.v1.McpServerStatus
-	65,  // 81: ariadne.v1.CheckMcpServerResponse.status:type_name -> ariadne.v1.McpServerStatus
-	2,   // 82: ariadne.v1.WebhookInput.headers:type_name -> ariadne.v1.SecretPair
-	0,   // 83: ariadne.v1.NotifierServiceView.title:type_name -> ariadne.v1.LocalizedText
-	0,   // 84: ariadne.v1.NotifierServiceView.description:type_name -> ariadne.v1.LocalizedText
-	4,   // 85: ariadne.v1.NotifierServiceView.settings:type_name -> ariadne.v1.SettingsSchema
-	75,  // 86: ariadne.v1.NotifierServiceView.capabilities:type_name -> ariadne.v1.NotifierCapabilities
-	103, // 87: ariadne.v1.NotifierServiceView.values:type_name -> google.protobuf.Struct
-	103, // 88: ariadne.v1.NotifierServiceInput.values:type_name -> google.protobuf.Struct
-	72,  // 89: ariadne.v1.NotificationSettings.subscriptions:type_name -> ariadne.v1.PushSubscriptionView
-	73,  // 90: ariadne.v1.NotificationSettings.webhooks:type_name -> ariadne.v1.WebhookView
-	76,  // 91: ariadne.v1.NotificationSettings.notifiers:type_name -> ariadne.v1.NotifierServiceView
-	78,  // 92: ariadne.v1.GetNotificationSettingsResponse.notifications:type_name -> ariadne.v1.NotificationSettings
-	74,  // 93: ariadne.v1.SaveNotificationSettingsRequest.webhooks:type_name -> ariadne.v1.WebhookInput
-	101, // 94: ariadne.v1.SaveNotificationSettingsRequest.notifiers:type_name -> ariadne.v1.SaveNotificationSettingsRequest.NotifiersEntry
-	78,  // 95: ariadne.v1.SaveNotificationSettingsResponse.notifications:type_name -> ariadne.v1.NotificationSettings
-	72,  // 96: ariadne.v1.SubscribePushResponse.subscription:type_name -> ariadne.v1.PushSubscriptionView
-	72,  // 97: ariadne.v1.SubscribePushResponse.subscriptions:type_name -> ariadne.v1.PushSubscriptionView
-	72,  // 98: ariadne.v1.UnsubscribePushResponse.subscriptions:type_name -> ariadne.v1.PushSubscriptionView
-	72,  // 99: ariadne.v1.DeletePushSubscriptionResponse.subscriptions:type_name -> ariadne.v1.PushSubscriptionView
-	74,  // 100: ariadne.v1.TestNotificationRequest.webhook_draft:type_name -> ariadne.v1.WebhookInput
-	77,  // 101: ariadne.v1.TestNotificationRequest.notifier_draft:type_name -> ariadne.v1.NotifierServiceInput
-	0,   // 102: ariadne.v1.TestNotificationResponse.message:type_name -> ariadne.v1.LocalizedText
-	3,   // 103: ariadne.v1.SettingsSchema.PropertiesEntry.value:type_name -> ariadne.v1.SettingField
-	103, // 104: ariadne.v1.SaveSearchSettingsRequest.ServicesEntry.value:type_name -> google.protobuf.Struct
-	103, // 105: ariadne.v1.CheckSearchSettingsRequest.ServicesEntry.value:type_name -> google.protobuf.Struct
-	77,  // 106: ariadne.v1.SaveNotificationSettingsRequest.NotifiersEntry.value:type_name -> ariadne.v1.NotifierServiceInput
-	6,   // 107: ariadne.v1.SettingsService.GetConcurrency:input_type -> ariadne.v1.GetConcurrencyRequest
-	8,   // 108: ariadne.v1.SettingsService.SaveConcurrency:input_type -> ariadne.v1.SaveConcurrencyRequest
-	12,  // 109: ariadne.v1.SettingsService.GetInputSettings:input_type -> ariadne.v1.GetInputSettingsRequest
-	14,  // 110: ariadne.v1.SettingsService.SaveInputSettings:input_type -> ariadne.v1.SaveInputSettingsRequest
-	21,  // 111: ariadne.v1.SettingsService.GetWorkSettings:input_type -> ariadne.v1.GetWorkSettingsRequest
-	23,  // 112: ariadne.v1.SettingsService.SaveWorkSettings:input_type -> ariadne.v1.SaveWorkSettingsRequest
-	28,  // 113: ariadne.v1.SettingsService.GetSearchSettings:input_type -> ariadne.v1.GetSearchSettingsRequest
-	30,  // 114: ariadne.v1.SettingsService.SaveSearchSettings:input_type -> ariadne.v1.SaveSearchSettingsRequest
-	32,  // 115: ariadne.v1.SettingsService.CheckSearchSettings:input_type -> ariadne.v1.CheckSearchSettingsRequest
-	43,  // 116: ariadne.v1.SettingsService.GetModelSettings:input_type -> ariadne.v1.GetModelSettingsRequest
-	45,  // 117: ariadne.v1.SettingsService.SaveModelSettings:input_type -> ariadne.v1.SaveModelSettingsRequest
-	51,  // 118: ariadne.v1.SettingsService.ListProviderModels:input_type -> ariadne.v1.ListProviderModelsRequest
-	53,  // 119: ariadne.v1.SettingsService.GetModelInfo:input_type -> ariadne.v1.GetModelInfoRequest
-	56,  // 120: ariadne.v1.SettingsService.ListFoundSetups:input_type -> ariadne.v1.ListFoundSetupsRequest
-	58,  // 121: ariadne.v1.SettingsService.UseFoundSetup:input_type -> ariadne.v1.UseFoundSetupRequest
-	66,  // 122: ariadne.v1.SettingsService.GetMcpSettings:input_type -> ariadne.v1.GetMcpSettingsRequest
-	68,  // 123: ariadne.v1.SettingsService.SaveMcpSettings:input_type -> ariadne.v1.SaveMcpSettingsRequest
-	70,  // 124: ariadne.v1.SettingsService.CheckMcpServer:input_type -> ariadne.v1.CheckMcpServerRequest
-	79,  // 125: ariadne.v1.SettingsService.GetNotificationSettings:input_type -> ariadne.v1.GetNotificationSettingsRequest
-	81,  // 126: ariadne.v1.SettingsService.SaveNotificationSettings:input_type -> ariadne.v1.SaveNotificationSettingsRequest
-	83,  // 127: ariadne.v1.SettingsService.SubscribePush:input_type -> ariadne.v1.SubscribePushRequest
-	85,  // 128: ariadne.v1.SettingsService.UnsubscribePush:input_type -> ariadne.v1.UnsubscribePushRequest
-	87,  // 129: ariadne.v1.SettingsService.DeletePushSubscription:input_type -> ariadne.v1.DeletePushSubscriptionRequest
-	89,  // 130: ariadne.v1.SettingsService.TestNotification:input_type -> ariadne.v1.TestNotificationRequest
-	91,  // 131: ariadne.v1.SettingsService.ReportNotificationPresence:input_type -> ariadne.v1.ReportNotificationPresenceRequest
-	7,   // 132: ariadne.v1.SettingsService.GetConcurrency:output_type -> ariadne.v1.GetConcurrencyResponse
-	9,   // 133: ariadne.v1.SettingsService.SaveConcurrency:output_type -> ariadne.v1.SaveConcurrencyResponse
-	13,  // 134: ariadne.v1.SettingsService.GetInputSettings:output_type -> ariadne.v1.GetInputSettingsResponse
-	15,  // 135: ariadne.v1.SettingsService.SaveInputSettings:output_type -> ariadne.v1.SaveInputSettingsResponse
-	22,  // 136: ariadne.v1.SettingsService.GetWorkSettings:output_type -> ariadne.v1.GetWorkSettingsResponse
-	24,  // 137: ariadne.v1.SettingsService.SaveWorkSettings:output_type -> ariadne.v1.SaveWorkSettingsResponse
-	29,  // 138: ariadne.v1.SettingsService.GetSearchSettings:output_type -> ariadne.v1.GetSearchSettingsResponse
-	31,  // 139: ariadne.v1.SettingsService.SaveSearchSettings:output_type -> ariadne.v1.SaveSearchSettingsResponse
-	33,  // 140: ariadne.v1.SettingsService.CheckSearchSettings:output_type -> ariadne.v1.CheckSearchSettingsResponse
-	44,  // 141: ariadne.v1.SettingsService.GetModelSettings:output_type -> ariadne.v1.GetModelSettingsResponse
-	46,  // 142: ariadne.v1.SettingsService.SaveModelSettings:output_type -> ariadne.v1.SaveModelSettingsResponse
-	52,  // 143: ariadne.v1.SettingsService.ListProviderModels:output_type -> ariadne.v1.ListProviderModelsResponse
-	54,  // 144: ariadne.v1.SettingsService.GetModelInfo:output_type -> ariadne.v1.GetModelInfoResponse
-	57,  // 145: ariadne.v1.SettingsService.ListFoundSetups:output_type -> ariadne.v1.ListFoundSetupsResponse
-	59,  // 146: ariadne.v1.SettingsService.UseFoundSetup:output_type -> ariadne.v1.UseFoundSetupResponse
-	67,  // 147: ariadne.v1.SettingsService.GetMcpSettings:output_type -> ariadne.v1.GetMcpSettingsResponse
-	69,  // 148: ariadne.v1.SettingsService.SaveMcpSettings:output_type -> ariadne.v1.SaveMcpSettingsResponse
-	71,  // 149: ariadne.v1.SettingsService.CheckMcpServer:output_type -> ariadne.v1.CheckMcpServerResponse
-	80,  // 150: ariadne.v1.SettingsService.GetNotificationSettings:output_type -> ariadne.v1.GetNotificationSettingsResponse
-	82,  // 151: ariadne.v1.SettingsService.SaveNotificationSettings:output_type -> ariadne.v1.SaveNotificationSettingsResponse
-	84,  // 152: ariadne.v1.SettingsService.SubscribePush:output_type -> ariadne.v1.SubscribePushResponse
-	86,  // 153: ariadne.v1.SettingsService.UnsubscribePush:output_type -> ariadne.v1.UnsubscribePushResponse
-	88,  // 154: ariadne.v1.SettingsService.DeletePushSubscription:output_type -> ariadne.v1.DeletePushSubscriptionResponse
-	90,  // 155: ariadne.v1.SettingsService.TestNotification:output_type -> ariadne.v1.TestNotificationResponse
-	92,  // 156: ariadne.v1.SettingsService.ReportNotificationPresence:output_type -> ariadne.v1.ReportNotificationPresenceResponse
-	132, // [132:157] is the sub-list for method output_type
-	107, // [107:132] is the sub-list for method input_type
-	107, // [107:107] is the sub-list for extension type_name
-	107, // [107:107] is the sub-list for extension extendee
-	0,   // [0:107] is the sub-list for field type_name
+	94,  // 0: ariadne.v1.LocalizedText.values:type_name -> ariadne.v1.LocalizedText.ValuesEntry
+	2,   // 1: ariadne.v1.SecretPairList.items:type_name -> ariadne.v1.SecretPair
+	0,   // 2: ariadne.v1.SettingField.title:type_name -> ariadne.v1.LocalizedText
+	0,   // 3: ariadne.v1.SettingField.description:type_name -> ariadne.v1.LocalizedText
+	103, // 4: ariadne.v1.SettingField.default_value:type_name -> google.protobuf.Value
+	95,  // 5: ariadne.v1.SettingsSchema.properties:type_name -> ariadne.v1.SettingsSchema.PropertiesEntry
+	6,   // 6: ariadne.v1.GetConcurrencyResponse.concurrency:type_name -> ariadne.v1.ConcurrencySettings
+	6,   // 7: ariadne.v1.SaveConcurrencyResponse.concurrency:type_name -> ariadne.v1.ConcurrencySettings
+	11,  // 8: ariadne.v1.InputSettings.snippets:type_name -> ariadne.v1.Snippet
+	96,  // 9: ariadne.v1.InputSettings.keys:type_name -> ariadne.v1.InputSettings.KeysEntry
+	12,  // 10: ariadne.v1.GetInputSettingsResponse.input:type_name -> ariadne.v1.InputSettings
+	11,  // 11: ariadne.v1.SaveInputSettingsRequest.snippets:type_name -> ariadne.v1.Snippet
+	97,  // 12: ariadne.v1.SaveInputSettingsRequest.keys:type_name -> ariadne.v1.SaveInputSettingsRequest.KeysEntry
+	12,  // 13: ariadne.v1.SaveInputSettingsResponse.input:type_name -> ariadne.v1.InputSettings
+	17,  // 14: ariadne.v1.CommandRuleList.items:type_name -> ariadne.v1.CommandRule
+	17,  // 15: ariadne.v1.WorkSettings.rules:type_name -> ariadne.v1.CommandRule
+	19,  // 16: ariadne.v1.WorkSettings.limits:type_name -> ariadne.v1.WorkLimits
+	19,  // 17: ariadne.v1.WorkSettings.defaults:type_name -> ariadne.v1.WorkLimits
+	21,  // 18: ariadne.v1.GetWorkSettingsResponse.work:type_name -> ariadne.v1.WorkSettings
+	18,  // 19: ariadne.v1.SaveWorkSettingsRequest.rules:type_name -> ariadne.v1.CommandRuleList
+	20,  // 20: ariadne.v1.SaveWorkSettingsRequest.limits:type_name -> ariadne.v1.WorkLimitsInput
+	21,  // 21: ariadne.v1.SaveWorkSettingsResponse.work:type_name -> ariadne.v1.WorkSettings
+	0,   // 22: ariadne.v1.SearchServiceView.title:type_name -> ariadne.v1.LocalizedText
+	0,   // 23: ariadne.v1.SearchServiceView.description:type_name -> ariadne.v1.LocalizedText
+	5,   // 24: ariadne.v1.SearchServiceView.settings:type_name -> ariadne.v1.SettingsSchema
+	26,  // 25: ariadne.v1.SearchServiceView.capabilities:type_name -> ariadne.v1.SearchCapabilities
+	104, // 26: ariadne.v1.SearchServiceView.values:type_name -> google.protobuf.Struct
+	0,   // 27: ariadne.v1.SearchSettings.plugins:type_name -> ariadne.v1.LocalizedText
+	27,  // 28: ariadne.v1.SearchSettings.services:type_name -> ariadne.v1.SearchServiceView
+	28,  // 29: ariadne.v1.GetSearchSettingsResponse.search:type_name -> ariadne.v1.SearchSettings
+	98,  // 30: ariadne.v1.SaveSearchSettingsRequest.services:type_name -> ariadne.v1.SaveSearchSettingsRequest.ServicesEntry
+	28,  // 31: ariadne.v1.SaveSearchSettingsResponse.search:type_name -> ariadne.v1.SearchSettings
+	99,  // 32: ariadne.v1.CheckSearchSettingsRequest.services:type_name -> ariadne.v1.CheckSearchSettingsRequest.ServicesEntry
+	0,   // 33: ariadne.v1.CheckSearchSettingsResponse.message:type_name -> ariadne.v1.LocalizedText
+	0,   // 34: ariadne.v1.ModelKind.title:type_name -> ariadne.v1.LocalizedText
+	5,   // 35: ariadne.v1.ModelKind.settings:type_name -> ariadne.v1.SettingsSchema
+	104, // 36: ariadne.v1.ModelProviderView.settings:type_name -> google.protobuf.Struct
+	104, // 37: ariadne.v1.ModelProviderView.extra_body:type_name -> google.protobuf.Struct
+	104, // 38: ariadne.v1.ModelProviderInput.settings:type_name -> google.protobuf.Struct
+	2,   // 39: ariadne.v1.ModelProviderInput.headers:type_name -> ariadne.v1.SecretPair
+	104, // 40: ariadne.v1.ModelProviderInput.extra_body:type_name -> google.protobuf.Struct
+	2,   // 41: ariadne.v1.ModelProviderInput.env:type_name -> ariadne.v1.SecretPair
+	35,  // 42: ariadne.v1.ModelEntry.price:type_name -> ariadne.v1.ModelPrice
+	1,   // 43: ariadne.v1.ModelEntry.efforts:type_name -> ariadne.v1.StringList
+	40,  // 44: ariadne.v1.ModelRoles.thread:type_name -> ariadne.v1.RoleConfig
+	40,  // 45: ariadne.v1.ModelRoles.coordinator:type_name -> ariadne.v1.RoleConfig
+	40,  // 46: ariadne.v1.ModelRoles.triage:type_name -> ariadne.v1.RoleConfig
+	40,  // 47: ariadne.v1.ModelRoles.research:type_name -> ariadne.v1.RoleConfig
+	36,  // 48: ariadne.v1.ModelSettings.kinds:type_name -> ariadne.v1.ModelKind
+	37,  // 49: ariadne.v1.ModelSettings.providers:type_name -> ariadne.v1.ModelProviderView
+	39,  // 50: ariadne.v1.ModelSettings.models:type_name -> ariadne.v1.ModelEntry
+	41,  // 51: ariadne.v1.ModelSettings.roles:type_name -> ariadne.v1.ModelRoles
+	105, // 52: ariadne.v1.ModelProblem.problem:type_name -> ariadne.v1.LocalizedError
+	42,  // 53: ariadne.v1.GetModelSettingsResponse.settings:type_name -> ariadne.v1.ModelSettings
+	38,  // 54: ariadne.v1.SaveModelSettingsRequest.providers:type_name -> ariadne.v1.ModelProviderInput
+	39,  // 55: ariadne.v1.SaveModelSettingsRequest.models:type_name -> ariadne.v1.ModelEntry
+	41,  // 56: ariadne.v1.SaveModelSettingsRequest.roles:type_name -> ariadne.v1.ModelRoles
+	42,  // 57: ariadne.v1.SaveModelSettingsResponse.settings:type_name -> ariadne.v1.ModelSettings
+	43,  // 58: ariadne.v1.SaveModelSettingsResponse.problems:type_name -> ariadne.v1.ModelProblem
+	35,  // 59: ariadne.v1.ModelInfo.price:type_name -> ariadne.v1.ModelPrice
+	1,   // 60: ariadne.v1.ModelInfo.efforts:type_name -> ariadne.v1.StringList
+	48,  // 61: ariadne.v1.ListedModel.info:type_name -> ariadne.v1.ModelInfo
+	49,  // 62: ariadne.v1.ListedModelList.items:type_name -> ariadne.v1.ListedModel
+	104, // 63: ariadne.v1.DraftModelProviderInput.settings:type_name -> google.protobuf.Struct
+	3,   // 64: ariadne.v1.DraftModelProviderInput.env:type_name -> ariadne.v1.SecretPairList
+	51,  // 65: ariadne.v1.ListProviderModelsRequest.provider:type_name -> ariadne.v1.DraftModelProviderInput
+	50,  // 66: ariadne.v1.ListProviderModelsResponse.models:type_name -> ariadne.v1.ListedModelList
+	48,  // 67: ariadne.v1.GetModelInfoResponse.info:type_name -> ariadne.v1.ModelInfo
+	0,   // 68: ariadne.v1.FoundSetup.title:type_name -> ariadne.v1.LocalizedText
+	56,  // 69: ariadne.v1.ListFoundSetupsResponse.found:type_name -> ariadne.v1.FoundSetup
+	42,  // 70: ariadne.v1.UseFoundSetupResponse.settings:type_name -> ariadne.v1.ModelSettings
+	43,  // 71: ariadne.v1.UseFoundSetupResponse.problems:type_name -> ariadne.v1.ModelProblem
+	100, // 72: ariadne.v1.McpServerView.tools:type_name -> ariadne.v1.McpServerView.ToolsEntry
+	2,   // 73: ariadne.v1.McpServerInput.env:type_name -> ariadne.v1.SecretPair
+	2,   // 74: ariadne.v1.McpServerInput.headers:type_name -> ariadne.v1.SecretPair
+	101, // 75: ariadne.v1.McpServerInput.tools:type_name -> ariadne.v1.McpServerInput.ToolsEntry
+	64,  // 76: ariadne.v1.McpToolInfoList.items:type_name -> ariadne.v1.McpToolInfo
+	63,  // 77: ariadne.v1.McpServerStatus.info:type_name -> ariadne.v1.McpServerInfo
+	65,  // 78: ariadne.v1.McpServerStatus.tools:type_name -> ariadne.v1.McpToolInfoList
+	61,  // 79: ariadne.v1.GetMcpSettingsResponse.servers:type_name -> ariadne.v1.McpServerView
+	66,  // 80: ariadne.v1.GetMcpSettingsResponse.status:type_name -> ariadne.v1.McpServerStatus
+	62,  // 81: ariadne.v1.SaveMcpSettingsRequest.servers:type_name -> ariadne.v1.McpServerInput
+	61,  // 82: ariadne.v1.SaveMcpSettingsResponse.servers:type_name -> ariadne.v1.McpServerView
+	66,  // 83: ariadne.v1.SaveMcpSettingsResponse.status:type_name -> ariadne.v1.McpServerStatus
+	66,  // 84: ariadne.v1.CheckMcpServerResponse.status:type_name -> ariadne.v1.McpServerStatus
+	2,   // 85: ariadne.v1.WebhookInput.headers:type_name -> ariadne.v1.SecretPair
+	0,   // 86: ariadne.v1.NotifierServiceView.title:type_name -> ariadne.v1.LocalizedText
+	0,   // 87: ariadne.v1.NotifierServiceView.description:type_name -> ariadne.v1.LocalizedText
+	5,   // 88: ariadne.v1.NotifierServiceView.settings:type_name -> ariadne.v1.SettingsSchema
+	76,  // 89: ariadne.v1.NotifierServiceView.capabilities:type_name -> ariadne.v1.NotifierCapabilities
+	104, // 90: ariadne.v1.NotifierServiceView.values:type_name -> google.protobuf.Struct
+	104, // 91: ariadne.v1.NotifierServiceInput.values:type_name -> google.protobuf.Struct
+	73,  // 92: ariadne.v1.NotificationSettings.subscriptions:type_name -> ariadne.v1.PushSubscriptionView
+	74,  // 93: ariadne.v1.NotificationSettings.webhooks:type_name -> ariadne.v1.WebhookView
+	77,  // 94: ariadne.v1.NotificationSettings.notifiers:type_name -> ariadne.v1.NotifierServiceView
+	79,  // 95: ariadne.v1.GetNotificationSettingsResponse.notifications:type_name -> ariadne.v1.NotificationSettings
+	75,  // 96: ariadne.v1.SaveNotificationSettingsRequest.webhooks:type_name -> ariadne.v1.WebhookInput
+	102, // 97: ariadne.v1.SaveNotificationSettingsRequest.notifiers:type_name -> ariadne.v1.SaveNotificationSettingsRequest.NotifiersEntry
+	79,  // 98: ariadne.v1.SaveNotificationSettingsResponse.notifications:type_name -> ariadne.v1.NotificationSettings
+	73,  // 99: ariadne.v1.SubscribePushResponse.subscription:type_name -> ariadne.v1.PushSubscriptionView
+	73,  // 100: ariadne.v1.SubscribePushResponse.subscriptions:type_name -> ariadne.v1.PushSubscriptionView
+	73,  // 101: ariadne.v1.UnsubscribePushResponse.subscriptions:type_name -> ariadne.v1.PushSubscriptionView
+	73,  // 102: ariadne.v1.DeletePushSubscriptionResponse.subscriptions:type_name -> ariadne.v1.PushSubscriptionView
+	75,  // 103: ariadne.v1.TestNotificationRequest.webhook_draft:type_name -> ariadne.v1.WebhookInput
+	78,  // 104: ariadne.v1.TestNotificationRequest.notifier_draft:type_name -> ariadne.v1.NotifierServiceInput
+	0,   // 105: ariadne.v1.TestNotificationResponse.message:type_name -> ariadne.v1.LocalizedText
+	4,   // 106: ariadne.v1.SettingsSchema.PropertiesEntry.value:type_name -> ariadne.v1.SettingField
+	104, // 107: ariadne.v1.SaveSearchSettingsRequest.ServicesEntry.value:type_name -> google.protobuf.Struct
+	104, // 108: ariadne.v1.CheckSearchSettingsRequest.ServicesEntry.value:type_name -> google.protobuf.Struct
+	78,  // 109: ariadne.v1.SaveNotificationSettingsRequest.NotifiersEntry.value:type_name -> ariadne.v1.NotifierServiceInput
+	7,   // 110: ariadne.v1.SettingsService.GetConcurrency:input_type -> ariadne.v1.GetConcurrencyRequest
+	9,   // 111: ariadne.v1.SettingsService.SaveConcurrency:input_type -> ariadne.v1.SaveConcurrencyRequest
+	13,  // 112: ariadne.v1.SettingsService.GetInputSettings:input_type -> ariadne.v1.GetInputSettingsRequest
+	15,  // 113: ariadne.v1.SettingsService.SaveInputSettings:input_type -> ariadne.v1.SaveInputSettingsRequest
+	22,  // 114: ariadne.v1.SettingsService.GetWorkSettings:input_type -> ariadne.v1.GetWorkSettingsRequest
+	24,  // 115: ariadne.v1.SettingsService.SaveWorkSettings:input_type -> ariadne.v1.SaveWorkSettingsRequest
+	29,  // 116: ariadne.v1.SettingsService.GetSearchSettings:input_type -> ariadne.v1.GetSearchSettingsRequest
+	31,  // 117: ariadne.v1.SettingsService.SaveSearchSettings:input_type -> ariadne.v1.SaveSearchSettingsRequest
+	33,  // 118: ariadne.v1.SettingsService.CheckSearchSettings:input_type -> ariadne.v1.CheckSearchSettingsRequest
+	44,  // 119: ariadne.v1.SettingsService.GetModelSettings:input_type -> ariadne.v1.GetModelSettingsRequest
+	46,  // 120: ariadne.v1.SettingsService.SaveModelSettings:input_type -> ariadne.v1.SaveModelSettingsRequest
+	52,  // 121: ariadne.v1.SettingsService.ListProviderModels:input_type -> ariadne.v1.ListProviderModelsRequest
+	54,  // 122: ariadne.v1.SettingsService.GetModelInfo:input_type -> ariadne.v1.GetModelInfoRequest
+	57,  // 123: ariadne.v1.SettingsService.ListFoundSetups:input_type -> ariadne.v1.ListFoundSetupsRequest
+	59,  // 124: ariadne.v1.SettingsService.UseFoundSetup:input_type -> ariadne.v1.UseFoundSetupRequest
+	67,  // 125: ariadne.v1.SettingsService.GetMcpSettings:input_type -> ariadne.v1.GetMcpSettingsRequest
+	69,  // 126: ariadne.v1.SettingsService.SaveMcpSettings:input_type -> ariadne.v1.SaveMcpSettingsRequest
+	71,  // 127: ariadne.v1.SettingsService.CheckMcpServer:input_type -> ariadne.v1.CheckMcpServerRequest
+	80,  // 128: ariadne.v1.SettingsService.GetNotificationSettings:input_type -> ariadne.v1.GetNotificationSettingsRequest
+	82,  // 129: ariadne.v1.SettingsService.SaveNotificationSettings:input_type -> ariadne.v1.SaveNotificationSettingsRequest
+	84,  // 130: ariadne.v1.SettingsService.SubscribePush:input_type -> ariadne.v1.SubscribePushRequest
+	86,  // 131: ariadne.v1.SettingsService.UnsubscribePush:input_type -> ariadne.v1.UnsubscribePushRequest
+	88,  // 132: ariadne.v1.SettingsService.DeletePushSubscription:input_type -> ariadne.v1.DeletePushSubscriptionRequest
+	90,  // 133: ariadne.v1.SettingsService.TestNotification:input_type -> ariadne.v1.TestNotificationRequest
+	92,  // 134: ariadne.v1.SettingsService.ReportNotificationPresence:input_type -> ariadne.v1.ReportNotificationPresenceRequest
+	8,   // 135: ariadne.v1.SettingsService.GetConcurrency:output_type -> ariadne.v1.GetConcurrencyResponse
+	10,  // 136: ariadne.v1.SettingsService.SaveConcurrency:output_type -> ariadne.v1.SaveConcurrencyResponse
+	14,  // 137: ariadne.v1.SettingsService.GetInputSettings:output_type -> ariadne.v1.GetInputSettingsResponse
+	16,  // 138: ariadne.v1.SettingsService.SaveInputSettings:output_type -> ariadne.v1.SaveInputSettingsResponse
+	23,  // 139: ariadne.v1.SettingsService.GetWorkSettings:output_type -> ariadne.v1.GetWorkSettingsResponse
+	25,  // 140: ariadne.v1.SettingsService.SaveWorkSettings:output_type -> ariadne.v1.SaveWorkSettingsResponse
+	30,  // 141: ariadne.v1.SettingsService.GetSearchSettings:output_type -> ariadne.v1.GetSearchSettingsResponse
+	32,  // 142: ariadne.v1.SettingsService.SaveSearchSettings:output_type -> ariadne.v1.SaveSearchSettingsResponse
+	34,  // 143: ariadne.v1.SettingsService.CheckSearchSettings:output_type -> ariadne.v1.CheckSearchSettingsResponse
+	45,  // 144: ariadne.v1.SettingsService.GetModelSettings:output_type -> ariadne.v1.GetModelSettingsResponse
+	47,  // 145: ariadne.v1.SettingsService.SaveModelSettings:output_type -> ariadne.v1.SaveModelSettingsResponse
+	53,  // 146: ariadne.v1.SettingsService.ListProviderModels:output_type -> ariadne.v1.ListProviderModelsResponse
+	55,  // 147: ariadne.v1.SettingsService.GetModelInfo:output_type -> ariadne.v1.GetModelInfoResponse
+	58,  // 148: ariadne.v1.SettingsService.ListFoundSetups:output_type -> ariadne.v1.ListFoundSetupsResponse
+	60,  // 149: ariadne.v1.SettingsService.UseFoundSetup:output_type -> ariadne.v1.UseFoundSetupResponse
+	68,  // 150: ariadne.v1.SettingsService.GetMcpSettings:output_type -> ariadne.v1.GetMcpSettingsResponse
+	70,  // 151: ariadne.v1.SettingsService.SaveMcpSettings:output_type -> ariadne.v1.SaveMcpSettingsResponse
+	72,  // 152: ariadne.v1.SettingsService.CheckMcpServer:output_type -> ariadne.v1.CheckMcpServerResponse
+	81,  // 153: ariadne.v1.SettingsService.GetNotificationSettings:output_type -> ariadne.v1.GetNotificationSettingsResponse
+	83,  // 154: ariadne.v1.SettingsService.SaveNotificationSettings:output_type -> ariadne.v1.SaveNotificationSettingsResponse
+	85,  // 155: ariadne.v1.SettingsService.SubscribePush:output_type -> ariadne.v1.SubscribePushResponse
+	87,  // 156: ariadne.v1.SettingsService.UnsubscribePush:output_type -> ariadne.v1.UnsubscribePushResponse
+	89,  // 157: ariadne.v1.SettingsService.DeletePushSubscription:output_type -> ariadne.v1.DeletePushSubscriptionResponse
+	91,  // 158: ariadne.v1.SettingsService.TestNotification:output_type -> ariadne.v1.TestNotificationResponse
+	93,  // 159: ariadne.v1.SettingsService.ReportNotificationPresence:output_type -> ariadne.v1.ReportNotificationPresenceResponse
+	135, // [135:160] is the sub-list for method output_type
+	110, // [110:135] is the sub-list for method input_type
+	110, // [110:110] is the sub-list for extension type_name
+	110, // [110:110] is the sub-list for extension extendee
+	0,   // [0:110] is the sub-list for field type_name
 }
 
 func init() { file_ariadne_v1_settings_proto_init() }
@@ -6447,43 +6526,44 @@ func file_ariadne_v1_settings_proto_init() {
 		return
 	}
 	file_ariadne_v1_common_proto_init()
-	file_ariadne_v1_settings_proto_msgTypes[3].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[19].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[23].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[26].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[4].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[20].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[24].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[27].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[30].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[32].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[28].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[31].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[33].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[34].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[36].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[35].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[37].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[38].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[39].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[47].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[40].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[48].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[52].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[55].OneofWrappers = []any{
+	file_ariadne_v1_settings_proto_msgTypes[49].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[51].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[53].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[56].OneofWrappers = []any{
 		(*FoundSetup_Env)(nil),
 		(*FoundSetup_Program)(nil),
 	}
-	file_ariadne_v1_settings_proto_msgTypes[60].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[61].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[63].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[65].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[72].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[74].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[76].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[89].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[62].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[64].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[66].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[73].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[75].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[77].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[90].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[91].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[92].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ariadne_v1_settings_proto_rawDesc), len(file_ariadne_v1_settings_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   102,
+			NumMessages:   103,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -52,6 +52,11 @@ message SecretPair {
   string value = 2;
 }
 
+// SecretPairList wraps a repeated SecretPair so callers can distinguish omitted vs empty.
+message SecretPairList {
+  repeated SecretPair items = 1;
+}
+
 message SettingField {
   string type = 1;
   LocalizedText title = 2;
@@ -257,6 +262,7 @@ message ModelProviderView {
   repeated string headers = 6;
   google.protobuf.Struct extra_body = 7;
   optional int32 timeout_seconds = 8;
+  repeated string env = 9;
 }
 
 message ModelProviderInput {
@@ -267,6 +273,7 @@ message ModelProviderInput {
   repeated SecretPair headers = 5;
   google.protobuf.Struct extra_body = 6;
   optional int32 timeout_seconds = 7;
+  repeated SecretPair env = 8;
 }
 
 message ModelEntry {
@@ -349,6 +356,7 @@ message DraftModelProviderInput {
   string id = 1;
   string kind = 2;
   google.protobuf.Struct settings = 3;
+  optional SecretPairList env = 4;
 }
 
 message ListProviderModelsRequest {

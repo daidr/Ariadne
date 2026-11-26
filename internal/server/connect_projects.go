@@ -20,6 +20,7 @@ import (
 	"github.com/daidr/Ariadne/internal/projectsettings"
 	"github.com/daidr/Ariadne/internal/realtime"
 	"github.com/daidr/Ariadne/internal/sources"
+	"github.com/daidr/Ariadne/sdk"
 )
 
 var projectToolSwitches = []string{"fetch", "search", "commands", "research", "issueWrites"}
@@ -272,6 +273,9 @@ func (s *projectService) UpdateProject(
 		rawSettings := fromProtoProjectSettings(msg.Settings)
 		parsed, err := projectsettings.Parse(rawSettings, projectToolSwitches)
 		if err != nil {
+			return nil, err
+		}
+		if err := s.validateProjectModels(parsed.Models, current.Settings.Models); err != nil {
 			return nil, err
 		}
 		autopilotEnabled = parsed.Autopilot.Enabled
@@ -993,7 +997,74 @@ func toProtoProjectSettings(settings projectsettings.Settings) *ariadnev1.Projec
 			Enabled: settings.Autopilot.Enabled,
 			Method:  settings.Autopilot.Method,
 		},
+		Models: &ariadnev1.ProjectModelsSettings{
+			Thread:      toProtoProjectModelRole(settings.Models.Thread),
+			Coordinator: toProtoProjectModelRole(settings.Models.Coordinator),
+			Research:    toProtoProjectModelRole(settings.Models.Research),
+		},
 	}
+}
+
+func toProtoProjectModelRole(role projectsettings.ModelRole) *ariadnev1.ProjectModelRoleSettings {
+	out := &ariadnev1.ProjectModelRoleSettings{}
+	if role.Model != "" {
+		value := role.Model
+		out.Model = &value
+	}
+	if role.Effort != "" {
+		value := role.Effort
+		out.Effort = &value
+	}
+	return out
+}
+
+func fromProtoProjectModelRole(role *ariadnev1.ProjectModelRoleSettings) object {
+	out := object{"model": nil, "effort": nil}
+	if role == nil {
+		return out
+	}
+	if role.Model != nil {
+		out["model"] = role.GetModel()
+	}
+	if role.Effort != nil {
+		out["effort"] = role.GetEffort()
+	}
+	return out
+}
+
+func (s *projectService) validateProjectModels(next, current projectsettings.Models) error {
+	if s.api.options.Settings == nil {
+		return nil
+	}
+	var kinds []sdk.ModelProviderInfo
+	if s.api.options.Models != nil {
+		kinds = s.api.options.Models.Kinds()
+	}
+	known := map[string]bool{}
+	for _, raw := range s.api.options.Settings.ModelChoices(kinds) {
+		if choice := protoMap(raw); choice != nil {
+			if id, ok := choice["id"].(string); ok && id != "" {
+				known[id] = true
+			}
+		}
+	}
+	checks := []struct {
+		role        string
+		next, prior projectsettings.ModelRole
+	}{
+		{"thread", next.Thread, current.Thread},
+		{"coordinator", next.Coordinator, current.Coordinator},
+		{"research", next.Research, current.Research},
+	}
+	for _, item := range checks {
+		if item.next.Model == "" || item.next.Model == item.prior.Model {
+			continue
+		}
+		if !known[item.next.Model] {
+			return badInput("models." + item.role + ".model")
+		}
+	}
+	return nil
 }
 
 func fromProtoProjectSettings(settings *ariadnev1.ProjectSettings) object {
@@ -1049,6 +1120,13 @@ func fromProtoProjectSettings(settings *ariadnev1.ProjectSettings) object {
 		out["autopilot"] = object{
 			"enabled": settings.Autopilot.Enabled,
 			"method":  settings.Autopilot.Method,
+		}
+	}
+	if settings.Models != nil {
+		out["models"] = object{
+			"thread":      fromProtoProjectModelRole(settings.Models.Thread),
+			"coordinator": fromProtoProjectModelRole(settings.Models.Coordinator),
+			"research":    fromProtoProjectModelRole(settings.Models.Research),
 		}
 	}
 	return out

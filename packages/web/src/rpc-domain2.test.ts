@@ -141,6 +141,11 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
         routines: [],
         review: { enabled: true },
         autopilot: { enabled: true, method: 'squash' },
+        models: {
+          thread: { model: 'm-1', effort: 'high' },
+          coordinator: { model: 'm-2', effort: null },
+          research: { model: null, effort: null },
+        },
       },
       env: [{ name: 'NODE_ENV', value: 'test' }],
       slots: 3,
@@ -158,6 +163,9 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
     expect(decodedReq.mcpServers?.values).toEqual(['srv_1'])
     expect(decodedReq.autopilotPaused).toBe(true)
     expect(decodedReq.env?.entries).toHaveLength(1)
+    expect(decodedReq.settings?.models?.thread?.model).toBe('m-1')
+    expect(decodedReq.settings?.models?.thread?.effort).toBe('high')
+    expect(decodedReq.settings?.models?.coordinator?.model).toBe('m-2')
 
     expect(result.project.slots).toBe(3)
     expect(result.project.mcp).toEqual(['srv_1'])
@@ -427,6 +435,11 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
       routines: [],
       review: { enabled: false },
       autopilot: { enabled: false, method: 'merge' as const },
+      models: {
+        thread: { model: null, effort: null },
+        coordinator: { model: null, effort: null },
+        research: { model: null, effort: null },
+      },
     }
     const detail = {
       project: {

@@ -124,15 +124,28 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo, valid
 			kind := text(given["kind"])
 			info, ok := providerInfo(kinds, kind)
 			var settings Object
+			var env Object
 			if !ok {
 				if before == nil || before["kind"] != kind {
 					return bad(at + ".kind")
 				}
 				settings = cloneMap(object(before["settings"]))
+				env = cloneMap(object(before["env"]))
 			} else {
 				settings = storedProviderSecrets(kind, given["settings"], before, info)
 				if validateSettings != nil {
 					if err := validateSettings(kind, cloneMap(settings)); err != nil {
+						return err
+					}
+				}
+				if info.Program {
+					var beforeEnv Object
+					if before != nil && before["kind"] == kind {
+						beforeEnv = object(before["env"])
+					}
+					var err error
+					env, err = secretPairs(given["env"], validProviderEnv, beforeEnv, at+".env")
+					if err != nil {
 						return err
 					}
 				}
@@ -173,6 +186,9 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo, valid
 			provider := Object{"id": id, "kind": kind, "name": name, "settings": settings}
 			if len(request) > 0 {
 				provider["request"] = request
+			}
+			if len(env) > 0 {
+				provider["env"] = env
 			}
 			providers = append(providers, provider)
 		}
@@ -295,8 +311,8 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo, valid
 				registered[id] = true
 			}
 			before := findByID(previousProviders, id)
-			beforeData, _ := jsonutil.Encode([]any{before["kind"], before["settings"], before["request"]})
-			afterData, _ := jsonutil.Encode([]any{provider["kind"], provider["settings"], provider["request"]})
+			beforeData, _ := jsonutil.Encode([]any{before["kind"], before["settings"], before["request"], before["env"]})
+			afterData, _ := jsonutil.Encode([]any{provider["kind"], provider["settings"], provider["request"], provider["env"]})
 			if string(beforeData) != string(afterData) {
 				changed[id] = true
 			}
@@ -347,6 +363,7 @@ func (store *Store) PublicModels(kinds []sdk.ModelProviderInfo) Object {
 		provider["settings"] = settings
 		provider["secretsSet"] = set
 		provider["headers"] = names(object(request["headers"]))
+		provider["env"] = names(object(provider["env"]))
 		provider["extraBody"] = fallback(request["extraBody"], Object{})
 		provider["timeoutSeconds"] = request["timeoutSeconds"]
 		providers = append(providers, provider)
@@ -403,11 +420,34 @@ func (store *Store) DraftProvider(input any, kinds []sdk.ModelProviderInfo, vali
 	if before["kind"] == kind {
 		headers = cloneMap(object(object(before["request"])["headers"]))
 	}
+	var env Object
+	if info.Program {
+		if rawEnv, exists := given["env"]; exists && rawEnv != nil {
+			var beforeEnv Object
+			if before != nil && before["kind"] == kind {
+				beforeEnv = object(before["env"])
+			}
+			var err error
+			env, err = secretPairs(rawEnv, validProviderEnv, beforeEnv, "provider.env")
+			if err != nil {
+				return DraftProvider{}, err
+			}
+		} else if before != nil && before["kind"] == kind {
+			env = cloneMap(object(before["env"]))
+		}
+	}
 	hint := []string{kind}
 	secrets := secretFields(info)
 	for _, key := range names(settings) {
 		if value, ok := settings[key].(string); ok && !hasString(secrets, key) {
 			hint = append(hint, value)
+		}
+	}
+	if info.Program {
+		if len(env) > 0 {
+			settings["env"] = env
+		} else if _, inSchema := info.Settings.Properties["env"]; !inSchema {
+			delete(settings, "env")
 		}
 	}
 	return DraftProvider{Info: info, Settings: settings, Headers: headers, Hint: strings.Join(hint, " ")}, nil

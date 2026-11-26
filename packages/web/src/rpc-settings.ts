@@ -381,6 +381,7 @@ function fromProtoModelProviderView(
     settings: fromJsonObject(provider.settings),
     secretsSet: [...provider.secretsSet],
     headers: [...provider.headers],
+    env: [...provider.env],
     extraBody: fromJsonObject(provider.extraBody),
     timeoutSeconds: provider.timeoutSeconds ?? null,
   }
@@ -445,6 +446,10 @@ export function toProtoSaveModelSettingsRequest(input: ModelSettingsInput) {
       headers: (provider.headers ?? []).map((header) => ({
         name: header.name,
         value: header.value,
+      })),
+      env: (provider.env ?? []).map((entry) => ({
+        name: entry.name,
+        value: entry.value,
       })),
       extraBody: toJsonObject(provider.extraBody),
       ...(provider.timeoutSeconds !== undefined && provider.timeoutSeconds !== null
