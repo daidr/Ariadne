@@ -48,7 +48,12 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"delegate code investigation, solution design, and implementation to discussion threads",
 		"[Title](thread:<threadId>)",
 		"[Title](artifact:<artifactId>)",
+		"do not repeat those attached threads as inline [Title](thread:<threadId>) links in text",
 		"Do not use thread: or artifact: links in external destinations",
+		"each card already displays the thread's title, status, and live progress",
+		"keep text to a brief overall summary and do not repeat those attached threads as a list of [Title](thread:<threadId>) links",
+		"mention a specific attached thread in text only when adding context not shown on its card",
+		"Use inline [Title](thread:<threadId>) links in send_message, when referencing threads without attached cards, or in thread relays",
 		"Do not add a plan node for a one-off small fix",
 		"Set group on related nodes",
 		"update_plan applies immediately",
@@ -86,6 +91,9 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 	if strings.Contains(coordinatorPrompt, "delegate implementation to discussion threads") {
 		t.Error("coordinator prompt still limits delegation to implementation")
 	}
+	if strings.Contains(coordinatorPrompt, "Tell the user what each thread is handling with post_ui using threadIds") {
+		t.Error("coordinator prompt still encourages listing each thread alongside threadIds cards")
+	}
 
 	threadTurn := &turn{Runner: &Runner{Repository: repo}, conversation: core.ConversationView{
 		ID: thread.ID, ProjectID: project.ID, Role: "thread",
@@ -95,6 +103,7 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"keeping completed steps and listing next steps in order",
 		"[Title](thread:<threadId>)",
 		"[Title](artifact:<artifactId>)",
+		"do not repeat those attached threads as inline [Title](thread:<threadId>) links in text",
 		"relevant artifact IDs in artifacts",
 		"include reviewReplies before reporting ready again",
 		"save or remove it with remember or forget",
@@ -184,6 +193,17 @@ func TestToolSchemasDocumentPlanSequencingAndReviewEnums(t *testing.T) {
 	}
 	if strings.Contains(coordTodo.spec.Description, "Keep completed items") {
 		t.Errorf("coordinator update_todo description should not include thread guidance: %q", coordTodo.spec.Description)
+	}
+
+	postUI := findTool(coordTools, "post_ui")
+	for _, want := range []string{
+		"Thread cards (via threadIds or thread blocks) already display each thread's title, status, and live progress",
+		"keep text to a brief overall summary and do not repeat those attached threads as [Title](thread:<threadId>) links",
+		"unless adding context not shown on a card",
+	} {
+		if !strings.Contains(postUI.spec.Description, want) {
+			t.Errorf("post_ui description missing %q: %q", want, postUI.spec.Description)
+		}
 	}
 
 	updatePlan := findTool(coordTools, "update_plan")
