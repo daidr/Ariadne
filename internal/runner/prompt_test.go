@@ -62,7 +62,7 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"Do not call update_plan and create_thread in parallel for a new node",
 		"investigate code, analyze implementation details, review current behavior, propose changes",
 		"Do not inspect source code or draft technical proposals directly in the coordinator with read_file, search, find_files, or list_dir",
-		"Use research only for a lightweight, single-point read-only lookup",
+		"delegate repository research and code lookups directly to a discussion thread with create_thread so the coordinator stays lightweight, responsive, and unblocked",
 		"Research, investigation, analysis, and proposal threads report idle after sharing findings",
 		"discussion threads handle memory requests made in them directly",
 		"Use update_todo as an active work list",
@@ -94,6 +94,9 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 	}
 	if strings.Contains(coordinatorPrompt, "Tell the user what each thread is handling with post_ui using threadIds") {
 		t.Error("coordinator prompt still encourages listing each thread alongside threadIds cards")
+	}
+	if strings.Contains(coordinatorPrompt, "Use research") || strings.Contains(coordinatorPrompt, "single-point read-only lookup") {
+		t.Error("coordinator prompt should not reference the removed research tool")
 	}
 
 	threadTurn := &turn{Runner: &Runner{Repository: repo}, conversation: core.ConversationView{
