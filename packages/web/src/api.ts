@@ -414,6 +414,8 @@ export interface ModelProviderInput {
   settings: Record<string, unknown>
   /** Sent with every request; an empty value keeps the stored one. */
   headers?: { name: string; value: string }[]
+  /** Passed to local agent program providers; an empty value keeps the stored one. */
+  env?: { name: string; value: string }[]
   extraBody?: Record<string, unknown>
   timeoutSeconds?: number | null
 }
@@ -785,10 +787,12 @@ export interface RoleInput<E extends string = Effort> {
 
 export interface ModelSettings extends Omit<ModelSettingsInput, 'providers'> {
   kinds: ModelKind[]
-  providers: (Omit<ModelProviderInput, 'headers'> & {
+  providers: (Omit<ModelProviderInput, 'headers' | 'env'> & {
     secretsSet: string[]
     /** Names of the headers stored; their values stay on the server. */
     headers: string[]
+    /** Names of the environment variables stored; their values stay on the server. */
+    env: string[]
     extraBody: Record<string, unknown>
     timeoutSeconds: number | null
   })[]
@@ -1230,13 +1234,20 @@ export const api = {
   },
   /** The models a provider in the form can use; `null` when it cannot say. */
   listModels: async (
-    provider: Pick<ModelProviderInput, 'id' | 'kind' | 'settings'>,
+    provider: Pick<ModelProviderInput, 'id' | 'kind' | 'settings' | 'env'>,
   ): Promise<{ models: ListedModel[] | null }> => {
     const response = await settingsClient.listProviderModels({
       provider: {
         id: provider.id,
         kind: provider.kind,
         settings: toJsonObject(provider.settings),
+        ...(provider.env !== undefined
+          ? {
+              env: {
+                items: provider.env.map((pair) => ({ name: pair.name, value: pair.value })),
+              },
+            }
+          : {}),
       },
     })
     return {

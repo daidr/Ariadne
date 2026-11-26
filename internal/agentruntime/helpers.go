@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -43,6 +43,64 @@ func Localized(zh, en string) sdk.LocalizedText {
 func StringSetting(settings map[string]any, key string) string {
 	value, _ := settings[key].(string)
 	return value
+}
+
+// EnvSetting extracts custom provider environment variables from settings["env"].
+func EnvSetting(settings map[string]any) map[string]string {
+	if settings == nil {
+		return nil
+	}
+	raw, exists := settings["env"]
+	if !exists || raw == nil {
+		return nil
+	}
+	out := map[string]string{}
+	add := func(key, value string) {
+		key = textutil.Trim(key)
+		if key == "" || strings.HasPrefix(strings.ToUpper(key), "ARIADNE_") {
+			return
+		}
+		out[key] = value
+	}
+	switch entries := raw.(type) {
+	case map[string]string:
+		for key, value := range entries {
+			add(key, value)
+		}
+	case map[string]any:
+		for key, value := range entries {
+			if str, ok := value.(string); ok {
+				add(key, str)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// MergeEnv layers overrides on top of defaults, normalizing case-insensitive
+// key collisions on Windows so overrides deterministically win.
+func MergeEnv(defaults, overrides map[string]string) map[string]string {
+	if len(defaults) == 0 && len(overrides) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(defaults)+len(overrides))
+	for key, value := range defaults {
+		out[key] = value
+	}
+	for key, value := range overrides {
+		if runtime.GOOS == "windows" {
+			for existing := range out {
+				if strings.EqualFold(existing, key) {
+					delete(out, existing)
+				}
+			}
+		}
+		out[key] = value
+	}
+	return out
 }
 
 func TrimmedJSON(raw json.RawMessage) string {
@@ -112,11 +170,17 @@ func ValidateCommandSettings(required bool) func(map[string]any) error {
 
 // CheckCommand verifies that the first token of command is resolvable in PATH.
 func CheckCommand(command string) (sdk.LocalizedText, error) {
+	return CheckCommandWithEnv(command, nil)
+}
+
+// CheckCommandWithEnv verifies that the first token of command is resolvable
+// in the agent process environment with optional provider overrides applied.
+func CheckCommandWithEnv(command string, env map[string]string) (sdk.LocalizedText, error) {
 	words := process.SplitCommand(command)
 	if len(words) == 0 {
 		return nil, nil
 	}
-	if _, err := exec.LookPath(words[0]); err != nil {
+	if _, err := process.LookPath(words[0], process.AgentEnv(env)); err != nil {
 		return Localized("找不到命令 "+words[0], "command not found: "+words[0]), nil
 	}
 	return nil, nil

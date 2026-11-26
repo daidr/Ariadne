@@ -10,6 +10,7 @@ import (
 	"github.com/daidr/Ariadne/internal/core"
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
+	"github.com/daidr/Ariadne/internal/projectsettings"
 	"github.com/daidr/Ariadne/internal/skills"
 	"github.com/daidr/Ariadne/internal/trace"
 )
@@ -59,7 +60,11 @@ func (h *conversationServiceHandler) GetConversation(
 	}
 	var model any
 	if h.api.options.Settings != nil {
-		model = map[string]any(h.api.options.Settings.ConversationModel(snapshot.Conversation.Role, snapshot.ThreadModel, snapshot.ThreadEffort))
+		var overrides *projectsettings.Models
+		if project, projErr := h.api.options.Repository.GetProject(ctx, snapshot.Conversation.ProjectID); projErr == nil {
+			overrides = &project.Settings.Models
+		}
+		model = map[string]any(h.api.options.Settings.ConversationModelForProject(snapshot.Conversation.Role, snapshot.ThreadModel, snapshot.ThreadEffort, overrides))
 	} else if h.api.options.ModelOf != nil {
 		dummyReq, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
 		if reqErr == nil {

@@ -146,7 +146,8 @@ export const emptyConversation = (): ConversationState => ({
   seq: null,
 })
 
-export type ProjectSettingsTab = 'source' | 'instructions' | 'workspace' | 'autopilot' | 'usage'
+export type ProjectSettingsTab =
+  'source' | 'models' | 'instructions' | 'workspace' | 'autopilot' | 'usage'
 
 /** Open the open project's settings, on `tab`; the first-run steps open them on the source. */
 export function openProjectSettings(tab: ProjectSettingsTab = 'source') {
@@ -206,6 +207,8 @@ interface State {
   threadDefault: string | null
   /** The default thinking effort threads use unless overridden. */
   threadDefaultEffort: Effort | null
+  /** Global model roles as last loaded from settings, used to preview project defaults. */
+  globalRoles: ModelSettings['roles'] | null
   /** Usage shows the estimated cost too. */
   showCost: boolean
   /** The user is making a new project: its form shows in place of the open one. */
@@ -267,6 +270,7 @@ export const state = reactive<State>({
   models: [],
   threadDefault: null,
   threadDefaultEffort: null,
+  globalRoles: null,
   showCost: false,
   starting: false,
   focus: null,
@@ -1634,7 +1638,9 @@ export async function saveProjectSettings(
       ...(slots !== project.slots ? { slots } : {}),
       ...(JSON.stringify(mcp) !== JSON.stringify(project.mcp) ? { mcp } : {}),
     })
-    await refreshCurrent(['detail'])
+    const modelsChanged =
+      JSON.stringify(input.settings.models) !== JSON.stringify(project.settings.models)
+    await refreshCurrent(modelsChanged ? ['detail', 'conversations'] : ['detail'])
     return null
   } catch (error) {
     if (error instanceof ApiError) return tm(error.localized)
@@ -2019,6 +2025,12 @@ export function applyModelSettings(settings: ModelSettings) {
   state.modelReady = !!settings.roles.thread.model
   state.threadDefault = settings.roles.thread.model
   state.threadDefaultEffort = settings.roles.thread.effort
+  state.globalRoles = {
+    thread: { ...settings.roles.thread },
+    coordinator: { ...settings.roles.coordinator },
+    triage: { ...settings.roles.triage },
+    research: { ...settings.roles.research },
+  }
   state.showCost = settings.showCost
   const labels = modelLabels(activeModels, activeProviders)
   state.models = activeModels.map((model, index) => ({

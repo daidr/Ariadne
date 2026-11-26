@@ -29,6 +29,23 @@ export const SHELL_CHOICES: ShellChoice[] = ['auto', ...SHELL_NAMES]
  * follows, how its threads' workspaces are set up, and the built-in tools it goes without.
  * Secrets (environment variables) are kept in the user's settings file, not here.
  */
+export interface ProjectModelRole {
+  model: string | null
+  effort: string | null
+}
+
+export interface ProjectModelsSettings {
+  thread: ProjectModelRole
+  coordinator: ProjectModelRole
+  research: ProjectModelRole
+}
+
+export const EMPTY_PROJECT_MODELS: ProjectModelsSettings = {
+  thread: { model: null, effort: null },
+  coordinator: { model: null, effort: null },
+  research: { model: null, effort: null },
+}
+
 export interface ProjectSettings {
   /** Instructions for this project that are not in its repository, for every conversation. */
   instructions: string
@@ -76,6 +93,8 @@ export interface ProjectSettings {
    * review on.
    */
   autopilot: { enabled: boolean; method: MergeMethod }
+  /** Optional per-project overrides for thread, coordinator, and sub-research models. */
+  models: ProjectModelsSettings
 }
 
 export type MergeMethod = 'squash' | 'merge'

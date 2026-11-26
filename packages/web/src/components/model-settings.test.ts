@@ -44,6 +44,7 @@ function makeModelSettings(anthropicEnabled: boolean): ModelSettings {
         settings: { baseUrl: 'https://api.openai.com/v1' },
         secretsSet: ['apiKey'],
         headers: [],
+        env: [],
         extraBody: {},
         timeoutSeconds: null,
       },
@@ -54,6 +55,7 @@ function makeModelSettings(anthropicEnabled: boolean): ModelSettings {
         settings: anthropicEnabled ? { baseUrl: 'https://proxy.anthropic.example' } : {},
         secretsSet: anthropicEnabled ? ['apiKey'] : [],
         headers: [],
+        env: [],
         extraBody: {},
         timeoutSeconds: null,
       },
@@ -589,5 +591,116 @@ describe('ModelSettings', () => {
     )
     await flushPromises()
     expect(updatesTab()?.find('.dou-badge__mark').exists()).toBe(false)
+  })
+
+  test('edits and saves custom environment variables for program providers (Claude Code / Codex / ACP)', async () => {
+    const programKind: ModelSettings['kinds'][number] = {
+      kind: 'claude-code',
+      title: { 'zh-CN': 'Claude Code', en: 'Claude Code' },
+      program: true,
+      settings: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', title: { 'zh-CN': '命令', en: 'Command' }, default: 'claude' },
+        },
+      },
+    }
+    const initial: ModelSettings = {
+      kinds: [openaiKind, programKind],
+      providers: [
+        {
+          id: 'p-cc',
+          kind: 'claude-code',
+          name: 'Claude Code',
+          settings: { command: 'claude' },
+          secretsSet: [],
+          headers: [],
+          env: ['ANTHROPIC_BASE_URL'],
+          extraBody: {},
+          timeoutSeconds: null,
+        },
+      ],
+      models: [{ id: 'm-cc', provider: 'p-cc', model: 'default' }],
+      roles: {
+        thread: { model: 'm-cc', effort: null },
+        coordinator: { model: null, effort: null },
+        triage: { model: null, effort: null },
+        research: { model: null, effort: null },
+      },
+      showCost: false,
+    }
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(initial)
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 1 })
+    vi.spyOn(api, 'saveConcurrency').mockResolvedValue({ slots: 3, reserved: 1 })
+    const listModelsSpy = vi.spyOn(api, 'listModels').mockResolvedValue({ models: [] })
+    const saveSpy = vi.spyOn(api, 'saveModelSettings').mockImplementation(async (input) => ({
+      ...initial,
+      providers: [
+        {
+          ...initial.providers[0]!,
+          env: (input.providers[0]?.env ?? []).map((entry) => entry.name),
+        },
+      ],
+      problems: [],
+    }))
+
+    const wrapper = mount(ModelSettingsDialog, {
+      props: { open: true, tab: 'models' },
+      global: {
+        stubs: {
+          PluginSettings: true,
+          SearchSettings: true,
+          WorkSettings: true,
+          InputSettings: true,
+          McpSettings: true,
+          DataTab: true,
+          UpdatesSettings: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    // Stored env automatically expands the env section on program providers.
+    expect(wrapper.text()).toContain('环境变量')
+    const pairNameInputs = () => wrapper.findAll('input.pairs-name, .pairs-name input')
+    const pairValueInputs = () => wrapper.findAll('input.pairs-value, .pairs-value input')
+    expect(pairNameInputs()).toHaveLength(1)
+    expect((pairNameInputs()[0]!.element as HTMLInputElement).value).toBe('ANTHROPIC_BASE_URL')
+
+    // Add a new custom environment variable.
+    const addPairButton = wrapper.find('.pairs-add')
+    await addPairButton.trigger('click')
+    await flushPromises()
+    await pairNameInputs()[1]!.setValue('ANTHROPIC_AUTH_TOKEN')
+    await pairValueInputs()[1]!.setValue('sk-draft-token')
+    await flushPromises()
+
+    // Focusing model autocomplete lists models with the draft env included.
+    const autocomplete = wrapper.findComponent({ name: 'DouAutocomplete' })
+    const fetchSuggestions = autocomplete.props('fetch') as (query: string) => Promise<unknown>
+    await fetchSuggestions('')
+    expect(listModelsSpy).toHaveBeenCalledWith({
+      id: 'p-cc',
+      kind: 'claude-code',
+      settings: { command: 'claude' },
+      env: [
+        { name: 'ANTHROPIC_BASE_URL', value: '' },
+        { name: 'ANTHROPIC_AUTH_TOKEN', value: 'sk-draft-token' },
+      ],
+    })
+
+    // Save sends both preserved and newly typed env pairs.
+    const saveButton = wrapper.findAll('button').find((btn) => btn.text().trim() === '保存')
+    expect(saveButton).toBeTruthy()
+    await saveButton!.trigger('click')
+    await flushPromises()
+
+    expect(saveSpy).toHaveBeenCalledTimes(1)
+    expect(saveSpy.mock.calls[0]?.[0]?.providers[0]?.env).toEqual([
+      { name: 'ANTHROPIC_BASE_URL', value: '' },
+      { name: 'ANTHROPIC_AUTH_TOKEN', value: 'sk-draft-token' },
+    ])
   })
 })

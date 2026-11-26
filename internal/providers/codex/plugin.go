@@ -80,8 +80,9 @@ func ModelProvider(sessions *agentruntime.Sessions, dataDir string) sdk.ModelPro
 		},
 		Models: func(ctx context.Context, settings map[string]any, _ sdk.ModelListOptions) ([]sdk.ListedModel, error) {
 			command := agentruntime.StringSetting(settings, "command")
+			env := agentruntime.EnvSetting(settings)
 			listed, err := agentruntime.WithModelTempDir(dataDir, func(directory string) ([]sdk.ListedModel, error) {
-				return ListModels(ctx, Settings{Command: command}, directory)
+				return ListModels(ctx, Settings{Command: command, Env: env}, directory)
 			})
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -91,9 +92,9 @@ func ModelProvider(sessions *agentruntime.Sessions, dataDir string) sdk.ModelPro
 			}
 			return []sdk.ListedModel{{ID: "default"}}, nil
 		},
-			Check: func(_ context.Context, settings map[string]any) (sdk.LocalizedText, error) {
-				return agentruntime.CheckCommand(commandFor(settings))
-			},
+		Check: func(_ context.Context, settings map[string]any) (sdk.LocalizedText, error) {
+			return agentruntime.CheckCommandWithEnv(commandFor(settings), agentruntime.EnvSetting(settings))
+		},
 		Find: findProviders,
 	}
 }
