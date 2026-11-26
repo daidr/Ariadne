@@ -17,6 +17,7 @@ import {
   openGallery,
   openProject,
   openProjectArtifact,
+  openProjectThread,
   openThread,
   openView,
   setSide,
@@ -172,5 +173,13 @@ describe('workspace routes', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.params.projectId).toBe('prj_first'))
     openGallery()
     await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/gallery'))
+
+    // Opening a thread in the already-loaded project while on /gallery exits the gallery view.
+    await openProject('prj_second')
+    openGallery()
+    await vi.waitFor(() => expect(state.main).toEqual({ kind: 'gallery' }))
+    await openProjectThread('prj_second', thread.id)
+    expect(state.main.kind).toBe('conversation')
+    expect(side.focusedThread(state.side)).toBe(thread.id)
   })
 })

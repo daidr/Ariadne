@@ -1,10 +1,18 @@
 // @vitest-environment happy-dom
 import type { GalleryArtifactSummary, GalleryCounts } from '@ariadne/core'
+import {
+  StoredEventSchema,
+  StreamEventsResponseSchema,
+  StreamReadySchema,
+  type StreamEventsResponse,
+} from '@ariadne/proto'
+import { create } from '@bufbuild/protobuf'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { DouConfigProvider } from 'dou-ui'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
 import { api } from '../api'
+import { previewFile } from '../files/preview'
 import { douLocale, locale } from '../i18n'
 import * as store from '../store'
 import ArtifactGallery from './ArtifactGallery.vue'
@@ -273,7 +281,7 @@ describe('ArtifactGallery interactions', () => {
     expect(wrapper.find('aside.quick-pane').text()).toContain('画廊交互设计稿')
 
     // Pressing Space on another card switches quick-view target.
-    await wrapper.find('[data-artifact-id="art_dash"]').trigger('keydown.space')
+    await wrapper.find('[data-artifact-id="art_dash"]').trigger('keydown', { key: ' ' })
     await flushPromises()
     expect(galleryState.quickViewId).toBe('art_dash')
     expect(wrapper.find('aside.quick-pane').text()).toContain('推理延迟看板')
@@ -301,6 +309,20 @@ describe('ArtifactGallery interactions', () => {
         includeCounts: true,
       }),
     )
+
+    // Click "has comments" status chip and verify status='has_comments' is sent.
+    listSpy.mockClear()
+    const commentsChip = wrapper.findAll('button').find((el) => el.text().includes('有未解决评论'))
+    expect(commentsChip).toBeTruthy()
+    await commentsChip!.trigger('click')
+    await flushPromises()
+
+    expect(listSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'has_comments',
+        includeCounts: true,
+      }),
+    )
   })
 
   test('narrow layout shows filter sheet trigger and bottom sheet quick-view drawer', async () => {
@@ -316,6 +338,375 @@ describe('ArtifactGallery interactions', () => {
     await wrapper.find('[data-artifact-id="art_doc"] .quick-view-btn').trigger('click')
     await flushPromises()
     expect(wrapper.find('aside.quick-pane').exists()).toBe(false)
+    expect(galleryState.quickViewId).toBe('art_doc')
+  })
+
+  test('quick preview sanitizes markdown URLs, blocks external images, sets target="_blank", and routes internal links', async () => {
+    const markdown = [
+      '![外链追踪图](https://evil.example/pixel.png)',
+      '![相对图](assets/local.png)',
+      '![站内截图](file:fil_safe_123)',
+      '[官网](https://example.com/docs)',
+      '[不安全链接](http://evil.example/phish)',
+      '[相对路径](/internal/secret)',
+      '[关联画板](artifact:art_proto)',
+      '[关联讨论](thread:thr_42)',
+      '[附件文件](file:fil_attach_9)',
+    ].join('\n\n')
+
+    vi.mocked(api.getArtifact).mockResolvedValueOnce({
+      artifact: { ...sampleItems[0]!.artifact, content: markdown },
+      versions: [],
+      comments: [],
+      nextVersionPageToken: '',
+      hasMoreVersions: false,
+      askBaseline: null,
+    })
+
+    const openArtifactSpy = vi.spyOn(store, 'openProjectArtifact').mockResolvedValue()
+    const openThreadSpy = vi.spyOn(store, 'openProjectThread').mockResolvedValue()
+    previewFile.value = null
+
+    // Desktop aside quick view
+    const desktopWrapper = mountGallery('wide')
+    await flushPromises()
+    await desktopWrapper.find('[data-artifact-id="art_doc"] .quick-view-btn').trigger('click')
+    await flushPromises()
+
+    const pane = desktopWrapper.find('aside.quick-pane .quick-markdown')
+    expect(pane.exists()).toBe(true)
+
+    const imgs = pane.findAll('img')
+    expect(imgs).toHaveLength(1)
+    expect(imgs[0]!.attributes('src')).toBe('/api/files/fil_safe_123')
+
+    const extLink = pane.find('a[href="https://example.com/docs"]')
+    expect(extLink.exists()).toBe(true)
+    expect(extLink.attributes('target')).toBe('_blank')
+    expect(extLink.attributes('rel')).toContain('noopener')
+
+    expect(pane.find('a[href^="http://"]').exists()).toBe(false)
+    expect(pane.find('a[href="/internal/secret"]').exists()).toBe(false)
+
+    const artifactLink = pane.findAll('a').find((a) => a.text().includes('关联画板'))
+    expect(artifactLink).toBeTruthy()
+    await artifactLink!.trigger('click')
+    expect(openArtifactSpy).toHaveBeenCalledWith('prj_a', 'art_proto')
+
+    const threadLink = pane.findAll('a').find((a) => a.text().includes('关联讨论'))
+    expect(threadLink).toBeTruthy()
+    await threadLink!.trigger('click')
+    expect(openThreadSpy).toHaveBeenCalledWith('prj_a', 'thr_42')
+
+    const fileLink = pane
+      .findAll('a, button, [role="button"]')
+      .find((el) => el.text().includes('附件文件'))
+    expect(fileLink).toBeTruthy()
+    await fileLink!.trigger('click')
+    expect(previewFile.value).toMatchObject({ id: 'fil_attach_9' })
+
+    desktopWrapper.unmount()
+
+    // Narrow drawer quick view applies the same URL sanitization
+    vi.mocked(api.getArtifact).mockResolvedValueOnce({
+      artifact: { ...sampleItems[0]!.artifact, content: markdown },
+      versions: [],
+      comments: [],
+      nextVersionPageToken: '',
+      hasMoreVersions: false,
+      askBaseline: null,
+    })
+    resetGalleryStateForTests()
+    const narrowWrapper = mountGallery('narrow')
+    await flushPromises()
+    await narrowWrapper.find('[data-artifact-id="art_doc"] .quick-view-btn').trigger('click')
+    await flushPromises()
+
+    const drawerMarkdown = document.body.querySelector('.quick-sheet-body .quick-markdown')
+    expect(drawerMarkdown).toBeTruthy()
+    const drawerImgs = [...drawerMarkdown!.querySelectorAll('img')]
+    expect(drawerImgs).toHaveLength(1)
+    expect(drawerImgs[0]!.getAttribute('src')).toBe('/api/files/fil_safe_123')
+    const drawerExt = drawerMarkdown!.querySelector('a[href="https://example.com/docs"]')
+    expect(drawerExt?.getAttribute('target')).toBe('_blank')
+    expect(drawerMarkdown!.querySelector('a[href^="http://"]')).toBeNull()
+  })
+
+  test('virtualized mode paginates via DouVirtualList @end-reached without eager page 2 fetch and restores scroll position', async () => {
+    const page1 = Array.from({ length: 48 }, (_, i) =>
+      makeItem(`art_p1_${i}`, { title: `第 1 页产物 ${i}` }),
+    )
+    const page2 = Array.from({ length: 48 }, (_, i) =>
+      makeItem(`art_p2_${i}`, { title: `第 2 页产物 ${i}` }),
+    )
+    const page3 = Array.from({ length: 10 }, (_, i) =>
+      makeItem(`art_p3_${i}`, { title: `第 3 页产物 ${i}` }),
+    )
+
+    const observeSpy = vi.fn()
+    const originalIO = globalThis.IntersectionObserver
+    globalThis.IntersectionObserver = class {
+      observe = observeSpy
+      disconnect = vi.fn()
+      unobserve = vi.fn()
+      takeRecords = () => []
+      root = null
+      rootMargin = ''
+      thresholds = []
+    } as unknown as typeof IntersectionObserver
+
+    try {
+      const listSpy = vi.mocked(api.listGalleryArtifacts)
+      listSpy.mockReset()
+      listSpy.mockImplementation(async (params) => {
+        if (!params?.pageToken) {
+          return { items: page1, nextPageToken: 'tok_2', hasMore: true, counts: sampleCounts }
+        }
+        if (params?.pageToken === 'tok_2') {
+          return { items: page2, nextPageToken: 'tok_3', hasMore: true, counts: null }
+        }
+        return { items: page3, nextPageToken: '', hasMore: false, counts: null }
+      })
+
+      const wrapper = mountGallery('wide')
+      await flushPromises()
+      await nextTick()
+
+      // Enters virtualized mode (> 40 items) and does NOT attach an external IntersectionObserver or eagerly fetch page 2.
+      const virtualList = wrapper.findComponent({ name: 'DouVirtualList' })
+      expect(virtualList.exists()).toBe(true)
+      expect(observeSpy).not.toHaveBeenCalled()
+      expect(listSpy).toHaveBeenCalledTimes(1)
+
+      // Trigger page 2 and page 3 via DouVirtualList's endReached event.
+      virtualList.vm.$emit('endReached')
+      await flushPromises()
+      expect(listSpy).toHaveBeenCalledTimes(2)
+      expect(listSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pageToken: 'tok_2' }))
+      expect(galleryState.items).toHaveLength(96)
+
+      virtualList.vm.$emit('endReached')
+      await flushPromises()
+      expect(listSpy).toHaveBeenCalledTimes(3)
+      expect(listSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pageToken: 'tok_3' }))
+      expect(galleryState.items).toHaveLength(106)
+      expect(galleryState.hasMore).toBe(false)
+
+      // Record virtual list scrollTop and verify restoration after remounting gallery.
+      const scrollEl = virtualList.element as HTMLElement
+      scrollEl.scrollTop = 420
+      scrollEl.dispatchEvent(new Event('scroll'))
+      expect(galleryState.scrollTop).toBe(420)
+
+      wrapper.unmount()
+
+      const remounted = mountGallery('wide')
+      await flushPromises()
+      await nextTick()
+      const restoredList = remounted.findComponent({ name: 'DouVirtualList' })
+      expect(restoredList.exists()).toBe(true)
+      expect((restoredList.element as HTMLElement).scrollTop).toBe(420)
+    } finally {
+      globalThis.IntersectionObserver = originalIO
+    }
+  })
+
+  test('marks gallery stale on live events while unmounted and reloads on re-entry', async () => {
+    vi.spyOn(api, 'listProjects').mockResolvedValue({ projects: [], lastSeq: 1 })
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue({
+      models: [],
+      providers: [],
+      roles: { thread: { model: '' } },
+      showCost: false,
+    } as never)
+    vi.spyOn(api, 'getInputSettings').mockResolvedValue({
+      submitOn: 'enter',
+      snippets: [],
+      keys: {},
+    } as never)
+
+    let pushFrame!: (frame: StreamEventsResponse) => void
+    vi.spyOn(api, 'streamEvents').mockImplementationOnce((_opts, signal) =>
+      (async function* () {
+        yield create(StreamEventsResponseSchema, {
+          payload: { case: 'ready', value: create(StreamReadySchema, { lastSeq: 1n }) },
+        })
+        for (;;) {
+          if (signal?.aborted) return
+          const frame = await new Promise<StreamEventsResponse | null>((resolve) => {
+            pushFrame = resolve
+            signal?.addEventListener('abort', () => resolve(null), { once: true })
+          })
+          if (!frame) return
+          yield frame
+        }
+      })(),
+    )
+
+    await store.start(async () => {})
+    await flushPromises()
+
+    const listSpy = vi.mocked(api.listGalleryArtifacts)
+    const firstWrapper = mountGallery('wide')
+    await flushPromises()
+    expect(listSpy).toHaveBeenCalledTimes(1)
+    expect(galleryState.stale).toBe(false)
+
+    // Leave the gallery (component unmounts).
+    firstWrapper.unmount()
+
+    // While outside /gallery, an artifact revision arrives over the live event stream.
+    const encoder = new TextEncoder()
+    pushFrame(
+      create(StreamEventsResponseSchema, {
+        payload: {
+          case: 'event',
+          value: create(StoredEventSchema, {
+            seq: 2n,
+            id: 'evt_2',
+            projectId: 'prj_a',
+            type: 'artifact.revised',
+            at: 1800000001000n,
+            rawJson: encoder.encode(JSON.stringify({ artifactId: 'art_doc', version: 4 })),
+          }),
+        },
+      }),
+    )
+    await flushPromises()
+    expect(galleryState.stale).toBe(true)
+
+    // Returning to /gallery automatically reloads fresh data.
+    const secondWrapper = mountGallery('wide')
+    await flushPromises()
+    expect(listSpy).toHaveBeenCalledTimes(2)
+    expect(galleryState.stale).toBe(false)
+
+    secondWrapper.unmount()
+
+    // Plan node rename while outside /gallery also invalidates cached nodeTitle.
+    pushFrame(
+      create(StreamEventsResponseSchema, {
+        payload: {
+          case: 'event',
+          value: create(StoredEventSchema, {
+            seq: 3n,
+            id: 'evt_3',
+            projectId: 'prj_a',
+            type: 'plan.revised',
+            at: 1800000002000n,
+            rawJson: encoder.encode(JSON.stringify({})),
+          }),
+        },
+      }),
+    )
+    await flushPromises()
+    expect(galleryState.stale).toBe(true)
+  })
+
+  test('ignores global /, Escape, and Arrow shortcuts when a modal dialog or listbox overlay is open', async () => {
+    const wrapper = mountGallery('wide')
+    await flushPromises()
+
+    // Open desktop quick view on the first card.
+    await wrapper.find('[data-artifact-id="art_doc"] .quick-view-btn').trigger('click')
+    await flushPromises()
+    expect(galleryState.quickViewId).toBe('art_doc')
+
+    const searchInput = wrapper.find('.gallery-search input').element as HTMLInputElement
+
+    // Simulate an open modal dialog (e.g. settings modal / command palette).
+    const modal = document.createElement('div')
+    modal.setAttribute('role', 'dialog')
+    modal.setAttribute('aria-modal', 'true')
+    const modalBtn = document.createElement('button')
+    modal.appendChild(modalBtn)
+    document.body.appendChild(modal)
+    modalBtn.focus()
+
+    try {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      expect(galleryState.quickViewId).toBe('art_doc')
+
+      const downEv = new KeyboardEvent('keydown', {
+        key: 'ArrowDown',
+        bubbles: true,
+        cancelable: true,
+      })
+      window.dispatchEvent(downEv)
+      expect(downEv.defaultPrevented).toBe(false)
+      expect(galleryState.quickViewId).toBe('art_doc')
+
+      const slashEv = new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true })
+      window.dispatchEvent(slashEv)
+      expect(slashEv.defaultPrevented).toBe(false)
+      expect(document.activeElement).not.toBe(searchInput)
+    } finally {
+      modal.remove()
+    }
+
+    // Simulate an open DouSelect listbox dropdown.
+    const listbox = document.createElement('div')
+    listbox.setAttribute('role', 'listbox')
+    document.body.appendChild(listbox)
+    try {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      expect(galleryState.quickViewId).toBe('art_doc')
+
+      const downEv = new KeyboardEvent('keydown', {
+        key: 'ArrowDown',
+        bubbles: true,
+        cancelable: true,
+      })
+      window.dispatchEvent(downEv)
+      expect(downEv.defaultPrevented).toBe(false)
+      expect(galleryState.quickViewId).toBe('art_doc')
+    } finally {
+      listbox.remove()
+    }
+
+    // With no overlay open, ArrowDown steps quick view and Escape closes it.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(galleryState.quickViewId).toBe('art_proto')
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(galleryState.quickViewId).toBeNull()
+  })
+
+  test('isolates card Enter and Space shortcuts from nested project pill and quick-view buttons', async () => {
+    const openArtifactSpy = vi.spyOn(store, 'openProjectArtifact').mockResolvedValue()
+    const wrapper = mountGallery('wide')
+    await flushPromises()
+
+    const card = wrapper.find('[data-artifact-id="art_doc"]')
+    const projectPill = card.find('button.project-pill')
+    const quickBtn = card.find('button.quick-view-btn')
+
+    // Pressing Enter or Space while focused on nested buttons must NOT trigger card shortcuts or preventDefault.
+    for (const btn of [projectPill, quickBtn]) {
+      const enterEv = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      })
+      btn.element.dispatchEvent(enterEv)
+      expect(enterEv.defaultPrevented).toBe(false)
+      expect(openArtifactSpy).not.toHaveBeenCalled()
+
+      const spaceEv = new KeyboardEvent('keydown', {
+        key: ' ',
+        bubbles: true,
+        cancelable: true,
+      })
+      btn.element.dispatchEvent(spaceEv)
+      expect(spaceEv.defaultPrevented).toBe(false)
+      expect(galleryState.quickViewId).toBeNull()
+    }
+
+    // Pressing Enter or Space on the card container itself still triggers open / quickView.
+    await card.trigger('keydown', { key: 'Enter' })
+    expect(openArtifactSpy).toHaveBeenCalledWith('prj_a', 'art_doc')
+
+    await card.trigger('keydown', { key: ' ' })
     expect(galleryState.quickViewId).toBe('art_doc')
   })
 })

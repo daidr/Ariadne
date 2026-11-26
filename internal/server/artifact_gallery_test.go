@@ -67,11 +67,21 @@ func TestArtifactGalleryRPCAndLightweightGet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.CreateArtifact(ctx, prjB.ID, core.NewArtifact{
+	docArt, err := repo.CreateArtifact(ctx, prjB.ID, core.NewArtifact{
 		Kind:    "document",
 		Title:   "设计文档",
 		Author:  "user",
 		Content: "# 概览\n\n正文",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CommentOnArtifact(ctx, docArt.ID, "user", map[string]any{
+		"type":      "create",
+		"threadId":  "ct_rpc_1",
+		"commentId": "cm_rpc_1",
+		"quote":     "正文",
+		"body":      "补充实现细节",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +124,15 @@ func TestArtifactGalleryRPCAndLightweightGet(t *testing.T) {
 	}
 	if len(protoOnly.Msg.Items) != 1 || protoOnly.Msg.Items[0].Artifact.Id != protoArt.ID {
 		t.Fatalf("only_prototypes = %+v", protoOnly.Msg.Items)
+	}
+	hasComments, err := client.ListGalleryArtifacts(ctx, connect.NewRequest(&ariadnev1.ListGalleryArtifactsRequest{
+		Status: "has_comments",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hasComments.Msg.Items) != 1 || hasComments.Msg.Items[0].Artifact.Id != docArt.ID {
+		t.Fatalf("has_comments = %+v, want only %s", hasComments.Msg.Items, docArt.ID)
 	}
 	wbPreview := protoOnly.Msg.Items[0].Artifact.Preview.GetWhiteboard()
 	if wbPreview == nil || wbPreview.PrototypeCount != 1 || wbPreview.GetPreviewImage() != "/api/files/fil_proto_cover" || len(wbPreview.Minimap) != 1 {

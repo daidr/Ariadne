@@ -206,6 +206,8 @@ func appendGalleryFilters(where []string, args []any, q GalleryArtifactsQuery, i
 		switch q.Status {
 		case "needs_me":
 			where = append(where, "(a.pending_actions > 0 OR a.open_comments > 0)")
+		case "has_comments":
+			where = append(where, "a.open_comments > 0")
 		case "feedback_pending":
 			where = append(where, "EXISTS (SELECT 1 FROM artifact_feedback f WHERE f.artifact_id = a.id AND f.done_at IS NULL AND f.withdrawn_at IS NULL)")
 		}
@@ -274,7 +276,7 @@ func (reader Reader) ListGalleryArtifacts(ctx context.Context, q GalleryArtifact
 		return GalleryArtifactPage{}, badInput("kind")
 	}
 	switch q.Status {
-	case "", "needs_me", "feedback_pending":
+	case "", "needs_me", "has_comments", "feedback_pending":
 	default:
 		return GalleryArtifactPage{}, badInput("status")
 	}

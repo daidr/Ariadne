@@ -31,11 +31,12 @@ import {
   DouTooltip,
   DouVirtualList,
   useElementSize,
+  type VirtualListExpose,
 } from 'dou-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { t } from '../i18n'
 import { useServerNow } from '../server-clock'
-import { onLiveEvent, openProject, openProjectArtifact } from '../store'
+import { openProject, openProjectArtifact, state } from '../store'
 import type { WorkspaceLayoutMode } from '../workspace-layout'
 import { ARTIFACT_VIRTUALIZE_THRESHOLD, gridColumnCount } from './card-grid'
 import GalleryCard from './GalleryCard.vue'
@@ -46,7 +47,6 @@ import {
   hasActiveGalleryFilters,
   loadGallery,
   loadMoreGallery,
-  markGalleryStale,
   resetGalleryFilters,
   saveGalleryPrefs,
   type GalleryDensity,
@@ -62,6 +62,7 @@ const isNarrow = computed(() => props.layoutMode === 'narrow')
 const now = useServerNow()
 
 const canvasRef = useTemplateRef<HTMLElement>('canvasRef')
+const virtualListRef = useTemplateRef<VirtualListExpose>('virtualListRef')
 const sentinelRef = useTemplateRef<HTMLElement>('sentinelRef')
 const searchInputRef = useTemplateRef<InstanceType<typeof DouInput>>('searchInputRef')
 const { width: canvasWidth } = useElementSize(canvasRef)
@@ -89,16 +90,26 @@ const virtualized = computed(
     galleryState.groupBy === 'none' && galleryState.items.length > ARTIFACT_VIRTUALIZE_THRESHOLD,
 )
 
-const virtualRows = computed(() => {
+type VirtualRow =
+  | { key: string; kind: 'items'; items: GalleryArtifactSummary[] }
+  | { key: '__load_more__'; kind: 'load-more' }
+
+const virtualRows = computed<VirtualRow[]>(() => {
   if (!virtualized.value) return []
+  const rows: VirtualRow[] = []
   if (galleryState.viewMode === 'list') {
-    return galleryState.items.map((item) => ({ key: item.artifact.id, items: [item] }))
+    for (const item of galleryState.items) {
+      rows.push({ key: item.artifact.id, kind: 'items', items: [item] })
+    }
+  } else {
+    const cols = Math.max(1, columns.value)
+    for (let i = 0; i < galleryState.items.length; i += cols) {
+      const chunk = galleryState.items.slice(i, i + cols)
+      rows.push({ key: chunk[0]!.artifact.id, kind: 'items', items: chunk })
+    }
   }
-  const cols = Math.max(1, columns.value)
-  const rows: { key: string; items: GalleryArtifactSummary[] }[] = []
-  for (let i = 0; i < galleryState.items.length; i += cols) {
-    const chunk = galleryState.items.slice(i, i + cols)
-    rows.push({ key: chunk[0]!.artifact.id, items: chunk })
+  if (galleryState.hasMore) {
+    rows.push({ key: '__load_more__', kind: 'load-more' })
   }
   return rows
 })
@@ -107,6 +118,10 @@ const estimatedRowHeight = computed(() => {
   if (galleryState.viewMode === 'list') return galleryState.density === 'compact' ? 68 : 78
   return galleryState.density === 'compact' ? 218 : 264
 })
+
+function estimateVirtualRowSize(row: VirtualRow): number {
+  return row.kind === 'load-more' ? 56 : estimatedRowHeight.value
+}
 
 const kindOptions = computed(() => {
   const c = galleryState.counts
@@ -180,7 +195,7 @@ function setKindFilter(value: unknown) {
   const next = String(value ?? '') as GalleryKindFilter
   if (galleryState.kindFilter === next) return
   galleryState.kindFilter = next
-  galleryState.scrollTop = 0
+  resetScroll()
   void loadGallery()
 }
 
@@ -188,13 +203,13 @@ function setProjectFilter(value: unknown) {
   const next = String(value ?? '')
   if (galleryState.projectId === next) return
   galleryState.projectId = next
-  galleryState.scrollTop = 0
+  resetScroll()
   void loadGallery()
 }
 
 function toggleStatus(target: Exclude<GalleryStatusFilter, ''>) {
   galleryState.status = galleryState.status === target ? '' : target
-  galleryState.scrollTop = 0
+  resetScroll()
   void loadGallery()
 }
 
@@ -202,8 +217,13 @@ function setSort(value: unknown) {
   const next = String(value ?? 'updated_desc') as GallerySort
   if (galleryState.sort === next) return
   galleryState.sort = next
-  galleryState.scrollTop = 0
+  resetScroll()
   void loadGallery()
+}
+
+function onResetFilters() {
+  resetScroll()
+  resetGalleryFilters()
 }
 
 function setGroupBy(value: unknown) {
@@ -264,9 +284,35 @@ function jumpToProject(projectId: string) {
   void openProject(projectId)
 }
 
+function applyScrollTop(offset: number) {
+  if (virtualized.value) {
+    virtualListRef.value?.scrollTo(offset)
+  } else if (canvasRef.value) {
+    canvasRef.value.scrollTop = offset
+  }
+}
+
+function resetScroll() {
+  galleryState.scrollTop = 0
+  applyScrollTop(0)
+}
+
 function onCanvasScroll() {
-  if (canvasRef.value) {
+  if (!virtualized.value && canvasRef.value) {
     galleryState.scrollTop = canvasRef.value.scrollTop
+  }
+}
+
+function onVirtualScroll(event: Event) {
+  const el = (event.currentTarget as HTMLElement | null) ?? virtualListRef.value?.el()
+  if (el) {
+    galleryState.scrollTop = el.scrollTop
+  }
+}
+
+function onVirtualEndReached() {
+  if (galleryState.hasMore && !galleryState.loadingMore) {
+    void loadMoreGallery()
   }
 }
 
@@ -277,36 +323,33 @@ watch(
   () => {
     clearTimeout(queryTimer)
     queryTimer = setTimeout(() => {
-      galleryState.scrollTop = 0
+      resetScroll()
       void loadGallery()
     }, 220)
   },
 )
 
-// Live event refresh so newly created/updated artifacts appear without manual reload.
+// Debounced silent refresh while mounted whenever the persistent live listener invalidates cache.
 let liveRefreshTimer: ReturnType<typeof setTimeout> | undefined
-const stopLive = onLiveEvent((event) => {
-  if (
-    event.type.startsWith('artifact.') ||
-    event.type === 'project.deleted' ||
-    event.type === 'project.renamed'
-  ) {
-    markGalleryStale()
+watch(
+  () => galleryState.staleRevision,
+  () => {
+    if (!galleryState.stale) return
     clearTimeout(liveRefreshTimer)
     liveRefreshTimer = setTimeout(() => {
       void loadGallery({ silent: true })
     }, 350)
-  }
-})
+  },
+)
 
-// Infinite scroll sentinel observer.
+// Infinite scroll sentinel observer (non-virtualized mode only; virtualized mode uses @end-reached).
 let sentinelObserver: IntersectionObserver | null = null
 watch(
-  [sentinelRef, () => galleryState.hasMore],
-  ([el, hasMore]) => {
+  [sentinelRef, virtualized, () => galleryState.hasMore],
+  ([el, isVirtual, hasMore]) => {
     sentinelObserver?.disconnect()
     sentinelObserver = null
-    if (!el || !hasMore || typeof IntersectionObserver === 'undefined') return
+    if (!el || isVirtual || !hasMore || typeof IntersectionObserver === 'undefined') return
     sentinelObserver = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
@@ -326,23 +369,55 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
 }
 
+function isVisibleOverlayElement(el: Element): boolean {
+  if (!(el instanceof HTMLElement)) return false
+  if (el.hidden || el.getAttribute('aria-hidden') === 'true') return false
+  // In real browsers with layout, client rects accurately reflect ancestor visibility.
+  if (document.body.getClientRects().length > 0) {
+    return el.getClientRects().length > 0
+  }
+  let cur: HTMLElement | null = el
+  while (cur) {
+    if (cur.hidden || cur.getAttribute('aria-hidden') === 'true') return false
+    const style = window.getComputedStyle(cur)
+    if (style.display === 'none' || style.visibility === 'hidden') return false
+    cur = cur.parentElement
+  }
+  return true
+}
+
+function isInOverlay(node: EventTarget | null): boolean {
+  return (
+    node instanceof Element &&
+    Boolean(
+      node.closest(
+        '[role="dialog"], [role="menu"], [role="listbox"], [role="combobox"][aria-expanded="true"]',
+      ),
+    )
+  )
+}
+
+function isOverlayOpen(event: KeyboardEvent): boolean {
+  if (state.stream === 'unauthorized') return true
+  const visibleOverlay = [
+    ...document.querySelectorAll('[aria-modal="true"], [role="menu"], [role="listbox"]'),
+  ].some((el) => isVisibleOverlayElement(el))
+  if (visibleOverlay) return true
+  return isInOverlay(event.target) || isInOverlay(document.activeElement)
+}
+
 function onKeyDown(event: KeyboardEvent) {
-  if (event.metaKey || event.ctrlKey || event.altKey) return
+  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
+  if (isOverlayOpen(event)) return
   if (event.key === '/' && !isEditableTarget(event.target)) {
     event.preventDefault()
     const root = searchInputRef.value?.$el as HTMLElement | undefined
     root?.querySelector<HTMLInputElement>('input')?.focus()
     return
   }
-  if (event.key === 'Escape') {
-    if (mobileFilterOpen.value) {
-      mobileFilterOpen.value = false
-      return
-    }
-    if (galleryState.quickViewId) {
-      closeQuickView()
-      return
-    }
+  if (event.key === 'Escape' && galleryState.quickViewId) {
+    closeQuickView()
+    return
   }
   if (galleryState.quickViewId && !isEditableTarget(event.target)) {
     if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
@@ -365,8 +440,8 @@ onMounted(async () => {
     await loadGallery({ silent: galleryState.loadedOnce })
   }
   await nextTick()
-  if (canvasRef.value && galleryState.scrollTop > 0) {
-    canvasRef.value.scrollTop = galleryState.scrollTop
+  if (galleryState.scrollTop > 0) {
+    applyScrollTop(galleryState.scrollTop)
   }
 })
 
@@ -375,7 +450,6 @@ onBeforeUnmount(() => {
   clearTimeout(queryTimer)
   clearTimeout(liveRefreshTimer)
   sentinelObserver?.disconnect()
-  stopLive()
 })
 </script>
 
@@ -565,7 +639,7 @@ onBeforeUnmount(() => {
             v-if="hasActiveGalleryFilters"
             size="sm"
             variant="ghost"
-            @click="resetGalleryFilters"
+            @click="onResetFilters"
           >
             {{ t('gallery.filters.reset') }}
           </DouButton>
@@ -574,7 +648,12 @@ onBeforeUnmount(() => {
     </header>
 
     <div class="gallery-body">
-      <div ref="canvasRef" class="gallery-canvas" @scroll.passive="onCanvasScroll">
+      <div
+        ref="canvasRef"
+        class="gallery-canvas"
+        :class="{ 'gallery-canvas-virtual': virtualized }"
+        @scroll.passive="onCanvasScroll"
+      >
         <div v-if="galleryState.error" class="gallery-error">
           <DouAlert tone="danger" :title="t('gallery.error.load')">
             {{ galleryState.error }}
@@ -612,7 +691,7 @@ onBeforeUnmount(() => {
               v-if="hasActiveGalleryFilters"
               size="sm"
               variant="outline"
-              @click="resetGalleryFilters"
+              @click="onResetFilters"
             >
               {{ t('gallery.filters.reset') }}
             </DouButton>
@@ -621,16 +700,26 @@ onBeforeUnmount(() => {
 
         <DouVirtualList
           v-else-if="virtualized"
+          ref="virtualListRef"
           class="gallery-virtual"
           :items="virtualRows"
           item-key="key"
-          :estimate-size="estimatedRowHeight"
+          :estimate-size="estimateVirtualRowSize"
           :overscan="3"
+          :end-threshold="240"
           :aria-label="t('gallery.title')"
+          @scroll="onVirtualScroll"
+          @end-reached="onVirtualEndReached"
         >
           <template #default="{ item: row }">
+            <div v-if="row.kind === 'load-more'" class="gallery-load-more">
+              <DouSpinner v-if="galleryState.loadingMore" size="sm" />
+              <DouButton v-else size="sm" variant="outline" @click="loadMoreGallery()">
+                {{ t('gallery.loadMore') }}
+              </DouButton>
+            </div>
             <div
-              v-if="galleryState.viewMode === 'grid'"
+              v-else-if="galleryState.viewMode === 'grid'"
               class="gallery-virtual-row"
               :style="{
                 gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
@@ -713,7 +802,11 @@ onBeforeUnmount(() => {
           </section>
         </div>
 
-        <div v-if="galleryState.hasMore" ref="sentinelRef" class="gallery-load-more">
+        <div
+          v-if="!virtualized && galleryState.hasMore"
+          ref="sentinelRef"
+          class="gallery-load-more"
+        >
           <DouSpinner v-if="galleryState.loadingMore" size="sm" />
           <DouButton v-else size="sm" variant="outline" @click="loadMoreGallery()">
             {{ t('gallery.loadMore') }}
@@ -869,7 +962,7 @@ onBeforeUnmount(() => {
 
       <template #footer="{ close }">
         <div class="sheet-footer">
-          <DouButton variant="outline" class="sheet-footer-btn" @click="resetGalleryFilters">
+          <DouButton variant="outline" class="sheet-footer-btn" @click="onResetFilters">
             {{ t('gallery.filters.reset') }}
           </DouButton>
           <DouButton tone="primary" class="sheet-footer-btn" @click="close">
@@ -1042,8 +1135,17 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
+.gallery-canvas-virtual {
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
 .gallery-narrow .gallery-canvas {
   padding: 12px 12px calc(24px + var(--ariadne-safe-bottom, 0px));
+}
+
+.gallery-narrow .gallery-canvas-virtual {
+  padding-bottom: 0;
 }
 
 .gallery-sections {

@@ -88,6 +88,17 @@ function onCardClick() {
   emit('open', props.item)
 }
 
+function onCardKeydown(event: KeyboardEvent) {
+  if (event.target !== event.currentTarget) return
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    onCardClick()
+  } else if (event.key === ' ' || event.key === 'Spacebar') {
+    event.preventDefault()
+    emit('quickView', props.item)
+  }
+}
+
 function onQuickViewClick(event: MouseEvent) {
   event.stopPropagation()
   emit('quickView', props.item)
@@ -121,8 +132,7 @@ function onProjectClick(event: MouseEvent) {
       :data-artifact-id="artifact.id"
       :aria-pressed="selected ? 'true' : undefined"
       @click="onCardClick"
-      @keydown.enter.prevent="onCardClick"
-      @keydown.space.prevent="emit('quickView', item)"
+      @keydown="onCardKeydown"
     >
       <template v-if="viewMode === 'grid'">
         <div class="card-media">

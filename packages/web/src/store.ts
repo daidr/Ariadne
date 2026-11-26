@@ -953,7 +953,9 @@ export async function openProjectThread(
   options: OpenOptions = {},
 ) {
   if (!(await ensureProjectOpen(projectId))) return
-  if (state.main.kind === 'trace') openMain({ kind: 'conversation' })
+  if (state.main.kind === 'trace' || state.main.kind === 'gallery') {
+    openMain({ kind: 'conversation' })
+  }
   await openThread(threadId, options)
 }
 

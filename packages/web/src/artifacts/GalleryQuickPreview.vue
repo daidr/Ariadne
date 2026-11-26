@@ -15,6 +15,7 @@ import {
   DouButton,
   DouDivider,
   DouDrawer,
+  DouLink,
   DouMarkdown,
   DouSpinner,
   DouTag,
@@ -22,8 +23,12 @@ import {
 } from 'dou-ui'
 import { computed, ref, watch } from 'vue'
 import { api } from '../api'
+import { openFilePreview } from '../files/preview'
 import { locale, t } from '../i18n'
+import { innerLink, sanitizeUrl } from '../markdown/links'
 import { useServerNow } from '../server-clock'
+import { artifactKey, threadKey } from '../side/layout'
+import { openProjectArtifact, openProjectThread } from '../store'
 import ArtifactThumb from './ArtifactThumb.vue'
 import { formatGalleryTime, formatGalleryUpdater } from './gallery-groups'
 import { kindIcon } from './kinds'
@@ -146,6 +151,36 @@ const dashboardTitles = computed(() => {
 function formatVersionTime(at: number) {
   return formatGalleryTime(at, now.value, locale.value)
 }
+
+function innerLinkHref(href: string | undefined): string | undefined {
+  const target = innerLink(href)
+  const projectId = artifact.value?.projectId
+  if (!target || !projectId) return undefined
+  if (target.kind === 'artifact') {
+    return `/projects/${encodeURIComponent(projectId)}?pane=side&tab=${encodeURIComponent(artifactKey(target.id))}`
+  }
+  if (target.kind === 'thread') {
+    return `/projects/${encodeURIComponent(projectId)}?pane=side&tab=${encodeURIComponent(threadKey(target.id))}`
+  }
+  return undefined
+}
+
+function openMarkdownInnerLink(href: string, event: MouseEvent) {
+  const target = innerLink(href)
+  if (!target) return
+  if ((event.metaKey || event.ctrlKey || event.shiftKey) && innerLinkHref(href)) {
+    return
+  }
+  event.preventDefault()
+  const projectId = artifact.value?.projectId
+  if (target.kind === 'artifact' && projectId) {
+    void openProjectArtifact(projectId, target.id)
+  } else if (target.kind === 'thread' && projectId) {
+    void openProjectThread(projectId, target.id)
+  } else if (target.kind === 'file') {
+    openFilePreview({ id: target.id })
+  }
+}
 </script>
 
 <template>
@@ -208,7 +243,30 @@ function formatVersionTime(at: number) {
         </div>
         <DouAlert v-else-if="loadError" tone="danger" :title="t('gallery.quickView.loadError')" />
         <div v-else-if="artifact.kind === 'document' && documentMarkdown" class="quick-markdown">
-          <DouMarkdown :content="documentMarkdown" />
+          <DouMarkdown :content="documentMarkdown" link-target="_blank" :sanitize-url="sanitizeUrl">
+            <template #link="{ href, title, external, children }">
+              <DouLink
+                v-if="innerLink(href)"
+                :href="innerLinkHref(href)"
+                variant="soft"
+                @click="openMarkdownInnerLink(href!, $event)"
+              >
+                <component :is="children" />
+              </DouLink>
+              <a
+                v-else-if="href"
+                :href="href"
+                :title="title"
+                :target="external ? '_blank' : undefined"
+                :rel="external ? 'noopener noreferrer' : undefined"
+              >
+                <component :is="children" />
+              </a>
+              <span v-else class="dou-markdown__link">
+                <component :is="children" />
+              </span>
+            </template>
+          </DouMarkdown>
         </div>
         <div v-else-if="preview?.kind === 'whiteboard'" class="quick-list-section">
           <DouText size="sm" variant="secondary" weight="medium">{{
@@ -388,7 +446,30 @@ function formatVersionTime(at: number) {
         </div>
         <DouAlert v-else-if="loadError" tone="danger" :title="t('gallery.quickView.loadError')" />
         <div v-else-if="artifact.kind === 'document' && documentMarkdown" class="quick-markdown">
-          <DouMarkdown :content="documentMarkdown" />
+          <DouMarkdown :content="documentMarkdown" link-target="_blank" :sanitize-url="sanitizeUrl">
+            <template #link="{ href, title, external, children }">
+              <DouLink
+                v-if="innerLink(href)"
+                :href="innerLinkHref(href)"
+                variant="soft"
+                @click="openMarkdownInnerLink(href!, $event)"
+              >
+                <component :is="children" />
+              </DouLink>
+              <a
+                v-else-if="href"
+                :href="href"
+                :title="title"
+                :target="external ? '_blank' : undefined"
+                :rel="external ? 'noopener noreferrer' : undefined"
+              >
+                <component :is="children" />
+              </a>
+              <span v-else class="dou-markdown__link">
+                <component :is="children" />
+              </span>
+            </template>
+          </DouMarkdown>
         </div>
         <div v-else-if="preview?.kind === 'whiteboard'" class="quick-list-section">
           <DouText size="sm" variant="tertiary">
@@ -575,6 +656,14 @@ function formatVersionTime(at: number) {
   border-radius: var(--dou-radius-control);
   background: var(--dou-color-bg-canvas);
   font-size: 13px;
+}
+
+.quick-markdown :deep(img) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-block: 6px;
+  border-radius: var(--dou-radius-control);
 }
 
 .quick-list-section {

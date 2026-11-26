@@ -209,12 +209,22 @@ func TestArtifactGalleryPreviewSearchAndFilters(t *testing.T) {
 	if len(needsMePage.Items) != 3 {
 		t.Fatalf("needs_me count = %d, want 3", len(needsMePage.Items))
 	}
+	commentsPage, err := repo.ListGalleryArtifacts(ctx, GalleryArtifactsQuery{Status: "has_comments"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commentsPage.Items) != 1 || commentsPage.Items[0].Artifact.ID != archArt.ID {
+		t.Fatalf("has_comments = %+v, want only %s", commentsPage.Items, archArt.ID)
+	}
 	fbPage, err := repo.ListGalleryArtifacts(ctx, GalleryArtifactsQuery{Status: "feedback_pending"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(fbPage.Items) != 1 || fbPage.Items[0].Artifact.ID != dashArt.ID {
 		t.Fatalf("feedback_pending = %+v, want only %s", fbPage.Items, dashArt.ID)
+	}
+	if _, err := repo.ListGalleryArtifacts(ctx, GalleryArtifactsQuery{Status: "unknown"}); err == nil {
+		t.Fatalf("expected error for invalid status filter")
 	}
 
 	// Search by prototype node note (previously unindexed in boardWords) and by project name.

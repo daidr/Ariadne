@@ -1,4 +1,5 @@
 import type {
+  AnyStoredEvent,
   GalleryArtifactSummary,
   GalleryArtifactsQuery,
   GalleryCounts,
@@ -8,6 +9,7 @@ import type {
 } from '@ariadne/core'
 import { computed, reactive } from 'vue'
 import { api } from '../api'
+import { onLiveEvent } from '../store'
 import type { GalleryGroupBy } from './gallery-groups'
 
 export type GalleryViewMode = 'grid' | 'list'
@@ -72,6 +74,7 @@ export const galleryState = reactive({
   error: null as string | null,
   loadedOnce: false,
   stale: false,
+  staleRevision: 0,
 
   scrollTop: 0,
   selectedId: null as string | null,
@@ -128,6 +131,7 @@ export async function loadGallery(options: { silent?: boolean } = {}): Promise<v
   const controller = new AbortController()
   activeController = controller
   const serial = ++requestSerial
+  const startRevision = galleryState.staleRevision
 
   if (!options.silent || !galleryState.loadedOnce) {
     galleryState.loading = true
@@ -146,7 +150,9 @@ export async function loadGallery(options: { silent?: boolean } = {}): Promise<v
     galleryState.hasMore = page.hasMore
     if (page.counts) galleryState.counts = page.counts
     galleryState.loadedOnce = true
-    galleryState.stale = false
+    if (galleryState.staleRevision === startRevision) {
+      galleryState.stale = false
+    }
     if (
       galleryState.quickViewId &&
       !page.items.some((entry) => entry.artifact.id === galleryState.quickViewId)
@@ -206,9 +212,30 @@ export function resetGalleryFilters() {
   void loadGallery()
 }
 
+/** Whether a live event can invalidate cached cross-project gallery data. */
+export function isGalleryInvalidatingEvent(type: AnyStoredEvent['type']): boolean {
+  return (
+    type.startsWith('artifact.') ||
+    type === 'project.deleted' ||
+    type === 'project.renamed' ||
+    type === 'plan.revised' ||
+    type === 'thread.renamed'
+  )
+}
+
 export function markGalleryStale() {
   galleryState.stale = true
+  galleryState.staleRevision++
 }
+
+// Keep a module-level subscription so changes made while outside /gallery still invalidate cache.
+onLiveEvent((event) => {
+  if (!isGalleryInvalidatingEvent(event.type)) return
+  if (event.type === 'project.deleted' && galleryState.projectId === event.projectId) {
+    galleryState.projectId = ''
+  }
+  markGalleryStale()
+})
 
 export function resetGalleryStateForTests() {
   activeController?.abort()
@@ -231,6 +258,7 @@ export function resetGalleryStateForTests() {
   galleryState.error = null
   galleryState.loadedOnce = false
   galleryState.stale = false
+  galleryState.staleRevision = 0
   galleryState.scrollTop = 0
   galleryState.selectedId = null
   galleryState.quickViewId = null
