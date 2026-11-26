@@ -24,16 +24,17 @@ const thread = (over: Partial<ThreadView>): ThreadView =>
 const ids = (sorted: ThreadView[]) => sorted.map((item) => item.id)
 
 describe('thread list', () => {
-  test('shows the headline for a review, blocker or completed delivery', () => {
-    const stages: ThreadStage[] = ['review', 'blocked', 'done', 'working', 'idle', 'answer']
+  test('shows the headline for a review, blocker, idle report, or completed delivery', () => {
+    const stages: ThreadStage[] = ['review', 'blocked', 'done', 'idle', 'working', 'answer']
     expect(stages.map((stage) => threadLine(thread({ stage, lastHeadline: '看一下' })))).toEqual([
       '看一下',
       '看一下',
       '看一下',
-      null,
+      '看一下',
       null,
       null,
     ])
+    expect(threadLine(thread({ stage: 'idle', lastHeadline: null }))).toBeNull()
   })
 
   test('groups every stage', () => {

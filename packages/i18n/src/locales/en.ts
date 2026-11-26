@@ -304,6 +304,8 @@ export const en: Record<MessageKey, string> = {
   'thread.stoppedByCoordinator': 'The coordinator paused this thread: {reason}',
   'thread.stoppedByUser': 'You paused this thread: {reason}',
   'thread.resume': 'Resume',
+  'thread.resolved': 'This thread is resolved',
+  'thread.reopen': 'Reopen',
   'thread.stage.answer': 'Awaiting your answer',
   'thread.stage.review': 'Awaiting review',
   'thread.stage.waitingMerge': 'Awaiting merge',

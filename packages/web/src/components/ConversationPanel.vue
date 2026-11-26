@@ -24,6 +24,7 @@ import {
 } from 'dou-ui'
 import type { ChangeTotals, MessageView, NoticeView, ReplyDraftBlock } from '@ariadne/core'
 import {
+  CheckCircleIcon,
   ChevronDownIcon,
   CpuIcon,
   ListTreeIcon,
@@ -31,7 +32,9 @@ import {
   PaperclipIcon,
   PauseIcon,
   PlayIcon,
+  RotateCcwIcon,
   RotateCwIcon,
+  ScanSearchIcon,
 } from '@dou-ui/icons'
 import {
   computed,
@@ -69,6 +72,7 @@ import {
   retryTurn,
   sendMessage,
   state,
+  reopenThread,
   resumeThread,
   removeThreadReference,
   keepThreadReference,
@@ -392,6 +396,32 @@ const cancelled = computed(
 )
 // Its turn ended without a report, and it was told once already: the user decides.
 const silent = computed(() => thread.value?.stage === 'silent')
+// Completed discussions hide the composer until the user explicitly reopens them.
+const resolved = computed(() => !!props.threadId && thread.value?.stage === 'done')
+const canReopen = computed(() => resolved.value && !thread.value?.reviewOf)
+const reopeningIds = ref(new Set<string>())
+const reopening = computed(() => {
+  const id = thread.value?.id
+  return !!id && reopeningIds.value.has(id)
+})
+async function reopen() {
+  const id = thread.value?.id
+  if (!id || !canReopen.value || reopeningIds.value.has(id)) return
+  const next = new Set(reopeningIds.value)
+  next.add(id)
+  reopeningIds.value = next
+  try {
+    const ok = await reopenThread(id)
+    if (ok && thread.value?.id === id) {
+      await nextTick()
+      input.value?.focus()
+    }
+  } finally {
+    const remaining = new Set(reopeningIds.value)
+    remaining.delete(id)
+    reopeningIds.value = remaining
+  }
+}
 
 // The reply being written now, shown where its message will be: it keeps the message's id,
 // so the same bubble goes on once the message is posted and loaded.
@@ -726,6 +756,7 @@ let recall: Recall | null = null
 watch(conversationId, () => (recall = null))
 
 function onInputKeydown(event: KeyboardEvent) {
+  if (resolved.value) return
   // The `/` menu moves through its entries with the arrows and has already taken them.
   if (event.defaultPrevented || event.isComposing) return
   if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
@@ -1358,7 +1389,32 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
           :thread="thread"
           class="conversation-capsules"
         />
+        <div v-if="resolved" class="conversation-resolved" data-thread-resolved>
+          <div class="conversation-resolved-status">
+            <ScanSearchIcon
+              v-if="thread?.reviewOf"
+              class="conversation-resolved-icon is-review"
+              aria-hidden="true"
+            />
+            <CheckCircleIcon v-else class="conversation-resolved-icon" aria-hidden="true" />
+            <DouText variant="secondary" size="sm" class="conversation-resolved-text">
+              {{ t(thread?.reviewOf ? 'review.ended' : 'thread.resolved') }}
+            </DouText>
+          </div>
+          <DouButton
+            v-if="canReopen"
+            size="sm"
+            variant="outline"
+            class="conversation-resolved-action"
+            :loading="reopening"
+            @click="reopen"
+          >
+            <template #leading><RotateCcwIcon /></template>
+            {{ t('thread.reopen') }}
+          </DouButton>
+        </div>
         <DouChatInput
+          v-else
           ref="input"
           v-model="draft"
           :submit-on="state.input.submitOn"
@@ -1660,8 +1716,51 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 .conversation-alert,
 .conversation-capsules :deep(button),
 .conversation-capsules :deep(a),
+.conversation-resolved,
 .conversation-input :deep(.dou-chat-input) {
   pointer-events: auto;
+}
+
+.conversation-resolved {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 9px 10px 9px 14px;
+  border: 1px solid var(--dou-color-border);
+  border-radius: 16px;
+  background-color: var(--dou-color-bg-surface);
+  color: var(--dou-color-text-secondary);
+}
+
+.conversation-resolved-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.conversation-resolved-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+  color: var(--dou-color-success);
+}
+
+.conversation-resolved-icon.is-review {
+  color: var(--dou-color-text-tertiary);
+}
+
+.conversation-resolved-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.conversation-resolved-action {
+  flex: none;
 }
 
 .conversation-input :deep(.dou-chat-input:not(:focus-within)) {

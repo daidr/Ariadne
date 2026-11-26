@@ -36,6 +36,9 @@ const (
 	// ThreadServiceResumeThreadProcedure is the fully-qualified name of the ThreadService's
 	// ResumeThread RPC.
 	ThreadServiceResumeThreadProcedure = "/ariadne.v1.ThreadService/ResumeThread"
+	// ThreadServiceReopenThreadProcedure is the fully-qualified name of the ThreadService's
+	// ReopenThread RPC.
+	ThreadServiceReopenThreadProcedure = "/ariadne.v1.ThreadService/ReopenThread"
 	// ThreadServiceCompleteThreadProcedure is the fully-qualified name of the ThreadService's
 	// CompleteThread RPC.
 	ThreadServiceCompleteThreadProcedure = "/ariadne.v1.ThreadService/CompleteThread"
@@ -73,6 +76,7 @@ const (
 // ThreadServiceClient is a client for the ariadne.v1.ThreadService service.
 type ThreadServiceClient interface {
 	ResumeThread(context.Context, *connect.Request[v1.ResumeThreadRequest]) (*connect.Response[v1.ResumeThreadResponse], error)
+	ReopenThread(context.Context, *connect.Request[v1.ReopenThreadRequest]) (*connect.Response[v1.ReopenThreadResponse], error)
 	CompleteThread(context.Context, *connect.Request[v1.CompleteThreadRequest]) (*connect.Response[v1.CompleteThreadResponse], error)
 	EndAside(context.Context, *connect.Request[v1.EndAsideRequest]) (*connect.Response[v1.EndAsideResponse], error)
 	SetThreadModel(context.Context, *connect.Request[v1.SetThreadModelRequest]) (*connect.Response[v1.SetThreadModelResponse], error)
@@ -101,6 +105,12 @@ func NewThreadServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			httpClient,
 			baseURL+ThreadServiceResumeThreadProcedure,
 			connect.WithSchema(threadServiceMethods.ByName("ResumeThread")),
+			connect.WithClientOptions(opts...),
+		),
+		reopenThread: connect.NewClient[v1.ReopenThreadRequest, v1.ReopenThreadResponse](
+			httpClient,
+			baseURL+ThreadServiceReopenThreadProcedure,
+			connect.WithSchema(threadServiceMethods.ByName("ReopenThread")),
 			connect.WithClientOptions(opts...),
 		),
 		completeThread: connect.NewClient[v1.CompleteThreadRequest, v1.CompleteThreadResponse](
@@ -175,6 +185,7 @@ func NewThreadServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 // threadServiceClient implements ThreadServiceClient.
 type threadServiceClient struct {
 	resumeThread          *connect.Client[v1.ResumeThreadRequest, v1.ResumeThreadResponse]
+	reopenThread          *connect.Client[v1.ReopenThreadRequest, v1.ReopenThreadResponse]
 	completeThread        *connect.Client[v1.CompleteThreadRequest, v1.CompleteThreadResponse]
 	endAside              *connect.Client[v1.EndAsideRequest, v1.EndAsideResponse]
 	setThreadModel        *connect.Client[v1.SetThreadModelRequest, v1.SetThreadModelResponse]
@@ -191,6 +202,11 @@ type threadServiceClient struct {
 // ResumeThread calls ariadne.v1.ThreadService.ResumeThread.
 func (c *threadServiceClient) ResumeThread(ctx context.Context, req *connect.Request[v1.ResumeThreadRequest]) (*connect.Response[v1.ResumeThreadResponse], error) {
 	return c.resumeThread.CallUnary(ctx, req)
+}
+
+// ReopenThread calls ariadne.v1.ThreadService.ReopenThread.
+func (c *threadServiceClient) ReopenThread(ctx context.Context, req *connect.Request[v1.ReopenThreadRequest]) (*connect.Response[v1.ReopenThreadResponse], error) {
+	return c.reopenThread.CallUnary(ctx, req)
 }
 
 // CompleteThread calls ariadne.v1.ThreadService.CompleteThread.
@@ -251,6 +267,7 @@ func (c *threadServiceClient) GetPullRequestChecks(ctx context.Context, req *con
 // ThreadServiceHandler is an implementation of the ariadne.v1.ThreadService service.
 type ThreadServiceHandler interface {
 	ResumeThread(context.Context, *connect.Request[v1.ResumeThreadRequest]) (*connect.Response[v1.ResumeThreadResponse], error)
+	ReopenThread(context.Context, *connect.Request[v1.ReopenThreadRequest]) (*connect.Response[v1.ReopenThreadResponse], error)
 	CompleteThread(context.Context, *connect.Request[v1.CompleteThreadRequest]) (*connect.Response[v1.CompleteThreadResponse], error)
 	EndAside(context.Context, *connect.Request[v1.EndAsideRequest]) (*connect.Response[v1.EndAsideResponse], error)
 	SetThreadModel(context.Context, *connect.Request[v1.SetThreadModelRequest]) (*connect.Response[v1.SetThreadModelResponse], error)
@@ -275,6 +292,12 @@ func NewThreadServiceHandler(svc ThreadServiceHandler, opts ...connect.HandlerOp
 		ThreadServiceResumeThreadProcedure,
 		svc.ResumeThread,
 		connect.WithSchema(threadServiceMethods.ByName("ResumeThread")),
+		connect.WithHandlerOptions(opts...),
+	)
+	threadServiceReopenThreadHandler := connect.NewUnaryHandler(
+		ThreadServiceReopenThreadProcedure,
+		svc.ReopenThread,
+		connect.WithSchema(threadServiceMethods.ByName("ReopenThread")),
 		connect.WithHandlerOptions(opts...),
 	)
 	threadServiceCompleteThreadHandler := connect.NewUnaryHandler(
@@ -347,6 +370,8 @@ func NewThreadServiceHandler(svc ThreadServiceHandler, opts ...connect.HandlerOp
 		switch r.URL.Path {
 		case ThreadServiceResumeThreadProcedure:
 			threadServiceResumeThreadHandler.ServeHTTP(w, r)
+		case ThreadServiceReopenThreadProcedure:
+			threadServiceReopenThreadHandler.ServeHTTP(w, r)
 		case ThreadServiceCompleteThreadProcedure:
 			threadServiceCompleteThreadHandler.ServeHTTP(w, r)
 		case ThreadServiceEndAsideProcedure:
@@ -380,6 +405,10 @@ type UnimplementedThreadServiceHandler struct{}
 
 func (UnimplementedThreadServiceHandler) ResumeThread(context.Context, *connect.Request[v1.ResumeThreadRequest]) (*connect.Response[v1.ResumeThreadResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ThreadService.ResumeThread is not implemented"))
+}
+
+func (UnimplementedThreadServiceHandler) ReopenThread(context.Context, *connect.Request[v1.ReopenThreadRequest]) (*connect.Response[v1.ReopenThreadResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ThreadService.ReopenThread is not implemented"))
 }
 
 func (UnimplementedThreadServiceHandler) CompleteThread(context.Context, *connect.Request[v1.CompleteThreadRequest]) (*connect.Response[v1.CompleteThreadResponse], error) {

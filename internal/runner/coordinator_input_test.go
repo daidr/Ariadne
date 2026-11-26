@@ -373,3 +373,111 @@ func TestCoordinatorCanNotifyUserAfterProactivelyRoutingUnrelatedThreadMessage(t
 		})
 	}
 }
+
+func TestCoordinatorStaysQuietAfterReopenAndUserReplyInThread(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	home := t.TempDir()
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	project, err := repo.CreateProject(ctx, new("Reopen Quiet"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "调研讨论串"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.StartThread(ctx, thread.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ReportThread(ctx, thread.ID, core.ThreadReport{
+		Kind: "done", Headline: "已完成", Summary: "阶段性结论已输出",
+	}, nil, core.ReviewOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Drain the coordinator wake from the done report so the next turn only sees reopen + follow-up.
+	coordID := project.CoordinatorID
+	firstTurnID, err := repo.StartScheduledTurn(ctx, coordID, "mock")
+	if err != nil || firstTurnID == "" {
+		t.Fatalf("expected coordinator turn after done report, got %q, %v", firstTurnID, err)
+	}
+	firstConv, err := repo.GetConversation(ctx, coordID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RecordStep(ctx, coordID, firstTurnID, core.Step{SawSeq: firstConv.PendingSeq}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.FinishTurn(ctx, coordID, firstTurnID, "completed", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// User reopens the completed thread (writes non-waking thread-reopened note to coordinator)
+	// and immediately sends a follow-up message in that thread (wakes coordinator with user-in-thread).
+	if _, err := repo.ReopenThread(ctx, thread.ID, "user"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
+		ConversationID: thread.ID, Author: "user", Content: "顺着这个方案补充一下边界情况",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	turnID, err := repo.StartScheduledTurn(ctx, coordID, "mock")
+	if err != nil || turnID == "" {
+		t.Fatalf("expected coordinator turn after user-in-thread, got %q, %v", turnID, err)
+	}
+	store, err := settings.Open(filepath.Join(home, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub := realtime.NewHub()
+	t.Cleanup(hub.Close)
+	rtState := realtime.NewState(hub)
+	t.Cleanup(rtState.Close)
+	drafts := realtime.NewDrafts(rtState, realtime.LiveOptions{})
+	t.Cleanup(drafts.Close)
+	info := sdk.ModelProviderInfo{Kind: "mock", Program: true}
+	registry := models.New()
+	calls := 0
+	_, err = registry.Register(sdk.ModelProvider{Info: info, Stream: func(context.Context, map[string]any, sdk.Request) iter.Seq[sdk.Part] {
+		return func(yield func(sdk.Part) bool) {
+			calls++
+			if calls == 1 {
+				if yield(sdk.Part{Type: "tool-call", ID: "dup", Name: "send_message", Arguments: `{"text":"我来回复一下"}`}) {
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+				}
+				return
+			}
+			yield(sdk.Part{Type: "finish", Reason: "stop"})
+		}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	agent := &turn{
+		Runner:       &Runner{Repository: repo, Settings: store, Models: registry, Drafts: drafts},
+		id:           turnID,
+		conversation: core.ConversationView{ID: coordID, ProjectID: project.ID, Role: "coordinator"},
+	}
+	if err := agent.run(ctx, &settings.ResolvedModel{Provider: info, Model: "mock", Label: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if !agent.quiet {
+		t.Fatal("expected coordinator turn to remain quiet after thread-reopened + user-in-thread")
+	}
+	coordMessages, err := repo.ListMessages(ctx, coordID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(coordMessages) != 0 {
+		t.Fatalf("expected quiet coordinator not to post in main chat, got %+v", coordMessages)
+	}
+}
