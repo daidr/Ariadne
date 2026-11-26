@@ -843,7 +843,7 @@ export const en: Record<MessageKey, string> = {
   'settings.sameAsThreads': 'Use thread model',
   'settings.researchModel': 'Sub-research model',
   'settings.researchModelHelp':
-    'Threads and the coordinator hand questions that take a lot of reading to a read-only sub-research; a cheaper model will do',
+    'Threads hand questions that take a lot of reading to a read-only sub-research; a cheaper model will do',
   'settings.sameAsAsking': 'Same as the one asking',
   'settings.effort.default': 'Default',
   'settings.effort.low': 'Low',

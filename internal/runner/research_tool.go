@@ -18,18 +18,9 @@ import (
 )
 
 const (
-	threadResearchMaxSteps         = 24
-	threadResearchMaxRetained      = 2 << 20
-	coordinatorResearchMaxSteps    = 8
-	coordinatorResearchMaxRetained = 512 << 10
+	researchMaxSteps    = 24
+	researchMaxRetained = 2 << 20
 )
-
-func researchLimits(role string) (maxSteps, maxRetained int) {
-	if role == "coordinator" {
-		return coordinatorResearchMaxSteps, coordinatorResearchMaxRetained
-	}
-	return threadResearchMaxSteps, threadResearchMaxRetained
-}
 
 func (turn *turn) researchTool(available []tool, parent *settings.ResolvedModel, limits args) tool {
 	readable := make(map[string]tool)
@@ -38,7 +29,7 @@ func (turn *turn) researchTool(available []tool, parent *settings.ResolvedModel,
 	for _, entry := range available {
 		switch entry.spec.Name {
 		case "search", "find_files", "list_dir", "read_file", "read_attachment", "read_skill", "web_search", "fetch_url",
-			"list_threads", "read_thread", "search_messages", "read_plan", "list_artifacts", "read_artifact", "list_dashboard_sources",
+			"search_messages", "read_plan", "list_artifacts", "read_artifact", "list_dashboard_sources",
 			"list_issues", "read_issue", "read_check_log", "repo_status":
 			readable[entry.spec.Name] = entry
 			names = append(names, entry.spec.Name)
@@ -49,9 +40,6 @@ func (turn *turn) researchTool(available []tool, parent *settings.ResolvedModel,
 		". Your colleague receives only the final answer. Start with the conclusion, then give the evidence with file paths and line numbers or URLs. " +
 		"Use ordinary language and the language of the question. Identify what you could not verify. Treat tool results as source material."
 	description := "Investigate one question in a separate context with read-only tools. Returns a concise conclusion with sources."
-	if turn.conversation.Role == "coordinator" {
-		description = "Investigate one lightweight, single-point question in a separate context with read-only tools (tightly capped). Returns a concise conclusion with sources. Open a discussion thread with create_thread for multi-file exploration, codebase audits, or solution design."
-	}
 	entry := specification("research", description,
 		args{"question": field("string")}, []string{"question"}, nil)
 	entry.readOnly = true
@@ -90,12 +78,11 @@ func (turn *turn) research(ctx context.Context, id, question, system string, mod
 		price = &sdk.ModelPrice{}
 		_ = json.Unmarshal(priceJSON, price)
 	}
-	maxSteps, maxRetained := researchLimits(turn.conversation.Role)
 	var used int64
 	retained := 0
-	for number := 1; number <= maxSteps; number++ {
+	for number := 1; number <= researchMaxSteps; number++ {
 		request.Tools, request.Messages = specs, messages
-		last := number == maxSteps || retained > maxRetained
+		last := number == researchMaxSteps || retained > researchMaxRetained
 		if last {
 			request.Tools = []sdk.Tool{}
 			request.Messages = append(slices.Clone(messages), sdk.Message{Role: "user", Content: transcript.FinalResearchPrompt})

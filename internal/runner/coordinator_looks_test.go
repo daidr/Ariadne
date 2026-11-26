@@ -301,27 +301,40 @@ func TestCoordinatorLooksResetInSameStepAsHandover(t *testing.T) {
 	}
 }
 
-func TestCoordinatorResearchLookWeight(t *testing.T) {
+func TestResearchToolRegisteredOnlyForThreads(t *testing.T) {
 	t.Parallel()
-	t.Run("five research calls hint on second and refuse fifth", func(t *testing.T) {
+	hasTool := func(tools []sdk.Tool, name string) bool {
+		for _, item := range tools {
+			if item.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("coordinator does not register research and rejects calls to it", func(t *testing.T) {
 		repo, store, project := openTestEnv(t)
 		conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
 
+		var sawTools []sdk.Tool
 		researchCalls := 0
 		step := 0
 		results := runToolTurn(t, repo, store, conv, nil, func(req sdk.Request) iter.Seq[sdk.Part] {
 			if strings.Contains(req.Conversation, "/research/") {
 				researchCalls++
 				return func(yield func(sdk.Part) bool) {
-					yield(sdk.Part{Type: "text", Text: fmt.Sprintf("Conclusion %d.", researchCalls)})
+					yield(sdk.Part{Type: "text", Text: "unexpected"})
 					yield(sdk.Part{Type: "finish", Reason: "stop"})
 				}
+			}
+			if step == 0 {
+				sawTools = append(sawTools, req.Tools...)
 			}
 			current := step
 			step++
 			return func(yield func(sdk.Part) bool) {
-				if current < 5 {
-					yield(makeCall(fmt.Sprintf("r%d", current), "research", args{"question": fmt.Sprintf("Question %d?", current)}))
+				if current == 0 {
+					yield(makeCall("r0", "research", args{"question": "Check repository"}))
 					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 					return
 				}
@@ -329,81 +342,73 @@ func TestCoordinatorResearchLookWeight(t *testing.T) {
 			}
 		})
 
-		if researchCalls != 4 {
-			t.Fatalf("research provider ran %d times, want 4 (weight 3 x 4 = 12, 5th refused)", researchCalls)
+		if hasTool(sawTools, "research") {
+			t.Fatalf("coordinator tools should not include research")
 		}
-		if len(results) != 5 {
-			t.Fatalf("got %d results, want 5", len(results))
+		if researchCalls != 0 {
+			t.Fatalf("research provider ran %d times for coordinator, want 0", researchCalls)
 		}
-		// Call 1 -> 3 (no hint), Call 2 -> 6 (hint), Call 3 -> 9 (no hint), Call 4 -> 12 (no hint), Call 5 -> 15 > 12 (refused).
-		if strings.Contains(results[0].content, coordinatorLookHintText) {
-			t.Errorf("call 1 should not be hinted: %q", results[0].content)
-		}
-		if !strings.Contains(results[1].content, coordinatorLookHintText) {
-			t.Errorf("call 2 (looks=6) should be hinted: %q", results[1].content)
-		}
-		if strings.Contains(results[2].content, coordinatorLookHintText) || strings.Contains(results[3].content, coordinatorLookHintText) {
-			t.Errorf("calls 3 and 4 should not repeat hint")
-		}
-		if !results[4].isError || results[4].content != coordinatorLookRefusedText {
-			t.Fatalf("call 5 = (%q, err=%v), want refused error", results[4].content, results[4].isError)
+		if len(results) != 1 || !results[0].isError || !strings.Contains(results[0].content, `tool "research" is unavailable`) {
+			t.Fatalf("coordinator research call result = %+v, want unavailable error", results)
 		}
 	})
 
-	t.Run("crossing soft threshold and boundary refusal", func(t *testing.T) {
+	t.Run("thread keeps research unless disabled in project settings", func(t *testing.T) {
 		repo, store, project := openTestEnv(t)
-		conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
-
-		// 4 normal looks (looks=4), 1 research (looks=7 -> crosses 6, triggers hint),
-		// 3 normal looks (looks=10), 1 research (10+3=13 > 12 -> refused, looks stays 10),
-		// 2 normal looks (looks=11, 12 -> allowed), 1 normal look (13 > 12 -> refused).
-		plan := []string{
-			"fetch", "fetch", "fetch", "fetch",
-			"research",
-			"fetch", "fetch", "fetch",
-			"research",
-			"fetch", "fetch", "fetch",
+		thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "调研讨论串"})
+		if err != nil {
+			t.Fatal(err)
 		}
+		conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+
+		var sawEnabledTools []sdk.Tool
 		researchCalls := 0
 		step := 0
 		results := runToolTurn(t, repo, store, conv, nil, func(req sdk.Request) iter.Seq[sdk.Part] {
 			if strings.Contains(req.Conversation, "/research/") {
 				researchCalls++
 				return func(yield func(sdk.Part) bool) {
-					yield(sdk.Part{Type: "text", Text: fmt.Sprintf("Answer %d.", researchCalls)})
+					yield(sdk.Part{Type: "text", Text: "Thread conclusion."})
 					yield(sdk.Part{Type: "finish", Reason: "stop"})
 				}
+			}
+			if step == 0 {
+				sawEnabledTools = append(sawEnabledTools, req.Tools...)
 			}
 			current := step
 			step++
 			return func(yield func(sdk.Part) bool) {
-				if current >= len(plan) {
-					yield(sdk.Part{Type: "finish", Reason: "stop"})
+				if current == 0 {
+					yield(makeCall("r0", "research", args{"question": "Inspect details"}))
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
 					return
 				}
-				if plan[current] == "research" {
-					yield(makeCall(fmt.Sprintf("c%d", current), "research", args{"question": fmt.Sprintf("Q%d", current)}))
-				} else {
-					yield(makeCall(fmt.Sprintf("c%d", current), "fetch_url", args{"url": fmt.Sprintf("http://127.0.0.1/%d", current)}))
-				}
-				yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
 			}
 		})
 
+		if !hasTool(sawEnabledTools, "research") {
+			t.Fatalf("thread tools should include research when enabled")
+		}
 		if researchCalls != 1 {
-			t.Fatalf("research ran %d times, want 1", researchCalls)
+			t.Fatalf("research provider ran %d times for thread, want 1", researchCalls)
 		}
-		if !strings.Contains(results[4].content, coordinatorLookHintText) {
-			t.Fatalf("index 4 (looks 4->7) should receive soft hint: %q", results[4].content)
+		if len(results) != 1 || results[0].isError || !strings.Contains(results[0].content, "Thread conclusion.") {
+			t.Fatalf("thread research call result = %+v, want success conclusion", results)
 		}
-		if !results[8].isError || results[8].content != coordinatorLookRefusedText {
-			t.Fatalf("index 8 (research at looks=10) should be refused: (%q, err=%v)", results[8].content, results[8].isError)
+
+		if _, err := repo.SetProjectSettings(t.Context(), project.ID, map[string]any{"tools": []any{"research"}}, []string{"fetch", "search", "commands", "research", "issueWrites"}); err != nil {
+			t.Fatal(err)
 		}
-		if strings.Contains(results[9].content, coordinatorLookRefusedText) || strings.Contains(results[10].content, coordinatorLookRefusedText) {
-			t.Fatalf("indices 9 and 10 (looks 11, 12) should still be allowed")
-		}
-		if !results[11].isError || results[11].content != coordinatorLookRefusedText {
-			t.Fatalf("index 11 (looks=12 + 1) should be refused: (%q, err=%v)", results[11].content, results[11].isError)
+		var sawDisabledTools []sdk.Tool
+		runToolTurn(t, repo, store, conv, nil, func(req sdk.Request) iter.Seq[sdk.Part] {
+			sawDisabledTools = append(sawDisabledTools, req.Tools...)
+			return func(yield func(sdk.Part) bool) {
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		})
+		if hasTool(sawDisabledTools, "research") {
+			t.Fatalf("thread tools should omit research when disabled in project settings")
 		}
 	})
 }

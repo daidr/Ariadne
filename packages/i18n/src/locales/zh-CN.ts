@@ -806,8 +806,7 @@ export const zhCN = {
   'settings.coordinatorModel': '协调器模型',
   'settings.sameAsThreads': '沿用讨论串模型',
   'settings.researchModel': '子调研模型',
-  'settings.researchModelHelp':
-    '讨论串和协调器把需要大量查阅的问题交给只读子调研，可以用便宜的模型',
+  'settings.researchModelHelp': '讨论串把需要大量查阅的问题交给只读子调研，可以用便宜的模型',
   'settings.sameAsAsking': '和提问的一方相同',
   'settings.effort.default': '默认',
   'settings.effort.low': '低',

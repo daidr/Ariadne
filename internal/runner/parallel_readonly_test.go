@@ -410,69 +410,6 @@ func TestParallelCoordinatorLooksQuotaAndHintDeterministic(t *testing.T) {
 	}
 }
 
-func TestParallelCoordinatorResearchWeightPreDeduction(t *testing.T) {
-	t.Parallel()
-	repo, store, project := openTestEnv(t)
-	conv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
-
-	var researchRuns, readRuns atomic.Int32
-	researchStub := readOnlySpec("research", "research", args{"question": field("string")}, nil, func(_ context.Context, input args) (string, error) {
-		researchRuns.Add(1)
-		return "ans:" + text(input, "question"), nil
-	})
-	readStub := readOnlySpec("read_file", "read", args{"path": field("string")}, nil, func(_ context.Context, input args) (string, error) {
-		readRuns.Add(1)
-		return "read:" + text(input, "path"), nil
-	})
-
-	step := 0
-	results := runToolTurn(t, repo, store, conv, []tool{researchStub, readStub}, func(_ sdk.Request) iter.Seq[sdk.Part] {
-		return func(yield func(sdk.Part) bool) {
-			step++
-			if step == 1 {
-				// Step 1: 10 reads -> looks == 10
-				for i := 1; i <= 10; i++ {
-					yield(makeCall(fmt.Sprintf("s1_%d", i), "read_file", args{"path": fmt.Sprintf("a%d.go", i)}))
-				}
-				yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
-				return
-			}
-			if step == 2 {
-				// Step 2 (concurrent group): research (10+3=13 > 12 -> refused), read_file (10+1=11 -> ok), read_file (11+1=12 -> ok), read_file (12+1=13 -> refused)
-				yield(makeCall("s2_res", "research", args{"question": "q"}))
-				yield(makeCall("s2_r1", "read_file", args{"path": "b1.go"}))
-				yield(makeCall("s2_r2", "read_file", args{"path": "b2.go"}))
-				yield(makeCall("s2_r3", "read_file", args{"path": "b3.go"}))
-				yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
-				return
-			}
-			yield(sdk.Part{Type: "finish", Reason: "stop"})
-		}
-	})
-
-	if researchRuns.Load() != 0 {
-		t.Fatalf("expected research to be refused at looks=10, ran %d times", researchRuns.Load())
-	}
-	if readRuns.Load() != 12 {
-		t.Fatalf("expected 12 total read_file runs, got %d", readRuns.Load())
-	}
-	if len(results) != 14 {
-		t.Fatalf("expected 14 total results, got %d", len(results))
-	}
-	if !results[10].isError || results[10].content != coordinatorLookRefusedText {
-		t.Fatalf("expected step 2 research refused, got %+v", results[10])
-	}
-	if results[11].isError || results[11].content != "read:b1.go" {
-		t.Fatalf("expected step 2 first read_file to succeed, got %+v", results[11])
-	}
-	if results[12].isError || results[12].content != "read:b2.go" {
-		t.Fatalf("expected step 2 second read_file to succeed, got %+v", results[12])
-	}
-	if !results[13].isError || results[13].content != coordinatorLookRefusedText {
-		t.Fatalf("expected step 2 third read_file refused, got %+v", results[13])
-	}
-}
-
 func TestParallelReadFilesAndFileStateRaceSafety(t *testing.T) {
 	t.Parallel()
 	fix := newFileStateFixture(t, "", nil)
