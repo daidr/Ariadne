@@ -37,12 +37,17 @@ import { computed, ref, watch } from 'vue'
 import { list, t } from '../i18n'
 import { openView, state } from '../store'
 import { requestArtifactFocus } from './artifact-focus'
+import type { ArtifactNavigationTarget } from './artifact-history'
 import { groupOptionsMap, type DecisionGroupData } from './decision-groups'
 import { kindIcon } from './kinds'
 import type { OptionNodeData } from './option-node'
 import { normalizeRefProps } from './document-block-data'
 
-const props = defineProps<BlockViewProps>()
+const props = defineProps<
+  BlockViewProps & {
+    navigate?: (target: ArtifactNavigationTarget) => void
+  }
+>()
 
 const refProps = computed(() => normalizeRefProps(props.block.props))
 
@@ -184,7 +189,11 @@ const displaySubtitle = computed(() => {
 function openReferenced() {
   const r = refProps.value
   if (!r?.artifactId || missing.value) return
-  const targetNodeId = boardPreview.value?.targetNodeId || r.optionId || r.groupId
+  const targetNodeId = boardPreview.value?.targetNodeId || r.optionId || r.groupId || undefined
+  if (props.navigate) {
+    props.navigate({ artifactId: r.artifactId, focusNodeId: targetNodeId })
+    return
+  }
   if (targetNodeId) {
     requestArtifactFocus(r.artifactId, targetNodeId)
   }
