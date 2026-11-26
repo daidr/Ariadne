@@ -85,10 +85,9 @@ describe('PrototypeTweaksPanel enum control selection', () => {
     expect(tags[0]!.attributes('aria-pressed')).toBe('true')
     expect(tags[1]!.attributes('aria-pressed')).toBe('false')
 
-    // Clicking another tag emits both preview and commit immediately.
+    // Clicking another tag emits change with the updated tweak values.
     await tags[1]!.trigger('click')
-    expect(wrapper.emitted('preview')?.at(-1)?.[0]).toMatchObject({ entry: 'topbar' })
-    expect(wrapper.emitted('commit')?.at(-1)?.[0]).toMatchObject({ entry: 'topbar' })
+    expect(wrapper.emitted('change')?.at(-1)?.[0]).toMatchObject({ entry: 'topbar' })
 
     // > 4 options and ultra-long single options fall back to DouSelect.
     expect(rows[2]!.find('.dou-select').exists()).toBe(true)
@@ -110,7 +109,7 @@ describe('PrototypeTweaksPanel enum control selection', () => {
     expect(tags).toHaveLength(3)
     expect(tags.every((b) => b.attributes('disabled') !== undefined)).toBe(true)
     await tags[1]!.trigger('click')
-    expect(wrapper.emitted('commit')).toBeUndefined()
+    expect(wrapper.emitted('change')).toBeUndefined()
 
     wrapper.unmount()
   })

@@ -6,6 +6,7 @@ import {
   type RouterHistory,
 } from 'vue-router'
 import { isPaneKey, type PaneKey, type SideLayout } from './side/layout'
+import type { ArtifactHistoryStack } from './artifacts/artifact-history'
 import type { FullView, MainView, TurnChangesRef, WorkspaceLevel } from './store'
 
 export interface WorkspaceLocation {
@@ -25,6 +26,10 @@ export interface WorkspaceSnapshot {
   full: FullView | null
   planWide: boolean
   mainTrail: { view: MainView; level: WorkspaceLevel }[]
+  artifactHistory?: {
+    full?: ArtifactHistoryStack
+    side?: Record<string, ArtifactHistoryStack>
+  }
 }
 
 export function createWorkspaceRouter(history: RouterHistory, workspace: Component) {

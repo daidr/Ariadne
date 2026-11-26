@@ -34,6 +34,7 @@ import {
   type DecisionGroupSummary,
 } from './decision-groups'
 import { inspectPrototypePoint, resolvePrototypeViewportPoint } from './prototype-bridge'
+import type { PrototypeTweakValues } from './prototype-tweaks'
 import type { SharedArtifact } from './shared'
 import { whiteboardExtensions } from './whiteboard-extensions'
 
@@ -238,6 +239,20 @@ function applyRecommendedPicks(): number {
   return ids.length
 }
 
+function setPrototypeTweakValues(
+  nodeId: string,
+  tweakValues: PrototypeTweakValues | undefined,
+): boolean {
+  if (!editor.value || !board.value.nodes.some((n) => n.id === nodeId)) return false
+  editor.value.transact(
+    (tr) => {
+      tr.updateData(nodeId, { tweakValues })
+    },
+    { history: false },
+  )
+  return true
+}
+
 // ---- pictures of what the user marked, for the agent ----
 
 /** The board as the agent last heard about it. */
@@ -281,6 +296,7 @@ defineExpose({
   setHeard,
   currentSnapshot,
   applyRecommendedPicks,
+  setPrototypeTweakValues,
 })
 </script>
 
