@@ -1,7 +1,10 @@
 // @vitest-environment happy-dom
 import { WHITEBOARD_NODE_TYPES } from '@ariadne/core'
+import { DouEditor, editorKit } from '@dou-ui/editor'
+import { whiteboardBlock } from '@dou-ui/editor/flow'
+import { blocksToMarkdown, markdownToBlocks } from '@dou-ui/editor/markdown'
 import { DouFlowEditor, type FlowDocument, type FlowSelection } from '@dou-ui/flow'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import { whiteboardExtensions } from './whiteboard-extensions'
@@ -158,6 +161,109 @@ test('whiteboardExtensions renders shape/connector color styles and borderless s
     await nextTick()
     await nextTick()
     expect(wrapper.findAll('.dou-flow-toolbar .dou-flow-toolbar__color-bar')).toHaveLength(0)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+test('embedded document whiteboard block preserves and renders shape, text, and connector colors and borderless state', async () => {
+  stubBoxSizes()
+  const embedded = {
+    height: 360,
+    board: {
+      version: 1,
+      nodes: [
+        {
+          id: 'shape-1',
+          type: 'shape',
+          x: 40,
+          y: 60,
+          width: 160,
+          height: 84,
+          data: {
+            shape: 'rect',
+            text: '无边框卡片',
+            fill: 'green',
+            stroke: 'none',
+            textColor: '#166534',
+          },
+        },
+        {
+          id: 'text-1',
+          type: 'text',
+          x: 260,
+          y: 80,
+          width: 140,
+          height: 40,
+          data: { text: '彩色说明', color: '#7c3aed' },
+        },
+      ],
+      edges: [
+        {
+          id: 'edge-1',
+          type: 'connector',
+          source: { node: 'shape-1', port: 'right' },
+          target: { node: 'text-1', port: 'left-in' },
+          data: { route: 'curve', arrow: 'end', color: '#dc2626' },
+        },
+      ],
+    },
+  }
+  const source = ['# 架构图', `\`\`\`dou-whiteboard\n${JSON.stringify(embedded)}\n\`\`\``].join(
+    '\n\n',
+  )
+  const docExtensions = [editorKit(), whiteboardBlock({ commentable: true })]
+
+  const blocks = markdownToBlocks(source, docExtensions)
+  const markdown = blocksToMarkdown(blocks as never, docExtensions)
+  const match = markdown.match(/```dou-whiteboard\r?\n([\s\S]*?)\r?\n```/)
+  expect(match).not.toBeNull()
+  const roundTripped = JSON.parse(match![1]!) as typeof embedded
+  expect(roundTripped.board.nodes[0]?.data).toMatchObject({
+    shape: 'rect',
+    fill: 'green',
+    stroke: 'none',
+    textColor: '#166534',
+  })
+  expect(roundTripped.board.nodes[1]?.data).toMatchObject({
+    text: '彩色说明',
+    color: '#7c3aed',
+  })
+  expect(roundTripped.board.edges[0]?.data).toMatchObject({
+    route: 'curve',
+    arrow: 'end',
+    color: '#dc2626',
+  })
+
+  const wrapper = mount(DouEditor, {
+    props: {
+      modelValue: { version: 1, blocks } as never,
+      extensions: docExtensions,
+    },
+    attachTo: document.body,
+  })
+  try {
+    await flushPromises()
+    await nextTick()
+
+    await wrapper.get('.dou-editor-board__open').trigger('click')
+    await flushPromises()
+    await nextTick()
+    await nextTick()
+
+    const shapeNode = document.body.querySelector('.dou-whiteboard-node.is-shape')
+    expect(shapeNode).not.toBeNull()
+    expect(shapeNode?.classList.contains('is-borderless')).toBe(true)
+    expect(shapeNode?.getAttribute('style')).toContain(
+      '--dou-whiteboard-shape-fill: var(--dou-whiteboard-fill-green)',
+    )
+    expect(shapeNode?.getAttribute('style')).toContain('--dou-whiteboard-text-color: #166534')
+
+    const textNode = document.body.querySelector('.dou-whiteboard-node.is-text')
+    expect(textNode?.getAttribute('style')).toContain('--dou-whiteboard-text-color: #7c3aed')
+
+    const connectorPath = document.body.querySelector('.dou-flow-editor__edge:not(.is-mark)')
+    expect(connectorPath?.getAttribute('style')).toContain('--dou-flow-connector-color: #dc2626')
   } finally {
     wrapper.unmount()
   }

@@ -29,6 +29,30 @@ func TestBoardUpdatesKeepEditsOutsideTheBaseDiff(t *testing.T) {
 	compareContent(t, result, `{"version":1,"nodes":[{"id":"n","type":"group","x":80,"y":0,"data":{"text":"after"}}],"edges":[]}`)
 }
 
+func TestBoardUpdatesPreserveConcurrentColorAndBorderlessEdits(t *testing.T) {
+	t.Parallel()
+	board, err := Load("whiteboard", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer board.Destroy()
+	base := `{"version":1,"nodes":[{"id":"a","type":"shape","x":0,"y":0,"data":{"shape":"rect","text":"A"}},{"id":"b","type":"text","x":220,"y":0,"data":{"text":"B"}}],"edges":[{"id":"e1","type":"connector","source":{"node":"a","port":"right"},"target":{"node":"b","port":"left-in"},"data":{"arrow":"end"}}]}`
+	if err := UpdateWhiteboard(board, base, nil, "seed"); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate concurrent position drag on client 1 while client 2 edits fill, borderless stroke, textColor, text color and edge color.
+	board.GetMap("nodes").Get("a").(*crdt.YMap).Set("x", 120)
+	styled := `{"version":1,"nodes":[{"id":"a","type":"shape","x":0,"y":0,"data":{"shape":"rect","text":"A","fill":"green","stroke":"none","textColor":"#166534"}},{"id":"b","type":"text","x":220,"y":0,"data":{"text":"B","color":"purple"}}],"edges":[{"id":"e1","type":"connector","source":{"node":"a","port":"right"},"target":{"node":"b","port":"left-in"},"data":{"arrow":"end","color":"#dc2626"}}]}`
+	if err := UpdateWhiteboard(board, styled, &base, "writer"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ReadBoard(board, "whiteboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compareContent(t, result, `{"version":1,"nodes":[{"id":"a","type":"shape","x":120,"y":0,"data":{"shape":"rect","text":"A","fill":"green","stroke":"none","textColor":"#166534"}},{"id":"b","type":"text","x":220,"y":0,"data":{"text":"B","color":"purple"}}],"edges":[{"id":"e1","type":"connector","source":{"node":"a","port":"right"},"target":{"node":"b","port":"left-in"},"data":{"arrow":"end","color":"#dc2626"}}]}`)
+}
+
 func TestDashboardPreservesConcurrentBreakpointAndWidget(t *testing.T) {
 	t.Parallel()
 	dashboard, err := Load("dashboard", nil)
