@@ -627,44 +627,41 @@ async function save() {
           </div>
         </DouTabPanel>
         <DouTabPanel value="models" :label="t('projectSettings.tab.models')" :icon="CpuIcon">
-          <div v-if="activeModels.length" class="project-stack">
-            <DouText size="sm" variant="secondary">{{ t('projectSettings.modelsHelp') }}</DouText>
-            <DouForm layout="vertical" size="sm">
-              <DouFormItem :label="t('settings.threadModel')">
-                <DouCascader
-                  v-model="projectThreadPath"
-                  :options="projectThreadOptions"
-                  :placeholder="threadPlaceholder"
-                  separator=" · "
-                  clearable
+          <DouForm v-if="activeModels.length" layout="vertical" size="sm">
+            <DouFormItem :label="t('settings.threadModel')">
+              <DouCascader
+                v-model="projectThreadPath"
+                :options="projectThreadOptions"
+                :placeholder="threadPlaceholder"
+                separator=" · "
+                clearable
+              />
+            </DouFormItem>
+            <DouFormItem :label="t('settings.coordinatorModel')">
+              <DouCascader
+                v-model="projectCoordinatorPath"
+                :options="projectCoordinatorOptions"
+                :placeholder="coordinatorPlaceholder"
+                separator=" · "
+                clearable
+              />
+            </DouFormItem>
+            <DouFormItem>
+              <template #label>
+                <SettingsLabelHelp
+                  :label="t('settings.researchModel')"
+                  :content="t('settings.researchModelHelp')"
                 />
-              </DouFormItem>
-              <DouFormItem :label="t('settings.coordinatorModel')">
-                <DouCascader
-                  v-model="projectCoordinatorPath"
-                  :options="projectCoordinatorOptions"
-                  :placeholder="coordinatorPlaceholder"
-                  separator=" · "
-                  clearable
-                />
-              </DouFormItem>
-              <DouFormItem>
-                <template #label>
-                  <SettingsLabelHelp
-                    :label="t('settings.researchModel')"
-                    :content="t('settings.researchModelHelp')"
-                  />
-                </template>
-                <DouCascader
-                  v-model="projectResearchPath"
-                  :options="projectResearchOptions"
-                  :placeholder="researchPlaceholder"
-                  separator=" · "
-                  clearable
-                />
-              </DouFormItem>
-            </DouForm>
-          </div>
+              </template>
+              <DouCascader
+                v-model="projectResearchPath"
+                :options="projectResearchOptions"
+                :placeholder="researchPlaceholder"
+                separator=" · "
+                clearable
+              />
+            </DouFormItem>
+          </DouForm>
           <div v-else class="project-models-empty">
             <DouEmpty size="sm" :description="t('projectSettings.models.empty')" />
             <DouButton size="sm" variant="outline" @click="openModels">

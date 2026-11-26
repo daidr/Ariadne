@@ -1085,7 +1085,6 @@ export const zhCN = {
   'projectSettings.tab.models': '模型',
   'projectSettings.tab.workspace': '工作区',
   'projectSettings.tab.routines': '定期任务',
-  'projectSettings.modelsHelp': '默认沿用全局设置；只有这个项目需要单独指定模型时才需要修改。',
   'projectSettings.models.inherit': '沿用全局设置',
   'projectSettings.models.inheritWith': '沿用全局设置（{label}）',
   'projectSettings.models.empty': '还没有配置可用模型',

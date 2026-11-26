@@ -1129,8 +1129,6 @@ export const en: Record<MessageKey, string> = {
   'projectSettings.tab.models': 'Models',
   'projectSettings.tab.workspace': 'Workspace',
   'projectSettings.tab.routines': 'Routines',
-  'projectSettings.modelsHelp':
-    'Uses the global settings by default; change only what this project needs differently.',
   'projectSettings.models.inherit': 'Use global setting',
   'projectSettings.models.inheritWith': 'Use global setting ({label})',
   'projectSettings.models.empty': 'No models configured yet',
