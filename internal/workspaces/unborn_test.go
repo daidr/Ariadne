@@ -58,6 +58,8 @@ func TestUnbornGitDirectoryLifecycleAndRecovery(t *testing.T) {
 	repoDir := t.TempDir()
 	dataDir := t.TempDir()
 	runLocalGitOK(t, repoDir, "init", "-q")
+	runLocalGitOK(t, repoDir, "config", "user.name", "Test")
+	runLocalGitOK(t, repoDir, "config", "user.email", "test@example.invalid")
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("hello unborn\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
