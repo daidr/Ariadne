@@ -54,7 +54,12 @@ import {
   setPendingArtifactFeedback,
 } from './feedback-pending'
 import { kindIcon } from './kinds'
-import { PROTOTYPE_TWEAKS_BRIDGE_KEY } from './prototype-bridge'
+import {
+  PROTOTYPE_TWEAKS_BRIDGE_KEY,
+  type PrototypeTweaksPreviewEntry,
+  type PrototypeTweaksSubmitOptions,
+} from './prototype-bridge'
+import type { PrototypeTweakValues } from './prototype-tweaks'
 import { useSharedArtifact, type SharedArtifact } from './shared'
 
 /** `place` is where it is shown: in a tab on the right side, or full screen. */
@@ -89,6 +94,10 @@ const body = ref<{
   setHeard?: (snapshot: unknown) => void
   currentSnapshot?: () => unknown
   applyRecommendedPicks?: () => number
+  setPrototypeTweakValues?: (
+    nodeId: string,
+    tweakValues: PrototypeTweakValues | undefined,
+  ) => boolean
   currentAskSnapshot?: () => DocumentAskAnswerBaseline[]
 } | null>(null)
 /** The newest version; an older one is shown read-only. */
@@ -206,6 +215,9 @@ const sendingArtifacts = ref<ReadonlySet<string>>(new Set())
 const withdrawingArtifacts = ref<ReadonlySet<string>>(new Set())
 const sending = computed(() => sendingArtifacts.value.has(props.id))
 const withdrawing = computed(() => withdrawingArtifacts.value.has(props.id))
+const sendingTweakNodeId = ref<string | null>(null)
+/** Room-level cache of local prototype tweak previews, surviving node viewport culling and group folding. */
+const prototypeTweaksPreview = new Map<string, PrototypeTweaksPreviewEntry>()
 function setArtifactFlag(target: typeof sendingArtifacts, id: string, active: boolean) {
   const next = new Set(target.value)
   if (active) next.add(id)
@@ -229,7 +241,7 @@ const sentRound = ref<{
   hadNotes: number
   previousHeard?: unknown
   previousAskBaseline?: DocumentAskAnswerBaseline[] | null
-  rollbackTweaks?: () => void
+  rollbackTweaks?: PrototypeTweaksSubmitOptions
 } | null>(null)
 const decisionSummary = ref<DecisionGroupSummary | null>(null)
 const documentAsks = ref<AskBlockProps[]>([])
@@ -467,14 +479,22 @@ function onDocumentAsks(asks: AskBlockProps[]) {
   documentAsks.value = asks
 }
 
-interface PrototypeTweakCommit {
-  apply: () => void
-  rollback: () => void
+function rollbackPrototypeTweaks(commit: PrototypeTweaksSubmitOptions) {
+  const currentEntry = prototypeTweaksPreview.get(commit.nodeId)
+  if (currentEntry) {
+    prototypeTweaksPreview.set(commit.nodeId, {
+      ...currentEntry,
+      savedKey: commit.prevSavedKey,
+    })
+  }
+  runSilently(() => {
+    body.value?.setPrototypeTweakValues?.(commit.nodeId, commit.prevDiff)
+  })
 }
 
 interface SendFeedbackOptions {
   explicit?: boolean
-  prototypeTweaks?: PrototypeTweakCommit
+  prototypeTweaks?: PrototypeTweaksSubmitOptions
 }
 
 async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean> {
@@ -506,15 +526,30 @@ async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean>
   const rollbackAppliedTweaks = () => {
     if (!tweaksApplied || !prototypeTweaks || !isSameRoom()) return
     tweaksApplied = false
-    runSilently(() => prototypeTweaks.rollback())
+    rollbackPrototypeTweaks(prototypeTweaks)
   }
   setArtifactFlag(sendingArtifacts, id, true)
+  if (prototypeTweaks) sendingTweakNodeId.value = prototypeTweaks.nodeId
   try {
     if (prototypeTweaks) {
-      runSilently(() => {
-        prototypeTweaks.apply()
-        tweaksApplied = true
+      const updated = runSilently(() => {
+        const prevEntry = prototypeTweaksPreview.get(prototypeTweaks.nodeId)
+        if (prevEntry) {
+          prototypeTweaksPreview.set(prototypeTweaks.nodeId, {
+            ...prevEntry,
+            savedKey: prototypeTweaks.nextSavedKey,
+          })
+        }
+        const appliedWrite =
+          body.value?.setPrototypeTweakValues?.(prototypeTweaks.nodeId, prototypeTweaks.nextDiff) ??
+          false
+        if (!appliedWrite && prevEntry) {
+          prototypeTweaksPreview.set(prototypeTweaks.nodeId, prevEntry)
+        }
+        return appliedWrite
       })
+      if (!updated) return false
+      tweaksApplied = true
       await nextTick()
       await new Promise((resolve) => setTimeout(resolve, 120))
     } else if (explicit && hasStructuredRound.value) {
@@ -570,7 +605,7 @@ async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean>
             hadNotes,
             previousHeard,
             previousAskBaseline,
-            rollbackTweaks: prototypeTweaks?.rollback,
+            rollbackTweaks: prototypeTweaks,
           }
           startSentRoundCountdown()
         }
@@ -620,6 +655,9 @@ async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean>
     report(error)
     return false
   } finally {
+    if (prototypeTweaks && isSameRoom() && sendingTweakNodeId.value === prototypeTweaks.nodeId) {
+      sendingTweakNodeId.value = null
+    }
     setArtifactFlag(sendingArtifacts, id, false)
   }
 }
@@ -627,6 +665,18 @@ async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean>
 provide(PROTOTYPE_TWEAKS_BRIDGE_KEY, {
   submitTweaks: (options) => sendFeedback({ explicit: true, prototypeTweaks: options }),
   sending,
+  sendingNodeId: sendingTweakNodeId,
+  getPreview: (nodeId) => prototypeTweaksPreview.get(nodeId),
+  setPreview: (nodeId, entry) => {
+    prototypeTweaksPreview.set(nodeId, {
+      specsKey: entry.specsKey,
+      savedKey: entry.savedKey,
+      liveValues: { ...entry.liveValues },
+    })
+  },
+  clearPreview: (nodeId) => {
+    prototypeTweaksPreview.delete(nodeId)
+  },
 })
 
 async function withdrawSentFeedback() {
@@ -645,7 +695,7 @@ async function withdrawSentFeedback() {
     if (withdrawn) {
       if (isSameRoom()) {
         if (target.rollbackTweaks) {
-          runSilently(() => target.rollbackTweaks?.())
+          rollbackPrototypeTweaks(target.rollbackTweaks)
         }
         if (target.previousHeard !== undefined) body.value?.setHeard?.(target.previousHeard)
         if (target.previousAskBaseline !== undefined) {
@@ -772,6 +822,8 @@ function leave() {
   stopQuietTimer()
   clearSentRound()
   documentAsks.value = []
+  prototypeTweaksPreview.clear()
+  sendingTweakNodeId.value = null
   if (!room) return
   if (waiting.value && pendingChanges.value > 0) {
     setPendingArtifactFeedback(room.id, {

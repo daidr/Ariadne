@@ -87,7 +87,7 @@ const tweakSpecs = computed<PrototypeTweakSpec[]>(() => {
 })
 
 const tweaksBridge = inject(PROTOTYPE_TWEAKS_BRIDGE_KEY, null)
-const sendingTweaks = ref(false)
+const sendingTweaks = computed(() => tweaksBridge?.sendingNodeId.value === props.node.id)
 const liveValues = ref<PrototypeTweakValues>({})
 const savedValues = computed<PrototypeTweakValues>(() =>
   effectiveTweakValues(tweakSpecs.value, props.data.tweakValues),
@@ -100,17 +100,45 @@ function serializeTweakValues(
   return JSON.stringify(specs.map((spec) => [spec.key, values[spec.key] ?? spec.default]))
 }
 
+function persistPreview(values: PrototypeTweakValues) {
+  if (props.readonly || !tweaksBridge) return
+  const specs = tweakSpecs.value
+  tweaksBridge.setPreview(props.node.id, {
+    specsKey: JSON.stringify(specs),
+    savedKey: serializeTweakValues(specs, savedValues.value),
+    liveValues: { ...values },
+  })
+}
+
+let lastNodeId: string | null = null
 let lastSpecsKey: string | null = null
 let lastSavedKey: string | null = null
 
 watch(
-  [tweakSpecs, savedValues],
-  ([specs, saved]) => {
+  [() => props.node.id, tweakSpecs, savedValues],
+  ([nodeId, specs, saved]) => {
     const nextSpecsKey = JSON.stringify(specs)
     const nextSavedKey = serializeTweakValues(specs, saved)
-    if (nextSpecsKey === lastSpecsKey && nextSavedKey === lastSavedKey) return
+    if (nodeId === lastNodeId && nextSpecsKey === lastSpecsKey && nextSavedKey === lastSavedKey) {
+      return
+    }
+    lastNodeId = nodeId
     lastSpecsKey = nextSpecsKey
     lastSavedKey = nextSavedKey
+
+    if (!props.readonly && tweaksBridge) {
+      const cached = tweaksBridge.getPreview(nodeId)
+      if (cached && cached.specsKey === nextSpecsKey && cached.savedKey === nextSavedKey) {
+        const restored = effectiveTweakValues(specs, cached.liveValues)
+        liveValues.value = restored
+        postTweaks(restored)
+        return
+      }
+      if (cached && (specs.length > 0 || !loading.value)) {
+        tweaksBridge.clearPreview(nodeId)
+      }
+    }
+
     liveValues.value = saved
     postTweaks(saved)
   },
@@ -141,7 +169,7 @@ watch(
       return
     }
     const specs = tweakSpecs.value
-    const initial = effectiveTweakValues(specs, props.data.tweakValues)
+    const initial = effectiveTweakValues(specs, liveValues.value)
     sandboxedDoc.value = buildSandboxedPrototypeDoc(html, frameId, specs, initial)
   },
   { immediate: true },
@@ -159,12 +187,14 @@ function onIframeLoad() {
 
 function onTweakChange(next: PrototypeTweakValues) {
   liveValues.value = next
+  persistPreview(next)
   postTweaks(next)
 }
 
 function onTweakReset() {
   const defaults = effectiveTweakValues(tweakSpecs.value)
   liveValues.value = defaults
+  persistPreview(defaults)
   postTweaks(defaults)
 }
 
@@ -184,21 +214,16 @@ async function onTweakSend() {
   const nextSavedKey = serializeTweakValues(specs, effectiveTweakValues(specs, nextDiff))
   const prevSavedKey = serializeTweakValues(specs, effectiveTweakValues(specs, prevDiff))
 
-  sendingTweaks.value = true
-  try {
-    await tweaksBridge.submitTweaks({
-      apply: () => {
-        lastSavedKey = nextSavedKey
-        props.updateData({ tweakValues: nextDiff })
-      },
-      rollback: () => {
-        lastSavedKey = prevSavedKey
-        props.updateData({ tweakValues: prevDiff })
-      },
-    })
-  } finally {
-    sendingTweaks.value = false
-  }
+  // Keep the local preview cached at room level so rollback or node remount restores it cleanly.
+  persistPreview(liveValues.value)
+
+  await tweaksBridge.submitTweaks({
+    nodeId: props.node.id,
+    nextDiff,
+    prevDiff,
+    nextSavedKey,
+    prevSavedKey,
+  })
 }
 
 // ---- logical viewport scaling ----

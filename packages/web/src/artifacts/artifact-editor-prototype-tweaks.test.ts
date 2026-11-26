@@ -19,13 +19,15 @@ import PrototypeNode from './PrototypeNode.vue'
 import PrototypeTweaksPanel from './PrototypeTweaksPanel.vue'
 
 let currentSharedDoc: Y.Doc | null = null
+const sharedDocsByArtifact = new Map<string, Y.Doc>()
+const culledNodeIds = ref<ReadonlySet<string>>(new Set())
 let activeDecisionSummary: DecisionGroupSummary | null = null
 let applyRecommendedSpy = vi.fn(() => 0)
 const fakeProvider = { awareness: null, destroy: () => {} }
 
 vi.mock('./shared', () => ({
-  useSharedArtifact: () => {
-    const doc = currentSharedDoc ?? new Y.Doc()
+  useSharedArtifact: (id: string) => {
+    const doc = sharedDocsByArtifact.get(id) ?? currentSharedDoc ?? new Y.Doc()
     currentSharedDoc = doc
     return {
       doc,
@@ -74,10 +76,11 @@ vi.mock('./WhiteboardBody.vue', () => ({
         emit('decisionSummary', activeDecisionSummary)
       }
 
-      const updateNodeData = (nodeId: string, patch: Partial<PrototypeNodeData>) => {
-        if (!props.shared) return
+      const updateNodeData = (nodeId: string, patch: Partial<PrototypeNodeData>): boolean => {
+        if (!props.shared) return false
         const doc = props.shared.doc as Y.Doc
         const map = doc.getMap('nodes') as Y.Map<Y.Map<unknown>>
+        if (!map.has(nodeId)) return false
         doc.transact(() => {
           const fields = map.get(nodeId)
           if (!fields) return
@@ -89,6 +92,7 @@ vi.mock('./WhiteboardBody.vue', () => ({
           }
           fields.set('data', next)
         })
+        return true
       }
 
       expose({
@@ -98,6 +102,8 @@ vi.mock('./WhiteboardBody.vue', () => ({
         setHeard: () => {},
         currentSnapshot: () => new Map(),
         applyRecommendedPicks: () => applyRecommendedSpy(),
+        setPrototypeTweakValues: (nodeId: string, tweakValues: PrototypeTweakValues | undefined) =>
+          updateNodeData(nodeId, { tweakValues }),
       })
 
       return () =>
@@ -105,7 +111,7 @@ vi.mock('./WhiteboardBody.vue', () => ({
           'div',
           { class: 'mock-whiteboard' },
           nodes.value
-            .filter((node) => node.type === 'prototype')
+            .filter((node) => node.type === 'prototype' && !culledNodeIds.value.has(node.id))
             .map((node) =>
               h(PrototypeNode, {
                 key: node.id,
@@ -114,7 +120,11 @@ vi.mock('./WhiteboardBody.vue', () => ({
                 ports: [],
                 selected: false,
                 readonly: props.readonly,
-                updateData: (patch: Partial<PrototypeNodeData>) => updateNodeData(node.id, patch),
+                // Simulate Vue 3 NodeView emit silently dropping updates once the node is unmounted.
+                updateData: (patch: Partial<PrototypeNodeData>) => {
+                  if (culledNodeIds.value.has(node.id)) return
+                  updateNodeData(node.id, patch)
+                },
               }),
             ),
         )
@@ -260,15 +270,21 @@ describe('ArtifactEditor prototype tweaks local preview & explicit send', () => 
     setLocale('zh-CN')
     state.artifacts = []
     currentSharedDoc = null
+    sharedDocsByArtifact.clear()
+    culledNodeIds.value = new Set()
     activeDecisionSummary = null
     applyRecommendedSpy = vi.fn(() => 0)
     clearPendingArtifactFeedback('art_board_1')
+    clearPendingArtifactFeedback('art_board_2')
   })
 
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+    sharedDocsByArtifact.clear()
+    culledNodeIds.value = new Set()
     clearPendingArtifactFeedback('art_board_1')
+    clearPendingArtifactFeedback('art_board_2')
   })
 
   test('adjusting tweaks previews locally without adding pending changes or auto-sending', async () => {
@@ -611,6 +627,208 @@ describe('ArtifactEditor prototype tweaks local preview & explicit send', () => 
     expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
       false,
     )
+
+    wrapper.unmount()
+  })
+
+  test('preserves unsent local preview tweaks across PrototypeNode unmount and remount', async () => {
+    const doc = seedBoardDoc()
+    let docUpdates = 0
+    doc.on('update', () => {
+      docUpdates++
+    })
+
+    const { wrapper } = await mountBoardEditor(doc)
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 28, dense: true, cta: '试用一下' })
+    await flushPromises()
+
+    expect(docUpdates).toBe(0)
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('4')
+
+    // Simulate viewport culling / simpleZoom < 0.4 / collapsed parent group unmounting PrototypeNode.
+    culledNodeIds.value = new Set(['proto-1'])
+    await flushPromises()
+    expect(wrapper.findComponent(PrototypeNode).exists()).toBe(false)
+
+    // Pan/zoom back in so a fresh PrototypeNode instance mounts.
+    culledNodeIds.value = new Set()
+    await flushPromises()
+
+    expect(docUpdates).toBe(0)
+    expect(wrapper.findComponent(PrototypeNode).exists()).toBe(true)
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('4')
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+    // Newly built sandboxedDoc already carries the restored local preview values.
+    const srcdoc = wrapper.find('iframe.proto-iframe').attributes('srcdoc') ?? ''
+    expect(srcdoc).toContain('#10b981')
+    expect(srcdoc).toContain('试用一下')
+
+    wrapper.unmount()
+  })
+
+  test('rolls back Yjs tweakValues via WhiteboardBody even after PrototypeNode unmounts before withdraw', async () => {
+    const doc = seedBoardDoc()
+    const { wrapper, withdrawFeedback } = await mountBoardEditor(doc)
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 24, dense: false, cta: '立即开始' })
+    await flushPromises()
+
+    const clickSend = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await clickSend
+    await flushPromises()
+
+    expect(readNodeTweakValues(doc)).toEqual({ accent: '#10b981', gap: 24 })
+    expect(wrapper.find('.artifact-feedback-bar').text()).toContain('撤回')
+
+    // Unmount PrototypeNode during the 60s withdraw window (e.g. zoomed out or panned away).
+    culledNodeIds.value = new Set(['proto-1'])
+    await flushPromises()
+    expect(wrapper.findComponent(PrototypeNode).exists()).toBe(false)
+
+    // Click withdraw while the node is unmounted: WhiteboardBody must still roll back Yjs silently.
+    const withdrawBtn = wrapper
+      .findAll('.artifact-feedback-bar button')
+      .find((btn) => btn.text().includes('撤回'))
+    expect(withdrawBtn).toBeDefined()
+    await withdrawBtn!.trigger('click')
+    await flushPromises()
+
+    expect(withdrawFeedback).toHaveBeenCalledWith('art_board_1', 1)
+    expect(readNodeTweakValues(doc)).toBeUndefined()
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+    expect(getPendingArtifactFeedback('art_board_1')).toBeUndefined()
+
+    // Remount PrototypeNode: restored to unsent local preview, send button enabled again.
+    culledNodeIds.value = new Set()
+    await flushPromises()
+
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('2')
+    expect(wrapper.find('.tweaks-footer button').text()).toContain('将当前参数发给 AI')
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+    const srcdoc = wrapper.find('iframe.proto-iframe').attributes('srcdoc') ?? ''
+    expect(srcdoc).toContain('#10b981')
+
+    wrapper.unmount()
+  })
+
+  test('rolls back Yjs tweakValues via WhiteboardBody when send fails after PrototypeNode unmounts mid-flight', async () => {
+    const doc = seedBoardDoc()
+    const { wrapper, sendFeedback } = await mountBoardEditor(doc)
+
+    let rejectSend!: (err: Error) => void
+    sendFeedback.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSend = reject
+        }),
+    )
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 24, dense: false, cta: '立即开始' })
+    await flushPromises()
+
+    const clickSend = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+
+    // Yjs already received the silent write and sendFeedback is in flight.
+    expect(readNodeTweakValues(doc)).toEqual({ accent: '#10b981', gap: 24 })
+    expect(sendFeedback).toHaveBeenCalledTimes(1)
+
+    // Unmount PrototypeNode before the request settles.
+    culledNodeIds.value = new Set(['proto-1'])
+    await flushPromises()
+    expect(wrapper.findComponent(PrototypeNode).exists()).toBe(false)
+
+    // Fail the request: rollback must still clear Yjs via WhiteboardBody.
+    rejectSend(new Error('network timeout'))
+    await clickSend
+    await flushPromises()
+
+    expect(readNodeTweakValues(doc)).toBeUndefined()
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+    expect(getPendingArtifactFeedback('art_board_1')).toBeUndefined()
+
+    // Remount PrototypeNode: local preview preserved, ready to retry.
+    culledNodeIds.value = new Set()
+    await flushPromises()
+
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('2')
+    expect(wrapper.find('.tweaks-footer button').text()).toContain('将当前参数发给 AI')
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+
+    wrapper.unmount()
+  })
+
+  test('clears stale room-level preview cache when remote tweakValues change while node is unmounted', async () => {
+    const doc = seedBoardDoc()
+    const { wrapper } = await mountBoardEditor(doc)
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 28, dense: false, cta: '立即开始' })
+    await flushPromises()
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('2')
+
+    // Unmount PrototypeNode.
+    culledNodeIds.value = new Set(['proto-1'])
+    await flushPromises()
+
+    // Remote collaborator / AI updates tweakValues on proto-1 while it is unmounted.
+    const nodes = doc.getMap('nodes') as Y.Map<Y.Map<unknown>>
+    doc.transact(() => {
+      const fields = nodes.get('proto-1')!
+      const prev = fields.get('data') as PrototypeNodeData
+      fields.set('data', { ...prev, tweakValues: { dense: true } })
+    }, fakeProvider)
+    await flushPromises()
+
+    // Remount: stale local preview must be discarded in favor of remote saved values.
+    culledNodeIds.value = new Set()
+    await flushPromises()
+
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('1')
+    expect(wrapper.find('.tweaks-footer button').text()).toContain('当前参数已发送')
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  test('clears room-level preview cache when leaving or switching artifact rooms', async () => {
+    const doc1 = seedBoardDoc()
+    const doc2 = seedBoardDoc()
+    sharedDocsByArtifact.set('art_board_1', doc1)
+    sharedDocsByArtifact.set('art_board_2', doc2)
+
+    const { wrapper, getArtifact } = await mountBoardEditor(doc1, 'art_board_1')
+    getArtifact.mockImplementation((artifactId) => Promise.resolve(boardDetail(artifactId)))
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 24, dense: false, cta: '立即开始' })
+    await flushPromises()
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('2')
+
+    // Switch to another artifact (triggers leave() and join('art_board_2')).
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.find('.proto-tweak-count').exists()).toBe(false)
+
+    // Switch back to art_board_1: previous room's local preview cache was cleared on leave().
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.find('.proto-tweak-count').exists()).toBe(false)
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(true)
 
     wrapper.unmount()
   })
