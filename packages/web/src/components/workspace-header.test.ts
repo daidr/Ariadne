@@ -354,4 +354,65 @@ describe('WorkspaceHeader medium layout', () => {
     expect(state.main).toEqual({ kind: 'conversation' })
     expect(wrapper.find('button[aria-label="收起项目面板"]').exists()).toBe(true)
   })
+
+  test('does not double-count authors under review in the pulse activity pill', async () => {
+    state.projects = [
+      { ...makeProjectSummary('prj_1', 'Ariadne', 0), runningTurns: 1 } as ProjectView,
+    ]
+    state.detail = {
+      project: {
+        ...state.projects[0]!,
+        settings: { autopilot: { enabled: false, method: 'squash' } },
+      } as never,
+      threads: [
+        {
+          id: 'thr_author',
+          title: '作者任务',
+          stage: 'working',
+          review: { reviewerId: 'thr_reviewer', rounds: 1, reviewing: true },
+        } as never,
+        {
+          id: 'thr_reviewer',
+          title: '审阅任务',
+          stage: 'working',
+          reviewOf: 'thr_author',
+          review: null,
+        } as never,
+      ],
+      needsMe: [],
+      hasTracker: false,
+    }
+    const { wrapper } = mountHeader({ layoutMode: 'wide' })
+    await nextTick()
+
+    const pill = wrapper.get<HTMLButtonElement>('[data-pulse-pill]')
+    expect(pill.text()).toContain('1 运行中')
+    expect(pill.text()).not.toContain('2 运行中')
+
+    // When the reviewer is queued and no turn is running, show queued rather than running.
+    state.projects = [
+      { ...makeProjectSummary('prj_1', 'Ariadne', 0), runningTurns: 0 } as ProjectView,
+    ]
+    state.detail = {
+      ...state.detail,
+      threads: [
+        {
+          id: 'thr_author',
+          title: '作者任务',
+          stage: 'working',
+          review: { reviewerId: 'thr_reviewer', rounds: 1, reviewing: true },
+        } as never,
+        {
+          id: 'thr_reviewer',
+          title: '审阅任务',
+          stage: 'queued',
+          reviewOf: 'thr_author',
+          review: null,
+        } as never,
+      ],
+    }
+    await nextTick()
+    expect(pill.text()).toContain('1 排队中')
+    expect(pill.text()).not.toContain('运行中')
+  })
 })

@@ -185,7 +185,7 @@ export function computeFetchBounds(
   const pad = Math.round(span * 0.25)
   const earliest = nowMs - MAX_RETENTION_MS
   const fromMs = Math.max(earliest, Math.floor(viewStart - pad))
-  const toMs = Math.max(Math.ceil(viewEnd), nowMs)
+  const toMs = Math.max(fromMs, Math.min(nowMs, Math.ceil(viewEnd + pad)))
   return { fromMs, toMs }
 }
 
@@ -199,7 +199,7 @@ export function needsRefetch(
   if (fetchedTo <= fetchedFrom) return true
   if (viewStart < fetchedFrom) return true
   const visibleEnd = Math.min(viewEnd, nowMs)
-  return visibleEnd > fetchedTo + 60_000
+  return visibleEnd > fetchedTo
 }
 
 export function resolveSpanVisualKind(
@@ -608,11 +608,20 @@ const PULSE_RELEVANT_PREFIXES = new Set([
   'review',
   'pull_request',
   'checks',
+  'branch',
   'artifact',
   'plan',
   'autopilot',
   'workspace',
   'user',
+])
+
+const PULSE_RELEVANT_EVENTS = new Set<AnyStoredEvent['type']>([
+  'conversation.wait_set',
+  'conversation.wait_ended',
+  'message.posted',
+  'todo.updated',
+  'routine.ran',
 ])
 
 const PULSE_IGNORED_EVENTS = new Set([
@@ -627,7 +636,7 @@ const PULSE_IGNORED_EVENTS = new Set([
 
 export function isPulseRelevantEvent(type: AnyStoredEvent['type']): boolean {
   if (PULSE_IGNORED_EVENTS.has(type)) return false
-  if (type === 'conversation.wait_set' || type === 'conversation.wait_ended') return true
+  if (PULSE_RELEVANT_EVENTS.has(type)) return true
   const prefix = type.split('.')[0] ?? ''
   return PULSE_RELEVANT_PREFIXES.has(prefix)
 }

@@ -357,13 +357,16 @@ function computeHandoffArcsNow() {
     for (const row of props.partitioned.completed) visibleOrder.push(row.lane.conversationId)
   }
 
-  let measuredHeight = inner?.scrollHeight ?? 0
+  // Use offsetHeight (flow height) rather than scrollHeight so the absolutely
+  // positioned handoff SVG cannot inflate subsequent height measurements.
+  let measuredHeight = inner?.offsetHeight ?? 0
   if (inner) {
     for (const el of inner.querySelectorAll<HTMLElement>('[data-lane-id]')) {
       const id = el.dataset.laneId
       if (!id) continue
       if (el.offsetHeight > 0) {
         laneCenters.set(id, el.offsetTop + el.offsetHeight / 2)
+        measuredHeight = Math.max(measuredHeight, el.offsetTop + el.offsetHeight)
       }
     }
   }

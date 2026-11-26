@@ -91,15 +91,47 @@ describe('pulse viewport math', () => {
     expect(tooFarLeft.viewEnd - tooFarLeft.viewStart).toBe(HOUR)
   })
 
-  test('computeFetchBounds adds 25% left padding and needsRefetch detects out-of-range pans', () => {
+  test('computeFetchBounds caps historical windows and needsRefetch triggers on right-edge pans', () => {
     const vp = computeLiveViewport(NOW, HOUR)
     const bounds = computeFetchBounds(vp.viewStart, vp.viewEnd, NOW)
     expect(bounds.fromMs).toBeLessThan(vp.viewStart)
-    expect(bounds.toMs).toBeGreaterThanOrEqual(NOW)
+    expect(bounds.toMs).toBe(NOW)
 
     expect(needsRefetch(vp.viewStart, vp.viewEnd, bounds.fromMs, bounds.toMs, NOW)).toBe(false)
     expect(needsRefetch(bounds.fromMs - 1, vp.viewEnd, bounds.fromMs, bounds.toMs, NOW)).toBe(true)
-    expect(needsRefetch(vp.viewStart, vp.viewEnd, bounds.fromMs, NOW - 120_000, NOW)).toBe(true)
+    expect(needsRefetch(vp.viewStart, vp.viewEnd, bounds.fromMs, NOW - 10_000, NOW)).toBe(true)
+
+    // Near-live viewport extends toMs to nowMs when right padding reaches nowMs.
+    const nearNow = computeFetchBounds(NOW - 70 * MINUTE, NOW - 10 * MINUTE, NOW)
+    expect(nearNow.toMs).toBe(NOW)
+
+    // Historical viewport (e.g. 7 days ago) stays bounded around viewEnd + 25% pad.
+    const histStart = NOW - 7 * 24 * HOUR
+    const histEnd = histStart + HOUR
+    const histBounds = computeFetchBounds(histStart, histEnd, NOW)
+    expect(histBounds.fromMs).toBe(histStart - 15 * MINUTE)
+    expect(histBounds.toMs).toBe(histEnd + 15 * MINUTE)
+    expect(histBounds.toMs).toBeLessThan(NOW)
+
+    // Panning right inside fetched historical bounds does not refetch, but crossing fetchedTo does immediately.
+    expect(
+      needsRefetch(
+        histStart + 10 * MINUTE,
+        histEnd + 10 * MINUTE,
+        histBounds.fromMs,
+        histBounds.toMs,
+        NOW,
+      ),
+    ).toBe(false)
+    expect(
+      needsRefetch(
+        histStart + 16 * MINUTE,
+        histBounds.toMs + 1_000,
+        histBounds.fromMs,
+        histBounds.toMs,
+        NOW,
+      ),
+    ).toBe(true)
   })
 })
 
@@ -265,7 +297,16 @@ describe('buildConcurrencyBars and axis ticks', () => {
     expect(isPulseRelevantEvent('turn.started')).toBe(true)
     expect(isPulseRelevantEvent('conversation.wait_set')).toBe(true)
     expect(isPulseRelevantEvent('conversation.wait_ended')).toBe(true)
+    expect(isPulseRelevantEvent('branch.merged')).toBe(true)
+    expect(isPulseRelevantEvent('branch.conflicted')).toBe(true)
+    expect(isPulseRelevantEvent('branch.merge_undone')).toBe(true)
+    expect(isPulseRelevantEvent('todo.updated')).toBe(true)
+    expect(isPulseRelevantEvent('message.posted')).toBe(true)
+    expect(isPulseRelevantEvent('routine.ran')).toBe(true)
+    expect(isPulseRelevantEvent('branch.changes_synced')).toBe(false)
     expect(isPulseRelevantEvent('turn.step')).toBe(false)
     expect(isPulseRelevantEvent('message.read')).toBe(false)
+    expect(isPulseRelevantEvent('message.reacted')).toBe(false)
+    expect(isPulseRelevantEvent('message.edited')).toBe(false)
   })
 })

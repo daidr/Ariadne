@@ -496,4 +496,43 @@ describe('PulseView', () => {
     expect(wrapper.find('[data-pulse-inline-empty]').exists()).toBe(false)
     expect(wrapper.find('[data-lane-id="thr_author"]').exists()).toBe(true)
   })
+
+  test('shrinks handoff SVG height using flow offsetHeight rather than stale scrollHeight', async () => {
+    vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
+    const wrapper = mountPulse()
+    await flushPromises()
+    await nextTick()
+
+    const inner = wrapper.get('.pulse-lanes-inner').element as HTMLElement
+    let flowHeight = 620
+    const staleScrollHeight = 620
+    Object.defineProperty(inner, 'clientWidth', { configurable: true, get: () => 1058 })
+    Object.defineProperty(inner, 'offsetHeight', { configurable: true, get: () => flowHeight })
+    Object.defineProperty(inner, 'scrollHeight', {
+      configurable: true,
+      get: () => staleScrollHeight,
+    })
+
+    const authorEl = wrapper.get('[data-lane-id="thr_author"]').element as HTMLElement
+    const reviewerEl = wrapper.get('[data-lane-id="thr_reviewer"]').element as HTMLElement
+    Object.defineProperty(authorEl, 'offsetTop', { configurable: true, get: () => 88 })
+    Object.defineProperty(authorEl, 'offsetHeight', { configurable: true, get: () => 44 })
+    Object.defineProperty(reviewerEl, 'offsetTop', { configurable: true, get: () => 132 })
+    Object.defineProperty(reviewerEl, 'offsetHeight', { configurable: true, get: () => 44 })
+
+    // Expand completed section at taller flow height -> SVG grows to 620px.
+    await wrapper.get('[data-pulse-completed-toggle]').trigger('click')
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.get('[data-pulse-handoff-svg]').attributes('style')).toContain('height: 620px')
+
+    // Collapse completed section -> flow offsetHeight shrinks to 260px while scrollHeight stays inflated at 620px.
+    flowHeight = 260
+    await wrapper.get('[data-pulse-completed-toggle]').trigger('click')
+    await flushPromises()
+    await nextTick()
+    const svg = wrapper.get('[data-pulse-handoff-svg]')
+    expect(svg.attributes('style')).toContain('height: 260px')
+    expect(svg.attributes('viewBox')).toBe('0 0 800 260')
+  })
 })

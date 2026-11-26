@@ -15,7 +15,9 @@ const currentProject = computed(
 
 const runningCount = computed(() => {
   const threads = state.detail?.threads ?? []
-  const workingThreads = threads.filter((thread) => thread.stage === 'working').length
+  const workingThreads = threads.filter(
+    (thread) => thread.stage === 'working' && !thread.review?.reviewing,
+  ).length
   const coordinatorBusy = state.coordinator.conversation?.turn ? 1 : 0
   return Math.max(workingThreads + coordinatorBusy, currentProject.value?.runningTurns ?? 0)
 })
