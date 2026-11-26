@@ -339,9 +339,21 @@ describe('artifact history stack helpers', () => {
     expect(referencedArtifactId('/projects/prj_1?modal=artifact:art_456&from=thr_1', 'prj_1')).toBe(
       'art_456',
     )
+    expect(
+      referencedArtifactId(
+        `${window.location.origin}/projects/prj_1?tab=artifact:art_789`,
+        'prj_1',
+      ),
+    ).toBe('art_789')
     expect(referencedArtifactId('/projects/prj_other?tab=artifact:art_123', 'prj_1')).toBeNull()
     expect(
       referencedArtifactId('https://example.com/projects/prj_1?tab=artifact:art_1', 'prj_1'),
+    ).toBeNull()
+    expect(
+      referencedArtifactId('//example.com/projects/prj_1?tab=artifact:art_1', 'prj_1'),
+    ).toBeNull()
+    expect(
+      referencedArtifactId('//example.com/projects/prj_1?modal=artifact:art_1', 'prj_1'),
     ).toBeNull()
     expect(referencedArtifactId('thread:thr_1', 'prj_1')).toBeNull()
   })
@@ -500,6 +512,78 @@ describe('store in-place artifact navigation and Back/Forward history', () => {
     expect(stepArtifactNavigation('full', 'art_board', -1)).toBe(false)
     expect(state.full?.view).toEqual({ kind: 'artifact', id: 'art_board' })
     expect(artifactNavigation('full', 'art_board')).toEqual({ back: null, forward: null })
+  })
+
+  test('preserves both tabs histories when side navigation activates an already-open artifact tab', async () => {
+    state.artifacts = [
+      makeSummary('art_a0', 'document', '起点 A'),
+      makeSummary('art_a', 'document', '文档 A'),
+      makeSummary('art_b0', 'document', '起点 B'),
+      makeSummary('art_b', 'whiteboard', '画板 B'),
+    ]
+    state.artifactsLoaded = true
+
+    // Group 1 opens art_a0 -> art_a (history: [art_a0, art_a]).
+    await openView({ kind: 'artifact', id: 'art_a0' })
+    navigateArtifactInPlace({ place: 'side', fromId: 'art_a0', toId: 'art_a' })
+
+    // Split opens art_b0 -> art_b in a second group (history: [art_b0, art_b]).
+    setSide(side.open(state.side, side.artifactKey('art_b0'), { beside: 'horizontal' }))
+    navigateArtifactInPlace({ place: 'side', fromId: 'art_b0', toId: 'art_b' })
+
+    // Focus back on art_a and click a ref card targeting already-open art_b.
+    setSide(side.activate(state.side, side.artifactKey('art_a')))
+    navigateArtifactInPlace({
+      place: 'side',
+      fromId: 'art_a',
+      toId: 'art_b',
+      focusNodeId: 'grp-1',
+    })
+
+    // Both tabs remain open, art_b is activated, focus is requested, and neither history is clobbered.
+    expect(sideTabs()).toContain('artifact:art_a')
+    expect(sideTabs()).toContain('artifact:art_b')
+    expect(side.activeOf(side.focusedGroup(state.side))).toBe('artifact:art_b')
+    expect(artifactFocusTarget.value).toMatchObject({ artifactId: 'art_b', nodeId: 'grp-1' })
+    expect(artifactNavigation('side', 'art_a')).toEqual({ back: { id: 'art_a0' }, forward: null })
+    expect(artifactNavigation('side', 'art_b')).toEqual({ back: { id: 'art_b0' }, forward: null })
+
+    // Now manually open art_a0 in a split while art_a still has Back -> art_a0, then step Back.
+    setSide(side.open(state.side, side.artifactKey('art_a0'), { beside: 'horizontal' }))
+    // Even if art_a0 is already the active tab in the focused split group, stepping Back from art_a
+    // keeps art_a's own history intact and does not overwrite art_a0's history.
+    expect(stepArtifactNavigation('side', 'art_a', -1)).toBe(true)
+    expect(side.activeOf(side.focusedGroup(state.side))).toBe('artifact:art_a0')
+    expect(artifactNavigation('side', 'art_a')).toEqual({ back: { id: 'art_a0' }, forward: null })
+    expect(artifactNavigation('side', 'art_a0')).toEqual({ back: null, forward: null })
+  })
+
+  test('allows stepping back from an artifact missing from state.artifacts and prunes it afterward', async () => {
+    state.artifacts = [
+      makeSummary('art_root', 'document', '总览文档'),
+      makeSummary('art_doc', 'document', '方案文档'),
+    ]
+    state.artifactsLoaded = true
+
+    // Full-screen: art_root -> art_doc -> art_unsynced (not yet in state.artifacts or broken link).
+    await openView({ kind: 'artifact', id: 'art_root' }, { from: 'thr_1' })
+    navigateArtifactInPlace({ place: 'full', fromId: 'art_root', toId: 'art_doc' })
+    navigateArtifactInPlace({ place: 'full', fromId: 'art_doc', toId: 'art_unsynced' })
+
+    expect(stepArtifactNavigation('full', 'art_unsynced', -1)).toBe(true)
+    expect(state.full?.view).toEqual({ kind: 'artifact', id: 'art_doc' })
+    // Earlier valid entry remains reachable; invalid entry is pruned from Forward.
+    expect(artifactNavigation('full', 'art_doc')).toEqual({
+      back: { id: 'art_root' },
+      forward: null,
+    })
+
+    // Side dock: art_doc -> art_missing (only 2 entries) -> Back returns to art_doc and clears stale history.
+    await openView({ kind: 'artifact', id: 'art_doc' })
+    navigateArtifactInPlace({ place: 'side', fromId: 'art_doc', toId: 'art_missing' })
+    expect(stepArtifactNavigation('side', 'art_missing', -1)).toBe(true)
+    expect(side.activeOf(side.focusedGroup(state.side))).toBe('artifact:art_doc')
+    expect(artifactNavigation('side', 'art_doc')).toEqual({ back: null, forward: null })
   })
 })
 

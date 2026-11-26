@@ -174,15 +174,12 @@ export function referencedArtifactId(href: string | undefined, projectId: string
   if (inner) return inner.kind === 'artifact' ? inner.id : null
   if (!projectId) return null
 
-  const origin =
-    typeof window !== 'undefined' && window.location?.origin
-      ? window.location.origin
-      : 'http://ariadne.local'
+  const rawOrigin = typeof window !== 'undefined' ? window.location?.origin : undefined
+  const origin = rawOrigin && rawOrigin !== 'null' ? rawOrigin : 'http://ariadne.local'
   let parsed: URL
   try {
-    const isRelative = raw.startsWith('/') || raw.startsWith('?')
     parsed = new URL(raw, origin)
-    if (!isRelative && parsed.origin !== origin) return null
+    if (parsed.origin !== origin) return null
   } catch {
     return null
   }

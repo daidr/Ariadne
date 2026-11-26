@@ -1484,19 +1484,34 @@ export function navigateArtifactInPlace(options: {
     return
   }
 
+  const fromKey = side.artifactKey(fromId)
+  const toKey = side.artifactKey(toId)
+  if (side.groupWith(state.side, toKey)) {
+    // Target artifact is already open in another tab or split group: focus it in place
+    // without removing `fromId` or overwriting either tab's navigation history.
+    showWorkspace('side')
+    setSide(side.activate(state.side, toKey))
+    return
+  }
   const nextHistory = pushArtifactHistory(sideArtifactHistories[fromId], fromId, toId, focusNodeId)
   delete sideArtifactHistories[fromId]
   sideArtifactHistories[toId] = nextHistory
   showWorkspace('side')
-  setSide(side.replace(state.side, side.artifactKey(fromId), side.artifactKey(toId)))
+  setSide(side.replace(state.side, fromKey, toKey))
 }
 
 /** Step one entry back (`-1`) or forward (`1`) in an artifact panel's navigation history. */
 export function stepArtifactNavigation(place: 'side' | 'full', id: string, delta: -1 | 1): boolean {
+  if (place === 'full') {
+    const current = state.full
+    if (!current || current.view.kind !== 'artifact' || current.view.id !== id) return false
+  }
   const knownIds = state.artifactsLoaded ? new Set(state.artifacts.map((a) => a.id)) : null
   const currentStack = place === 'full' ? fullArtifactHistory.value : sideArtifactHistories[id]
+  // Keep the current entry during stepping so users can still go back from a newly created
+  // artifact not yet synced into `state.artifacts` or from a broken/deleted target.
   const usable = knownIds
-    ? pruneArtifactHistory(currentStack, (entryId) => knownIds.has(entryId))
+    ? pruneArtifactHistory(currentStack, (entryId) => entryId === id || knownIds.has(entryId))
     : currentStack
   const stepped = stepArtifactHistoryStack(usable, id, delta)
   if (!stepped) {
@@ -1505,6 +1520,9 @@ export function stepArtifactNavigation(place: 'side' | 'full', id: string, delta
     else delete sideArtifactHistories[id]
     return false
   }
+  const nextStack = knownIds
+    ? pruneArtifactHistory(stepped.stack, (entryId) => knownIds.has(entryId))
+    : stepped.stack
 
   if (stepped.entry.focusNodeId) {
     requestArtifactFocus(stepped.entry.id, stepped.entry.focusNodeId)
@@ -1513,16 +1531,26 @@ export function stepArtifactNavigation(place: 'side' | 'full', id: string, delta
   }
 
   if (place === 'full') {
-    const current = state.full
-    if (!current || current.view.kind !== 'artifact' || current.view.id !== id) return false
-    setFull({ ...current, view: { kind: 'artifact', id: stepped.entry.id } }, stepped.stack)
+    setFull({ ...state.full!, view: { kind: 'artifact', id: stepped.entry.id } }, nextStack)
+    return true
+  }
+
+  const fromKey = side.artifactKey(id)
+  const targetKey = side.artifactKey(stepped.entry.id)
+  if (side.groupWith(state.side, targetKey)) {
+    // Target artifact is already open in another tab or split group: focus it while keeping
+    // both tabs' own histories intact.
+    if (usable) sideArtifactHistories[id] = usable
+    else delete sideArtifactHistories[id]
+    showWorkspace('side')
+    setSide(side.activate(state.side, targetKey))
     return true
   }
 
   delete sideArtifactHistories[id]
-  sideArtifactHistories[stepped.entry.id] = stepped.stack
+  if (nextStack) sideArtifactHistories[stepped.entry.id] = nextStack
   showWorkspace('side')
-  setSide(side.replace(state.side, side.artifactKey(id), side.artifactKey(stepped.entry.id)))
+  setSide(side.replace(state.side, fromKey, targetKey))
   return true
 }
 
