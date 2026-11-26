@@ -318,12 +318,6 @@ function groupHeaderTitle(group: PulsePartitionedLanes['groups'][number]): strin
   return t('pulse.group.unlinkedNode')
 }
 
-function groupHeaderHint(group: PulsePartitionedLanes['groups'][number]): string {
-  if (group.kind === 'needs') return t('pulse.group.needsHint')
-  if (group.kind === 'active') return t('pulse.group.activeHint')
-  return ''
-}
-
 // --- Handoff SVG arc calculation ---
 interface HandoffArc {
   key: string
@@ -866,9 +860,7 @@ onBeforeUnmount(() => {
                 {{ group.rows.length }}
               </span>
             </div>
-            <div class="pulse-track-col pulse-group-track">
-              {{ groupHeaderHint(group) }}
-            </div>
+            <div class="pulse-track-col pulse-group-track" aria-hidden="true" />
           </div>
 
           <div
@@ -979,9 +971,6 @@ onBeforeUnmount(() => {
               <span v-if="completedPreviewTitles" class="pulse-completed-names">
                 （{{ completedPreviewTitles }}）
               </span>
-            </span>
-            <span class="pulse-completed-hint">
-              {{ showCompleted ? t('pulse.completed.collapse') : t('pulse.completed.expand') }}
             </span>
           </button>
 
@@ -1443,11 +1432,7 @@ onBeforeUnmount(() => {
 }
 
 .pulse-group-track {
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  font-size: 11.5px;
-  color: var(--dou-color-text-tertiary);
+  min-width: 0;
 }
 
 /* Lane rows */
@@ -1862,11 +1847,6 @@ onBeforeUnmount(() => {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--dou-color-text-tertiary);
-}
-
-.pulse-completed-hint {
-  flex: none;
   color: var(--dou-color-text-tertiary);
 }
 

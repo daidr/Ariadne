@@ -38,7 +38,6 @@ import { t } from '../i18n'
         {{ t('pulse.legend.returnLine') }}
       </span>
     </div>
-    <span class="pulse-legend-hint">{{ t('pulse.legend.hint') }}</span>
   </footer>
 </template>
 
@@ -120,10 +119,5 @@ import { t } from '../i18n'
   width: 0;
   height: 11px;
   border-left: 1.5px dashed color-mix(in srgb, var(--dou-color-primary) 60%, transparent);
-}
-
-.pulse-legend-hint {
-  color: var(--dou-color-text-tertiary);
-  font-variant-numeric: tabular-nums;
 }
 </style>
