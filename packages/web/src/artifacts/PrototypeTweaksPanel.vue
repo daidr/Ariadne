@@ -2,6 +2,7 @@
 import { RotateCcwIcon } from '@dou-ui/icons'
 import {
   DouButton,
+  DouCheckTagGroup,
   DouColorPicker,
   DouInput,
   DouSegmentedControl,
@@ -15,6 +16,8 @@ import { t } from '../i18n'
 import {
   countModifiedTweaks,
   groupTweaksBySection,
+  resolveEnumTweakControl,
+  type EnumTweakControl,
   type PrototypeTweakSpec,
   type PrototypeTweakValue,
   type PrototypeTweakValues,
@@ -76,6 +79,10 @@ function onTextCommit(spec: PrototypeTweakSpec, val: string) {
 function formatRangeValue(spec: PrototypeTweakSpec, val: PrototypeTweakValue | undefined): string {
   const n = typeof val === 'number' ? val : Number(spec.default)
   return `${n}${spec.unit ?? ''}`
+}
+
+function enumControl(spec: PrototypeTweakSpec): EnumTweakControl {
+  return resolveEnumTweakControl(spec.options)
 }
 </script>
 
@@ -163,13 +170,25 @@ function formatRangeValue(spec: PrototypeTweakSpec, val: PrototypeTweakValue | u
             <div class="tweak-stack">
               <DouText size="sm" class="tweak-label">{{ spec.label }}</DouText>
               <DouSegmentedControl
-                v-if="(spec.options?.length ?? 0) <= 4"
+                v-if="enumControl(spec) === 'segmented'"
                 size="sm"
                 block
                 :model-value="String(values[spec.key] ?? spec.default)"
                 :options="spec.options ?? []"
                 :disabled="readonly"
                 @update:model-value="(val) => onImmediateChange(spec, String(val))"
+              />
+              <DouCheckTagGroup
+                v-else-if="enumControl(spec) === 'tags'"
+                size="sm"
+                :model-value="String(values[spec.key] ?? spec.default)"
+                :options="spec.options ?? []"
+                :disabled="readonly"
+                @update:model-value="
+                  (val) => {
+                    if (typeof val === 'string') onImmediateChange(spec, val)
+                  }
+                "
               />
               <DouSelect
                 v-else

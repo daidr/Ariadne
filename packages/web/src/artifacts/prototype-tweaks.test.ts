@@ -6,12 +6,16 @@ import {
   buildSandboxedPrototypeDoc,
   countModifiedTweaks,
   effectiveTweakValues,
+  estimateTweakLabelWidth,
   extractTweaksFromHtml,
   groupTweaksBySection,
   isValidPrototypeSrc,
+  resolveEnumTweakControl,
   resolvePrototypeHeaderLayout,
   sanitizeCommentElement,
 } from './prototype-tweaks'
+
+const makeEnumOptions = (labels: string[]) => labels.map((label, i) => ({ value: `v${i}`, label }))
 
 describe('prototype tweaks & sandbox builder', () => {
   test('extracts and normalizes declarative tweaks from HTML script tag', () => {
@@ -261,5 +265,55 @@ describe('prototype tweaks & sandbox builder', () => {
       mode: 'block',
       maxLines: 5,
     })
+  })
+
+  test('picks segmented, wrapping tags, or select for enum tweaks based on count and label width', () => {
+    // Short 2–4 option labels fit comfortably inside equal-width segmented controls.
+    expect(resolveEnumTweakControl(makeEnumOptions(['浅色', '深色']))).toBe('segmented')
+    expect(resolveEnumTweakControl(makeEnumOptions(['compact', 'comfortable']))).toBe('segmented')
+    expect(resolveEnumTweakControl(makeEnumOptions(['浅色', '深色', '跟随系统']))).toBe('segmented')
+    expect(resolveEnumTweakControl(makeEnumOptions(['今日', '近 7 天', '近 30 天']))).toBe(
+      'segmented',
+    )
+    expect(resolveEnumTweakControl(makeEnumOptions(['sm', 'md', 'lg', 'xl']))).toBe('segmented')
+    expect(resolveEnumTweakControl(makeEnumOptions(['全部', '文档', '画板', '仪表盘']))).toBe(
+      'segmented',
+    )
+
+    // Longer 2–4 option labels that would clip in equal-width 288px segments switch to wrapping tags.
+    expect(
+      resolveEnumTweakControl(
+        makeEnumOptions(['侧栏顶部（推荐）', '顶栏常驻按钮', '单项目右侧 [更多]']),
+      ),
+    ).toBe('tags')
+    expect(
+      resolveEnumTweakControl(
+        makeEnumOptions(['今日（日报）', '近 7 天（周报）', '近 30 天（月报）']),
+      ),
+    ).toBe('tags')
+    expect(
+      resolveEnumTweakControl(
+        makeEnumOptions(['默认折叠（0 干扰）', '展开 AI 复盘摘要', '纯规则（无 AI）']),
+      ),
+    ).toBe('tags')
+    expect(resolveEnumTweakControl(makeEnumOptions(['关', '开', '仅在桌面端自动启用']))).toBe(
+      'tags',
+    )
+    expect(resolveEnumTweakControl(makeEnumOptions(['Comfortable', 'Compact', 'Spacious']))).toBe(
+      'tags',
+    )
+
+    // Single options, > 4 options, and ultra-long labels (> single chip width) fall back to select.
+    expect(resolveEnumTweakControl(undefined)).toBe('select')
+    expect(resolveEnumTweakControl(makeEnumOptions(['唯一选项']))).toBe('select')
+    expect(resolveEnumTweakControl(makeEnumOptions(['一', '二', '三', '四', '五']))).toBe('select')
+    expect(
+      resolveEnumTweakControl(
+        makeEnumOptions(['这是一段超过整个面板单行标签宽度的非常长描述方案', '另一项超长描述']),
+      ),
+    ).toBe('select')
+
+    // Emoji / surrogate pairs count as a single wide glyph rather than two UTF-16 code units.
+    expect(estimateTweakLabelWidth('🎨')).toBe(13.5)
   })
 })

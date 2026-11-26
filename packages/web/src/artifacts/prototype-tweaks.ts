@@ -71,6 +71,59 @@ export function resolvePrototypeHeaderLayout(
   return { showSize, compactTweaks, compactInteract, compactModeTag }
 }
 
+export type EnumTweakControl = 'segmented' | 'tags' | 'select'
+
+const TWEAKS_SEGMENTED_INNER_WIDTH = 272
+const TWEAKS_SEGMENT_HORIZONTAL_OVERHEAD = 24
+const TWEAKS_TAG_MAX_LABEL_WIDTH = 220
+
+const WIDE_CHAR_RE =
+  /[\u1100-\u115f\u2e80-\u9fff\ua960-\ua97c\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6\p{Extended_Pictographic}]/u
+const NARROW_ASCII_RE = /^[\s.,:;'"!|()[\]{}/\\`ilItfj1-]$/
+const WIDE_ASCII_RE = /^[WMmw@%&]$/
+
+/**
+ * Estimates the rendered pixel width of an enum tweak option label at 13px medium weight
+ * (`--dou-font-size-sm`) so narrow inspector controls can pick a widget without truncating text.
+ */
+export function estimateTweakLabelWidth(label: string): number {
+  let width = 0
+  for (const ch of label) {
+    if (WIDE_CHAR_RE.test(ch)) {
+      width += 13.5
+    } else if (NARROW_ASCII_RE.test(ch)) {
+      width += 4.5
+    } else if (WIDE_ASCII_RE.test(ch)) {
+      width += 10.5
+    } else {
+      width += 8
+    }
+  }
+  return width
+}
+
+/**
+ * Chooses the best native DouUI control for an `enum` tweak inside the 288px tweaks popover:
+ * - `segmented`: 2–4 short options that fit comfortably in equal-width segments without clipping.
+ * - `tags`: 2–4 medium/long options rendered as wrapping single-select chips for one-click preview.
+ * - `select`: > 4 options, single-option lists, or ultra-long labels that exceed a single chip row.
+ */
+export function resolveEnumTweakControl(
+  options: readonly PrototypeTweakOption[] | undefined,
+): EnumTweakControl {
+  const count = options?.length ?? 0
+  if (count < 2 || count > 4) return 'select'
+  let maxWidth = 0
+  for (const opt of options!) {
+    const w = estimateTweakLabelWidth(opt.label)
+    if (w > maxWidth) maxWidth = w
+  }
+  const segmentBudget = TWEAKS_SEGMENTED_INNER_WIDTH / count - TWEAKS_SEGMENT_HORIZONTAL_OVERHEAD
+  if (maxWidth <= segmentBudget) return 'segmented'
+  if (maxWidth <= TWEAKS_TAG_MAX_LABEL_WIDTH) return 'tags'
+  return 'select'
+}
+
 const TWEAK_KEY_RE = /^[a-zA-Z0-9_-]{1,64}$/
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 const PROTOTYPE_SRC_RE = /^\/api\/files\/fil_[\w-]+$/
