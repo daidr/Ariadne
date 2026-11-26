@@ -432,6 +432,7 @@ function setMark(server: DraftServer, tool: string, mark: unknown) {
             </DouText>
           </div>
           <DouSegmentedControl
+            class="mcp-tool-mark"
             size="sm"
             :options="markOptions"
             :model-value="server.tools[tool.name] ?? 'ask'"
@@ -539,8 +540,13 @@ function setMark(server: DraftServer, tool: string, mark: unknown) {
 
 .mcp-tool-text {
   display: flex;
+  flex: 1;
   flex-direction: column;
   min-width: 0;
+}
+
+.mcp-tool-mark {
+  flex: none;
 }
 
 .mcp-tool-name {

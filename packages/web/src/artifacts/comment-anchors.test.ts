@@ -63,4 +63,32 @@ describe('anchorQuotes', () => {
       anchorQuotes(read('```\nconst a = 1\n```\n'), [{ id: 'x', quote: 'const' }]).found.size,
     ).toBe(0)
   })
+
+  test('parses and round-trips CJK punctuation adjacent to bold, italic and strike marks', () => {
+    const markdown =
+      '制作了**桌面工作台（1280×860）**与**移动端 PWA（390×800）**两套，包含**「重要」**、**“引号”**、**测试！**、~~删除（测试）~~与*斜体（示例）*。\n'
+    const blocks = read(markdown)
+    expect(blocks[0]?.content).toEqual([
+      { type: 'text', text: '制作了' },
+      { type: 'text', text: '桌面工作台（1280×860）', marks: ['bold'] },
+      { type: 'text', text: '与' },
+      { type: 'text', text: '移动端 PWA（390×800）', marks: ['bold'] },
+      { type: 'text', text: '两套，包含' },
+      { type: 'text', text: '「重要」', marks: ['bold'] },
+      { type: 'text', text: '、' },
+      { type: 'text', text: '“引号”', marks: ['bold'] },
+      { type: 'text', text: '、' },
+      { type: 'text', text: '测试！', marks: ['bold'] },
+      { type: 'text', text: '、' },
+      { type: 'text', text: '删除（测试）', marks: ['strike'] },
+      { type: 'text', text: '与' },
+      { type: 'text', text: '斜体（示例）', marks: ['italic'] },
+      { type: 'text', text: '。' },
+    ])
+    expect(blocksToMarkdown(blocks as never, extensions).trim()).toBe(markdown.trim())
+
+    const anchored = anchorQuotes(blocks, [{ id: 'cjk', quote: '（1280×860）与移动端' }])
+    expect(anchored.found.has('cjk')).toBe(true)
+    expect(blocksToMarkdown(anchored.blocks as never, extensions).trim()).toBe(markdown.trim())
+  })
 })
