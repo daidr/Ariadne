@@ -664,6 +664,7 @@ export const en: Record<MessageKey, string> = {
   'artifact.prototype.defaultTitle': 'Interactive prototype',
   'artifact.prototype.interact': 'Interact',
   'artifact.prototype.interacting': 'Interacting · Esc to exit',
+  'artifact.prototype.interactingShort': 'Active',
   'artifact.prototype.exitInteract': 'Exit interaction',
   'artifact.prototype.tweaks': 'Tweaks',
   'artifact.prototype.tweaksTitle': 'Parameters',

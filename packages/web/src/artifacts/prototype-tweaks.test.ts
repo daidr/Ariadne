@@ -1,5 +1,6 @@
 import type { FlowDocument } from '@dou-ui/flow'
 import { describe, expect, test } from 'vitest'
+import { resolveOptionNoteLayout } from './decision-groups'
 import { resolvePrototypeViewportPoint } from './prototype-bridge'
 import {
   buildSandboxedPrototypeDoc,
@@ -8,6 +9,7 @@ import {
   extractTweaksFromHtml,
   groupTweaksBySection,
   isValidPrototypeSrc,
+  resolvePrototypeHeaderLayout,
   sanitizeCommentElement,
 } from './prototype-tweaks'
 
@@ -181,6 +183,83 @@ describe('prototype tweaks & sandbox builder', () => {
       prototypeNodeId: 'opt-1-prototype',
       viewportX: 640,
       viewportY: 400,
+    })
+  })
+
+  test('adapts prototype header chrome cleanly across narrow portrait and wide desktop widths', () => {
+    // Narrow 240px resized card with tweaks collapses both action labels and hides inline size.
+    expect(resolvePrototypeHeaderLayout(240, { hasTweaks: true, interacting: false })).toEqual({
+      showSize: false,
+      compactTweaks: true,
+      compactInteract: true,
+      compactModeTag: false,
+    })
+
+    // Portrait mobile card (280–328px) with tweaks hides inline size so title + buttons have room.
+    expect(resolvePrototypeHeaderLayout(280, { hasTweaks: true, interacting: false })).toEqual({
+      showSize: false,
+      compactTweaks: false,
+      compactInteract: false,
+      compactModeTag: false,
+    })
+    expect(resolvePrototypeHeaderLayout(300, { hasTweaks: true, interacting: true })).toEqual({
+      showSize: false,
+      compactTweaks: true,
+      compactInteract: false,
+      compactModeTag: true,
+    })
+
+    // Wide desktop card (480px) shows inline dimensions and full action labels in both modes.
+    expect(resolvePrototypeHeaderLayout(480, { hasTweaks: true, interacting: false })).toEqual({
+      showSize: true,
+      compactTweaks: false,
+      compactInteract: false,
+      compactModeTag: false,
+    })
+    expect(resolvePrototypeHeaderLayout(480, { hasTweaks: true, interacting: true })).toEqual({
+      showSize: true,
+      compactTweaks: false,
+      compactInteract: false,
+      compactModeTag: false,
+    })
+
+    // Cards without tweaks can show inline size earlier (>= 320px).
+    expect(resolvePrototypeHeaderLayout(330, { hasTweaks: false, interacting: false })).toEqual({
+      showSize: true,
+      compactTweaks: false,
+      compactInteract: false,
+      compactModeTag: false,
+    })
+  })
+
+  test('computes option card note layout for empty, legacy tight inset, reserved inset, and note-only cards', () => {
+    expect(resolveOptionNoteLayout(undefined, 240, 40)).toEqual({ mode: 'none', maxLines: 0 })
+    expect(resolveOptionNoteLayout('   ', 240, 40)).toEqual({ mode: 'none', maxLines: 0 })
+
+    // Legacy boards with children placed at y + 40 fall back to a compact two-line header.
+    expect(resolveOptionNoteLayout('Legacy short note', 240, 40)).toEqual({
+      mode: 'compact',
+      maxLines: 1,
+    })
+
+    // New boards reserve inset height for 1, 2, or 3 wrapped lines above child nodes.
+    expect(resolveOptionNoteLayout('One-line note', 240, 68)).toEqual({
+      mode: 'block',
+      maxLines: 1,
+    })
+    expect(resolveOptionNoteLayout('Two-line wrapped note', 260, 88)).toEqual({
+      mode: 'block',
+      maxLines: 2,
+    })
+    expect(resolveOptionNoteLayout('Three-line wrapped note', 300, 108)).toEqual({
+      mode: 'block',
+      maxLines: 3,
+    })
+
+    // Pure-note option cards without children use the card height.
+    expect(resolveOptionNoteLayout('Standalone note card', 160, null)).toEqual({
+      mode: 'block',
+      maxLines: 5,
     })
   })
 })

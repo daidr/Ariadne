@@ -6,20 +6,54 @@ import (
 	"strings"
 )
 
+const (
+	boardTextFontSize   = 16.0
+	boardTextLineHeight = 24.0 // 16px * 1.5 in @dou-ui/flow `.is-text > .dou-whiteboard-node__text`
+	boardTextPadX       = 16.0 // 8px left + 8px right
+	boardTextPadY       = 8.0  // 4px top + 4px bottom
+	boardTextSafetyPad  = 8.0  // cushion for cross-platform font metrics and descenders
+)
+
+func isWideBoardRune(r rune) bool {
+	return (r >= 0x1100 && r <= 0x115f) ||
+		(r >= 0x2e80 && r <= 0xa4cf) ||
+		(r >= 0xac00 && r <= 0xd7a3) ||
+		(r >= 0xf900 && r <= 0xfaff) ||
+		(r >= 0xfe30 && r <= 0xfe4f) ||
+		(r >= 0xff00 && r <= 0xff60) ||
+		(r >= 0xffe0 && r <= 0xffe6) ||
+		(r >= 0x2013 && r <= 0x2015) ||
+		(r >= 0x2018 && r <= 0x201d) ||
+		r == 0x2026
+}
+
+func boardRuneEm(r rune) float64 {
+	switch {
+	case r >= 0x1f300:
+		return 1.25
+	case isWideBoardRune(r):
+		return 1.0
+	case r == ' ' || r == '\t':
+		return 0.35
+	case r >= 'A' && r <= 'Z':
+		return 0.72
+	default:
+		return 0.6
+	}
+}
+
 func boardTextWidth(value string, font float64) float64 {
 	var em float64
 	for _, r := range value {
-		switch {
-		case r >= 0x1100 && r <= 0x115f, r >= 0x2e80 && r <= 0xa4cf,
-			r >= 0xac00 && r <= 0xd7a3, r >= 0xf900 && r <= 0xfaff,
-			r >= 0xfe30 && r <= 0xfe4f, r >= 0xff00 && r <= 0xff60,
-			r >= 0xffe0 && r <= 0xffe6:
-			em++
-		default:
-			em += 0.6
-		}
+		em += boardRuneEm(r)
 	}
 	return em * font
+}
+
+func boardTextNodeHeight(content string, width float64) float64 {
+	inner := max(boardTextFontSize, width-boardTextPadX)
+	lines := boardLineCount(content, boardTextFontSize, inner)
+	return math.Round(lines*boardTextLineHeight + boardTextPadY + boardTextSafetyPad)
 }
 
 func boardTextSize(kind, content string, w, h float64, fixedWidth bool) (float64, float64) {
@@ -34,7 +68,7 @@ func boardTextSize(kind, content string, w, h float64, fixedWidth bool) (float64
 	}
 	font := 14.0
 	if kind == "text" {
-		font = 16
+		font = boardTextFontSize
 	}
 	var longest float64
 	for line := range strings.SplitSeq(content, "\n") {
@@ -44,7 +78,7 @@ func boardTextSize(kind, content string, w, h float64, fixedWidth bool) (float64
 		if !fixedWidth {
 			w = min(480, max(w, longest+20))
 		}
-		return math.Round(w), h
+		return math.Round(w), math.Round(max(h, boardTextNodeHeight(content, w)))
 	}
 	if !fixedWidth {
 		w = max(w, min(280, (longest+2*padX)*roomy+2))
@@ -54,12 +88,75 @@ func boardTextSize(kind, content string, w, h float64, fixedWidth bool) (float64
 	return math.Round(w), math.Round(max(h, (lines*21+2*padY)*roomy+2))
 }
 
+// boardLineCount estimates wrapped visual lines for CSS `white-space: pre-wrap; overflow-wrap: anywhere;`.
+// It simulates greedy word-boundary wrapping (breaking between wide/CJK runes and whitespace, keeping
+// narrow word runs intact unless wider than the line) with a conservative metric factor across fonts.
 func boardLineCount(content string, font, width float64) float64 {
-	var lines float64
-	for line := range strings.SplitSeq(content, "\n") {
-		lines += max(1, math.Ceil(boardTextWidth(line, font)*1.1/width))
+	if width <= 0 {
+		width = max(font, 16)
 	}
-	return lines
+	limit := max(font, width/1.08)
+	var total float64
+	for para := range strings.SplitSeq(content, "\n") {
+		if para == "" {
+			total++
+			continue
+		}
+		lines := 1.0
+		cur := 0.0
+		runes := []rune(para)
+		for i := 0; i < len(runes); {
+			r := runes[i]
+			var tokenW float64
+			isSpace := false
+			switch {
+			case r == ' ' || r == '\t':
+				isSpace = true
+				tokenW = boardRuneEm(r) * font
+				i++
+			case r >= 0x1f300 || isWideBoardRune(r):
+				tokenW = boardRuneEm(r) * font
+				i++
+			default:
+				j := i
+				for j < len(runes) {
+					rj := runes[j]
+					if rj == ' ' || rj == '\t' || rj >= 0x1f300 || isWideBoardRune(rj) {
+						break
+					}
+					tokenW += boardRuneEm(rj) * font
+					j++
+				}
+				i = j
+			}
+			if cur == 0 {
+				if tokenW <= limit {
+					cur = tokenW
+				} else {
+					extra := math.Floor((tokenW - 1e-9) / limit)
+					lines += extra
+					cur = tokenW - extra*limit
+				}
+				continue
+			}
+			if cur+tokenW <= limit {
+				cur += tokenW
+				continue
+			}
+			lines++
+			if isSpace {
+				cur = 0
+			} else if tokenW <= limit {
+				cur = tokenW
+			} else {
+				extra := math.Floor((tokenW - 1e-9) / limit)
+				lines += extra
+				cur = tokenW - extra*limit
+			}
+		}
+		total += lines
+	}
+	return total
 }
 
 func boardRankGap(label, direction string) float64 {

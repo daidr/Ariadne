@@ -634,6 +634,7 @@ export const zhCN = {
   'artifact.prototype.defaultTitle': '交互原型',
   'artifact.prototype.interact': '交互',
   'artifact.prototype.interacting': '交互中 · Esc 退出',
+  'artifact.prototype.interactingShort': '交互中',
   'artifact.prototype.exitInteract': '退出交互',
   'artifact.prototype.tweaks': '参数',
   'artifact.prototype.tweaksTitle': '参数调节',

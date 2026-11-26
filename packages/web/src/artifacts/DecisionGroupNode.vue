@@ -149,7 +149,7 @@ function onKeydown(event: KeyboardEvent) {
       </div>
     </div>
     <div v-if="data.note && !data.collapsed" class="decision-group-note">
-      <DouText variant="tertiary" size="sm" truncate>{{ data.note }}</DouText>
+      <DouText variant="tertiary" size="sm" truncate :title="data.note">{{ data.note }}</DouText>
     </div>
   </div>
 </template>
@@ -181,6 +181,7 @@ function onKeydown(event: KeyboardEvent) {
   align-items: center;
   flex: none;
   margin-inline-start: auto;
+  white-space: nowrap;
 }
 
 .decision-group-picked {
@@ -195,7 +196,9 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .decision-group-note {
+  min-width: 0;
   padding: 0 12px 6px 34px;
+  overflow: hidden;
   line-height: 1.3;
 }
 </style>

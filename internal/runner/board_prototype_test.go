@@ -110,6 +110,9 @@ func TestWhiteboardPrototypeStandaloneEmbeddedAndLargeFileStorage(t *testing.T) 
 	if standalone == nil || text(standalone, "type") != "prototype" {
 		t.Fatalf("missing standalone prototype node: %+v", standalone)
 	}
+	if asNumber(standalone["width"]) != 300 || asNumber(standalone["height"]) < 680 {
+		t.Fatalf("expected portrait 390x844 prototype card to be 300x685 (full aspect fit), got %.0fx%.0f", asNumber(standalone["width"]), asNumber(standalone["height"]))
+	}
 	sData := objectField(standalone, "data")
 	if text(sData, "html") == "" || text(sData, "src") != "" {
 		t.Fatalf("expected small prototype to be stored inline, got data=%+v", sData)

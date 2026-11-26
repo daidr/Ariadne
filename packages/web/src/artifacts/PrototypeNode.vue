@@ -16,6 +16,7 @@ import {
   extractTweaksFromHtml,
   isValidPrototypeSrc,
   normalizePrototypeTweaks,
+  resolvePrototypeHeaderLayout,
   sanitizeCommentElement,
   type PrototypeNodeData,
   type PrototypeTweakSpec,
@@ -264,12 +265,21 @@ function inspectPoint(
 }
 
 let unregisterInspector: (() => void) | null = null
+let resizeObserver: ResizeObserver | null = null
+const measuredWidth = ref(0)
 
 onMounted(() => {
   window.addEventListener('message', onWindowMessage)
   window.addEventListener('keydown', onWindowKeydown, true)
   window.addEventListener('pointerdown', onWindowPointerDown, true)
   unregisterInspector = registerPrototypeInspector(props.node.id, inspectPoint)
+  if (rootEl.value && typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width
+      if (typeof width === 'number' && width > 0) measuredWidth.value = width
+    })
+    resizeObserver.observe(rootEl.value)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -277,20 +287,43 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onWindowKeydown, true)
   window.removeEventListener('pointerdown', onWindowPointerDown, true)
   unregisterInspector?.()
+  resizeObserver?.disconnect()
+  resizeObserver = null
   for (const resolve of pendingInspects.values()) resolve(null)
   pendingInspects.clear()
 })
 
 const displayTitle = computed(() => props.data.title || t('artifact.prototype.defaultTitle'))
+const sizeLabel = computed(() => `${viewportWidth.value}×${viewportHeight.value}`)
+const titleTooltip = computed(() => `${displayTitle.value} (${sizeLabel.value})`)
+const cardWidth = computed(() =>
+  typeof props.node.width === 'number' && props.node.width > 0
+    ? props.node.width
+    : measuredWidth.value || 480,
+)
+const headerLayout = computed(() =>
+  resolvePrototypeHeaderLayout(cardWidth.value, {
+    hasTweaks: tweakSpecs.value.length > 0,
+    interacting: interacting.value,
+  }),
+)
 </script>
 
 <template>
   <div ref="rootEl" class="proto-node" :class="{ 'is-interacting': interacting }">
     <div class="proto-head">
       <div class="proto-title">
-        <DouText weight="medium" size="sm" truncate>{{ displayTitle }}</DouText>
-        <DouText variant="tertiary" size="sm" class="proto-size">
-          {{ viewportWidth }}×{{ viewportHeight }}
+        <DouText weight="medium" size="sm" truncate class="proto-title-text" :title="titleTooltip">
+          {{ displayTitle }}
+        </DouText>
+        <DouText
+          v-if="headerLayout.showSize"
+          variant="tertiary"
+          size="sm"
+          class="proto-size"
+          :title="sizeLabel"
+        >
+          {{ sizeLabel }}
         </DouText>
       </div>
 
@@ -303,14 +336,25 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
           :aria-label="t('artifact.prototype.tweaksTitle')"
         >
           <DouButton
-            size="sm"
+            size="xs"
+            class="proto-action-btn"
             :variant="tweaksOpen || modifiedCount > 0 ? 'soft' : 'ghost'"
             :tone="modifiedCount > 0 ? 'primary' : 'neutral'"
+            :aria-label="t('artifact.prototype.tweaksTitle')"
+            :title="t('artifact.prototype.tweaksTitle')"
             @click.stop
           >
             <template #leading><SlidersIcon /></template>
-            {{ t('artifact.prototype.tweaks') }}
-            <span v-if="modifiedCount > 0" class="proto-tweak-count">{{ modifiedCount }}</span>
+            <template v-if="!headerLayout.compactTweaks">
+              {{ t('artifact.prototype.tweaks') }}
+            </template>
+            <span
+              v-if="modifiedCount > 0"
+              class="proto-tweak-count"
+              :class="{ 'is-compact': headerLayout.compactTweaks }"
+            >
+              {{ modifiedCount }}
+            </span>
           </DouButton>
           <template #content>
             <PrototypeTweaksPanel
@@ -325,12 +369,22 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
         </DouPopover>
 
         <template v-if="interacting">
-          <DouTag size="sm" tone="primary" class="proto-mode-tag">
-            {{ t('artifact.prototype.interacting') }}
+          <DouTag
+            size="sm"
+            tone="primary"
+            class="proto-mode-tag"
+            :title="t('artifact.prototype.interacting')"
+          >
+            {{
+              headerLayout.compactModeTag
+                ? t('artifact.prototype.interactingShort')
+                : t('artifact.prototype.interacting')
+            }}
           </DouTag>
           <DouButton
-            size="sm"
+            size="xs"
             variant="ghost"
+            class="proto-action-btn"
             :aria-label="t('artifact.prototype.exitInteract')"
             :title="t('artifact.prototype.exitInteract')"
             @click.stop="exitInteract"
@@ -340,13 +394,17 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
         </template>
         <DouButton
           v-else
-          size="sm"
+          size="xs"
           variant="ghost"
+          class="proto-action-btn"
+          :aria-label="t('artifact.prototype.interact')"
           :title="t('artifact.prototype.doubleClickHint')"
           @click.stop="enterInteract"
         >
           <template #leading><MousePointerClickIcon /></template>
-          {{ t('artifact.prototype.interact') }}
+          <template v-if="!headerLayout.compactInteract">
+            {{ t('artifact.prototype.interact') }}
+          </template>
         </DouButton>
       </div>
     </div>
@@ -388,17 +446,24 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
 
 <style scoped>
 .proto-node {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  border-radius: inherit;
+  border-radius: calc(var(--dou-flow-editor-node-radius, var(--dou-radius-container)) - 1px);
   background: var(--dou-color-bg-surface);
 }
 
-.proto-node.is-interacting {
+.proto-node.is-interacting::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: inherit;
   box-shadow: inset 0 0 0 2px var(--dou-color-primary);
+  pointer-events: none;
 }
 
 .proto-head {
@@ -406,32 +471,47 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
   flex: none;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   box-sizing: border-box;
   height: 36px;
+  min-width: 0;
   padding: 0 6px 0 10px;
-  border-bottom: 1px solid var(--dou-color-border-subtle);
+  overflow: hidden;
+  border-bottom: 1px solid var(--dou-color-border);
   background: var(--dou-color-bg-muted);
 }
 
 .proto-title {
   display: flex;
-  flex: 1;
+  flex: 1 1 0;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.proto-title-text {
+  flex: 0 1 auto;
   min-width: 0;
 }
 
 .proto-size {
   flex: none;
+  white-space: nowrap;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .proto-actions {
   display: flex;
   flex: none;
+  flex-shrink: 0;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+}
+
+.proto-action-btn {
+  flex: none;
 }
 
 .proto-tweak-count {
@@ -447,6 +527,10 @@ const displayTitle = computed(() => props.data.title || t('artifact.prototype.de
   color: var(--dou-color-primary-on);
   font-size: 11px;
   line-height: 1;
+}
+
+.proto-tweak-count.is-compact {
+  margin-left: 0;
 }
 
 .proto-mode-tag {

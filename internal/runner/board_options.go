@@ -248,6 +248,22 @@ func groupHeaderInset(group args) float64 {
 	return 48.0
 }
 
+func optionHeaderInset(note string, frameWidth float64) float64 {
+	trimmed := strings.TrimSpace(note)
+	if trimmed == "" {
+		return 40.0
+	}
+	// Matches OptionNode.vue: 36px top row + 10px vertical note padding + wrapped 13px/1.45 (~19px) note lines.
+	const (
+		noteFontSize   = 13.0
+		noteLineStep   = 20.0
+		notePadX       = 24.0
+		noteBaseHeight = 48.0
+	)
+	lines := boardLineCount(trimmed, noteFontSize, max(noteFontSize, frameWidth-notePadX))
+	return math.Round(noteBaseHeight + lines*noteLineStep)
+}
+
 func (board *whiteboard) resizeGroupToChildren(group args) {
 	const padding = 20.0
 	id := text(group, "id")
@@ -392,7 +408,7 @@ func (board *whiteboard) placeGroupsAndOptions(groups []boardGroup, options []bo
 }
 
 func (board *whiteboard) placeSingleOption(option boardOption, pick string, groupNode args) error {
-	const width, padding, inset, gap, between = 360.0, 16.0, 40.0, 12.0, 48.0
+	const width, padding, gap, between = 360.0, 16.0, 12.0, 48.0
 	const groupPad, optionGap = 20.0, 24.0
 	nodes := boardItems(board.Nodes)
 	existing, before := nodes[option.id], nodes[option.revises]
@@ -467,6 +483,14 @@ func (board *whiteboard) placeSingleOption(option boardOption, pick string, grou
 			frameWidth = max(frameWidth, 340.0)
 		}
 	}
+	if len(option.baselinePictures) > 0 && len(option.pictures) > 0 {
+		frameWidth = max(frameWidth, 720.0)
+	}
+	effectiveNote := text(objectField(existing, "data"), "note")
+	if option.hasNote {
+		effectiveNote = option.note
+	}
+	inset := optionHeaderInset(effectiveNote, frameWidth)
 	var inner []args
 	cursor := y + inset
 	if option.prototype != nil {
@@ -487,7 +511,6 @@ func (board *whiteboard) placeSingleOption(option boardOption, pick string, grou
 		cursor += protoHeight + gap
 	}
 	if len(option.baselinePictures) > 0 && len(option.pictures) > 0 {
-		frameWidth = 720.0
 		colWidth := (frameWidth - 2*padding - gap) / 2
 		const labelHeight = 26.0
 		leftX := x + padding
@@ -543,9 +566,10 @@ func (board *whiteboard) placeSingleOption(option boardOption, pick string, grou
 		}
 	}
 	if option.text != "" {
-		height := boardLineCount(option.text, 16, frameWidth-2*padding-16)*22 + 8
+		textWidth := frameWidth - 2*padding
+		height := boardTextNodeHeight(option.text, textWidth)
 		inner = append(inner, args{"id": option.id + "-text", "type": "text", "parent": option.id, "x": x + padding, "y": cursor,
-			"width": frameWidth - 2*padding, "height": height, "data": args{"text": option.text}})
+			"width": textWidth, "height": height, "data": args{"text": option.text}})
 		cursor += height + gap
 	}
 	if len(inner) > 0 {
@@ -555,7 +579,11 @@ func (board *whiteboard) placeSingleOption(option boardOption, pick string, grou
 	fields := objectField(existing, "data")
 	fields["title"] = option.title
 	if option.hasNote {
-		fields["note"] = option.note
+		if option.note == "" {
+			delete(fields, "note")
+		} else {
+			fields["note"] = option.note
+		}
 	}
 	if groupID != "" {
 		fields["group"] = groupID
