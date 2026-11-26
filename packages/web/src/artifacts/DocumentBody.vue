@@ -234,15 +234,17 @@ function measureToc() {
 
   const tables: TableCollisionBox[] = []
   for (const frame of scrollEl.querySelectorAll<HTMLElement>('.dou-editor__content--table')) {
-    const tableEl = frame.querySelector<HTMLElement>(':scope > table.dou-editor-table, table')
+    const viewport =
+      frame.querySelector<HTMLElement>(':scope > .dou-editor-table__viewport') ?? frame
+    const tableEl = viewport.querySelector<HTMLElement>(':scope > table.dou-editor-table, table')
     if (!tableEl) continue
-    const frameRect = frame.getBoundingClientRect()
+    const viewportRect = viewport.getBoundingClientRect()
     const tableRect = tableEl.getBoundingClientRect()
     tables.push({
-      visibleLeft: Math.max(frameRect.left, tableRect.left),
-      top: frameRect.top,
-      bottom: frameRect.bottom,
-      height: frameRect.height,
+      visibleLeft: Math.max(viewportRect.left, tableRect.left),
+      top: viewportRect.top,
+      bottom: viewportRect.bottom,
+      height: viewportRect.height,
     })
   }
 
