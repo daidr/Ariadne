@@ -2,6 +2,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, test } from 'vitest'
 import PrototypeTweaksPanel from './PrototypeTweaksPanel.vue'
+import prototypeTweaksPanelSource from './PrototypeTweaksPanel.vue?raw'
 import type { PrototypeTweakSpec } from './prototype-tweaks'
 
 describe('PrototypeTweaksPanel enum control selection', () => {
@@ -112,5 +113,56 @@ describe('PrototypeTweaksPanel enum control selection', () => {
     expect(wrapper.emitted('change')).toBeUndefined()
 
     wrapper.unmount()
+  })
+})
+
+describe('PrototypeTweaksPanel header layout & reset button', () => {
+  const specs: PrototypeTweakSpec[] = [
+    {
+      key: 'theme',
+      label: '主题外观',
+      kind: 'enum',
+      default: 'light',
+      options: [
+        { value: 'light', label: '浅色模式' },
+        { value: 'dark', label: '深色模式' },
+      ],
+    },
+  ]
+
+  test('toggles sm ghost reset button without changing header structure and emits reset', async () => {
+    const wrapper = mount(PrototypeTweaksPanel, {
+      props: {
+        specs,
+        values: { theme: 'light' },
+      },
+    })
+
+    const header = wrapper.find('.tweaks-header')
+    expect(header.exists()).toBe(true)
+    expect(header.find('.tweaks-title.is-truncate').exists()).toBe(true)
+    expect(header.find('button.tweaks-reset').exists()).toBe(false)
+
+    await wrapper.setProps({ values: { theme: 'dark' } })
+    const resetBtn = header.find('button.tweaks-reset')
+    expect(resetBtn.exists()).toBe(true)
+    expect(resetBtn.classes()).toContain('dou-button--sm')
+
+    await resetBtn.trigger('click')
+    expect(wrapper.emitted('reset')).toHaveLength(1)
+
+    await wrapper.setProps({ readonly: true })
+    expect(header.find('button.tweaks-reset').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  test('reserves sm control height on header to prevent height jump when reset button toggles', () => {
+    const headerRule = prototypeTweaksPanelSource.match(/\.tweaks-header\s*\{([^}]*)\}/)
+    expect(headerRule?.[1]).toContain('min-height: var(--dou-control-height-sm, 28px);')
+    expect(headerRule?.[1]).toContain('flex-shrink: 0;')
+
+    const resetRule = prototypeTweaksPanelSource.match(/\.tweaks-reset\s*\{([^}]*)\}/)
+    expect(resetRule?.[1]).toContain('flex-shrink: 0;')
   })
 })
