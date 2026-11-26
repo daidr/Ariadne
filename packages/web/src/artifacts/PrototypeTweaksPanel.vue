@@ -70,11 +70,14 @@ function enumControl(spec: PrototypeTweakSpec): EnumTweakControl {
 <template>
   <div class="tweaks-panel" data-dou-nodrag @pointerdown.stop @wheel.stop>
     <div class="tweaks-header">
-      <DouText weight="medium" size="sm">{{ t('artifact.prototype.tweaksTitle') }}</DouText>
+      <DouText weight="medium" size="sm" truncate class="tweaks-title">
+        {{ t('artifact.prototype.tweaksTitle') }}
+      </DouText>
       <DouButton
         v-if="modifiedCount > 0 && !readonly"
         size="sm"
         variant="ghost"
+        class="tweaks-reset"
         @click="emit('reset')"
       >
         <template #leading><RotateCcwIcon /></template>
@@ -240,10 +243,19 @@ function enumControl(spec: PrototypeTweakSpec): EnumTweakControl {
 
 .tweaks-header {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 24px;
+  min-height: var(--dou-control-height-sm, 28px);
+}
+
+.tweaks-title {
+  min-width: 0;
+}
+
+.tweaks-reset {
+  flex-shrink: 0;
 }
 
 .tweaks-body {
