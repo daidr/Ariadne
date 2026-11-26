@@ -196,7 +196,8 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 	case "thread.reopened":
 		payload := tagged("thread-reopened", d)
 		note(d["threadId"], payload, false)
-		if c := coordinator(w, e.ProjectID); c != nil && d["by"] != c {
+		reviewer := w.one("SELECT review_of FROM threads WHERE id = ?", d["threadId"])["review_of"]
+		if c := coordinator(w, e.ProjectID); c != nil && d["by"] != c && (reviewer == nil || reviewer == "") {
 			note(c, payload, false)
 		}
 	case "pull_request.closed", "branch.merged", "branch.merge_undone":

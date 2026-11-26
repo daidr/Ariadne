@@ -238,4 +238,83 @@ describe('ConversationPanel resolved state and reopen action', () => {
     await flushPromises()
     expect(wrapper.find('.dou-chat-input').exists()).toBe(true)
   })
+
+  test('hides reopen button for finished reviewer threads', async () => {
+    state.detail!.threads = [makeThread({ id: 'thr_rev', stage: 'done', reviewOf: 'thr_author' })]
+    state.threads.thr_rev = {
+      ...emptyConversation(),
+      conversation: makeConversation('thr_rev', 'thread'),
+    }
+
+    const wrapper = mount(ConversationPanel, {
+      props: { threadId: 'thr_rev' },
+      global: { stubs: { teleport: true } },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const resolvedBar = wrapper.find('[data-thread-resolved]')
+    expect(resolvedBar.exists()).toBe(true)
+    expect(resolvedBar.text()).toContain(t('review.ended'))
+    expect(resolvedBar.find('button').exists()).toBe(false)
+    expect(wrapper.find('.dou-chat-input').exists()).toBe(false)
+  })
+
+  test('tracks reopening per threadId across thread switches without clearing in-flight guards', async () => {
+    const threadA = makeThread({ id: 'thr_1', stage: 'done' })
+    const threadB = makeThread({ id: 'thr_2', stage: 'done' })
+    state.detail!.threads = [threadA, threadB]
+    state.threads.thr_2 = {
+      ...emptyConversation(),
+      conversation: makeConversation('thr_2', 'thread'),
+    }
+
+    const resolvers = new Map<string, (value: { thread: ThreadView }) => void>()
+    const reopenSpy = vi.spyOn(api, 'reopenThread').mockImplementation(
+      (id) =>
+        new Promise((resolve) => {
+          resolvers.set(id, resolve)
+        }),
+    )
+
+    const wrapper = mount(ConversationPanel, {
+      props: { threadId: 'thr_1' },
+      global: { stubs: { teleport: true } },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    // Start reopening thread A.
+    await wrapper.find('[data-thread-resolved] button').trigger('click')
+    expect(reopenSpy).toHaveBeenCalledTimes(1)
+
+    // Switch to thread B and start reopening thread B.
+    await wrapper.setProps({ threadId: 'thr_2' })
+    await flushPromises()
+    await wrapper.find('[data-thread-resolved] button').trigger('click')
+    expect(reopenSpy).toHaveBeenCalledTimes(2)
+
+    // Switch back to thread A while A is still pending; clicking must not duplicate request A.
+    await wrapper.setProps({ threadId: 'thr_1' })
+    await flushPromises()
+    await wrapper.find('[data-thread-resolved] button').trigger('click')
+    expect(reopenSpy).toHaveBeenCalledTimes(2)
+
+    // Switch to thread B, resolve A first; A's finally must NOT clear B's in-flight guard.
+    await wrapper.setProps({ threadId: 'thr_2' })
+    await flushPromises()
+    resolvers.get('thr_1')!({
+      thread: makeThread({ id: 'thr_1', stage: 'idle', lastReport: 'idle', lastHeadline: null }),
+    })
+    await flushPromises()
+    await wrapper.find('[data-thread-resolved] button').trigger('click')
+    expect(reopenSpy).toHaveBeenCalledTimes(2)
+
+    // Now resolve B; B transitions cleanly to chat input.
+    resolvers.get('thr_2')!({
+      thread: makeThread({ id: 'thr_2', stage: 'idle', lastReport: 'idle', lastHeadline: null }),
+    })
+    await flushPromises()
+    expect(wrapper.find('.dou-chat-input').exists()).toBe(true)
+  })
 })

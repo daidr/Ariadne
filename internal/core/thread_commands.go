@@ -271,6 +271,9 @@ func (repo *Repository) ResumeThread(ctx context.Context, threadID, by string) (
 // can continue the conversation without immediately starting a turn.
 func (repo *Repository) ReopenThread(ctx context.Context, threadID, by string) (ThreadView, error) {
 	return repo.mutateThread(ctx, threadID, func(_ *eventstore.Transaction, current ThreadView) ([]change, error) {
+		if truthy(current.ReviewOf) {
+			return nil, badInput("review thread cannot be reopened")
+		}
 		if current.Stage != "done" {
 			return nil, nil
 		}

@@ -398,4 +398,175 @@ func TestReopenThreadReturnsCompletedThreadToIdle(t *testing.T) {
 	if err != nil || reopenedMerged.Stage != "idle" || reopenedMerged.Archived {
 		t.Fatalf("expected archived merged thread to reopen to unarchived idle, got %+v, %v", reopenedMerged, err)
 	}
+
+	// 5. Finished reviewer thread cannot be reopened, and a raw thread.reopened event on it
+	// must not add a coordinator transcript note.
+	author, err := repo.CreateThread(ctx, project.ID, NewThread{Title: "待评审改动"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.StartThread(ctx, author.ID); err != nil {
+		t.Fatal(err)
+	}
+	readyAuthor, err := repo.ReportThread(ctx, author.ID, ThreadReport{
+		Kind: "ready", Headline: "代码已就绪", Summary: "完成实现",
+	}, new("abc123"), ReviewOptions{Reviewable: true, Head: new("abc123"), ReviewerTitle: "评审：待评审改动"})
+	if err != nil || readyAuthor.Review == nil || readyAuthor.Review.ReviewerID == "" {
+		t.Fatalf("expected reviewer thread to be created, got %+v, %v", readyAuthor, err)
+	}
+	reviewerID := readyAuthor.Review.ReviewerID
+	revTurn, err := repo.StartScheduledTurn(ctx, reviewerID, "mock")
+	if err != nil || revTurn == "" {
+		t.Fatalf("start reviewer turn: %q, %v", revTurn, err)
+	}
+	revConv, err := repo.GetConversation(ctx, reviewerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RecordStep(ctx, reviewerID, revTurn, Step{SawSeq: revConv.PendingSeq}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SubmitReview(ctx, reviewerID, ReviewSubmission{
+		Verdict: "pass", Summary: "改动通过审阅", Headline: "评审通过",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.FinishTurn(ctx, reviewerID, revTurn, "completed", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ReopenThread(ctx, reviewerID, "user"); err == nil {
+		t.Fatal("expected ReopenThread to reject reviewer thread")
+	}
+	reviewerAfter, err := repo.GetThread(ctx, reviewerID)
+	if err != nil || reviewerAfter.Stage != "done" || reviewerAfter.LastHeadline != "评审通过" {
+		t.Fatalf("reviewer thread should remain done with intact headline, got %+v, %v", reviewerAfter, err)
+	}
+	if _, err := repo.Store.Append(ctx, []eventstore.NewEvent{{
+		ProjectID: project.ID,
+		Type:      "thread.reopened",
+		Data:      json.RawMessage(`{"threadId":"` + reviewerID + `","by":"user"}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var coordReviewerNotes int
+	if err := repo.Store.DB().QueryRowContext(ctx,
+		`SELECT count(*) FROM transcript WHERE conversation_id = ? AND kind = 'note' AND json_extract(payload, '$.type') = 'thread-reopened' AND json_extract(payload, '$.threadId') = ?`,
+		project.CoordinatorID, reviewerID,
+	).Scan(&coordReviewerNotes); err != nil || coordReviewerNotes != 0 {
+		t.Fatalf("reviewer thread.reopened should not write coordinator note, got %d (err=%v)", coordReviewerNotes, err)
+	}
+}
+
+func TestIdleAndReopenedThreadsBecomeSilentAndNudgedWhenFollowUpOmitsReport(t *testing.T) {
+	t.Parallel()
+	if got := ThreadStage(StageFacts{Started: true, LastReport: "idle", Unreported: true}); got != "silent" {
+		t.Fatalf("unreported idle thread stage = %q, want silent", got)
+	}
+	if got := ThreadStage(StageFacts{Started: true, LastReport: "idle", Unreported: true, Waiting: true}); got != "idle" {
+		t.Fatalf("waiting idle thread stage = %q, want idle", got)
+	}
+	if got := ThreadStage(StageFacts{Started: true, LastReport: "idle", Unreported: true, Reviewer: true}); got != "idle" {
+		t.Fatalf("unreported reviewer thread stage = %q, want idle", got)
+	}
+
+	ctx := t.Context()
+	now := time.UnixMilli(1900000000000)
+	repo, err := Open(ctx, Options{Path: ":memory:", Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	project, err := repo.CreateProject(ctx, new("漏报检测"), ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runUnreportedFollowUp := func(t *testing.T, threadID string) {
+		t.Helper()
+		now = now.Add(time.Second)
+		if _, err := repo.PostMessage(ctx, project.ID, MessageInput{
+			ConversationID: threadID, Author: "user", Content: "补充追问",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(time.Second)
+		turn1, err := repo.StartScheduledTurn(ctx, threadID, "mock")
+		if err != nil || turn1 == "" {
+			t.Fatalf("start follow-up turn: %q, %v", turn1, err)
+		}
+		conv1, err := repo.GetConversation(ctx, threadID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.RecordStep(ctx, threadID, turn1, Step{SawSeq: conv1.PendingSeq}); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(time.Second)
+		if err := repo.FinishTurn(ctx, threadID, turn1, "completed", nil); err != nil {
+			t.Fatal(err)
+		}
+		var nudges int
+		if err := repo.Store.DB().QueryRowContext(ctx,
+			`SELECT count(*) FROM events WHERE type = 'thread.nudged' AND json_extract(data, '$.threadId') = ?`, threadID,
+		).Scan(&nudges); err != nil || nudges != 1 {
+			t.Fatalf("expected 1 thread.nudged after unreported follow-up turn, got %d (err=%v)", nudges, err)
+		}
+
+		// If the nudged turn also finishes without reporting, it settles in silent without nudging again.
+		now = now.Add(time.Second)
+		turn2, err := repo.StartScheduledTurn(ctx, threadID, "mock")
+		if err != nil || turn2 == "" {
+			t.Fatalf("start nudged turn: %q, %v", turn2, err)
+		}
+		conv2, err := repo.GetConversation(ctx, threadID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.RecordStep(ctx, threadID, turn2, Step{SawSeq: conv2.PendingSeq}); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(time.Second)
+		if err := repo.FinishTurn(ctx, threadID, turn2, "completed", nil); err != nil {
+			t.Fatal(err)
+		}
+		after, err := repo.GetThread(ctx, threadID)
+		if err != nil || after.Stage != "silent" {
+			t.Fatalf("expected silent stage after second unreported turn, got %+v, %v", after, err)
+		}
+	}
+
+	// 1. Research thread reported idle, then follow-up turn omits report.
+	idleThread, err := repo.CreateThread(ctx, project.ID, NewThread{Title: "调研后续漏报"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.StartThread(ctx, idleThread.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ReportThread(ctx, idleThread.ID, ThreadReport{
+		Kind: "idle", Headline: "初版调研结论", Summary: "已输出初版调研结论",
+	}, nil, ReviewOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	runUnreportedFollowUp(t, idleThread.ID)
+
+	// 2. Completed thread reopened to idle, then follow-up turn omits report.
+	reopenedThread, err := repo.CreateThread(ctx, project.ID, NewThread{Title: "恢复后漏报"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.StartThread(ctx, reopenedThread.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ReportThread(ctx, reopenedThread.ID, ThreadReport{
+		Kind: "done", Headline: "已完成", Summary: "已完成",
+	}, nil, ReviewOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	if _, err := repo.ReopenThread(ctx, reopenedThread.ID, "user"); err != nil {
+		t.Fatal(err)
+	}
+	runUnreportedFollowUp(t, reopenedThread.ID)
 }
