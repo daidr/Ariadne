@@ -1,8 +1,21 @@
 import type { FlowDocument } from '@dou-ui/flow'
 import { describe, expect, test } from 'vitest'
+import * as Y from 'yjs'
 import { resolveOptionNoteLayout } from './decision-groups'
-import { resolvePrototypeViewportPoint } from './prototype-bridge'
 import {
+  clearPendingPrototypeTweakRollback,
+  getPendingPrototypeTweakRollbacks,
+  prunePendingPrototypeTweakRollbacksByArtifacts,
+  setPendingPrototypeTweakRollback,
+} from './feedback-pending'
+import {
+  prototypeDefinitionKey,
+  readDocPrototypeTweakValues,
+  resolvePrototypeViewportPoint,
+  rollbackDocPrototypeTweakValues,
+} from './prototype-bridge'
+import {
+  areTweakValuesEqual,
   buildSandboxedPrototypeDoc,
   countModifiedTweaks,
   diffTweakValues,
@@ -272,5 +285,117 @@ describe('prototype tweaks & sandbox builder', () => {
       mode: 'block',
       maxLines: 5,
     })
+  })
+
+  test('compares sparse tweak values and safely rolls back a whiteboard Y.Doc node', () => {
+    expect(areTweakValuesEqual(undefined, undefined)).toBe(true)
+    expect(areTweakValuesEqual(undefined, {})).toBe(true)
+    expect(
+      areTweakValuesEqual({ accent: '#10b981', gap: 24 }, { gap: 24, accent: '#10b981' }),
+    ).toBe(true)
+    expect(areTweakValuesEqual({ accent: '#10b981' }, { accent: '#ef4444' })).toBe(false)
+    expect(areTweakValuesEqual({ accent: '#10b981' }, undefined)).toBe(false)
+
+    const doc = new Y.Doc()
+    const nodes = doc.getMap('nodes') as Y.Map<Y.Map<unknown>>
+    const fields = new Y.Map<unknown>()
+    fields.set('type', 'prototype')
+    fields.set('data', {
+      title: '原型',
+      html: '<!doctype html><html><body>v1</body></html>',
+      tweakValues: { accent: '#10b981', gap: 24 },
+    })
+    nodes.set('proto-1', fields)
+
+    const initialDef = prototypeDefinitionKey({
+      html: '<!doctype html><html><body>v1</body></html>',
+    })
+    expect(readDocPrototypeTweakValues(doc, 'missing')).toEqual({ exists: false })
+    expect(readDocPrototypeTweakValues(doc, 'proto-1')).toEqual({
+      exists: true,
+      tweakValues: { accent: '#10b981', gap: 24 },
+      definitionKey: initialDef,
+    })
+
+    // Diverged remote/AI value must never be overwritten.
+    expect(
+      rollbackDocPrototypeTweakValues(doc, 'proto-1', { accent: '#ef4444' }, undefined, initialDef),
+    ).toBe('diverged')
+    expect(readDocPrototypeTweakValues(doc, 'proto-1')).toEqual({
+      exists: true,
+      tweakValues: { accent: '#10b981', gap: 24 },
+      definitionKey: initialDef,
+    })
+
+    // Exact match rolls back cleanly to undefined (deleting tweakValues).
+    expect(
+      rollbackDocPrototypeTweakValues(
+        doc,
+        'proto-1',
+        { accent: '#10b981', gap: 24 },
+        undefined,
+        initialDef,
+      ),
+    ).toBe('rolled-back')
+    expect(readDocPrototypeTweakValues(doc, 'proto-1')).toEqual({
+      exists: true,
+      tweakValues: undefined,
+      definitionKey: initialDef,
+    })
+
+    // Calling again recognizes it is already reverted.
+    expect(
+      rollbackDocPrototypeTweakValues(
+        doc,
+        'proto-1',
+        { accent: '#10b981', gap: 24 },
+        undefined,
+        initialDef,
+      ),
+    ).toBe('already-reverted')
+
+    // Rolling back a reset (undefined -> previous values) restores previous tweakValues when definition matches.
+    expect(
+      rollbackDocPrototypeTweakValues(doc, 'proto-1', undefined, { accent: '#2563eb' }, initialDef),
+    ).toBe('rolled-back')
+    expect(readDocPrototypeTweakValues(doc, 'proto-1')).toEqual({
+      exists: true,
+      tweakValues: { accent: '#2563eb' },
+      definitionKey: initialDef,
+    })
+
+    // Once AI updates prototype HTML and clears tweakValues, rollback with old definitionKey is refused.
+    fields.set('data', {
+      title: '原型',
+      html: '<!doctype html><html><body>v2 baked</body></html>',
+    })
+    expect(
+      rollbackDocPrototypeTweakValues(doc, 'proto-1', undefined, { accent: '#2563eb' }, initialDef),
+    ).toBe('diverged')
+    expect(readDocPrototypeTweakValues(doc, 'proto-1').exists).toBe(true)
+    const afterAi = readDocPrototypeTweakValues(doc, 'proto-1')
+    expect(afterAi.exists && afterAi.tweakValues).toBeUndefined()
+
+    // Non-user newer artifact version prunes stale pending rollbacks without touching user-only autosaves.
+    clearPendingPrototypeTweakRollback('art_prune_test')
+    setPendingPrototypeTweakRollback('art_prune_test', {
+      nodeId: 'proto-1',
+      nextDiff: undefined,
+      prevDiff: { accent: '#2563eb' },
+      nextSavedKey: 'next',
+      prevSavedKey: 'prev',
+      needsDocRollback: true,
+      definitionKey: initialDef,
+      baseVersion: 2,
+    })
+    prunePendingPrototypeTweakRollbacksByArtifacts([
+      { id: 'art_prune_test', version: 2, updatedBy: 'agent' },
+      { id: 'art_prune_test', version: 3, updatedBy: 'user' },
+    ])
+    expect(getPendingPrototypeTweakRollbacks('art_prune_test')).toHaveLength(1)
+    prunePendingPrototypeTweakRollbacksByArtifacts([
+      { id: 'art_prune_test', version: 3, updatedBy: 'agent' },
+    ])
+    expect(getPendingPrototypeTweakRollbacks('art_prune_test')).toHaveLength(0)
   })
 })

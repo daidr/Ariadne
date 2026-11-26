@@ -344,6 +344,20 @@ export function hasTweakValuesDiff(
   return false
 }
 
+/** Returns true when two sparse tweak value maps hold the exact same defined key-value entries. */
+export function areTweakValuesEqual(
+  left?: PrototypeTweakValues,
+  right?: PrototypeTweakValues,
+): boolean {
+  const leftKeys = left ? Object.keys(left).filter((k) => left[k] !== undefined) : []
+  const rightKeys = right ? Object.keys(right).filter((k) => right[k] !== undefined) : []
+  if (leftKeys.length !== rightKeys.length) return false
+  for (const key of leftKeys) {
+    if (left![key] !== right![key]) return false
+  }
+  return true
+}
+
 export interface PrototypeTweakGroup {
   section: string | null
   items: PrototypeTweakSpec[]
