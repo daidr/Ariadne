@@ -324,4 +324,34 @@ describe('WorkspaceHeader medium layout', () => {
     expect(wrapper.find('button.update-indicator').exists()).toBe(false)
     expect(wrapper.find('button[aria-label="设置"] .dou-badge__mark').exists()).toBe(false)
   })
+
+  test('renders the pulse activity pill and toggles the pulse main view while hiding side-pane controls', async () => {
+    state.detail = {
+      project: {
+        ...state.projects[0]!,
+        settings: { autopilot: { enabled: false, method: 'squash' } },
+      } as never,
+      threads: [{ id: 'thr_run', title: '执行中', stage: 'working' } as never],
+      needsMe: [],
+      hasTracker: false,
+    }
+    const { wrapper } = mountHeader({ layoutMode: 'medium' })
+    await nextTick()
+
+    const pill = wrapper.get<HTMLButtonElement>('[data-pulse-pill]')
+    expect(pill.attributes('aria-pressed')).toBe('false')
+    expect(pill.text()).toContain('1 运行中')
+    expect(wrapper.find('button[aria-label="收起项目面板"]').exists()).toBe(true)
+
+    await pill.trigger('click')
+    await nextTick()
+    expect(state.main).toEqual({ kind: 'pulse' })
+    expect(pill.attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('button[aria-label="收起项目面板"]').exists()).toBe(false)
+
+    await pill.trigger('click')
+    await nextTick()
+    expect(state.main).toEqual({ kind: 'conversation' })
+    expect(wrapper.find('button[aria-label="收起项目面板"]').exists()).toBe(true)
+  })
 })

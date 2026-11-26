@@ -10,6 +10,7 @@ import {
   type DockPanel,
 } from 'dou-ui'
 import {
+  ActivityIcon,
   FileDiffIcon,
   LayoutColumnsIcon,
   LayoutRowsIcon,
@@ -225,6 +226,20 @@ function bring(group: DockGroup, key: side.ListKey) {
             @click="openMain({ kind: 'plan' })"
           >
             <MaximizeIcon />
+          </DouButton>
+        </DouTooltip>
+        <DouTooltip
+          v-if="active !== undefined && side.listOf(active) === 'threads'"
+          :content="t('pulse.open')"
+          placement="bottom"
+        >
+          <DouButton
+            size="sm"
+            variant="ghost"
+            :aria-label="t('pulse.open')"
+            @click="openMain({ kind: 'pulse' })"
+          >
+            <ActivityIcon />
           </DouButton>
         </DouTooltip>
         <ThreadTools

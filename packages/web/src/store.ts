@@ -76,6 +76,8 @@ export type MainView =
   | { kind: 'conversation' }
   | { kind: 'plan' }
   | { kind: 'artifacts' }
+  /** Multi-agent real-time collaboration timeline across the open project. */
+  | { kind: 'pulse' }
   /** What a conversation's agent did, turn by turn, for finding out what went wrong. */
   | { kind: 'trace'; conversationId: string }
 
@@ -1002,6 +1004,7 @@ export const threadsById = computed(() => {
  * it already is, else in the group last used, or in a new group beside it.
  */
 export async function openPane(key: PaneKey, options: OpenOptions = {}) {
+  if (state.main.kind === 'pulse') openMain({ kind: 'conversation' })
   showWorkspace('side')
   const threadId = side.threadOf(key)
   const loading = !!threadId && !state.threads[threadId]
@@ -1044,7 +1047,7 @@ export async function openProjectThread(
   options: OpenOptions = {},
 ) {
   if (!(await ensureProjectOpen(projectId))) return
-  if (state.main.kind === 'trace') openMain({ kind: 'conversation' })
+  if (state.main.kind === 'trace' || state.main.kind === 'pulse') openMain({ kind: 'conversation' })
   await openThread(threadId, options)
 }
 
@@ -1057,7 +1060,7 @@ export async function openProjectConversation(projectId: string) {
 /** Open an artifact in any project, switching projects first when needed. */
 export async function openProjectArtifact(projectId: string, artifactId: string) {
   if (!(await ensureProjectOpen(projectId))) return
-  if (state.main.kind === 'trace') openMain({ kind: 'conversation' })
+  if (state.main.kind === 'trace' || state.main.kind === 'pulse') openMain({ kind: 'conversation' })
   await openView({ kind: 'artifact', id: artifactId })
 }
 
@@ -1068,7 +1071,7 @@ export async function openProjectMessage(
   messageId: string,
 ) {
   if (!(await ensureProjectOpen(projectId))) return
-  if (state.main.kind === 'trace') openMain({ kind: 'conversation' })
+  if (state.main.kind === 'trace' || state.main.kind === 'pulse') openMain({ kind: 'conversation' })
   await openMessage(conversationId, messageId)
 }
 
@@ -1277,7 +1280,7 @@ export function showWorkspace(level: WorkspaceLevel) {
 export function startNewProject() {
   state.starting = true
   showWorkspace('coordinator')
-  if (state.main.kind === 'trace') resetMain()
+  if (state.main.kind === 'trace' || state.main.kind === 'pulse') resetMain()
 }
 
 function resetMain() {

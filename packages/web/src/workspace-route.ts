@@ -55,7 +55,9 @@ export function workspaceLocation(route: RouteLocationNormalized): WorkspaceLoca
         ? 'side'
         : 'coordinator'
   let main: MainView = { kind: 'conversation' }
-  if (query.view === 'plan' || query.view === 'artifacts') main = { kind: query.view }
+  if (query.view === 'plan' || query.view === 'artifacts' || query.view === 'pulse') {
+    main = { kind: query.view }
+  }
   if (query.view === 'trace' && typeof query.trace === 'string' && query.trace) {
     main = { kind: 'trace', conversationId: query.trace }
   }

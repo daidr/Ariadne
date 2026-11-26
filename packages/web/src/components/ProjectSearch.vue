@@ -12,6 +12,7 @@ import {
   type CommandItem,
 } from 'dou-ui'
 import {
+  ActivityIcon,
   CoinsIcon,
   DownloadIcon,
   FolderCogIcon,
@@ -157,6 +158,14 @@ const actions = computed(() => {
         [
           'usage',
           { label: t('usage.title'), icon: CoinsIcon, run: () => openProjectSettings('usage') },
+        ],
+        [
+          'pulse',
+          {
+            label: t('pulse.title'),
+            icon: ActivityIcon,
+            run: () => openMain({ kind: 'pulse' }),
+          },
         ],
         [
           'trace',

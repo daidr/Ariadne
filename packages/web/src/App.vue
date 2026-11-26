@@ -155,6 +155,7 @@ const contentSplit = computed({
 // The flow and document editors are large; load them when first opened.
 const PlanMain = defineAsyncView(() => import('./plan/PlanMain.vue'))
 const ArtifactsOverview = defineAsyncView(() => import('./artifacts/ArtifactsOverview.vue'))
+const PulseView = defineAsyncView(() => import('./pulse/PulseView.vue'))
 const TraceView = defineAsyncView(() => import('./trace/TraceView.vue'))
 
 // Modal dialogs and secondary overlays are loaded lazily on first use.
@@ -290,6 +291,9 @@ onScopeDispose(
               </div>
               <div v-else-if="state.main.kind === 'plan' && state.planWide" class="pane">
                 <PlanMain />
+              </div>
+              <div v-else-if="state.main.kind === 'pulse'" class="pane">
+                <PulseView />
               </div>
               <DouSplitter
                 v-else

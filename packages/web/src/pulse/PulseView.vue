@@ -1,0 +1,493 @@
+<script setup lang="ts">
+import type { PulseLane, PulseMarker, PulseSnapshot, PulseSpan } from '@ariadne/core'
+import { DouAlert, DouButton, DouEmpty, DouSpinner } from 'dou-ui'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { api, ApiError } from '../api'
+import { coalescedRefresh } from '../coalesced-refresh'
+import { t, tm } from '../i18n'
+import { currentServerNow, synchronizeServerClock } from '../server-clock'
+import {
+  backMain,
+  onLiveEvent,
+  openMain,
+  openProjectThread,
+  openThread,
+  state,
+  threadsById,
+} from '../store'
+import PulseCanvas from './PulseCanvas.vue'
+import PulseLegend from './PulseLegend.vue'
+import PulseToolbar from './PulseToolbar.vue'
+import {
+  computeFetchBounds,
+  computeLiveViewport,
+  filterAndPartitionLanes,
+  isPulseRelevantEvent,
+  needsRefetch,
+  panViewport,
+  WINDOW_DURATION_MS,
+  zoomViewport,
+  type PulseDensity,
+  type PulseFilter,
+  type PulseGroupBy,
+  type PulseNodeMeta,
+  type PulseViewport,
+  type PulseWindowKey,
+} from './model'
+
+const LIVE_REFRESH_MS = 450
+const PAN_REFETCH_MS = 220
+const PREFS_KEY = 'ariadne.pulse.prefs'
+
+interface PulsePrefs {
+  density?: PulseDensity
+  showConcurrency?: boolean
+  showHandoffs?: boolean
+  showReturnLine?: boolean
+}
+
+function readPrefs(): PulsePrefs {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as PulsePrefs
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function writePrefs(prefs: PulsePrefs) {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
+  } catch {
+    // Ignore storage errors in restricted environments.
+  }
+}
+
+const initialPrefs = readPrefs()
+
+const filter = ref<PulseFilter>('all')
+const groupBy = ref<PulseGroupBy>('stage')
+const windowKey = ref<PulseWindowKey>('1h')
+const density = ref<PulseDensity>(initialPrefs.density === 'compact' ? 'compact' : 'comfortable')
+const showConcurrency = ref(initialPrefs.showConcurrency ?? true)
+const showHandoffs = ref(initialPrefs.showHandoffs ?? true)
+const showReturnLine = ref(initialPrefs.showReturnLine ?? true)
+const showCompleted = ref(false)
+const following = ref(true)
+const hovering = ref(false)
+
+const selectedLaneId = ref<string | null>(null)
+const selectedSpanId = ref<number | null>(null)
+
+const nowMs = ref(currentServerNow())
+const viewport = ref<PulseViewport>(computeLiveViewport(nowMs.value, WINDOW_DURATION_MS['1h']))
+const snapshot = shallowRef<PulseSnapshot | null>(null)
+const loading = ref(true)
+const problem = ref<string | null>(null)
+
+let fetchedFrom = 0
+let fetchedTo = 0
+let viewportSynced = false
+let controller = new AbortController()
+let liveTimer: ReturnType<typeof setTimeout> | undefined
+let panTimer: ReturnType<typeof setTimeout> | undefined
+let tickInterval: ReturnType<typeof setInterval> | undefined
+
+watch([density, showConcurrency, showHandoffs, showReturnLine], () => {
+  writePrefs({
+    density: density.value,
+    showConcurrency: showConcurrency.value,
+    showHandoffs: showHandoffs.value,
+    showReturnLine: showReturnLine.value,
+  })
+})
+
+const currentProjectName = computed(
+  () => state.projects.find((project) => project.id === state.currentId)?.name ?? null,
+)
+
+const threadNodes = computed(() => {
+  const map = new Map<string, PulseNodeMeta>()
+  const nodes = state.plan?.nodes ?? []
+  nodes.forEach((node, order) => {
+    for (const thread of node.threads) {
+      if (!map.has(thread.id)) {
+        map.set(thread.id, { nodeId: node.id, nodeTitle: node.title, order })
+      }
+    }
+  })
+  return map
+})
+
+const partitioned = computed(() =>
+  filterAndPartitionLanes(
+    snapshot.value?.lanes ?? [],
+    filter.value,
+    groupBy.value,
+    threadNodes.value,
+  ),
+)
+
+const spansByConversation = computed(() => {
+  const map = new Map<string, PulseSpan[]>()
+  for (const span of snapshot.value?.spans ?? []) {
+    const list = map.get(span.conversationId) ?? []
+    list.push(span)
+    map.set(span.conversationId, list)
+  }
+  return map
+})
+
+const markersByConversation = computed(() => {
+  const map = new Map<string, PulseMarker[]>()
+  for (const marker of snapshot.value?.markers ?? []) {
+    const list = map.get(marker.conversationId) ?? []
+    list.push(marker)
+    map.set(marker.conversationId, list)
+  }
+  return map
+})
+
+const emptyWindow = computed(() => {
+  const data = snapshot.value
+  if (!data) return false
+  return data.lanes.length === 0 && data.spans.length === 0
+})
+
+const showFilteredEmpty = computed(
+  () => filter.value !== 'all' && partitioned.value.groups.length === 0,
+)
+
+const showQuietWindowHint = computed(
+  () =>
+    filter.value === 'all' &&
+    partitioned.value.groups.length === 0 &&
+    partitioned.value.completed.length === 0 &&
+    (snapshot.value?.spans.length ?? 0) === 0,
+)
+
+const emptyConcurrency = { slots: 0, current: 0, peak: 0, points: [] }
+
+const load = coalescedRefresh<never, void>(async () => {
+  const projectId = state.currentId
+  if (!projectId) {
+    snapshot.value = null
+    loading.value = false
+    problem.value = null
+    return
+  }
+  const { signal } = controller
+  if (signal.aborted) return
+
+  const currentNow = Math.max(nowMs.value, currentServerNow())
+  const bounds = computeFetchBounds(viewport.value.viewStart, viewport.value.viewEnd, currentNow)
+  try {
+    const next = await api.getPulse({
+      projectId,
+      fromMs: bounds.fromMs,
+      toMs: bounds.toMs,
+      includeCompleted: true,
+      signal,
+    })
+    if (signal.aborted || state.currentId !== projectId) return
+
+    if (next.serverNowMs > 0) {
+      synchronizeServerClock(String(next.serverNowMs))
+      nowMs.value = Math.max(currentServerNow(), next.serverNowMs)
+    } else {
+      nowMs.value = currentServerNow()
+    }
+
+    if (!viewportSynced && following.value) {
+      viewport.value = computeLiveViewport(nowMs.value, WINDOW_DURATION_MS[windowKey.value])
+      viewportSynced = true
+    }
+
+    snapshot.value = next
+    fetchedFrom = next.fromMs || bounds.fromMs
+    fetchedTo = next.toMs || bounds.toMs
+    problem.value = null
+  } catch (error) {
+    if (!signal.aborted) {
+      problem.value = error instanceof ApiError ? tm(error.localized) : t('pulse.error')
+    }
+  } finally {
+    if (!signal.aborted) loading.value = false
+  }
+})
+
+function resetAndLoad() {
+  controller.abort()
+  controller = new AbortController()
+  clearTimeout(liveTimer)
+  clearTimeout(panTimer)
+  snapshot.value = null
+  fetchedFrom = 0
+  fetchedTo = 0
+  viewportSynced = false
+  selectedLaneId.value = null
+  selectedSpanId.value = null
+  loading.value = true
+  problem.value = null
+  nowMs.value = currentServerNow()
+  following.value = true
+  viewport.value = computeLiveViewport(nowMs.value, WINDOW_DURATION_MS[windowKey.value])
+  void load()
+}
+
+function scheduleLiveRefresh() {
+  clearTimeout(liveTimer)
+  liveTimer = setTimeout(() => void load(), LIVE_REFRESH_MS)
+}
+
+function schedulePanRefetchIfNeeded() {
+  if (
+    !needsRefetch(
+      viewport.value.viewStart,
+      viewport.value.viewEnd,
+      fetchedFrom,
+      fetchedTo,
+      nowMs.value,
+    )
+  ) {
+    return
+  }
+  clearTimeout(panTimer)
+  panTimer = setTimeout(() => void load(), PAN_REFETCH_MS)
+}
+
+watch(
+  () => state.currentId,
+  () => resetAndLoad(),
+  { immediate: true },
+)
+
+watch(windowKey, (key) => {
+  nowMs.value = Math.max(nowMs.value, currentServerNow())
+  following.value = true
+  viewport.value = computeLiveViewport(nowMs.value, WINDOW_DURATION_MS[key])
+  schedulePanRefetchIfNeeded()
+})
+
+function snapToNow() {
+  nowMs.value = Math.max(nowMs.value, currentServerNow())
+  following.value = true
+  viewport.value = computeLiveViewport(nowMs.value, WINDOW_DURATION_MS[windowKey.value])
+  schedulePanRefetchIfNeeded()
+}
+
+function handleZoom(anchorRatio: number, factor: number) {
+  following.value = false
+  viewport.value = zoomViewport(
+    viewport.value.viewStart,
+    viewport.value.viewEnd,
+    anchorRatio,
+    factor,
+    nowMs.value,
+  )
+  schedulePanRefetchIfNeeded()
+}
+
+function handlePan(deltaMs: number) {
+  following.value = false
+  viewport.value = panViewport(
+    viewport.value.viewStart,
+    viewport.value.viewEnd,
+    deltaMs,
+    nowMs.value,
+  )
+  schedulePanRefetchIfNeeded()
+}
+
+function handleSelect(laneId: string, spanId: number | null) {
+  selectedLaneId.value = laneId
+  selectedSpanId.value = spanId
+}
+
+function handleOpenLane(lane: PulseLane) {
+  if (lane.role === 'coordinator') {
+    openMain({ kind: 'conversation' })
+    return
+  }
+  if (lane.projectId && lane.projectId !== state.currentId) {
+    void openProjectThread(lane.projectId, lane.conversationId)
+    return
+  }
+  void openThread(lane.conversationId)
+}
+
+function expandTo24h() {
+  windowKey.value = '24h'
+}
+
+const stopLive = onLiveEvent((event) => {
+  if (!state.currentId) return
+  if (event.projectId && event.projectId !== state.currentId) return
+  if (isPulseRelevantEvent(event.type)) scheduleLiveRefresh()
+})
+
+watch(
+  () => state.stream,
+  (stream, previous) => {
+    if (stream === 'open' && previous && previous !== 'open') {
+      void load()
+    }
+  },
+)
+
+onMounted(() => {
+  tickInterval = setInterval(() => {
+    const nextNow = Math.max(nowMs.value + 1_000, currentServerNow())
+    const delta = nextNow - nowMs.value
+    nowMs.value = nextNow
+    if (following.value && !hovering.value && delta > 0) {
+      const len = viewport.value.viewEnd - viewport.value.viewStart
+      viewport.value = computeLiveViewport(nextNow, len)
+    }
+  }, 1_000)
+})
+
+onUnmounted(() => {
+  stopLive()
+  clearTimeout(liveTimer)
+  clearTimeout(panTimer)
+  if (tickInterval !== undefined) clearInterval(tickInterval)
+  controller.abort()
+})
+</script>
+
+<template>
+  <section class="pulse-view" data-pulse-view>
+    <PulseToolbar
+      v-model:filter="filter"
+      v-model:group-by="groupBy"
+      v-model:window-key="windowKey"
+      v-model:density="density"
+      v-model:show-concurrency="showConcurrency"
+      v-model:show-handoffs="showHandoffs"
+      v-model:show-return-line="showReturnLine"
+      :project-name="currentProjectName"
+      :counts="partitioned.counts"
+      :following="following"
+      @back="backMain"
+      @snap-to-now="snapToNow"
+    />
+
+    <div v-if="problem && snapshot" class="pulse-error-banner">
+      <DouAlert tone="danger">
+        {{ problem }}
+        <template #action>
+          <DouButton size="sm" variant="outline" @click="void load()">
+            {{ t('conversation.retry') }}
+          </DouButton>
+        </template>
+      </DouAlert>
+    </div>
+
+    <div v-if="loading && !snapshot" class="pulse-state-center">
+      <DouSpinner />
+    </div>
+
+    <div v-else-if="problem && !snapshot" class="pulse-state-center">
+      <DouAlert tone="danger">
+        {{ problem }}
+        <template #action>
+          <DouButton size="sm" variant="outline" @click="void load()">
+            {{ t('conversation.retry') }}
+          </DouButton>
+        </template>
+      </DouAlert>
+    </div>
+
+    <div v-else-if="emptyWindow" class="pulse-state-center">
+      <DouEmpty :description="t('pulse.empty.window')">
+        <DouButton v-if="windowKey !== '24h'" size="sm" variant="soft" @click="expandTo24h">
+          {{ t('pulse.empty.expandWindow') }}
+        </DouButton>
+      </DouEmpty>
+    </div>
+
+    <PulseCanvas
+      v-else-if="snapshot"
+      v-model:show-completed="showCompleted"
+      :partitioned="partitioned"
+      :spans-by-conversation="spansByConversation"
+      :markers-by-conversation="markersByConversation"
+      :handoffs="snapshot.handoffs"
+      :concurrency="snapshot.concurrency ?? emptyConcurrency"
+      :all-spans="snapshot.spans"
+      :last-returned-at="snapshot.lastReturnedAt"
+      :now-ms="nowMs"
+      :view-start="viewport.viewStart"
+      :view-end="viewport.viewEnd"
+      :density="density"
+      :show-concurrency="showConcurrency"
+      :show-handoffs="showHandoffs"
+      :show-return-line="showReturnLine"
+      :selected-lane-id="selectedLaneId"
+      :selected-span-id="selectedSpanId"
+      :threads="threadsById"
+      :live-commands="state.live"
+      @select="handleSelect"
+      @open-lane="handleOpenLane"
+      @zoom="handleZoom"
+      @pan="handlePan"
+      @reset-window="snapToNow"
+      @hovering-change="hovering = $event"
+    >
+      <template #empty>
+        <div v-if="showFilteredEmpty" class="pulse-inline-empty" data-pulse-inline-empty>
+          <DouEmpty :description="t('pulse.empty.filtered')">
+            <DouButton size="sm" variant="soft" @click="filter = 'all'">
+              {{ t('pulse.empty.resetFilter') }}
+            </DouButton>
+          </DouEmpty>
+        </div>
+        <div v-else-if="showQuietWindowHint" class="pulse-inline-empty" data-pulse-inline-empty>
+          <DouEmpty :description="t('pulse.empty.window')">
+            <DouButton v-if="windowKey !== '24h'" size="sm" variant="soft" @click="expandTo24h">
+              {{ t('pulse.empty.expandWindow') }}
+            </DouButton>
+          </DouEmpty>
+        </div>
+      </template>
+    </PulseCanvas>
+
+    <PulseLegend />
+  </section>
+</template>
+
+<style scoped>
+.pulse-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--dou-color-bg-canvas);
+}
+
+.pulse-error-banner {
+  flex: none;
+  padding: 8px 14px 0;
+}
+
+.pulse-state-center {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.pulse-inline-empty {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+  padding: 36px 24px;
+  background: color-mix(in srgb, var(--dou-color-bg-canvas) 82%, transparent);
+}
+</style>

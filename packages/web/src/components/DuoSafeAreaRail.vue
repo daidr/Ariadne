@@ -45,6 +45,7 @@ const hasSidePane = computed(
     !!state.currentId &&
     !state.starting &&
     state.main.kind !== 'trace' &&
+    state.main.kind !== 'pulse' &&
     !(state.main.kind === 'plan' && state.planWide),
 )
 

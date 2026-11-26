@@ -7,6 +7,8 @@ import {
   GetArtifactResponseSchema,
   GetIssueResponseSchema,
   GetPlanResponseSchema,
+  GetPulseRequestSchema,
+  GetPulseResponseSchema,
   ListAllNeedsMeResponseSchema,
   ListArtifactsResponseSchema,
   ListArtifactVersionsResponseSchema,
@@ -689,5 +691,121 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
       projectId: 'prj_2',
       projectName: 'Beta',
     })
+  })
+
+  it('sends GetPulseRequest with bigint timestamps and decodes PulseSnapshot', async () => {
+    let capturedBody: Uint8Array | null = null
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = init?.body
+      if (body instanceof Uint8Array) capturedBody = body
+      else if (body instanceof ArrayBuffer) capturedBody = new Uint8Array(body)
+      return protoResponse(GetPulseResponseSchema, {
+        lanes: [
+          {
+            conversationId: 'thr_1',
+            projectId: 'prj_1',
+            projectName: 'Ariadne',
+            title: 'Pulse 画布',
+            role: 'worker',
+            stage: 'working',
+            completed: false,
+            liveCommand: 'bun run check',
+            activeAt: 1_700_000_005_000n,
+          },
+        ],
+        spans: [
+          {
+            id: 42n,
+            projectId: 'prj_1',
+            conversationId: 'thr_1',
+            stage: 'working',
+            occupiesSlot: true,
+            startedAt: 1_700_000_000_000n,
+            seqStart: 10n,
+            label: '实现中',
+          },
+        ],
+        markers: [
+          {
+            seq: 11n,
+            projectId: 'prj_1',
+            conversationId: 'thr_1',
+            kind: 'pr_opened',
+            at: 1_700_000_004_000n,
+            label: '#270',
+          },
+        ],
+        handoffs: [
+          {
+            seq: 12n,
+            projectId: 'prj_1',
+            fromConversationId: 'thr_1',
+            toConversationId: 'rev_1',
+            kind: 'review_handoff',
+            at: 1_700_000_004_500n,
+            label: '提交审阅',
+          },
+        ],
+        concurrency: {
+          slots: 3,
+          current: 1,
+          peak: 2,
+          points: [{ at: 1_700_000_000_000n, active: 1 }],
+        },
+        lastReturnedAt: 1_699_999_000_000n,
+        cursorSeq: 12n,
+        fromMs: 1_699_996_400_000n,
+        toMs: 1_700_000_005_000n,
+        serverNowMs: 1_700_000_005_000n,
+      })
+    })
+
+    const transport = createAriadneTransport({
+      baseUrl: 'http://localhost',
+      fetch: fetchMock as unknown as typeof fetch,
+      getToken: () => 'tok',
+    })
+    const client = createDomain2Api(transport)
+
+    const pulse = await client.getPulse({
+      projectId: 'prj_1',
+      fromMs: 1_699_996_400_000,
+      toMs: 1_700_000_005_000,
+      includeCompleted: false,
+    })
+
+    expect(capturedBody).not.toBeNull()
+    const decoded = fromBinary(GetPulseRequestSchema, capturedBody!)
+    expect(decoded.projectId).toBe('prj_1')
+    expect(decoded.fromMs).toBe(1_699_996_400_000n)
+    expect(decoded.toMs).toBe(1_700_000_005_000n)
+    expect(decoded.includeCompleted).toBe(false)
+
+    expect(pulse.lanes[0]).toMatchObject({
+      conversationId: 'thr_1',
+      role: 'worker',
+      reviewOf: null,
+      liveCommand: 'bun run check',
+      activeAt: 1_700_000_005_000,
+    })
+    expect(pulse.spans[0]).toMatchObject({
+      id: 42,
+      occupiesSlot: true,
+      endedAt: null,
+      seqEnd: null,
+    })
+    expect(pulse.handoffs[0]).toMatchObject({
+      fromConversationId: 'thr_1',
+      toConversationId: 'rev_1',
+      kind: 'review_handoff',
+    })
+    expect(pulse.concurrency).toEqual({
+      slots: 3,
+      current: 1,
+      peak: 2,
+      points: [{ at: 1_700_000_000_000, active: 1 }],
+    })
+    expect(pulse.lastReturnedAt).toBe(1_699_999_000_000)
+    expect(pulse.cursorSeq).toBe(12)
   })
 })

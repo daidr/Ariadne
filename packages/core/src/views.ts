@@ -1113,3 +1113,92 @@ export interface MessagePage {
   /** Earlier messages exist before the first one here. */
   more: boolean
 }
+
+export type PulseStage =
+  'working' | 'queued' | 'review' | 'answer' | 'waiting' | 'ci' | 'halted' | 'aside'
+
+export type PulseLaneRole = 'coordinator' | 'worker' | 'reviewer'
+
+export type PulseMarkerKind =
+  | 'review_handoff'
+  | 'review_submitted'
+  | 'pr_opened'
+  | 'pr_merged'
+  | 'ci_failed'
+  | 'attention_opened'
+  | 'artifact_updated'
+  | 'user_returned'
+
+export interface PulseLane {
+  conversationId: string
+  projectId: string
+  projectName: string
+  title: string
+  role: PulseLaneRole
+  reviewOf: string | null
+  stage: string
+  completed: boolean
+  attentionId: string | null
+  liveCommand: string | null
+  liveTail: string | null
+  lastHeadline: string | null
+  activeAt: number
+}
+
+export interface PulseSpan {
+  id: number
+  projectId: string
+  conversationId: string
+  stage: PulseStage
+  occupiesSlot: boolean
+  startedAt: number
+  endedAt: number | null
+  seqStart: number
+  seqEnd: number | null
+  label: string
+}
+
+export interface PulseMarker {
+  seq: number
+  projectId: string
+  conversationId: string
+  relatedThreadId: string | null
+  kind: PulseMarkerKind
+  at: number
+  label: string
+}
+
+export interface PulseHandoff {
+  seq: number
+  projectId: string
+  fromConversationId: string
+  toConversationId: string
+  kind: PulseMarkerKind
+  at: number
+  label: string
+}
+
+export interface PulseConcurrencyPoint {
+  at: number
+  active: number
+}
+
+export interface PulseConcurrency {
+  slots: number
+  current: number
+  peak: number
+  points: PulseConcurrencyPoint[]
+}
+
+export interface PulseSnapshot {
+  lanes: PulseLane[]
+  spans: PulseSpan[]
+  markers: PulseMarker[]
+  handoffs: PulseHandoff[]
+  concurrency: PulseConcurrency
+  lastReturnedAt: number | null
+  cursorSeq: number
+  fromMs: number
+  toMs: number
+  serverNowMs: number
+}

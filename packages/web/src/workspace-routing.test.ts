@@ -16,6 +16,7 @@ import {
   closeFull,
   closePane,
   navigateArtifactInPlace,
+  openMain,
   openProject,
   openThread,
   openView,
@@ -190,5 +191,19 @@ describe('workspace routes', () => {
       back: { id: artifact.id },
       forward: null,
     })
+  })
+
+  test('syncs and restores the full-width pulse view via ?view=pulse', async () => {
+    const { router, history, binding } = await enter('/projects/prj_second')
+    openMain({ kind: 'pulse' })
+    await vi.waitFor(() => expect(router.currentRoute.value.query.view).toBe('pulse'))
+    const address = router.currentRoute.value.fullPath
+    expect(address).toContain('view=pulse')
+
+    binding.stop()
+    state.currentId = null
+    state.detail = null
+    await enter(address, history.state)
+    expect(state.main).toEqual({ kind: 'pulse' })
   })
 })
