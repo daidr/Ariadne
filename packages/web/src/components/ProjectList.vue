@@ -14,6 +14,7 @@ import {
   type VirtualListExpose,
 } from 'dou-ui'
 import {
+  ActivityIcon,
   DownloadIcon,
   LayoutGridIcon,
   ListTreeIcon,
@@ -171,10 +172,17 @@ function targetProject(event: MouseEvent) {
 const actions = [
   { key: 'settings', label: t('projectSettings.open'), icon: SettingsIcon },
   { key: 'rename', label: t('project.rename'), icon: PencilIcon },
+  { key: 'pulse', label: t('pulse.title'), icon: ActivityIcon },
   { key: 'trace', label: t('trace.coordinator'), icon: ListTreeIcon },
   { key: 'export', label: t('project.export'), icon: DownloadIcon },
   { key: 'delete', label: t('project.delete'), icon: TrashIcon, tone: 'danger' as const },
 ]
+
+/** The project's real-time collaboration timeline. */
+async function openPulse(id: string) {
+  if (state.currentId !== id) await openProject(id)
+  openMain({ kind: 'pulse' })
+}
 
 /** The coordinator's trace, in its project. */
 async function openTrace(id: string) {
@@ -194,6 +202,7 @@ function act(key: unknown, id: string) {
   emit('select')
   if (key === 'settings') void openSettings(id)
   else if (key === 'rename') void rename(id)
+  else if (key === 'pulse') void openPulse(id)
   else if (key === 'trace') void openTrace(id)
   else if (key === 'export') void exportProject(id)
   else if (key === 'delete') void confirmDelete(id)

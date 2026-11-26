@@ -20,6 +20,7 @@ import AutopilotSwitch from './AutopilotSwitch.vue'
 import type { SettingsTab } from './ModelSettings.vue'
 import ProjectList from './ProjectList.vue'
 import ProjectSearch from './ProjectSearch.vue'
+import PulseActivityPill from './PulseActivityPill.vue'
 import UpdateStatusIndicator from './UpdateStatusIndicator.vue'
 
 const props = defineProps<{
@@ -84,6 +85,7 @@ const hasSidePane = computed(
     !state.starting &&
     !isGallery.value &&
     state.main.kind !== 'trace' &&
+    state.main.kind !== 'pulse' &&
     !(state.main.kind === 'plan' && state.planWide),
 )
 const mergeUpdateIntoSettings = computed(() => isNarrow.value && !atProjects.value)
@@ -178,6 +180,7 @@ watch(showMediumProjectPopover, (allowed) => {
         <ProjectSearch />
         <AttentionBar :compact="actionsCompact" />
         <template v-if="state.detail && !isGallery && (!isNarrow || !atProjects)">
+          <PulseActivityPill :compact="actionsCompact" />
           <AutopilotSwitch :compact="actionsCompact" />
           <DouButton
             variant="ghost"
@@ -216,7 +219,8 @@ watch(showMediumProjectPopover, (allowed) => {
             state.currentId &&
             !state.starting &&
             !isGallery &&
-            state.main.kind !== 'trace'
+            state.main.kind !== 'trace' &&
+            state.main.kind !== 'pulse'
           "
           variant="ghost"
           size="sm"

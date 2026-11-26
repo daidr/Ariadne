@@ -95,6 +95,7 @@ import {
 import {
   domain2Api,
   type IssueCommentView,
+  type GetPulseParams,
   type IssueDetailView,
   type IssueSummaryView,
   type UpdateProjectPatch,
@@ -930,6 +931,7 @@ export const api = {
     domain2Api.getProject(id, since),
   getProjectActivity: (id: string, signal: AbortSignal) =>
     domain2Api.getProjectActivity(id, signal),
+  getPulse: (params?: GetPulseParams) => domain2Api.getPulse(params),
   /**
    * The newest messages, the page before `before`, or everything from `from` on. With
    * `since` (a `lastSeq` given before), only messages and notices changed after it.

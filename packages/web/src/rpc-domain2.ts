@@ -35,6 +35,10 @@ import type {
   ProjectSettings,
   ProjectSource,
   ProjectView,
+  PulseLaneRole,
+  PulseMarkerKind,
+  PulseSnapshot,
+  PulseStage,
   SearchResult,
   ThreadStage,
   ThreadView,
@@ -134,6 +138,14 @@ export interface ProjectDetailData {
     partial: boolean
     ids?: string[]
   }
+}
+
+export interface GetPulseParams {
+  projectId?: string
+  fromMs?: number
+  toMs?: number
+  includeCompleted?: boolean
+  signal?: AbortSignal
 }
 
 export interface UpdateProjectPatch {
@@ -1499,6 +1511,80 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
             ? { progress: { done: thread.progress.done, total: thread.progress.total } }
             : {}),
         })),
+      }
+    },
+
+    async getPulse(params: GetPulseParams = {}): Promise<PulseSnapshot> {
+      const response = await clients.projects.getPulse(
+        {
+          projectId: params.projectId ?? '',
+          fromMs: BigInt(Math.trunc(params.fromMs ?? 0)),
+          toMs: BigInt(Math.trunc(params.toMs ?? 0)),
+          includeCompleted: params.includeCompleted ?? true,
+        },
+        params.signal ? { signal: params.signal } : undefined,
+      )
+      return {
+        lanes: response.lanes.map((lane) => ({
+          conversationId: lane.conversationId,
+          projectId: lane.projectId,
+          projectName: lane.projectName,
+          title: lane.title,
+          role: (lane.role || 'worker') as PulseLaneRole,
+          reviewOf: lane.reviewOf ?? null,
+          stage: lane.stage,
+          completed: lane.completed,
+          attentionId: lane.attentionId ?? null,
+          liveCommand: lane.liveCommand ?? null,
+          liveTail: lane.liveTail ?? null,
+          lastHeadline: lane.lastHeadline ?? null,
+          activeAt: Number(lane.activeAt),
+        })),
+        spans: response.spans.map((span) => ({
+          id: Number(span.id),
+          projectId: span.projectId,
+          conversationId: span.conversationId,
+          stage: (span.stage || 'working') as PulseStage,
+          occupiesSlot: span.occupiesSlot,
+          startedAt: Number(span.startedAt),
+          endedAt: span.endedAt !== undefined ? Number(span.endedAt) : null,
+          seqStart: Number(span.seqStart),
+          seqEnd: span.seqEnd !== undefined ? Number(span.seqEnd) : null,
+          label: span.label,
+        })),
+        markers: response.markers.map((marker) => ({
+          seq: Number(marker.seq),
+          projectId: marker.projectId,
+          conversationId: marker.conversationId,
+          relatedThreadId: marker.relatedThreadId ?? null,
+          kind: marker.kind as PulseMarkerKind,
+          at: Number(marker.at),
+          label: marker.label,
+        })),
+        handoffs: response.handoffs.map((handoff) => ({
+          seq: Number(handoff.seq),
+          projectId: handoff.projectId,
+          fromConversationId: handoff.fromConversationId,
+          toConversationId: handoff.toConversationId,
+          kind: handoff.kind as PulseMarkerKind,
+          at: Number(handoff.at),
+          label: handoff.label,
+        })),
+        concurrency: {
+          slots: response.concurrency?.slots ?? 0,
+          current: response.concurrency?.current ?? 0,
+          peak: response.concurrency?.peak ?? 0,
+          points: (response.concurrency?.points ?? []).map((point) => ({
+            at: Number(point.at),
+            active: point.active,
+          })),
+        },
+        lastReturnedAt:
+          response.lastReturnedAt !== undefined ? Number(response.lastReturnedAt) : null,
+        cursorSeq: Number(response.cursorSeq),
+        fromMs: Number(response.fromMs),
+        toMs: Number(response.toMs),
+        serverNowMs: Number(response.serverNowMs),
       }
     },
 

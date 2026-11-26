@@ -46,6 +46,7 @@ const hasSidePane = computed(
     !state.starting &&
     state.main.kind !== 'gallery' &&
     state.main.kind !== 'trace' &&
+    state.main.kind !== 'pulse' &&
     !(state.main.kind === 'plan' && state.planWide),
 )
 

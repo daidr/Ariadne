@@ -1,0 +1,642 @@
+import type {
+  AnyStoredEvent,
+  PulseConcurrency,
+  PulseHandoff,
+  PulseLane,
+  PulseLaneRole,
+  PulseMarker,
+  PulseSpan,
+} from '@ariadne/core'
+
+export const PULSE_WINDOW_KEYS = ['15m', '1h', '6h', '24h'] as const
+export type PulseWindowKey = (typeof PULSE_WINDOW_KEYS)[number]
+
+export type PulseFilter = 'all' | 'needs' | 'active'
+export type PulseGroupBy = 'stage' | 'node'
+export type PulseDensity = 'comfortable' | 'compact'
+
+export type PulseSpanVisualKind =
+  | 'working'
+  | 'reviewing'
+  | 'waiting_review'
+  | 'waiting_user'
+  | 'waiting_ci'
+  | 'blocked'
+  | 'queued'
+  | 'waiting'
+  | 'aside'
+  | 'coord'
+
+export type PulseMarkerTone = 'primary' | 'success' | 'warning' | 'danger' | 'review' | 'ci'
+export type PulseHandoffTone = 'request' | 'pass' | 'changes'
+
+export interface PulseNodeMeta {
+  nodeId: string
+  nodeTitle: string
+  order: number
+}
+
+export interface PulseLaneRow {
+  lane: PulseLane
+  nested: boolean
+}
+
+export interface PulseLaneGroup {
+  key: string
+  kind: 'needs' | 'active' | 'node' | 'unlinked'
+  title?: string
+  rows: PulseLaneRow[]
+}
+
+export interface PulseLaneCounts {
+  all: number
+  needs: number
+  active: number
+  completed: number
+}
+
+export interface PulsePartitionedLanes {
+  coordinator: PulseLane | null
+  groups: PulseLaneGroup[]
+  completed: PulseLaneRow[]
+  counts: PulseLaneCounts
+  visibleCount: number
+}
+
+export interface PulseViewport {
+  viewStart: number
+  viewEnd: number
+}
+
+export interface PulseRibbonBar {
+  index: number
+  leftPct: number
+  widthPct: number
+  heightPx: number
+  active: number
+  slots: number
+  full: boolean
+  midAt: number
+}
+
+export interface PulseAxisTick {
+  at: number
+  pct: number
+}
+
+export interface PulseTooltipData {
+  title: string
+  subtitle?: string
+  meta?: string
+  detail?: string
+}
+
+const MINUTE_MS = 60_000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
+
+export const WINDOW_DURATION_MS: Record<PulseWindowKey, number> = {
+  '15m': 15 * MINUTE_MS,
+  '1h': HOUR_MS,
+  '6h': 6 * HOUR_MS,
+  '24h': 24 * HOUR_MS,
+}
+
+export const MIN_VIEW_SPAN_MS = 5 * MINUTE_MS
+export const MAX_VIEW_SPAN_MS = 24 * HOUR_MS
+export const MAX_RETENTION_MS = 30 * DAY_MS
+export const LIVE_LEAD_RATIO = 0.04
+
+const NICE_TICK_STEPS_MS = [
+  MINUTE_MS,
+  2 * MINUTE_MS,
+  5 * MINUTE_MS,
+  10 * MINUTE_MS,
+  15 * MINUTE_MS,
+  30 * MINUTE_MS,
+  HOUR_MS,
+  2 * HOUR_MS,
+  4 * HOUR_MS,
+  6 * HOUR_MS,
+]
+
+export function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+export function percentOf(at: number, viewStart: number, viewEnd: number): number {
+  const span = Math.max(1, viewEnd - viewStart)
+  return ((at - viewStart) / span) * 100
+}
+
+export function computeLiveViewport(nowMs: number, durationMs: number): PulseViewport {
+  const safeDuration = clamp(durationMs, MIN_VIEW_SPAN_MS, MAX_VIEW_SPAN_MS)
+  const viewEnd = nowMs + safeDuration * LIVE_LEAD_RATIO
+  return { viewStart: viewEnd - safeDuration, viewEnd }
+}
+
+export function clampViewport(viewStart: number, viewEnd: number, nowMs: number): PulseViewport {
+  const span = clamp(viewEnd - viewStart, MIN_VIEW_SPAN_MS, MAX_VIEW_SPAN_MS)
+  const earliest = nowMs - MAX_RETENTION_MS
+  const latest = nowMs + span * LIVE_LEAD_RATIO
+  let end = viewEnd
+  let start = end - span
+  if (end > latest) {
+    end = latest
+    start = end - span
+  }
+  if (start < earliest) {
+    start = earliest
+    end = start + span
+  }
+  return { viewStart: start, viewEnd: end }
+}
+
+export function zoomViewport(
+  viewStart: number,
+  viewEnd: number,
+  anchorRatio: number,
+  factor: number,
+  nowMs: number,
+): PulseViewport {
+  const frac = clamp(anchorRatio, 0, 1)
+  const currentLen = Math.max(1, viewEnd - viewStart)
+  const anchor = viewStart + frac * currentLen
+  const nextLen = clamp(currentLen * factor, MIN_VIEW_SPAN_MS, MAX_VIEW_SPAN_MS)
+  const nextStart = anchor - frac * nextLen
+  return clampViewport(nextStart, nextStart + nextLen, nowMs)
+}
+
+export function panViewport(
+  viewStart: number,
+  viewEnd: number,
+  deltaMs: number,
+  nowMs: number,
+): PulseViewport {
+  return clampViewport(viewStart + deltaMs, viewEnd + deltaMs, nowMs)
+}
+
+export function computeFetchBounds(
+  viewStart: number,
+  viewEnd: number,
+  nowMs: number,
+): { fromMs: number; toMs: number } {
+  const span = Math.max(MIN_VIEW_SPAN_MS, viewEnd - viewStart)
+  const pad = Math.round(span * 0.25)
+  const earliest = nowMs - MAX_RETENTION_MS
+  const fromMs = Math.max(earliest, Math.floor(viewStart - pad))
+  const toMs = Math.max(fromMs, Math.min(nowMs, Math.ceil(viewEnd + pad)))
+  return { fromMs, toMs }
+}
+
+export function needsRefetch(
+  viewStart: number,
+  viewEnd: number,
+  fetchedFrom: number,
+  fetchedTo: number,
+  nowMs: number,
+): boolean {
+  if (fetchedTo <= fetchedFrom) return true
+  if (viewStart < fetchedFrom) return true
+  const visibleEnd = Math.min(viewEnd, nowMs)
+  return visibleEnd > fetchedTo
+}
+
+export function resolveSpanVisualKind(
+  span: Pick<PulseSpan, 'stage'>,
+  laneRole: PulseLaneRole,
+): PulseSpanVisualKind {
+  switch (span.stage) {
+    case 'working':
+      if (laneRole === 'coordinator') return 'coord'
+      if (laneRole === 'reviewer') return 'reviewing'
+      return 'working'
+    case 'review':
+      return 'waiting_review'
+    case 'answer':
+      return 'waiting_user'
+    case 'ci':
+      return 'waiting_ci'
+    case 'halted':
+      return 'blocked'
+    case 'queued':
+      return 'queued'
+    case 'waiting':
+      return 'waiting'
+    case 'aside':
+      return 'aside'
+    default:
+      return 'waiting'
+  }
+}
+
+export function classifyHandoffTone(
+  handoff: Pick<PulseHandoff, 'kind' | 'label'>,
+): PulseHandoffTone {
+  if (handoff.kind === 'review_handoff') return 'request'
+  const lower = handoff.label.trim().toLowerCase()
+  if (lower.startsWith('pass')) return 'pass'
+  if (lower.startsWith('changes')) return 'changes'
+  return 'request'
+}
+
+export function classifyMarkerTone(marker: Pick<PulseMarker, 'kind' | 'label'>): PulseMarkerTone {
+  switch (marker.kind) {
+    case 'pr_merged':
+      return 'success'
+    case 'ci_failed':
+      return 'danger'
+    case 'attention_opened':
+      return 'warning'
+    case 'review_handoff':
+      return 'review'
+    case 'review_submitted': {
+      const lower = marker.label.trim().toLowerCase()
+      if (lower.startsWith('pass')) return 'success'
+      if (lower.startsWith('changes')) return 'warning'
+      return 'review'
+    }
+    case 'pr_opened':
+      return 'primary'
+    case 'artifact_updated':
+      return 'ci'
+    case 'user_returned':
+      return 'primary'
+    default:
+      return 'primary'
+  }
+}
+
+export function isNeedsLane(lane: Pick<PulseLane, 'stage' | 'attentionId'>): boolean {
+  return (
+    lane.stage === 'answer' ||
+    lane.stage === 'blocked' ||
+    lane.stage === 'halted' ||
+    lane.attentionId !== null
+  )
+}
+
+export function isActiveLane(lane: Pick<PulseLane, 'stage'>): boolean {
+  return (
+    lane.stage === 'working' ||
+    lane.stage === 'review' ||
+    lane.stage === 'queued' ||
+    lane.stage === 'waiting'
+  )
+}
+
+function attachNestedFlags(lanes: readonly PulseLane[]): PulseLaneRow[] {
+  const present = new Set(lanes.map((lane) => lane.conversationId))
+  return lanes.map((lane) => ({
+    lane,
+    nested: lane.role === 'reviewer' && lane.reviewOf !== null && present.has(lane.reviewOf),
+  }))
+}
+
+interface LaneUnit {
+  primary: PulseLane
+  reviewers: PulseLane[]
+}
+
+function buildLaneUnits(lanes: readonly PulseLane[]): LaneUnit[] {
+  const byId = new Map(lanes.map((lane) => [lane.conversationId, lane]))
+  const reviewersByAuthor = new Map<string, PulseLane[]>()
+  const primaries: PulseLane[] = []
+
+  for (const lane of lanes) {
+    if (lane.role === 'reviewer' && lane.reviewOf && byId.has(lane.reviewOf)) {
+      const list = reviewersByAuthor.get(lane.reviewOf) ?? []
+      list.push(lane)
+      reviewersByAuthor.set(lane.reviewOf, list)
+    } else {
+      primaries.push(lane)
+    }
+  }
+
+  return primaries.map((primary) => ({
+    primary,
+    reviewers: reviewersByAuthor.get(primary.conversationId) ?? [],
+  }))
+}
+
+function flattenUnits(units: readonly LaneUnit[]): PulseLaneRow[] {
+  const rows: PulseLaneRow[] = []
+  for (const unit of units) {
+    rows.push({ lane: unit.primary, nested: false })
+    for (const reviewer of unit.reviewers) {
+      rows.push({ lane: reviewer, nested: true })
+    }
+  }
+  return rows
+}
+
+export function filterAndPartitionLanes(
+  lanes: readonly PulseLane[],
+  filter: PulseFilter,
+  groupBy: PulseGroupBy,
+  threadNodes: ReadonlyMap<string, PulseNodeMeta> = new Map(),
+): PulsePartitionedLanes {
+  const coordinator = lanes.find((lane) => lane.role === 'coordinator') ?? null
+  const activePool = lanes.filter((lane) => lane.role !== 'coordinator' && !lane.completed)
+  const completedPool = lanes.filter((lane) => lane.role !== 'coordinator' && lane.completed)
+
+  const counts: PulseLaneCounts = {
+    all: activePool.length,
+    needs: activePool.filter(isNeedsLane).length,
+    active: activePool.filter(isActiveLane).length,
+    completed: completedPool.length,
+  }
+
+  const filtered =
+    filter === 'needs'
+      ? activePool.filter(isNeedsLane)
+      : filter === 'active'
+        ? activePool.filter(isActiveLane)
+        : activePool
+
+  const units = buildLaneUnits(filtered)
+  const groups: PulseLaneGroup[] = []
+
+  if (groupBy === 'node') {
+    const byNode = new Map<string, { meta: PulseNodeMeta; units: LaneUnit[] }>()
+    const unlinked: LaneUnit[] = []
+    for (const unit of units) {
+      const meta =
+        threadNodes.get(unit.primary.conversationId) ??
+        (unit.primary.reviewOf ? threadNodes.get(unit.primary.reviewOf) : undefined)
+      if (meta) {
+        const entry = byNode.get(meta.nodeId) ?? { meta, units: [] }
+        entry.units.push(unit)
+        byNode.set(meta.nodeId, entry)
+      } else {
+        unlinked.push(unit)
+      }
+    }
+    const sortedNodes = [...byNode.values()].toSorted(
+      (a, b) => a.meta.order - b.meta.order || a.meta.nodeTitle.localeCompare(b.meta.nodeTitle),
+    )
+    for (const entry of sortedNodes) {
+      groups.push({
+        key: `node:${entry.meta.nodeId}`,
+        kind: 'node',
+        title: entry.meta.nodeTitle,
+        rows: flattenUnits(entry.units),
+      })
+    }
+    if (unlinked.length) {
+      groups.push({
+        key: 'node:unlinked',
+        kind: 'unlinked',
+        rows: flattenUnits(unlinked),
+      })
+    }
+  } else {
+    const needsUnits: LaneUnit[] = []
+    const activeUnits: LaneUnit[] = []
+    for (const unit of units) {
+      const unitNeeds =
+        isNeedsLane(unit.primary) || unit.reviewers.some((reviewer) => isNeedsLane(reviewer))
+      if (unitNeeds) needsUnits.push(unit)
+      else activeUnits.push(unit)
+    }
+    if (needsUnits.length) {
+      groups.push({
+        key: 'stage:needs',
+        kind: 'needs',
+        rows: flattenUnits(needsUnits),
+      })
+    }
+    if (activeUnits.length) {
+      groups.push({
+        key: 'stage:active',
+        kind: 'active',
+        rows: flattenUnits(activeUnits),
+      })
+    }
+  }
+
+  return {
+    coordinator,
+    groups,
+    completed: attachNestedFlags(completedPool),
+    counts,
+    visibleCount: filtered.length,
+  }
+}
+
+export function countLiveSlotOccupancy(spans: readonly PulseSpan[]): number {
+  const occupied = new Set<string>()
+  for (const span of spans) {
+    if (span.occupiesSlot && span.endedAt === null) {
+      occupied.add(span.conversationId)
+    }
+  }
+  return occupied.size
+}
+
+interface StepInterval {
+  start: number
+  end: number
+  active: number
+}
+
+function buildStepIntervals(
+  concurrency: PulseConcurrency,
+  spans: readonly PulseSpan[],
+  nowMs: number,
+): StepInterval[] {
+  const pts = concurrency.points
+  if (pts.length > 0) {
+    const intervals: StepInterval[] = []
+    for (let i = 0; i < pts.length; i++) {
+      const curr = pts[i]!
+      const next = pts[i + 1]
+      const end = next ? next.at : Math.max(curr.at, nowMs)
+      if (end > curr.at) {
+        intervals.push({ start: curr.at, end, active: curr.active })
+      }
+    }
+    const lastPt = pts[pts.length - 1]!
+    if (nowMs > lastPt.at) {
+      const tail = intervals[intervals.length - 1]
+      if (tail && tail.start === lastPt.at) tail.end = nowMs
+      else intervals.push({ start: lastPt.at, end: nowMs, active: lastPt.active })
+    }
+    return intervals
+  }
+
+  // Fallback sweep if concurrency points are absent.
+  const events: { at: number; delta: number }[] = []
+  for (const span of spans) {
+    if (!span.occupiesSlot) continue
+    const end = span.endedAt ?? nowMs
+    if (end <= span.startedAt) continue
+    events.push({ at: span.startedAt, delta: 1 }, { at: end, delta: -1 })
+  }
+  events.sort((a, b) => a.at - b.at)
+  const intervals: StepInterval[] = []
+  let active = 0
+  let i = 0
+  while (i < events.length) {
+    const t = events[i]!.at
+    while (i < events.length && events[i]!.at === t) {
+      active = Math.max(0, active + events[i]!.delta)
+      i++
+    }
+    const nextAt = i < events.length ? events[i]!.at : nowMs
+    if (nextAt > t) intervals.push({ start: t, end: nextAt, active })
+  }
+  return intervals
+}
+
+export function buildConcurrencyBars(
+  concurrency: PulseConcurrency,
+  spans: readonly PulseSpan[],
+  viewStart: number,
+  viewEnd: number,
+  nowMs: number,
+  bins = 48,
+): PulseRibbonBar[] {
+  const len = Math.max(1, viewEnd - viewStart)
+  const step = len / bins
+  const intervals = buildStepIntervals(concurrency, spans, nowMs)
+  if (!intervals.length) return []
+
+  const displaySlots = Math.max(
+    1,
+    concurrency.slots > 0 ? concurrency.slots : Math.max(concurrency.peak, 1),
+  )
+  const bars: PulseRibbonBar[] = []
+  let ptr = 0
+
+  for (let i = 0; i < bins; i++) {
+    const binStart = viewStart + i * step
+    if (binStart >= nowMs) break
+    const binEnd = Math.min(binStart + step, nowMs)
+    if (binEnd <= binStart) continue
+
+    while (ptr < intervals.length && intervals[ptr]!.end <= binStart) ptr++
+
+    let maxActive = 0
+    for (let j = ptr; j < intervals.length; j++) {
+      const iv = intervals[j]!
+      if (iv.start >= binEnd) break
+      if (iv.active > maxActive) maxActive = iv.active
+    }
+    if (maxActive <= 0) continue
+
+    const heightPx = Math.max(
+      4,
+      Math.round((Math.min(maxActive, displaySlots) / displaySlots) * 20),
+    )
+    const full = concurrency.slots > 0 && maxActive >= concurrency.slots
+    bars.push({
+      index: i,
+      leftPct: (i / bins) * 100,
+      widthPct: Math.max(0.4, (1 / bins) * 100 - 0.15),
+      heightPx,
+      active: maxActive,
+      slots: concurrency.slots > 0 ? concurrency.slots : displaySlots,
+      full,
+      midAt: (binStart + binEnd) / 2,
+    })
+  }
+
+  return bars
+}
+
+export function buildAxisTicks(viewStart: number, viewEnd: number): PulseAxisTick[] {
+  const len = Math.max(1, viewEnd - viewStart)
+  const rawStep = len / 6
+  const step = NICE_TICK_STEPS_MS.find((candidate) => candidate >= rawStep) ?? 6 * HOUR_MS
+  const first = Math.ceil(viewStart / step) * step
+  const ticks: PulseAxisTick[] = []
+  for (let at = first; at <= viewEnd; at += step) {
+    const pct = percentOf(at, viewStart, viewEnd)
+    if (pct < 0 || pct > 97) continue
+    ticks.push({ at, pct })
+  }
+  return ticks
+}
+
+export function formatClockShort(
+  ms: number,
+  viewStart: number,
+  viewEnd: number,
+  locale: string,
+): string {
+  const date = new Date(ms)
+  const startDate = new Date(viewStart)
+  const endDate = new Date(viewEnd)
+  const spansDays =
+    startDate.getFullYear() !== endDate.getFullYear() ||
+    startDate.getMonth() !== endDate.getMonth() ||
+    startDate.getDate() !== endDate.getDate()
+  if (spansDays) {
+    return date.toLocaleString(locale, {
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+  }
+  return date.toLocaleTimeString(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
+export function formatDurationCompact(ms: number): string {
+  const safe = Math.max(0, ms)
+  if (safe < 60_000) {
+    const secs = Math.max(1, Math.round(safe / 1000))
+    return secs < 60 ? `${secs}s` : '1m'
+  }
+  const mins = Math.round(safe / 60_000)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  const rem = mins % 60
+  return rem ? `${hours}h ${rem}m` : `${hours}h`
+}
+
+const PULSE_RELEVANT_PREFIXES = new Set([
+  'turn',
+  'thread',
+  'attention',
+  'review',
+  'pull_request',
+  'checks',
+  'branch',
+  'artifact',
+  'plan',
+  'autopilot',
+  'workspace',
+  'user',
+])
+
+const PULSE_RELEVANT_EVENTS = new Set<AnyStoredEvent['type']>([
+  'conversation.wait_set',
+  'conversation.wait_ended',
+  'message.posted',
+  'todo.updated',
+  'routine.ran',
+])
+
+const PULSE_IGNORED_EVENTS = new Set([
+  'turn.changed',
+  'turn.step',
+  'branch.changes_synced',
+  'message.read',
+  'message.reacted',
+  'prompt.recorded',
+  'tool.finished',
+])
+
+export function isPulseRelevantEvent(type: AnyStoredEvent['type']): boolean {
+  if (PULSE_IGNORED_EVENTS.has(type)) return false
+  if (PULSE_RELEVANT_EVENTS.has(type)) return true
+  const prefix = type.split('.')[0] ?? ''
+  return PULSE_RELEVANT_PREFIXES.has(prefix)
+}
