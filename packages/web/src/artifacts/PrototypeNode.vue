@@ -114,18 +114,25 @@ function persistPreview(values: PrototypeTweakValues) {
 let lastNodeId: string | null = null
 let lastSpecsKey: string | null = null
 let lastSavedKey: string | null = null
+let lastPreviewRevision = -1
 
 watch(
-  [() => props.node.id, tweakSpecs, savedValues],
-  ([nodeId, specs, saved]) => {
+  [() => props.node.id, tweakSpecs, savedValues, () => tweaksBridge?.previewRevision.value ?? 0],
+  ([nodeId, specs, saved, previewRev]) => {
     const nextSpecsKey = JSON.stringify(specs)
     const nextSavedKey = serializeTweakValues(specs, saved)
-    if (nodeId === lastNodeId && nextSpecsKey === lastSpecsKey && nextSavedKey === lastSavedKey) {
+    if (
+      nodeId === lastNodeId &&
+      nextSpecsKey === lastSpecsKey &&
+      nextSavedKey === lastSavedKey &&
+      previewRev === lastPreviewRevision
+    ) {
       return
     }
     lastNodeId = nodeId
     lastSpecsKey = nextSpecsKey
     lastSavedKey = nextSavedKey
+    lastPreviewRevision = previewRev
 
     if (!props.readonly && tweaksBridge) {
       const cached = tweaksBridge.getPreview(nodeId)

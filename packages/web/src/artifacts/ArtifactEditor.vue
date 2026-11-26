@@ -59,16 +59,22 @@ import {
 import type { AskBlockProps } from './document-block-data'
 import {
   clearPendingArtifactFeedback,
+  clearPendingPrototypeTweakRollback,
   getPendingArtifactFeedback,
+  getPendingPrototypeTweakRollbacks,
+  pendingPrototypeRollbackRevision,
   setPendingArtifactFeedback,
+  setPendingPrototypeTweakRollback,
 } from './feedback-pending'
 import { kindIcon } from './kinds'
 import {
   PROTOTYPE_TWEAKS_BRIDGE_KEY,
+  readDocPrototypeTweakValues,
+  rollbackDocPrototypeTweakValues,
   type PrototypeTweaksPreviewEntry,
   type PrototypeTweaksSubmitOptions,
 } from './prototype-bridge'
-import type { PrototypeTweakValues } from './prototype-tweaks'
+import { areTweakValuesEqual, type PrototypeTweakValues } from './prototype-tweaks'
 import { useSharedArtifact, type SharedArtifact } from './shared'
 
 /** `place` is where it is shown: in a tab on the right side, or full screen. */
@@ -262,7 +268,9 @@ const sendingArtifacts = ref<ReadonlySet<string>>(new Set())
 const withdrawingArtifacts = ref<ReadonlySet<string>>(new Set())
 const sending = computed(() => sendingArtifacts.value.has(props.id))
 const withdrawing = computed(() => withdrawingArtifacts.value.has(props.id))
-const sendingTweakNodeId = ref<string | null>(null)
+const sendingTweakNodes = ref<ReadonlyMap<string, string>>(new Map())
+const sendingTweakNodeId = computed(() => sendingTweakNodes.value.get(props.id) ?? null)
+const previewRevision = ref(0)
 /** Room-level cache of local prototype tweak previews, surviving node viewport culling and group folding. */
 const prototypeTweaksPreview = new Map<string, PrototypeTweaksPreviewEntry>()
 function setArtifactFlag(target: typeof sendingArtifacts, id: string, active: boolean) {
@@ -270,6 +278,17 @@ function setArtifactFlag(target: typeof sendingArtifacts, id: string, active: bo
   if (active) next.add(id)
   else next.delete(id)
   target.value = next
+}
+function setSendingTweakNode(id: string, nodeId: string) {
+  const next = new Map(sendingTweakNodes.value)
+  next.set(id, nodeId)
+  sendingTweakNodes.value = next
+}
+function clearSendingTweakNode(id: string, nodeId: string) {
+  if (sendingTweakNodes.value.get(id) !== nodeId) return
+  const next = new Map(sendingTweakNodes.value)
+  next.delete(id)
+  sendingTweakNodes.value = next
 }
 /** Synchronous guard around internal silent Yjs writes (recommended picks / explicit prototype tweaks). */
 let silentLocalUpdates = 0
@@ -289,6 +308,7 @@ const sentRound = ref<{
   previousHeard?: unknown
   previousAskBaseline?: DocumentAskAnswerBaseline[] | null
   rollbackTweaks?: PrototypeTweaksSubmitOptions
+  rollbackPreview?: PrototypeTweaksPreviewEntry
 } | null>(null)
 const decisionSummary = ref<DecisionGroupSummary | null>(null)
 const documentAsks = ref<AskBlockProps[]>([])
@@ -405,10 +425,60 @@ watch(
 
 // ---- editing together ----
 
+interface ArtifactRoom {
+  id: string
+  scope: EffectScope
+  shared: SharedArtifact | null
+  mutations: number
+  /** In-flight prototype tweak sends/withdraws that need this room's Y.Doc alive until settled. */
+  holds: number
+  detached: boolean
+  disposed: boolean
+  onDocUpdate?: (_update: Uint8Array, origin: unknown, doc: Y.Doc, tr: Y.Transaction) => void
+}
+
 /** The room of the artifact open now, joined while its newest version is shown. */
 const shared = shallowRef<SharedArtifact | null>(null)
-let room: { id: string; scope: EffectScope; mutations: number } | null = null
+let room: ArtifactRoom | null = null
 const roomGeneration = shallowRef(0)
+
+function holdRoom(target: ArtifactRoom | null): () => void {
+  if (!target || target.disposed) return () => {}
+  target.holds++
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    target.holds = Math.max(0, target.holds - 1)
+    if (target.detached && target.holds === 0 && !target.disposed) {
+      target.disposed = true
+      target.scope.stop()
+    }
+  }
+}
+
+function disposeRoomIfIdle(target: ArtifactRoom) {
+  target.detached = true
+  if (target.onDocUpdate) {
+    target.shared?.doc.off('update', target.onDocUpdate)
+    target.onDocUpdate = undefined
+  }
+  if (target.holds === 0 && !target.disposed) {
+    target.disposed = true
+    target.scope.stop()
+  }
+}
+
+function clonePreviewEntry(
+  entry: PrototypeTweaksPreviewEntry | undefined,
+): PrototypeTweaksPreviewEntry | undefined {
+  if (!entry) return undefined
+  return {
+    specsKey: entry.specsKey,
+    savedKey: entry.savedKey,
+    liveValues: { ...entry.liveValues },
+  }
+}
 
 function syncPendingStore(id = room?.id) {
   if (!id) return
@@ -435,7 +505,16 @@ function mergePendingStore(id: string, changes: number, notes: number, paused: b
 
 function join(id: string) {
   const scope = effectScope()
-  room = { id, scope, mutations: 0 }
+  const activeRoom: ArtifactRoom = {
+    id,
+    scope,
+    shared: null,
+    mutations: 0,
+    holds: 0,
+    detached: false,
+    disposed: false,
+  }
+  room = activeRoom
   documentAsks.value = []
   const saved = getPendingArtifactFeedback(id)
   if (saved && saved.pendingChanges > 0) {
@@ -459,19 +538,77 @@ function join(id: string) {
           report(t('artifact.aiEditConflict'))
         }
       : undefined
-  shared.value = scope.run(() => useSharedArtifact(id, onLockedEdit)) ?? null
+  const activeShared = scope.run(() => useSharedArtifact(id, onLockedEdit)) ?? null
+  activeRoom.shared = activeShared
+  shared.value = activeShared
   roomGeneration.value++
-  shared.value?.doc.on(
-    'update',
-    (_update: Uint8Array, origin: unknown, doc: Y.Doc, tr: Y.Transaction) => {
-      if (origin === shared.value?.provider.value || silentLocalUpdates > 0) return
+  if (activeShared) {
+    const onDocUpdate = (_update: Uint8Array, origin: unknown, doc: Y.Doc, tr: Y.Transaction) => {
+      if (room !== activeRoom || activeRoom.detached) return
+      if (origin === activeShared.provider.value || silentLocalUpdates > 0) return
       if (artifact.value?.kind === 'document' && isAskAnswerOnlyTransaction(doc, tr)) {
         touchAskAnswer()
         return
       }
       touched()
-    },
-  )
+    }
+    activeRoom.onDocUpdate = onDocUpdate
+    activeShared.doc.on('update', onDocUpdate)
+
+    const reconcilePendingPrototypeRollbacks = () => {
+      if (room !== activeRoom || activeRoom.detached || !activeShared.ready.value) return
+      const entries = getPendingPrototypeTweakRollbacks(id)
+      if (entries.length === 0) return
+      let restoredAnyPreview = false
+      for (const entry of entries) {
+        const current = readDocPrototypeTweakValues(activeShared.doc, entry.nodeId)
+        const matchesNext =
+          current.exists && areTweakValuesEqual(current.tweakValues, entry.nextDiff)
+        const matchesPrev =
+          current.exists && areTweakValuesEqual(current.tweakValues, entry.prevDiff)
+        if (matchesNext || matchesPrev) {
+          if (
+            restorePreviewForRollback(
+              entry.nodeId,
+              entry.prevSavedKey,
+              entry.nextSavedKey,
+              entry.preview,
+            )
+          ) {
+            restoredAnyPreview = true
+          }
+          if (matchesNext) {
+            runSilently(() => {
+              const applied =
+                body.value?.setPrototypeTweakValues?.(entry.nodeId, entry.prevDiff) ?? false
+              if (!applied) {
+                rollbackDocPrototypeTweakValues(
+                  activeShared.doc,
+                  entry.nodeId,
+                  entry.nextDiff,
+                  entry.prevDiff,
+                )
+              }
+            })
+          }
+        }
+        clearPendingPrototypeTweakRollback(id, entry.nodeId)
+      }
+      if (restoredAnyPreview) {
+        previewRevision.value++
+      }
+    }
+
+    scope.run(() => {
+      watch(
+        [() => activeShared.ready.value, pendingPrototypeRollbackRevision],
+        ([isReady]) => {
+          if (isReady) reconcilePendingPrototypeRollbacks()
+        },
+        { immediate: true, flush: 'sync' },
+      )
+    })
+  }
 }
 
 watch(
@@ -541,17 +678,120 @@ function onDocumentAsks(asks: AskBlockProps[]) {
   documentAsks.value = asks
 }
 
-function rollbackPrototypeTweaks(commit: PrototypeTweaksSubmitOptions) {
-  const currentEntry = prototypeTweaksPreview.get(commit.nodeId)
+function restorePreviewForRollback(
+  nodeId: string,
+  prevSavedKey: string,
+  nextSavedKey: string,
+  fallbackPreview?: PrototypeTweaksPreviewEntry,
+): boolean {
+  const currentEntry = prototypeTweaksPreview.get(nodeId)
   if (currentEntry) {
-    prototypeTweaksPreview.set(commit.nodeId, {
-      ...currentEntry,
-      savedKey: commit.prevSavedKey,
+    if (currentEntry.savedKey === nextSavedKey || currentEntry.savedKey === prevSavedKey) {
+      prototypeTweaksPreview.set(nodeId, {
+        ...currentEntry,
+        savedKey: prevSavedKey,
+      })
+      return true
+    }
+    return false
+  }
+  if (fallbackPreview) {
+    prototypeTweaksPreview.set(nodeId, {
+      specsKey: fallbackPreview.specsKey,
+      savedKey: prevSavedKey,
+      liveValues: { ...fallbackPreview.liveValues },
+    })
+    return true
+  }
+  return false
+}
+
+function rollbackPrototypeTweaksForTarget(
+  artifactId: string,
+  commit: PrototypeTweaksSubmitOptions,
+  targetRoom: ArtifactRoom | null,
+  fallbackPreview?: PrototypeTweaksPreviewEntry,
+) {
+  const isLiveCurrent =
+    props.id === artifactId &&
+    room?.id === artifactId &&
+    !viewingOld.value &&
+    !!shared.value?.ready.value
+  if (isLiveCurrent && shared.value) {
+    const current = readDocPrototypeTweakValues(shared.value.doc, commit.nodeId)
+    if (!current.exists) return
+    const matchesNext = areTweakValuesEqual(current.tweakValues, commit.nextDiff)
+    const matchesPrev = areTweakValuesEqual(current.tweakValues, commit.prevDiff)
+    if (!matchesNext && !matchesPrev) return
+    const restored = restorePreviewForRollback(
+      commit.nodeId,
+      commit.prevSavedKey,
+      commit.nextSavedKey,
+      fallbackPreview,
+    )
+    if (matchesNext) {
+      runSilently(() => {
+        const applied =
+          body.value?.setPrototypeTweakValues?.(commit.nodeId, commit.prevDiff) ?? false
+        if (!applied && shared.value) {
+          rollbackDocPrototypeTweakValues(
+            shared.value.doc,
+            commit.nodeId,
+            commit.nextDiff,
+            commit.prevDiff,
+          )
+        }
+      })
+    }
+    if (restored) {
+      previewRevision.value++
+    }
+    clearPendingPrototypeTweakRollback(artifactId, commit.nodeId)
+    return
+  }
+
+  // The user already switched away (or the live room is still syncing). Avoid overwriting
+  // concurrent remote/AI edits if we can inspect the retained room's Y.Doc.
+  if (targetRoom && !targetRoom.disposed && targetRoom.shared) {
+    const current = readDocPrototypeTweakValues(targetRoom.shared.doc, commit.nodeId)
+    if (
+      !current.exists ||
+      (!areTweakValuesEqual(current.tweakValues, commit.nextDiff) &&
+        !areTweakValuesEqual(current.tweakValues, commit.prevDiff))
+    ) {
+      return
+    }
+  }
+
+  // Record a pending recovery entry first so any other live editor instance reacts immediately
+  // and returning to this whiteboard later reconciles offline rollback + restores local preview.
+  setPendingPrototypeTweakRollback(artifactId, {
+    nodeId: commit.nodeId,
+    nextDiff: commit.nextDiff,
+    prevDiff: commit.prevDiff,
+    nextSavedKey: commit.nextSavedKey,
+    prevSavedKey: commit.prevSavedKey,
+    preview: fallbackPreview
+      ? {
+          specsKey: fallbackPreview.specsKey,
+          savedKey: commit.prevSavedKey,
+          liveValues: { ...fallbackPreview.liveValues },
+        }
+      : undefined,
+  })
+
+  // Roll back on the retained source room immediately so the server room does not keep dirty
+  // tweakValues even if the user never switches back to this whiteboard.
+  if (targetRoom && !targetRoom.disposed && targetRoom.shared) {
+    runSilently(() => {
+      rollbackDocPrototypeTweakValues(
+        targetRoom.shared!.doc,
+        commit.nodeId,
+        commit.nextDiff,
+        commit.prevDiff,
+      )
     })
   }
-  runSilently(() => {
-    body.value?.setPrototypeTweakValues?.(commit.nodeId, commit.prevDiff)
-  })
 }
 
 interface SendFeedbackOptions {
@@ -572,7 +812,6 @@ async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean>
   const isDocument = artifact.value?.kind === 'document'
   const projectId = artifact.value?.projectId ?? ''
   const initialPending = pendingChanges.value
-  const hadPending = isDocument || prototypeTweaks ? initialPending : Math.max(1, initialPending)
   const hadNotes = pendingNotes.value
   const hadUnsentAsks = isDocument && askSummary.value.hasUnsentChanges
   const previousAskBaseline = isDocument
@@ -582,16 +821,25 @@ async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean>
     : undefined
   const isSameRoom = () => props.id === id && room === sendRoom && !viewingOld.value
   const isCurrentLiveArtifact = () => props.id === id && room?.id === id && !viewingOld.value
+  const submittedPreview = prototypeTweaks
+    ? clonePreviewEntry(prototypeTweaksPreview.get(prototypeTweaks.nodeId))
+    : undefined
+  const releaseSendRoom = prototypeTweaks ? holdRoom(sendRoom) : () => {}
   let applied = 0
   let tweaksApplied = false
   let clearedPending = false
+  let effectiveInitialPending = initialPending
+  let effectiveHadNotes = hadNotes
   const rollbackAppliedTweaks = () => {
-    if (!tweaksApplied || !prototypeTweaks || !isSameRoom()) return
+    if (!tweaksApplied || !prototypeTweaks) return
     tweaksApplied = false
-    rollbackPrototypeTweaks(prototypeTweaks)
+    rollbackPrototypeTweaksForTarget(id, prototypeTweaks, sendRoom, submittedPreview)
   }
   setArtifactFlag(sendingArtifacts, id, true)
-  if (prototypeTweaks) sendingTweakNodeId.value = prototypeTweaks.nodeId
+  if (prototypeTweaks) {
+    clearPendingPrototypeTweakRollback(id, prototypeTweaks.nodeId)
+    setSendingTweakNode(id, prototypeTweaks.nodeId)
+  }
   try {
     if (prototypeTweaks) {
       const updated = runSilently(() => {
@@ -630,10 +878,18 @@ async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean>
         : undefined
     const sentMutationSeq = sendRoom.mutations
     if (activeBeforeSend) {
+      effectiveInitialPending = pendingChanges.value
+      effectiveHadNotes = pendingNotes.value
       waiting.value = false
       quietPaused.value = false
       pendingChanges.value = 0
       pendingNotes.value = 0
+    } else {
+      const savedBeforeClear = getPendingArtifactFeedback(id)
+      if (savedBeforeClear) {
+        effectiveInitialPending = Math.max(effectiveInitialPending, savedBeforeClear.pendingChanges)
+        effectiveHadNotes = Math.max(effectiveHadNotes, savedBeforeClear.pendingNotes)
+      }
     }
     clearPendingArtifactFeedback(id)
     clearedPending = true
@@ -650,6 +906,9 @@ async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean>
     }
     const editedDuringSend = sendRoom.mutations !== sentMutationSeq
     if (result?.feedback && result.feedback.round > 0) {
+      if (prototypeTweaks) {
+        clearPendingPrototypeTweakRollback(id, prototypeTweaks.nodeId)
+      }
       if (isSameRoom()) {
         if (boardAtSend !== undefined) body.value?.setHeard?.(boardAtSend)
         else body.value?.markHeard?.()
@@ -663,11 +922,15 @@ async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean>
           sentRound.value = {
             artifactId: id,
             round: result.feedback.round,
-            hadPending,
-            hadNotes,
+            hadPending:
+              isDocument || prototypeTweaks
+                ? effectiveInitialPending
+                : Math.max(1, effectiveInitialPending),
+            hadNotes: effectiveHadNotes,
             previousHeard,
             previousAskBaseline,
             rollbackTweaks: prototypeTweaks,
+            rollbackPreview: submittedPreview,
           }
           startSentRoundCountdown()
         }
@@ -680,16 +943,18 @@ async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean>
     rollbackAppliedTweaks()
     if (explicit && !editedDuringSend) {
       const restorePending =
-        isDocument || prototypeTweaks ? initialPending : Math.max(initialPending, applied)
+        isDocument || prototypeTweaks
+          ? effectiveInitialPending
+          : Math.max(effectiveInitialPending, applied)
       if (restorePending > 0) {
         if (isCurrentLiveArtifact()) {
           waiting.value = true
           quietPaused.value = true
           pendingChanges.value += restorePending
-          pendingNotes.value += hadNotes
+          pendingNotes.value += effectiveHadNotes
           syncPendingStore(id)
         } else {
-          mergePendingStore(id, restorePending, hadNotes, true)
+          mergePendingStore(id, restorePending, effectiveHadNotes, true)
         }
       }
       if (isDocument && props.id === id && !viewingOld.value) {
@@ -701,26 +966,29 @@ async function sendFeedback(options: SendFeedbackOptions = {}): Promise<boolean>
     rollbackAppliedTweaks()
     if (clearedPending) {
       const restorePending =
-        isDocument || prototypeTweaks ? initialPending : Math.max(initialPending, applied)
+        isDocument || prototypeTweaks
+          ? effectiveInitialPending
+          : Math.max(effectiveInitialPending, applied)
       if (restorePending > 0) {
         if (isCurrentLiveArtifact()) {
           waiting.value = true
           quietPaused.value = true
           pendingChanges.value += restorePending
-          pendingNotes.value += hadNotes
+          pendingNotes.value += effectiveHadNotes
           syncPendingStore(id)
         } else {
-          mergePendingStore(id, restorePending, hadNotes, true)
+          mergePendingStore(id, restorePending, effectiveHadNotes, true)
         }
       }
     }
     report(error)
     return false
   } finally {
-    if (prototypeTweaks && isSameRoom() && sendingTweakNodeId.value === prototypeTweaks.nodeId) {
-      sendingTweakNodeId.value = null
+    if (prototypeTweaks) {
+      clearSendingTweakNode(id, prototypeTweaks.nodeId)
     }
     setArtifactFlag(sendingArtifacts, id, false)
+    releaseSendRoom()
   }
 }
 
@@ -728,6 +996,7 @@ provide(PROTOTYPE_TWEAKS_BRIDGE_KEY, {
   submitTweaks: (options) => sendFeedback({ explicit: true, prototypeTweaks: options }),
   sending,
   sendingNodeId: sendingTweakNodeId,
+  previewRevision,
   getPreview: (nodeId) => prototypeTweaksPreview.get(nodeId),
   setPreview: (nodeId, entry) => {
     prototypeTweaksPreview.set(nodeId, {
@@ -745,6 +1014,17 @@ async function withdrawSentFeedback() {
   const target = sentRound.value
   if (!target || withdrawingArtifacts.value.has(target.artifactId)) return
   const withdrawRoom = room
+  const currentWithdrawPreview = target.rollbackTweaks
+    ? prototypeTweaksPreview.get(target.rollbackTweaks.nodeId)
+    : undefined
+  const withdrawPreview =
+    target.rollbackTweaks &&
+    currentWithdrawPreview &&
+    (currentWithdrawPreview.savedKey === target.rollbackTweaks.nextSavedKey ||
+      currentWithdrawPreview.savedKey === target.rollbackTweaks.prevSavedKey)
+      ? clonePreviewEntry(currentWithdrawPreview)
+      : target.rollbackPreview
+  const releaseWithdrawRoom = target.rollbackTweaks ? holdRoom(withdrawRoom) : () => {}
   const isSameRoom = () =>
     props.id === target.artifactId && room === withdrawRoom && !viewingOld.value
   const isCurrentLiveArtifact = () =>
@@ -755,10 +1035,15 @@ async function withdrawSentFeedback() {
     const { withdrawn } = await api.withdrawFeedback(target.artifactId, target.round)
     if (sentRound.value === target) clearSentRound()
     if (withdrawn) {
+      if (target.rollbackTweaks) {
+        rollbackPrototypeTweaksForTarget(
+          target.artifactId,
+          target.rollbackTweaks,
+          withdrawRoom,
+          withdrawPreview,
+        )
+      }
       if (isSameRoom()) {
-        if (target.rollbackTweaks) {
-          rollbackPrototypeTweaks(target.rollbackTweaks)
-        }
         if (target.previousHeard !== undefined) body.value?.setHeard?.(target.previousHeard)
         if (target.previousAskBaseline !== undefined) {
           askBaselineEpoch++
@@ -799,6 +1084,7 @@ async function withdrawSentFeedback() {
     report(error)
   } finally {
     setArtifactFlag(withdrawingArtifacts, target.artifactId, false)
+    releaseWithdrawRoom()
   }
 }
 
@@ -885,24 +1171,24 @@ function leave() {
   clearSentRound()
   documentAsks.value = []
   prototypeTweaksPreview.clear()
-  sendingTweakNodeId.value = null
   if (!room) return
+  const leavingRoom = room
   if (waiting.value && pendingChanges.value > 0) {
-    setPendingArtifactFeedback(room.id, {
+    setPendingArtifactFeedback(leavingRoom.id, {
       pendingChanges: pendingChanges.value,
       pendingNotes: pendingNotes.value,
       paused: true,
     })
   } else {
-    clearPendingArtifactFeedback(room.id)
+    clearPendingArtifactFeedback(leavingRoom.id)
   }
   waiting.value = false
   quietPaused.value = false
   pendingChanges.value = 0
   pendingNotes.value = 0
-  room.scope.stop()
   room = null
   shared.value = null
+  disposeRoomIfIdle(leavingRoom)
 }
 onBeforeUnmount(leave)
 

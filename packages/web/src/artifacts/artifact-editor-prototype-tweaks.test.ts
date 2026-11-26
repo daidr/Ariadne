@@ -3,13 +3,18 @@ import type { ArtifactView } from '@ariadne/core'
 import type { FlowNode } from '@dou-ui/flow'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { defineComponent, h, onBeforeUnmount, ref, shallowRef } from 'vue'
+import { defineComponent, h, onBeforeUnmount, onScopeDispose, ref, shallowRef } from 'vue'
 import * as Y from 'yjs'
 import { api } from '../api'
 import { setLocale } from '../i18n'
 import { state } from '../store'
 import type { DecisionGroupSummary } from './decision-groups'
-import { clearPendingArtifactFeedback, getPendingArtifactFeedback } from './feedback-pending'
+import {
+  clearPendingArtifactFeedback,
+  clearPendingPrototypeTweakRollback,
+  getPendingArtifactFeedback,
+  getPendingPrototypeTweakRollbacks,
+} from './feedback-pending'
 import type {
   PrototypeNodeData,
   PrototypeTweakSpec,
@@ -18,8 +23,25 @@ import type {
 import PrototypeNode from './PrototypeNode.vue'
 import PrototypeTweaksPanel from './PrototypeTweaksPanel.vue'
 
+interface MockSyncedRoomSession {
+  id: string
+  doc: Y.Doc
+  ready: ReturnType<typeof ref<boolean>>
+  connected: ReturnType<typeof ref<boolean>>
+  disposed: boolean
+  disconnect: () => void
+  completeSync: () => void
+}
+
+interface MockServerRoom {
+  serverDoc: Y.Doc
+  deferReady?: boolean
+  sessions: MockSyncedRoomSession[]
+}
+
 let currentSharedDoc: Y.Doc | null = null
 const sharedDocsByArtifact = new Map<string, Y.Doc>()
+const serverRoomsByArtifact = new Map<string, MockServerRoom>()
 const culledNodeIds = ref<ReadonlySet<string>>(new Set())
 let activeDecisionSummary: DecisionGroupSummary | null = null
 let applyRecommendedSpy = vi.fn(() => 0)
@@ -27,6 +49,72 @@ const fakeProvider = { awareness: null, destroy: () => {} }
 
 vi.mock('./shared', () => ({
   useSharedArtifact: (id: string) => {
+    const serverRoom = serverRoomsByArtifact.get(id)
+    if (serverRoom) {
+      const clientDoc = new Y.Doc()
+      const provider = { awareness: null, destroy: () => {} }
+      const ready = ref(false)
+      const connected = ref(true)
+      let active = true
+      let synced = false
+
+      const onClientUpdate = (update: Uint8Array, origin: unknown) => {
+        if (!active || !connected.value || origin === provider) return
+        Y.applyUpdate(serverRoom.serverDoc, update, clientDoc)
+      }
+      const onServerUpdate = (update: Uint8Array, origin: unknown) => {
+        if (!active || !connected.value || !synced || origin === clientDoc) return
+        Y.applyUpdate(clientDoc, update, provider)
+      }
+
+      clientDoc.on('update', onClientUpdate)
+      serverRoom.serverDoc.on('update', onServerUpdate)
+
+      const completeSync = () => {
+        if (!active || synced) return
+        synced = true
+        Y.applyUpdate(clientDoc, Y.encodeStateAsUpdate(serverRoom.serverDoc), provider)
+        ready.value = true
+      }
+      const disconnect = () => {
+        connected.value = false
+        ready.value = false
+      }
+
+      const session: MockSyncedRoomSession = {
+        id,
+        doc: clientDoc,
+        ready,
+        connected,
+        disposed: false,
+        disconnect,
+        completeSync,
+      }
+      serverRoom.sessions.push(session)
+
+      if (!serverRoom.deferReady) {
+        completeSync()
+      }
+
+      onScopeDispose(() => {
+        active = false
+        session.disposed = true
+        connected.value = false
+        ready.value = false
+        clientDoc.off('update', onClientUpdate)
+        serverRoom.serverDoc.off('update', onServerUpdate)
+        clientDoc.destroy()
+      })
+
+      return {
+        doc: clientDoc,
+        awareness: null,
+        ready,
+        connected,
+        provider: shallowRef(provider),
+      }
+    }
+
     const doc = sharedDocsByArtifact.get(id) ?? currentSharedDoc ?? new Y.Doc()
     currentSharedDoc = doc
     return {
@@ -271,20 +359,26 @@ describe('ArtifactEditor prototype tweaks local preview & explicit send', () => 
     state.artifacts = []
     currentSharedDoc = null
     sharedDocsByArtifact.clear()
+    serverRoomsByArtifact.clear()
     culledNodeIds.value = new Set()
     activeDecisionSummary = null
     applyRecommendedSpy = vi.fn(() => 0)
     clearPendingArtifactFeedback('art_board_1')
     clearPendingArtifactFeedback('art_board_2')
+    clearPendingPrototypeTweakRollback('art_board_1')
+    clearPendingPrototypeTweakRollback('art_board_2')
   })
 
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
     sharedDocsByArtifact.clear()
+    serverRoomsByArtifact.clear()
     culledNodeIds.value = new Set()
     clearPendingArtifactFeedback('art_board_1')
     clearPendingArtifactFeedback('art_board_2')
+    clearPendingPrototypeTweakRollback('art_board_1')
+    clearPendingPrototypeTweakRollback('art_board_2')
   })
 
   test('adjusting tweaks previews locally without adding pending changes or auto-sending', async () => {
@@ -829,6 +923,461 @@ describe('ArtifactEditor prototype tweaks local preview & explicit send', () => 
     await flushPromises()
     expect(wrapper.find('.proto-tweak-count').exists()).toBe(false)
     expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  test('rolls back server Yjs and restores retry preview when switching artifacts mid-send and request fails', async () => {
+    const server1: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    const server2: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    serverRoomsByArtifact.set('art_board_1', server1)
+    serverRoomsByArtifact.set('art_board_2', server2)
+
+    const { wrapper, getArtifact, sendFeedback } = await mountBoardEditor(
+      server1.serverDoc,
+      'art_board_1',
+    )
+    getArtifact.mockImplementation((artifactId) => Promise.resolve(boardDetail(artifactId)))
+
+    let rejectSend!: (err: Error) => void
+    sendFeedback.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSend = reject
+        }),
+    )
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 24, dense: false, cta: '立即开始' })
+    await flushPromises()
+
+    // Click "将当前参数发给 AI" so Yjs receives the silent write and sendFeedback is in flight.
+    const clickSend = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+    expect(readNodeTweakValues(server1.serverDoc)).toEqual({ accent: '#10b981', gap: 24 })
+    expect(sendFeedback).toHaveBeenCalledTimes(1)
+    expect(server1.sessions).toHaveLength(1)
+    expect(server1.sessions[0]!.disposed).toBe(false)
+
+    // Switch to art_board_2 before sendFeedback settles.
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.find('.proto-tweak-count').exists()).toBe(false)
+    // Source room stays alive while its tweak send is in flight so rollback can flush to server.
+    expect(server1.sessions[0]!.disposed).toBe(false)
+
+    // Fail the in-flight request while viewing art_board_2.
+    rejectSend(new Error('network timeout'))
+    await clickSend
+    await flushPromises()
+
+    // Server Y.Doc for art_board_1 was immediately rolled back and retained room was disposed cleanly.
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(server1.sessions[0]!.disposed).toBe(true)
+    expect(readNodeTweakValues(server2.serverDoc)).toBeUndefined()
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+    expect(getPendingPrototypeTweakRollbacks('art_board_1')).toHaveLength(1)
+
+    // Switch back to art_board_1: shared doc is clean AND local preview is restored ready for retry.
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(getPendingPrototypeTweakRollbacks('art_board_1')).toHaveLength(0)
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('2')
+    expect(wrapper.find('.tweaks-footer button').text()).toContain('将当前参数发给 AI')
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+    const srcdoc = wrapper.find('iframe.proto-iframe').attributes('srcdoc') ?? ''
+    expect(srcdoc).toContain('#10b981')
+
+    // Retrying from the restored state sends the tweaks successfully.
+    const retryClick = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await retryClick
+    await flushPromises()
+
+    expect(sendFeedback).toHaveBeenCalledTimes(2)
+    expect(readNodeTweakValues(server1.serverDoc)).toEqual({ accent: '#10b981', gap: 24 })
+    expect(wrapper.find('.artifact-feedback-bar').text()).toContain('第 1 轮反馈已发送')
+
+    wrapper.unmount()
+  })
+
+  test('reconciles server Yjs rollback on return when WebSocket was offline during mid-flight failure', async () => {
+    const server1: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    const server2: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    serverRoomsByArtifact.set('art_board_1', server1)
+    serverRoomsByArtifact.set('art_board_2', server2)
+
+    const { wrapper, getArtifact, sendFeedback } = await mountBoardEditor(
+      server1.serverDoc,
+      'art_board_1',
+    )
+    getArtifact.mockImplementation((artifactId) => Promise.resolve(boardDetail(artifactId)))
+
+    let rejectSend!: (err: Error) => void
+    sendFeedback.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSend = reject
+        }),
+    )
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 24, dense: false, cta: '立即开始' })
+    await flushPromises()
+
+    const clickSend = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+    expect(readNodeTweakValues(server1.serverDoc)).toEqual({ accent: '#10b981', gap: 24 })
+
+    // Switch to art_board_2 and drop art_board_1's WebSocket before the request fails so the
+    // immediate rollback cannot reach server1.
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+    server1.sessions[0]!.disconnect()
+
+    rejectSend(new Error('offline'))
+    await clickSend
+    await flushPromises()
+
+    // Server still holds the dirty tweakValues while offline, and a pending rollback is recorded.
+    expect(readNodeTweakValues(server1.serverDoc)).toEqual({ accent: '#10b981', gap: 24 })
+    expect(server1.sessions[0]!.disposed).toBe(true)
+    expect(getPendingPrototypeTweakRollbacks('art_board_1')).toHaveLength(1)
+
+    // Switch back to art_board_1 with an async initial room sync (like a real WebSocket handshake).
+    server1.deferReady = true
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+    expect(server1.sessions).toHaveLength(2)
+    expect(server1.sessions[1]!.ready.value).toBe(false)
+
+    // Completing sync reconciles the rollback silently without triggering auto-send pending state.
+    server1.sessions[1]!.completeSync()
+    await flushPromises()
+    await flushPromises()
+
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(getPendingPrototypeTweakRollbacks('art_board_1')).toHaveLength(0)
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+    expect(getPendingArtifactFeedback('art_board_1')).toBeUndefined()
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('2')
+    expect(wrapper.find('.tweaks-footer button').text()).toContain('将当前参数发给 AI')
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+
+    wrapper.unmount()
+  })
+
+  test('rolls back tweaks and preserves pre-existing pending edits when empty feedback returns after switching artifacts', async () => {
+    const server1: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    const server2: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    serverRoomsByArtifact.set('art_board_1', server1)
+    serverRoomsByArtifact.set('art_board_2', server2)
+
+    const { wrapper, getArtifact, sendFeedback } = await mountBoardEditor(
+      server1.serverDoc,
+      'art_board_1',
+    )
+    getArtifact.mockImplementation((artifactId) => Promise.resolve(boardDetail(artifactId)))
+
+    // Create a normal board edit so art_board_1 has pendingChanges = 1 before tweaking prototype.
+    const session1Doc = server1.sessions[0]!.doc
+    session1Doc.transact(() => {
+      const sticky = new Y.Map<unknown>()
+      sticky.set('type', 'sticky')
+      sticky.set('data', { text: '先记一条待同步修改' })
+      session1Doc.getMap('nodes').set('sticky-1', sticky)
+    })
+    await flushPromises()
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(true)
+
+    let resolveFirst!: (val: { feedback: null }) => void
+    sendFeedback
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve
+          }),
+      )
+      .mockResolvedValueOnce({ feedback: null })
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 24, dense: false, cta: '立即开始' })
+    await flushPromises()
+
+    const clickSend = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+
+    // Switch to art_board_2 mid-flight.
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+
+    // Both initial send and 250ms retry return empty feedback.
+    resolveFirst({ feedback: null })
+    await vi.advanceTimersByTimeAsync(300)
+    await clickSend
+    await flushPromises()
+
+    expect(sendFeedback).toHaveBeenCalledTimes(2)
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+    expect(getPendingArtifactFeedback('art_board_1')).toEqual({
+      pendingChanges: 1,
+      pendingNotes: 0,
+      paused: true,
+    })
+
+    // Returning to art_board_1 restores both the paused feedback bar and retryable local tweaks.
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(true)
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('2')
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+
+    wrapper.unmount()
+  })
+
+  test('does not overwrite concurrent remote/AI tweakValues when a switched-away send fails', async () => {
+    const server1: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    const server2: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    serverRoomsByArtifact.set('art_board_1', server1)
+    serverRoomsByArtifact.set('art_board_2', server2)
+
+    const { wrapper, getArtifact, sendFeedback } = await mountBoardEditor(
+      server1.serverDoc,
+      'art_board_1',
+    )
+    getArtifact.mockImplementation((artifactId) => Promise.resolve(boardDetail(artifactId)))
+
+    let rejectSend!: (err: Error) => void
+    sendFeedback.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSend = reject
+        }),
+    )
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 24, dense: false, cta: '立即开始' })
+    await flushPromises()
+
+    const clickSend = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+
+    // Remote collaborator / AI updates proto-1 tweakValues on server1 before the send fails.
+    server1.serverDoc.transact(() => {
+      const fields = (server1.serverDoc.getMap('nodes') as Y.Map<Y.Map<unknown>>).get('proto-1')!
+      const prev = fields.get('data') as PrototypeNodeData
+      fields.set('data', { ...prev, tweakValues: { dense: true } })
+    })
+
+    rejectSend(new Error('send failed'))
+    await clickSend
+    await flushPromises()
+
+    // Remote tweakValues must remain intact and no stale rollback should be queued.
+    expect(readNodeTweakValues(server1.serverDoc)).toEqual({ dense: true })
+    expect(getPendingPrototypeTweakRollbacks('art_board_1')).toHaveLength(0)
+
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('1')
+    expect(wrapper.find('.tweaks-footer button').text()).toContain('当前参数已发送')
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  test('recovers cleanly when user switches away and returns to original board before send fails', async () => {
+    const server1: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    const server2: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    serverRoomsByArtifact.set('art_board_1', server1)
+    serverRoomsByArtifact.set('art_board_2', server2)
+
+    const { wrapper, getArtifact, sendFeedback } = await mountBoardEditor(
+      server1.serverDoc,
+      'art_board_1',
+    )
+    getArtifact.mockImplementation((artifactId) => Promise.resolve(boardDetail(artifactId)))
+
+    let rejectSend!: (err: Error) => void
+    sendFeedback.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSend = reject
+        }),
+    )
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 24, dense: false, cta: '立即开始' })
+    await flushPromises()
+
+    const clickSend = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+
+    // Switch to art_board_2 and then immediately back to art_board_1 while still in flight.
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+
+    // Button stays disabled while the original send is still in flight for art_board_1.
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(true)
+
+    rejectSend(new Error('network error'))
+    await clickSend
+    await flushPromises()
+
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(server1.sessions[0]!.disposed).toBe(true)
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('2')
+    expect(wrapper.find('.tweaks-footer button').text()).toContain('将当前参数发给 AI')
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+
+    wrapper.unmount()
+  })
+
+  test('rolls back server Yjs and restores latest preview when switching away during in-flight withdraw', async () => {
+    const server1: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    const server2: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    serverRoomsByArtifact.set('art_board_1', server1)
+    serverRoomsByArtifact.set('art_board_2', server2)
+
+    const { wrapper, getArtifact, withdrawFeedback } = await mountBoardEditor(
+      server1.serverDoc,
+      'art_board_1',
+    )
+    getArtifact.mockImplementation((artifactId) => Promise.resolve(boardDetail(artifactId)))
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 24, dense: false, cta: '立即开始' })
+    await flushPromises()
+
+    const clickSend = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await clickSend
+    await flushPromises()
+    expect(readNodeTweakValues(server1.serverDoc)).toEqual({ accent: '#10b981', gap: 24 })
+
+    // Adjust locally again during the 60s withdraw window.
+    panel.vm.$emit('change', { accent: '#10b981', gap: 30, dense: true, cta: '立即开始' })
+    await flushPromises()
+
+    let resolveWithdraw!: (val: { withdrawn: boolean }) => void
+    withdrawFeedback.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveWithdraw = resolve
+        }),
+    )
+
+    const withdrawBtn = wrapper
+      .findAll('.artifact-feedback-bar button')
+      .find((btn) => btn.text().includes('撤回'))
+    const clickWithdraw = withdrawBtn!.trigger('click')
+    await flushPromises()
+
+    // Switch to art_board_2 while withdraw is still in flight.
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+    expect(server1.sessions[0]!.disposed).toBe(false)
+
+    resolveWithdraw({ withdrawn: true })
+    await clickWithdraw
+    await flushPromises()
+
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(server1.sessions[0]!.disposed).toBe(true)
+
+    // Switch back to art_board_1: latest local preview (3 modified tweaks) is restored for retry.
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('3')
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+    const srcdoc = wrapper.find('iframe.proto-iframe').attributes('srcdoc') ?? ''
+    expect(srcdoc).toContain('#10b981')
+    expect(srcdoc).toContain('30')
+
+    wrapper.unmount()
+  })
+
+  test('rolls back server Yjs and restores preview when switching artifacts during the 120ms pre-send delay', async () => {
+    const server1: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    const server2: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    serverRoomsByArtifact.set('art_board_1', server1)
+    serverRoomsByArtifact.set('art_board_2', server2)
+
+    const { wrapper, getArtifact, sendFeedback } = await mountBoardEditor(
+      server1.serverDoc,
+      'art_board_1',
+    )
+    getArtifact.mockImplementation((artifactId) => Promise.resolve(boardDetail(artifactId)))
+    sendFeedback.mockRejectedValueOnce(new Error('timeout'))
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 24, dense: false, cta: '立即开始' })
+    await flushPromises()
+
+    // Click send, then immediately switch away before the 120ms settle wait expires.
+    const clickSend = wrapper.find('.tweaks-footer button').trigger('click')
+    await flushPromises()
+    expect(readNodeTweakValues(server1.serverDoc)).toEqual({ accent: '#10b981', gap: 24 })
+
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(150)
+    await clickSend
+    await flushPromises()
+
+    expect(sendFeedback).toHaveBeenCalledTimes(1)
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(server1.sessions[0]!.disposed).toBe(true)
+
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('2')
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
+      false,
+    )
 
     wrapper.unmount()
   })

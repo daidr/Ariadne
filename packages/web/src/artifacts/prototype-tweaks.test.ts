@@ -1,8 +1,14 @@
 import type { FlowDocument } from '@dou-ui/flow'
 import { describe, expect, test } from 'vitest'
+import * as Y from 'yjs'
 import { resolveOptionNoteLayout } from './decision-groups'
-import { resolvePrototypeViewportPoint } from './prototype-bridge'
 import {
+  readDocPrototypeTweakValues,
+  resolvePrototypeViewportPoint,
+  rollbackDocPrototypeTweakValues,
+} from './prototype-bridge'
+import {
+  areTweakValuesEqual,
   buildSandboxedPrototypeDoc,
   countModifiedTweaks,
   diffTweakValues,
@@ -271,6 +277,61 @@ describe('prototype tweaks & sandbox builder', () => {
     expect(resolveOptionNoteLayout('Standalone note card', 160, null)).toEqual({
       mode: 'block',
       maxLines: 5,
+    })
+  })
+
+  test('compares sparse tweak values and safely rolls back a whiteboard Y.Doc node', () => {
+    expect(areTweakValuesEqual(undefined, undefined)).toBe(true)
+    expect(areTweakValuesEqual(undefined, {})).toBe(true)
+    expect(
+      areTweakValuesEqual({ accent: '#10b981', gap: 24 }, { gap: 24, accent: '#10b981' }),
+    ).toBe(true)
+    expect(areTweakValuesEqual({ accent: '#10b981' }, { accent: '#ef4444' })).toBe(false)
+    expect(areTweakValuesEqual({ accent: '#10b981' }, undefined)).toBe(false)
+
+    const doc = new Y.Doc()
+    const nodes = doc.getMap('nodes') as Y.Map<Y.Map<unknown>>
+    const fields = new Y.Map<unknown>()
+    fields.set('type', 'prototype')
+    fields.set('data', { title: '原型', tweakValues: { accent: '#10b981', gap: 24 } })
+    nodes.set('proto-1', fields)
+
+    expect(readDocPrototypeTweakValues(doc, 'missing')).toEqual({ exists: false })
+    expect(readDocPrototypeTweakValues(doc, 'proto-1')).toEqual({
+      exists: true,
+      tweakValues: { accent: '#10b981', gap: 24 },
+    })
+
+    // Diverged remote/AI value must never be overwritten.
+    expect(rollbackDocPrototypeTweakValues(doc, 'proto-1', { accent: '#ef4444' }, undefined)).toBe(
+      'diverged',
+    )
+    expect(readDocPrototypeTweakValues(doc, 'proto-1')).toEqual({
+      exists: true,
+      tweakValues: { accent: '#10b981', gap: 24 },
+    })
+
+    // Exact match rolls back cleanly to undefined (deleting tweakValues).
+    expect(
+      rollbackDocPrototypeTweakValues(doc, 'proto-1', { accent: '#10b981', gap: 24 }, undefined),
+    ).toBe('rolled-back')
+    expect(readDocPrototypeTweakValues(doc, 'proto-1')).toEqual({
+      exists: true,
+      tweakValues: undefined,
+    })
+
+    // Calling again recognizes it is already reverted.
+    expect(
+      rollbackDocPrototypeTweakValues(doc, 'proto-1', { accent: '#10b981', gap: 24 }, undefined),
+    ).toBe('already-reverted')
+
+    // Rolling back a reset (undefined -> previous values) restores previous tweakValues.
+    expect(rollbackDocPrototypeTweakValues(doc, 'proto-1', undefined, { accent: '#2563eb' })).toBe(
+      'rolled-back',
+    )
+    expect(readDocPrototypeTweakValues(doc, 'proto-1')).toEqual({
+      exists: true,
+      tweakValues: { accent: '#2563eb' },
     })
   })
 })
