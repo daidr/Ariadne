@@ -47,38 +47,57 @@ export interface PrototypeTweaksFeedbackBridge {
 }
 
 export type PrototypeTweakDocRead =
-  { exists: false } | { exists: true; tweakValues: PrototypeTweakValues | undefined }
+  | { exists: false }
+  | { exists: true; tweakValues: PrototypeTweakValues | undefined; definitionKey: string }
 
-/** Reads a prototype node's current `data.tweakValues` directly from a whiteboard Y.Doc. */
+/**
+ * Computes a canonical fingerprint for a prototype node's definition (`html`, `src`, `tweaks`)
+ * so delayed rollback recovery never overwrites a prototype updated by AI or another collaborator.
+ */
+export function prototypeDefinitionKey(data: Record<string, unknown> | undefined): string {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return ''
+  return JSON.stringify({
+    html: typeof data.html === 'string' ? data.html : null,
+    src: typeof data.src === 'string' ? data.src : null,
+    tweaks: Array.isArray(data.tweaks) && data.tweaks.length > 0 ? data.tweaks : null,
+  })
+}
+
+/** Reads a prototype node's current `data.tweakValues` and definition fingerprint from a whiteboard Y.Doc. */
 export function readDocPrototypeTweakValues(doc: Y.Doc, nodeId: string): PrototypeTweakDocRead {
   const nodes = doc.getMap('nodes')
   const fields = nodes.get(nodeId)
   if (!(fields instanceof Y.Map)) return { exists: false }
   const data = fields.get('data')
-  const raw =
+  const dataObj =
     data && typeof data === 'object' && !Array.isArray(data)
-      ? (data as Record<string, unknown>).tweakValues
+      ? (data as Record<string, unknown>)
       : undefined
+  const raw = dataObj?.tweakValues
   const tweakValues =
     raw && typeof raw === 'object' && !Array.isArray(raw)
       ? (raw as PrototypeTweakValues)
       : undefined
-  return { exists: true, tweakValues }
+  return { exists: true, tweakValues, definitionKey: prototypeDefinitionKey(dataObj) }
 }
 
 /**
  * Rolls back a prototype node's `data.tweakValues` in a whiteboard Y.Doc from `expectedNext`
- * to `prevDiff` only when the node still holds `expectedNext`, so concurrent remote or AI edits
- * are never overwritten.
+ * to `prevDiff` only when the node still matches `expectedDefinitionKey` (when provided) and
+ * still holds `expectedNext`, so concurrent remote or AI edits are never overwritten.
  */
 export function rollbackDocPrototypeTweakValues(
   doc: Y.Doc,
   nodeId: string,
   expectedNext: PrototypeTweakValues | undefined,
   prevDiff: PrototypeTweakValues | undefined,
+  expectedDefinitionKey?: string,
 ): 'rolled-back' | 'already-reverted' | 'diverged' {
   const current = readDocPrototypeTweakValues(doc, nodeId)
   if (!current.exists) return 'diverged'
+  if (expectedDefinitionKey !== undefined && current.definitionKey !== expectedDefinitionKey) {
+    return 'diverged'
+  }
   if (areTweakValuesEqual(current.tweakValues, expectedNext)) {
     const nodes = doc.getMap('nodes')
     const fields = nodes.get(nodeId)

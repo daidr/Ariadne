@@ -31,6 +31,7 @@ interface MockSyncedRoomSession {
   disposed: boolean
   disconnect: () => void
   completeSync: () => void
+  reconnect: () => void
 }
 
 interface MockServerRoom {
@@ -79,6 +80,24 @@ vi.mock('./shared', () => ({
       const disconnect = () => {
         connected.value = false
         ready.value = false
+        synced = false
+      }
+      const reconnect = () => {
+        if (!active) return
+        connected.value = true
+        synced = true
+        // Simulate real y-websocket sync step 1 & 2 (bidirectional exchange BEFORE ready flips true).
+        const clientDiff = Y.encodeStateAsUpdate(
+          clientDoc,
+          Y.encodeStateVector(serverRoom.serverDoc),
+        )
+        const serverDiff = Y.encodeStateAsUpdate(
+          serverRoom.serverDoc,
+          Y.encodeStateVector(clientDoc),
+        )
+        if (clientDiff.length > 0) Y.applyUpdate(serverRoom.serverDoc, clientDiff, clientDoc)
+        if (serverDiff.length > 0) Y.applyUpdate(clientDoc, serverDiff, provider)
+        ready.value = true
       }
 
       const session: MockSyncedRoomSession = {
@@ -89,6 +108,7 @@ vi.mock('./shared', () => ({
         disposed: false,
         disconnect,
         completeSync,
+        reconnect,
       }
       serverRoom.sessions.push(session)
 
@@ -279,13 +299,16 @@ function seedBoardDoc(tweakValues?: PrototypeTweakValues) {
   return doc
 }
 
-function readNodeTweakValues(doc: Y.Doc, nodeId = 'proto-1'): PrototypeTweakValues | undefined {
+function readNodeData(doc: Y.Doc, nodeId = 'proto-1'): PrototypeNodeData | undefined {
   const fields = (doc.getMap('nodes') as Y.Map<Y.Map<unknown>>).get(nodeId)
-  const data = fields?.get('data') as PrototypeNodeData | undefined
-  return data?.tweakValues
+  return fields?.get('data') as PrototypeNodeData | undefined
 }
 
-function boardDetail(id: string) {
+function readNodeTweakValues(doc: Y.Doc, nodeId = 'proto-1'): PrototypeTweakValues | undefined {
+  return readNodeData(doc, nodeId)?.tweakValues
+}
+
+function boardDetail(id: string, version = 1, updatedBy: 'agent' | 'user' = 'agent') {
   const artifact: ArtifactView = {
     id,
     projectId: 'prj_1',
@@ -293,9 +316,9 @@ function boardDetail(id: string) {
     title: '原型评审画板',
     nodeId: null,
     content: JSON.stringify({ version: 1, nodes: [], edges: [] }),
-    version: 1,
+    version,
     createdBy: 'agent',
-    updatedBy: 'agent',
+    updatedBy,
     createdAt: 1000,
     updatedAt: 1000,
     commentedAt: 0,
@@ -305,7 +328,7 @@ function boardDetail(id: string) {
   return {
     artifact,
     comments: [],
-    versions: [{ version: 1, title: artifact.title, author: 'agent', reason: '', createdAt: 1000 }],
+    versions: [{ version, title: artifact.title, author: updatedBy, reason: '', createdAt: 1000 }],
     askBaseline: null,
   }
 }
@@ -1378,6 +1401,451 @@ describe('ArtifactEditor prototype tweaks local preview & explicit send', () => 
     expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
       false,
     )
+
+    wrapper.unmount()
+  })
+
+  test('does not mutate disconnected Y.Doc on same-board failure so reconnect never overwrites concurrent AI edits', async () => {
+    const server1: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    serverRoomsByArtifact.set('art_board_1', server1)
+
+    const { wrapper, getArtifact, sendFeedback } = await mountBoardEditor(
+      server1.serverDoc,
+      'art_board_1',
+    )
+    getArtifact.mockImplementation((artifactId) => Promise.resolve(boardDetail(artifactId)))
+
+    let rejectSend!: (err: Error) => void
+    sendFeedback.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSend = reject
+        }),
+    )
+
+    const session = server1.sessions[0]!
+    // Ensure clientDoc would win a concurrent Y.Map LWW conflict if an offline write ever occurred.
+    session.doc.clientID = server1.serverDoc.clientID + 100
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 24, dense: false, cta: '立即开始' })
+    await flushPromises()
+
+    const clickSend = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+    expect(sendFeedback).toHaveBeenCalledTimes(1)
+    expect(readNodeTweakValues(server1.serverDoc)).toEqual({ accent: '#10b981', gap: 24 })
+
+    // Lose connection on the active board while sendFeedback is in flight.
+    session.disconnect()
+    let offlineClientWrites = 0
+    const countOfflineWrite = () => {
+      offlineClientWrites++
+    }
+    session.doc.on('update', countOfflineWrite)
+
+    // Meanwhile AI updates the prototype on the server while the client is offline.
+    server1.serverDoc.transact(() => {
+      const fields = (server1.serverDoc.getMap('nodes') as Y.Map<Y.Map<unknown>>).get('proto-1')!
+      fields.set('data', {
+        ...(fields.get('data') as PrototypeNodeData),
+        html: '<!doctype html><html><body>AI v2 baked</body></html>',
+        tweakValues: { accent: '#f97316' },
+      })
+    })
+
+    // sendFeedback rejects while disconnected.
+    rejectSend(new Error('network offline'))
+    await clickSend
+    await flushPromises()
+
+    session.doc.off('update', countOfflineWrite)
+    // Crucial: zero local Y.Doc mutations occurred while disconnected.
+    expect(offlineClientWrites).toBe(0)
+
+    // Reconnect and sync bidirectional state: AI's update must survive intact.
+    session.reconnect()
+    await flushPromises()
+    await flushPromises()
+
+    expect(readNodeData(server1.serverDoc)?.html).toBe(
+      '<!doctype html><html><body>AI v2 baked</body></html>',
+    )
+    expect(readNodeTweakValues(server1.serverDoc)).toEqual({ accent: '#f97316' })
+    expect(readNodeData(session.doc)?.html).toBe(
+      '<!doctype html><html><body>AI v2 baked</body></html>',
+    )
+    expect(readNodeTweakValues(session.doc)).toEqual({ accent: '#f97316' })
+    expect(getPendingPrototypeTweakRollbacks('art_board_1')).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  test('defers offline same-board rollback until reconnect and reconciles cleanly when server is unchanged', async () => {
+    const server1: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    serverRoomsByArtifact.set('art_board_1', server1)
+
+    const { wrapper, getArtifact, sendFeedback } = await mountBoardEditor(
+      server1.serverDoc,
+      'art_board_1',
+    )
+    getArtifact.mockImplementation((artifactId) => Promise.resolve(boardDetail(artifactId)))
+
+    let rejectSend!: (err: Error) => void
+    sendFeedback.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSend = reject
+        }),
+    )
+
+    const session = server1.sessions[0]!
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 24, dense: false, cta: '立即开始' })
+    await flushPromises()
+
+    const clickSend = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+    expect(readNodeTweakValues(server1.serverDoc)).toEqual({ accent: '#10b981', gap: 24 })
+
+    session.disconnect()
+    let offlineClientWrites = 0
+    const countOfflineWrite = () => {
+      offlineClientWrites++
+    }
+    session.doc.on('update', countOfflineWrite)
+
+    rejectSend(new Error('network offline'))
+    await clickSend
+    await flushPromises()
+
+    session.doc.off('update', countOfflineWrite)
+    expect(offlineClientWrites).toBe(0)
+    expect(getPendingPrototypeTweakRollbacks('art_board_1')).toHaveLength(1)
+
+    // Reconnect while server still holds the unsent tweak values -> reconcile rolls back and restores retry.
+    session.reconnect()
+    await flushPromises()
+    await flushPromises()
+
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(getPendingPrototypeTweakRollbacks('art_board_1')).toEqual([])
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('2')
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+
+    wrapper.unmount()
+  })
+
+  test('clears and restores pending count consistently when switching away and back during 120ms wait', async () => {
+    const server1: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    const server2: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    serverRoomsByArtifact.set('art_board_1', server1)
+    serverRoomsByArtifact.set('art_board_2', server2)
+
+    const { wrapper, getArtifact, sendFeedback } = await mountBoardEditor(
+      server1.serverDoc,
+      'art_board_1',
+    )
+    getArtifact.mockImplementation((artifactId) => Promise.resolve(boardDetail(artifactId)))
+
+    let rejectFirstSend!: (err: Error) => void
+    sendFeedback.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectFirstSend = reject
+        }),
+    )
+
+    // Create 2 unrelated pending board edits first.
+    const addStickyEdit = (text: string) => {
+      const doc = server1.sessions[server1.sessions.length - 1]!.doc
+      doc.transact(() => {
+        const nodes = doc.getMap('nodes') as Y.Map<Y.Map<unknown>>
+        const sticky = new Y.Map<unknown>()
+        sticky.set('id', 'sticky-1')
+        sticky.set('type', 'sticky')
+        sticky.set('data', { text })
+        nodes.set('sticky-1', sticky)
+      })
+    }
+    addStickyEdit('edit 1')
+    addStickyEdit('edit 2')
+    await flushPromises()
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(true)
+
+    const panel = wrapper.findComponent(PrototypeTweaksPanel)
+    panel.vm.$emit('change', { accent: '#10b981', gap: 16, dense: false, cta: '立即开始' })
+    await flushPromises()
+
+    // Click send, then immediately switch away and switch right back BEFORE 120ms expires.
+    const clickSend = wrapper.find('.tweaks-footer button').trigger('click')
+    await flushPromises()
+
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+    expect(getPendingArtifactFeedback('art_board_1')?.pendingChanges).toBe(2)
+
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+    // Returning recreated a new room and restored pendingChanges = 2 on the active view.
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(true)
+
+    // Let 120ms settle window finish -> active pending bar must be cleared before sendFeedback runs.
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+    expect(sendFeedback).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+    expect(getPendingArtifactFeedback('art_board_1')).toBeUndefined()
+
+    // Case 1: sendFeedback fails -> pendingChanges must restore to 2 (not double to 4!).
+    rejectFirstSend(new Error('network error'))
+    await clickSend
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(true)
+    expect(getPendingArtifactFeedback('art_board_1')?.pendingChanges).toBe(2)
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(wrapper.find('.proto-tweak-count').text()).toBe('1')
+
+    // Case 2: retry send, again switch away and back within 120ms, this time succeed -> no lingering pending count.
+    let resolveSecondSend!: (value: {
+      feedback: {
+        artifactId: string
+        round: number
+        version: number
+        notify: string
+        createdAt: number
+        items: []
+        images: []
+        doneBy: null
+        doneAt: null
+        summary: null
+      }
+    }) => void
+    sendFeedback.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSecondSend = resolve
+        }),
+    )
+
+    const retrySend = wrapper.find('.tweaks-footer button').trigger('click')
+    await flushPromises()
+
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+    resolveSecondSend({
+      feedback: {
+        artifactId: 'art_board_1',
+        round: 2,
+        version: 2,
+        notify: 'thr_1',
+        createdAt: 2000,
+        items: [],
+        images: [],
+        doneBy: null,
+        doneAt: null,
+        summary: null,
+      },
+    })
+    await retrySend
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('.artifact-feedback-bar').exists()).toBe(false)
+    expect(getPendingArtifactFeedback('art_board_1')).toBeUndefined()
+
+    // Leaving the board must not resurrect stale pendingChanges in feedback-pending.
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    expect(getPendingArtifactFeedback('art_board_1')).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  test('does not re-apply old tweaks when reset-to-default fails and AI later updates the prototype before returning', async () => {
+    const server1: MockServerRoom = { serverDoc: seedBoardDoc({ accent: '#10b981' }), sessions: [] }
+    const server2: MockServerRoom = { serverDoc: seedBoardDoc(), sessions: [] }
+    serverRoomsByArtifact.set('art_board_1', server1)
+    serverRoomsByArtifact.set('art_board_2', server2)
+
+    let board1Version = 1
+    let board1UpdatedBy: 'agent' | 'user' = 'agent'
+    const { wrapper, getArtifact, sendFeedback } = await mountBoardEditor(
+      server1.serverDoc,
+      'art_board_1',
+    )
+    getArtifact.mockImplementation((artifactId) =>
+      Promise.resolve(
+        artifactId === 'art_board_1'
+          ? boardDetail(artifactId, board1Version, board1UpdatedBy)
+          : boardDetail(artifactId),
+      ),
+    )
+
+    // Case 1: Online rollback already reverted server to #10b981; AI then clears tweakValues
+    // (even without changing HTML or bumping artifact version yet) -> returning must not overwrite.
+    let rejectOnlineReset!: (err: Error) => void
+    sendFeedback.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectOnlineReset = reject
+        }),
+    )
+
+    wrapper.findComponent(PrototypeTweaksPanel).vm.$emit('reset')
+    await flushPromises()
+    expect((wrapper.find('.tweaks-footer button').element as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+
+    const clickOnlineReset = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+
+    rejectOnlineReset(new Error('network error'))
+    await clickOnlineReset
+    await flushPromises()
+    expect(readNodeTweakValues(server1.serverDoc)).toEqual({ accent: '#10b981' })
+
+    server1.serverDoc.transact(() => {
+      const fields = (server1.serverDoc.getMap('nodes') as Y.Map<Y.Map<unknown>>).get('proto-1')!
+      const nextData = { ...(fields.get('data') as PrototypeNodeData) }
+      delete nextData.tweakValues
+      fields.set('data', nextData)
+    })
+
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(wrapper.find('.proto-tweak-count').exists()).toBe(false)
+
+    // Case 2: Offline reset failure (needsDocRollback = true); AI bakes changes into HTML and
+    // clears tweakValues without bumping version yet -> definitionKey guard protects AI's HTML.
+    server1.serverDoc.transact(() => {
+      const fields = (server1.serverDoc.getMap('nodes') as Y.Map<Y.Map<unknown>>).get('proto-1')!
+      fields.set('data', {
+        ...(fields.get('data') as PrototypeNodeData),
+        tweakValues: { accent: '#10b981' },
+      })
+    })
+    await flushPromises()
+
+    let rejectOfflineHtmlReset!: (err: Error) => void
+    sendFeedback.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectOfflineHtmlReset = reject
+        }),
+    )
+
+    wrapper.findComponent(PrototypeTweaksPanel).vm.$emit('reset')
+    await flushPromises()
+    const clickOfflineHtmlReset = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+
+    const heldSessionHtml = server1.sessions[server1.sessions.length - 1]!
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+
+    heldSessionHtml.disconnect()
+    rejectOfflineHtmlReset(new Error('offline'))
+    await clickOfflineHtmlReset
+    await flushPromises()
+
+    server1.serverDoc.transact(() => {
+      const fields = (server1.serverDoc.getMap('nodes') as Y.Map<Y.Map<unknown>>).get('proto-1')!
+      const nextData = { ...(fields.get('data') as PrototypeNodeData) }
+      nextData.html = '<!doctype html><html><body>AI baked accent into HTML</body></html>'
+      delete nextData.tweakValues
+      fields.set('data', nextData)
+    })
+
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+
+    expect(readNodeData(server1.serverDoc)?.html).toBe(
+      '<!doctype html><html><body>AI baked accent into HTML</body></html>',
+    )
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(wrapper.find('.proto-tweak-count').exists()).toBe(false)
+
+    // Case 3: Offline reset failure (needsDocRollback = true); AI bumps artifact to v2 (agent)
+    // and clears tweakValues without changing HTML/tweaks -> non-user version guard prunes rollback.
+    server1.serverDoc.transact(() => {
+      const fields = (server1.serverDoc.getMap('nodes') as Y.Map<Y.Map<unknown>>).get('proto-1')!
+      fields.set('data', {
+        ...(fields.get('data') as PrototypeNodeData),
+        tweakValues: { accent: '#10b981' },
+      })
+    })
+    await flushPromises()
+
+    let rejectOfflineVersionReset!: (err: Error) => void
+    sendFeedback.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectOfflineVersionReset = reject
+        }),
+    )
+
+    wrapper.findComponent(PrototypeTweaksPanel).vm.$emit('reset')
+    await flushPromises()
+    const clickOfflineVersionReset = wrapper.find('.tweaks-footer button').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    await flushPromises()
+
+    const heldSessionVersion = server1.sessions[server1.sessions.length - 1]!
+    await wrapper.setProps({ id: 'art_board_2' })
+    await flushPromises()
+    await flushPromises()
+
+    heldSessionVersion.disconnect()
+    rejectOfflineVersionReset(new Error('offline'))
+    await clickOfflineVersionReset
+    await flushPromises()
+
+    server1.serverDoc.transact(() => {
+      const fields = (server1.serverDoc.getMap('nodes') as Y.Map<Y.Map<unknown>>).get('proto-1')!
+      const nextData = { ...(fields.get('data') as PrototypeNodeData) }
+      delete nextData.tweakValues
+      fields.set('data', nextData)
+    })
+    board1Version = 2
+    board1UpdatedBy = 'agent'
+    state.artifacts = [{ ...boardDetail('art_board_1', 2, 'agent').artifact }]
+    await flushPromises()
+
+    await wrapper.setProps({ id: 'art_board_1' })
+    await flushPromises()
+    await flushPromises()
+
+    expect(readNodeTweakValues(server1.serverDoc)).toBeUndefined()
+    expect(wrapper.find('.proto-tweak-count').exists()).toBe(false)
 
     wrapper.unmount()
   })

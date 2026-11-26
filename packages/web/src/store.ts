@@ -26,6 +26,7 @@ import type {
 import { toast } from 'dou-ui'
 import { computed, reactive, ref, toRaw, type Ref } from 'vue'
 import type { AskDraft } from './blocks/ask-drafts'
+import { prunePendingPrototypeTweakRollbacksByArtifacts } from './artifacts/feedback-pending'
 import type { Draft } from './components/attachments'
 import { reuse } from './reuse'
 import { coalescedRefresh } from './coalesced-refresh'
@@ -506,6 +507,7 @@ async function loadParts(parts: ReadonlySet<RefreshKey>) {
   if (artifacts) {
     state.artifacts = reuse(toRaw(state.artifacts), artifacts.artifacts)
     state.artifactsLoaded = true
+    prunePendingPrototypeTweakRollbacksByArtifacts(state.artifacts)
   }
   if (memory) state.memories = reuse(toRaw(state.memories), memory.memories)
 }
