@@ -343,7 +343,7 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 			if err != nil {
 				return nil, err
 			}
-			return user.ConversationModelForProject(conversation.Role, model, effort, &project.Settings.Models), nil
+			return user.ConversationModelForProject(conversation.Role, model, effort, &project.Settings.Models, modelRegistry.Kinds()), nil
 		},
 		OnProjectDeleted: func(id string) {
 			drafts.DropProject(id)

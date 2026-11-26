@@ -426,12 +426,12 @@ func (reader Reader) PageMessages(ctx context.Context, id string, cursor Message
 // ConversationSnapshot bundles all SQLite reads for GetConversation into one
 // consistent read-only snapshot transaction.
 type ConversationSnapshot struct {
-	Conversation ConversationView
-	Messages     []MessageView
-	Notices      []object
-	More         bool
-	LastSeq      int64
-	Todo         object
+	Conversation  ConversationView
+	Messages      []MessageView
+	Notices       []object
+	More          bool
+	LastSeq       int64
+	Todo          object
 	ReadThrough   string
 	ThreadModel   string
 	ThreadEffort  string
@@ -465,42 +465,42 @@ func (reader Reader) GetConversationSnapshot(ctx context.Context, id string, cur
 		}
 		threadModel := ""
 		threadEffort := ""
-			if conv.Role == "thread" {
-				rows, err := records(ctx, tx, "SELECT model, effort FROM threads WHERE id = ?", id)
+		if conv.Role == "thread" {
+			rows, err := records(ctx, tx, "SELECT model, effort FROM threads WHERE id = ?", id)
+			if err != nil {
+				return err
+			}
+			if len(rows) > 0 {
+				threadModel = rows[0].text("model")
+				threadEffort = rows[0].text("effort")
+			}
+		}
+		var projectModels projectsettings.Models
+		if conv.ProjectID != "" {
+			rows, err := records(ctx, tx, "SELECT settings FROM projects WHERE id = ?", conv.ProjectID)
+			if err != nil {
+				return err
+			}
+			if len(rows) > 0 {
+				parsed, err := projectsettings.Stored(rows[0].text("settings"))
 				if err != nil {
 					return err
 				}
-				if len(rows) > 0 {
-					threadModel = rows[0].text("model")
-					threadEffort = rows[0].text("effort")
-				}
+				projectModels = parsed.Models
 			}
-			var projectModels projectsettings.Models
-			if conv.ProjectID != "" {
-				rows, err := records(ctx, tx, "SELECT settings FROM projects WHERE id = ?", conv.ProjectID)
-				if err != nil {
-					return err
-				}
-				if len(rows) > 0 {
-					parsed, err := projectsettings.Stored(rows[0].text("settings"))
-					if err != nil {
-						return err
-					}
-					projectModels = parsed.Models
-				}
-			}
-			result = ConversationSnapshot{
-				Conversation:  conv,
-				Messages:      page.Messages,
-				Notices:       page.Notices,
-				More:          page.More,
-				LastSeq:       seq,
-				Todo:          todo,
-				ReadThrough:   readThrough,
-				ThreadModel:   threadModel,
-				ThreadEffort:  threadEffort,
-				ProjectModels: projectModels,
-			}
+		}
+		result = ConversationSnapshot{
+			Conversation:  conv,
+			Messages:      page.Messages,
+			Notices:       page.Notices,
+			More:          page.More,
+			LastSeq:       seq,
+			Todo:          todo,
+			ReadThrough:   readThrough,
+			ThreadModel:   threadModel,
+			ThreadEffort:  threadEffort,
+			ProjectModels: projectModels,
+		}
 		return nil
 	})
 	return

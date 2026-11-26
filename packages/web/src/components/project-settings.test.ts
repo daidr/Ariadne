@@ -512,4 +512,147 @@ describe('ProjectSettings', () => {
     expect(state.projectSettingsOpen).toBe(false)
     expect(openSettings).toHaveBeenCalledWith('models')
   })
+
+  test('refreshes global model settings when reopening with unsaved draft without overwriting draft', async () => {
+    const emptyModels: ModelSettings = {
+      ...makeModelSettings(),
+      providers: [],
+      models: [],
+      roles: {
+        thread: { model: null, effort: null },
+        coordinator: { model: null, effort: null },
+        triage: { model: null, effort: null },
+        research: { model: null, effort: null },
+      },
+    }
+    const updatedModels = makeModelSettings()
+    const getProjectSettings = vi
+      .spyOn(api, 'getProjectSettings')
+      .mockResolvedValue(makeProjectSettingsView())
+    vi.spyOn(api, 'getMcpSettings').mockResolvedValue({ servers: [], status: [] })
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+    const getModelSettings = vi
+      .spyOn(api, 'getModelSettings')
+      .mockResolvedValueOnce(emptyModels)
+      .mockResolvedValueOnce(updatedModels)
+
+    state.projectSettingsTab = 'instructions'
+    const wrapper = mount(ProjectSettingsDialog, {
+      props: { layoutMode: 'wide' },
+      global: {
+        stubs: {
+          FileSourcesForm: true,
+          SourceNotes: true,
+          MemoryList: true,
+          ProjectUsage: true,
+          SecretPairs: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+
+    state.projectSettingsOpen = true
+    await flushPromises()
+    expect(getProjectSettings).toHaveBeenCalledTimes(1)
+    expect(getModelSettings).toHaveBeenCalledTimes(1)
+
+    // Edit instructions to create an unsaved draft.
+    const instructionsTextarea = wrapper.find('textarea')
+    expect(instructionsTextarea.exists()).toBe(true)
+    await instructionsTextarea.setValue('保留这段未保存草稿')
+    await flushPromises()
+
+    // Switch to models tab and verify empty state before adding models globally.
+    state.projectSettingsTab = 'models'
+    await flushPromises()
+    expect(wrapper.findAllComponents({ name: 'DouCascader' })).toHaveLength(0)
+
+    // Close dialog (draft stays preserved) and reopen after adding global models.
+    state.projectSettingsOpen = false
+    await flushPromises()
+    state.projectSettingsOpen = true
+    await flushPromises()
+
+    expect(getProjectSettings).toHaveBeenCalledTimes(1)
+    expect(getModelSettings).toHaveBeenCalledTimes(2)
+    const cascaders = wrapper.findAllComponents({ name: 'DouCascader' })
+    expect(cascaders).toHaveLength(3)
+    expect(cascaders[0]!.props('placeholder')).toBe('沿用全局设置（gpt-5 · 高）')
+    expect(cascaders[1]!.props('placeholder')).toBe('沿用全局设置（gpt-5 · 低）')
+    expect(cascaders[2]!.props('placeholder')).toBe('沿用全局设置（claude-haiku · 低）')
+
+    // Switch back to instructions tab and confirm unsaved draft was preserved.
+    state.projectSettingsTab = 'instructions'
+    await flushPromises()
+    expect(wrapper.find('textarea').element.value).toBe('保留这段未保存草稿')
+  })
+
+  test('falls back to plain inherit placeholder when global model fetch fails or points to a disabled plugin', async () => {
+    vi.spyOn(api, 'getProjectSettings').mockResolvedValue(makeProjectSettingsView())
+    vi.spyOn(api, 'getMcpSettings').mockResolvedValue({ servers: [], status: [] })
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+
+    // Case 1: getModelSettings fails while state.models already has cached models.
+    state.models = [{ id: 'm-gpt', label: 'gpt-5', efforts: ['low', 'medium', 'high'] }]
+    state.threadDefault = 'm-gpt'
+    state.threadDefaultEffort = 'high'
+    const getModelSettings = vi
+      .spyOn(api, 'getModelSettings')
+      .mockRejectedValueOnce(new Error('network error'))
+
+    state.projectSettingsTab = 'models'
+    const wrapper = mount(ProjectSettingsDialog, {
+      props: { layoutMode: 'wide' },
+      global: {
+        stubs: {
+          FileSourcesForm: true,
+          SourceNotes: true,
+          MemoryList: true,
+          ProjectUsage: true,
+          SecretPairs: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+
+    state.projectSettingsOpen = true
+    await flushPromises()
+
+    let cascaders = wrapper.findAllComponents({ name: 'DouCascader' })
+    expect(cascaders).toHaveLength(3)
+    expect(cascaders[1]!.props('placeholder')).toBe('沿用全局设置')
+    expect(cascaders[2]!.props('placeholder')).toBe('沿用全局设置')
+
+    // Case 2: global coordinator and research roles explicitly point to a model from a disabled plugin.
+    const disabledPluginModels: ModelSettings = {
+      ...makeModelSettings(),
+      kinds: [
+        {
+          kind: 'openai-compatible',
+          title: { 'zh-CN': 'OpenAI', en: 'OpenAI' },
+          settings: { type: 'object', properties: {} },
+        },
+      ],
+      roles: {
+        thread: { model: 'm-gpt', effort: 'high' },
+        coordinator: { model: 'm-opus', effort: 'high' },
+        triage: { model: null, effort: null },
+        research: { model: 'm-haiku', effort: 'low' },
+      },
+    }
+    getModelSettings.mockResolvedValueOnce(disabledPluginModels)
+
+    state.projectSettingsOpen = false
+    await flushPromises()
+    state.projectSettingsOpen = true
+    await flushPromises()
+
+    cascaders = wrapper.findAllComponents({ name: 'DouCascader' })
+    expect(cascaders).toHaveLength(3)
+    expect(cascaders[0]!.props('placeholder')).toBe('沿用全局设置（gpt-5 · 高）')
+    expect(cascaders[1]!.props('placeholder')).toBe('沿用全局设置')
+    expect(cascaders[2]!.props('placeholder')).toBe('沿用全局设置')
+  })
 })

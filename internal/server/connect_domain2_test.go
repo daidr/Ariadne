@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/daidr/Ariadne/internal/core"
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
+	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/workspaces"
@@ -1096,5 +1098,151 @@ func TestProjectSettingsModelsRPCAndConversationModel(t *testing.T) {
 	}
 	if threadConvAfter.Msg.Model == nil || threadConvAfter.Msg.Model.Id != "m-sonnet" || threadConvAfter.Msg.Model.GetEffort() != "medium" {
 		t.Fatalf("thread conversation model after clear = %+v, want m-sonnet/medium", threadConvAfter.Msg.Model)
+	}
+}
+
+func TestProjectSettingsModelsDisabledPluginFallbackInGetConversation(t *testing.T) {
+	ctx := t.Context()
+	home := t.TempDir()
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	settingsStore, err := settings.Open(filepath.Join(home, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	noopStream := func(context.Context, map[string]any, sdk.Request) iter.Seq[sdk.Part] {
+		return func(func(sdk.Part) bool) {}
+	}
+	modelReg := models.New()
+	if _, err := modelReg.Register(sdk.ModelProvider{
+		Info:   sdk.ModelProviderInfo{Kind: "anthropic", Title: sdk.LocalizedText{"en": "Anthropic"}},
+		Stream: noopStream,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unregisterPlugin, err := modelReg.Register(sdk.ModelProvider{
+		Info:   sdk.ModelProviderInfo{Kind: "custom-plugin", Title: sdk.LocalizedText{"en": "Custom Plugin"}},
+		Stream: noopStream,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := settingsStore.UpdateModels(settings.Object{
+		"providers": []any{
+			settings.Object{"id": "p1", "kind": "anthropic", "name": "Claude", "settings": settings.Object{}},
+			settings.Object{"id": "p2", "kind": "custom-plugin", "name": "Plugin", "settings": settings.Object{}},
+		},
+		"models": []any{
+			settings.Object{"id": "m-sonnet", "provider": "p1", "model": "claude-sonnet", "contextTokens": float64(128000), "efforts": []any{"low", "medium", "high"}},
+			settings.Object{"id": "m-plugin", "provider": "p2", "model": "plugin-model", "contextTokens": float64(160000), "efforts": []any{"low", "medium", "high"}},
+		},
+		"roles": settings.Object{
+			"thread":      settings.Object{"model": "m-sonnet", "effort": "medium"},
+			"coordinator": settings.Object{"model": nil, "effort": nil},
+		},
+	}, modelReg.Kinds()); err != nil {
+		t.Fatal(err)
+	}
+
+	api, err := New(Options{
+		Repository: repo,
+		Settings:   settingsStore,
+		Models:     modelReg,
+		Token:      "test-token",
+		Version:    "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(api)
+	defer func() {
+		ts.Close()
+		api.Close()
+	}()
+
+	clientOpts := []connect.ClientOption{
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	}
+	baseURL := ts.URL + rpcPrefix
+	projects := ariadnev1connect.NewProjectServiceClient(ts.Client(), baseURL, clientOpts...)
+	conversations := ariadnev1connect.NewConversationServiceClient(ts.Client(), baseURL, clientOpts...)
+
+	name := "Disabled Plugin Fallback Project"
+	created, err := projects.CreateProject(ctx, connect.NewRequest(&ariadnev1.CreateProjectRequest{Name: &name}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := created.Msg.Project.Id
+	coordinatorID := created.Msg.Project.CoordinatorId
+	thread, err := repo.CreateThread(ctx, projectID, core.NewThread{Title: "Thread A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	strPtr := func(v string) *string { return &v }
+	if _, err := projects.UpdateProject(ctx, connect.NewRequest(&ariadnev1.UpdateProjectRequest{
+		ProjectId: projectID,
+		Settings: &ariadnev1.ProjectSettings{
+			Models: &ariadnev1.ProjectModelSettings{
+				Thread: &ariadnev1.ProjectModelRoleSettings{Model: strPtr("m-plugin"), Effort: strPtr("high")},
+			},
+		},
+	})); err != nil {
+		t.Fatalf("UpdateProject with plugin model: %v", err)
+	}
+
+	// While plugin is active, GetConversation returns the project override.
+	activeThreadConv, err := conversations.GetConversation(ctx, connect.NewRequest(&ariadnev1.GetConversationRequest{
+		ConversationId: thread.ID,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activeThreadConv.Msg.Model == nil || activeThreadConv.Msg.Model.Id != "m-plugin" || activeThreadConv.Msg.Model.GetEffort() != "high" {
+		t.Fatalf("active plugin thread model = %+v, want m-plugin/high", activeThreadConv.Msg.Model)
+	}
+
+	// Disabling the plugin makes GetConversation fall back to global active settings while keeping stored project settings intact.
+	unregisterPlugin()
+
+	fallbackThreadConv, err := conversations.GetConversation(ctx, connect.NewRequest(&ariadnev1.GetConversationRequest{
+		ConversationId: thread.ID,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallbackThreadConv.Msg.Model == nil || fallbackThreadConv.Msg.Model.Id != "m-sonnet" || fallbackThreadConv.Msg.Model.GetEffort() != "medium" {
+		t.Fatalf("disabled plugin thread model = %+v, want m-sonnet/medium", fallbackThreadConv.Msg.Model)
+	}
+	fallbackCoordConv, err := conversations.GetConversation(ctx, connect.NewRequest(&ariadnev1.GetConversationRequest{
+		ConversationId: coordinatorID,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallbackCoordConv.Msg.Model == nil || fallbackCoordConv.Msg.Model.Id != "m-sonnet" || fallbackCoordConv.Msg.Model.GetEffort() != "low" {
+		t.Fatalf("disabled plugin coordinator model = %+v, want m-sonnet/low", fallbackCoordConv.Msg.Model)
+	}
+
+	// Re-enabling the plugin restores the preserved project override.
+	if _, err := modelReg.Register(sdk.ModelProvider{
+		Info:   sdk.ModelProviderInfo{Kind: "custom-plugin", Title: sdk.LocalizedText{"en": "Custom Plugin"}},
+		Stream: noopStream,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	restoredThreadConv, err := conversations.GetConversation(ctx, connect.NewRequest(&ariadnev1.GetConversationRequest{
+		ConversationId: thread.ID,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restoredThreadConv.Msg.Model == nil || restoredThreadConv.Msg.Model.Id != "m-plugin" || restoredThreadConv.Msg.Model.GetEffort() != "high" {
+		t.Fatalf("re-enabled plugin thread model = %+v, want m-plugin/high", restoredThreadConv.Msg.Model)
 	}
 }

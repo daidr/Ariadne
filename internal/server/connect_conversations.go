@@ -12,6 +12,7 @@ import (
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/skills"
 	"github.com/daidr/Ariadne/internal/trace"
+	"github.com/daidr/Ariadne/sdk"
 )
 
 type conversationServiceHandler struct {
@@ -59,11 +60,16 @@ func (h *conversationServiceHandler) GetConversation(
 	}
 	var model any
 	if h.api.options.Settings != nil {
+		var kinds []sdk.ModelProviderInfo
+		if h.api.options.Models != nil {
+			kinds = h.api.options.Models.Kinds()
+		}
 		model = map[string]any(h.api.options.Settings.ConversationModelForProject(
 			snapshot.Conversation.Role,
 			snapshot.ThreadModel,
 			snapshot.ThreadEffort,
 			&snapshot.ProjectModels,
+			kinds,
 		))
 	} else if h.api.options.ModelOf != nil {
 		dummyReq, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, "/", nil)

@@ -195,20 +195,6 @@ const globalThreadRole = computed(
       effort: state.threadDefaultEffort,
     },
 )
-const globalCoordinatorRole = computed(
-  () =>
-    globalModelSettings.value?.roles.coordinator ?? {
-      model: null,
-      effort: null,
-    },
-)
-const globalResearchRole = computed(
-  () =>
-    globalModelSettings.value?.roles.research ?? {
-      model: null,
-      effort: null,
-    },
-)
 
 const effectiveThreadModel = computed(() => {
   const overrideId = settings.value?.models.thread?.model
@@ -275,9 +261,11 @@ const threadPlaceholder = computed(() => {
 })
 
 const coordinatorPlaceholder = computed(() => {
-  const globalCoord = globalCoordinatorRole.value
-  const pinned = activeModelById(globalCoord.model)
-  if (pinned) {
+  const globalCoord = globalModelSettings.value?.roles.coordinator
+  if (!globalCoord) return inheritPlaceholder(null)
+  if (globalCoord.model) {
+    const pinned = activeModelById(globalCoord.model)
+    if (!pinned) return inheritPlaceholder(null)
     const effort =
       globalCoord.effort && globalCoord.effort !== 'default'
         ? effortWithin(globalCoord.effort, effortsOf(pinned.efforts))
@@ -296,9 +284,11 @@ const coordinatorPlaceholder = computed(() => {
 })
 
 const researchPlaceholder = computed(() => {
-  const globalResearch = globalResearchRole.value
-  const pinned = activeModelById(globalResearch.model)
-  if (pinned) {
+  const globalResearch = globalModelSettings.value?.roles.research
+  if (!globalResearch) return inheritPlaceholder(null)
+  if (globalResearch.model) {
+    const pinned = activeModelById(globalResearch.model)
+    if (!pinned) return inheritPlaceholder(null)
     const effort = globalResearch.effort
       ? effortWithin(globalResearch.effort, effortsOf(pinned.efforts))
       : null
@@ -422,6 +412,25 @@ const mcpOptions = computed(() =>
 const now = ref(Date.now())
 const loadedProjectId = ref<string | null>(null)
 const savedSnapshot = ref('')
+let modelSettingsLoadSeq = 0
+
+async function refreshGlobalModelSettings(projectId: string) {
+  const requestId = ++modelSettingsLoadSeq
+  const loadedModels = await api.getModelSettings().catch(() => null)
+  if (
+    requestId !== modelSettingsLoadSeq ||
+    !state.projectSettingsOpen ||
+    loadedProjectId.value !== projectId
+  ) {
+    return
+  }
+  if (loadedModels) {
+    applyModelSettings(loadedModels)
+    globalModelSettings.value = loadedModels
+  } else {
+    globalModelSettings.value = null
+  }
+}
 
 function currentSnapshot() {
   return JSON.stringify({
@@ -464,6 +473,7 @@ watch(
     if (!project) return
     if (loadedProjectId.value === project.id && settings.value && hasUnsavedChanges.value) {
       now.value = Date.now()
+      void refreshGlobalModelSettings(project.id)
       return
     }
     error.value = null
@@ -471,6 +481,7 @@ watch(
     savedSnapshot.value = ''
     now.value = Date.now()
     mcp.value = [...project.mcp]
+    const requestId = ++modelSettingsLoadSeq
     try {
       const [view, servers, concurrency, loadedModels] = await Promise.all([
         api.getProjectSettings(project.id),
@@ -479,11 +490,13 @@ watch(
         api.getModelSettings().catch(() => null),
       ])
       if (concurrency) totalSlots.value = concurrency.slots
-      if (loadedModels) {
-        applyModelSettings(loadedModels)
-        globalModelSettings.value = loadedModels
-      } else {
-        globalModelSettings.value = null
+      if (requestId === modelSettingsLoadSeq) {
+        if (loadedModels) {
+          applyModelSettings(loadedModels)
+          globalModelSettings.value = loadedModels
+        } else {
+          globalModelSettings.value = null
+        }
       }
       const nextSettings = structuredClone(view.settings)
       if (!nextSettings.models) {

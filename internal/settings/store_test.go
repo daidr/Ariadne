@@ -820,7 +820,7 @@ func TestProjectModelOverridesPriorityAndFallbacks(t *testing.T) {
 	if got, err := store.ResolveCoordinatorForProject(true, 1000, threadOnly, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "low" {
 		t.Fatalf("triage inheriting project thread = %+v, err=%v", got, err)
 	}
-	if conv := store.ConversationModelForProject("coordinator", "", "", threadOnly); conv["id"] != "m-opus" || conv["effort"] != "low" || conv["contextTokens"] != float64(200000) {
+	if conv := store.ConversationModelForProject("coordinator", "", "", threadOnly, kinds); conv["id"] != "m-opus" || conv["effort"] != "low" || conv["contextTokens"] != float64(200000) {
 		t.Fatalf("ConversationModelForProject(coordinator) = %#v", conv)
 	}
 
@@ -920,5 +920,70 @@ func TestProjectModelOverridesPriorityAndFallbacks(t *testing.T) {
 	}
 	if got, err := store.ResolveResearchForProject(opusParent, deletedOverrides, kinds); err != nil || got == nil || got.Model != "claude-haiku" || got.Effort != "low" {
 		t.Fatalf("deleted project research fallback = %+v, err=%v", got, err)
+	}
+
+	// 9. Project overrides pointing to a disabled plugin provider kind are ignored and fall back to global settings
+	//    without returning error.modelUnknown, and automatically take effect again once the plugin kind is re-enabled.
+	allKinds := []sdk.ModelProviderInfo{
+		{Kind: "anthropic", Title: sdk.LocalizedText{"en": "Anthropic"}},
+		{Kind: "custom-plugin", Title: sdk.LocalizedText{"en": "Custom Plugin"}},
+	}
+	if _, err := store.UpdateModels(jsonObject(`{
+		"providers":[
+			{"id":"p1","kind":"anthropic","name":"Claude","settings":{}},
+			{"id":"p-plugin","kind":"custom-plugin","name":"Plugin","settings":{}}
+		],
+		"models":[
+			{"id":"m-sonnet","provider":"p1","model":"claude-sonnet","contextTokens":128000,"efforts":["low","medium","high"]},
+			{"id":"m-haiku","provider":"p1","model":"claude-haiku","contextTokens":100000,"efforts":["low","medium"]},
+			{"id":"m-plugin","provider":"p-plugin","model":"plugin-model","contextTokens":160000,"efforts":["low","medium","high"]}
+		],
+		"roles":{
+			"thread":{"model":"m-sonnet","effort":"high"},
+			"coordinator":{"model":null,"effort":null},
+			"research":{"model":"m-haiku","effort":"low"}
+		}
+	}`), allKinds); err != nil {
+		t.Fatalf("UpdateModels with plugin provider: %v", err)
+	}
+	pluginOverrides := &projectsettings.Models{
+		Thread:      &projectsettings.ModelRole{Model: strPtr("m-plugin"), Effort: strPtr("medium")},
+		Coordinator: &projectsettings.ModelRole{Model: strPtr("m-plugin"), Effort: strPtr("high")},
+		Research:    &projectsettings.ModelRole{Model: strPtr("m-plugin"), Effort: strPtr("high")},
+	}
+	activeOnlyAnthropic := []sdk.ModelProviderInfo{
+		{Kind: "anthropic", Title: sdk.LocalizedText{"en": "Anthropic"}},
+	}
+	if got, err := store.ResolveModelForProject("thread", "", "", pluginOverrides, activeOnlyAnthropic); err != nil || got == nil || got.Model != "claude-sonnet" || got.Effort != "high" {
+		t.Fatalf("disabled plugin thread override fallback = %+v, err=%v", got, err)
+	}
+	if got, err := store.ResolveCoordinatorForProject(false, 0, pluginOverrides, activeOnlyAnthropic); err != nil || got == nil || got.Model != "claude-sonnet" || got.Effort != "low" {
+		t.Fatalf("disabled plugin coordinator override fallback = %+v, err=%v", got, err)
+	}
+	sonnetParent, err := store.ResolveModelForProject("thread", "", "", pluginOverrides, activeOnlyAnthropic)
+	if err != nil || sonnetParent == nil {
+		t.Fatalf("resolve sonnetParent: %v", err)
+	}
+	if got, err := store.ResolveResearchForProject(sonnetParent, pluginOverrides, activeOnlyAnthropic); err != nil || got == nil || got.Model != "claude-haiku" || got.Effort != "low" {
+		t.Fatalf("disabled plugin research override fallback = %+v, err=%v", got, err)
+	}
+	if conv := store.ConversationModelForProject("thread", "", "", pluginOverrides, activeOnlyAnthropic); conv["id"] != "m-sonnet" || conv["effort"] != "high" {
+		t.Fatalf("disabled plugin ConversationModelForProject(thread) = %#v", conv)
+	}
+	if conv := store.ConversationModelForProject("coordinator", "", "", pluginOverrides, activeOnlyAnthropic); conv["id"] != "m-sonnet" || conv["effort"] != "low" {
+		t.Fatalf("disabled plugin ConversationModelForProject(coordinator) = %#v", conv)
+	}
+	// When the plugin kind is enabled again, the preserved project overrides apply again.
+	if got, err := store.ResolveModelForProject("thread", "", "", pluginOverrides, allKinds); err != nil || got == nil || got.Model != "plugin-model" || got.Effort != "medium" {
+		t.Fatalf("re-enabled plugin thread override = %+v, err=%v", got, err)
+	}
+	if got, err := store.ResolveCoordinatorForProject(false, 0, pluginOverrides, allKinds); err != nil || got == nil || got.Model != "plugin-model" || got.Effort != "high" {
+		t.Fatalf("re-enabled plugin coordinator override = %+v, err=%v", got, err)
+	}
+	if got, err := store.ResolveResearchForProject(sonnetParent, pluginOverrides, allKinds); err != nil || got == nil || got.Model != "plugin-model" || got.Effort != "high" {
+		t.Fatalf("re-enabled plugin research override = %+v, err=%v", got, err)
+	}
+	if conv := store.ConversationModelForProject("thread", "", "", pluginOverrides, allKinds); conv["id"] != "m-plugin" || conv["effort"] != "medium" {
+		t.Fatalf("re-enabled plugin ConversationModelForProject(thread) = %#v", conv)
 	}
 }
