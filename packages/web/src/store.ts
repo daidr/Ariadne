@@ -146,7 +146,8 @@ export const emptyConversation = (): ConversationState => ({
   seq: null,
 })
 
-export type ProjectSettingsTab = 'source' | 'instructions' | 'workspace' | 'autopilot' | 'usage'
+export type ProjectSettingsTab =
+  'source' | 'instructions' | 'models' | 'workspace' | 'autopilot' | 'usage'
 
 /** Open the open project's settings, on `tab`; the first-run steps open them on the source. */
 export function openProjectSettings(tab: ProjectSettingsTab = 'source') {
@@ -1628,13 +1629,16 @@ export async function saveProjectSettings(
   const project = state.detail?.project
   if (!project) return null
   try {
+    const modelsChanged =
+      JSON.stringify(input.settings.models ?? null) !==
+      JSON.stringify(project.settings.models ?? null)
     await api.updateProject(project.id, {
       settings: input.settings,
       ...(input.env === undefined ? {} : { env: input.env }),
       ...(slots !== project.slots ? { slots } : {}),
       ...(JSON.stringify(mcp) !== JSON.stringify(project.mcp) ? { mcp } : {}),
     })
-    await refreshCurrent(['detail'])
+    await refreshCurrent(modelsChanged ? ['detail', 'conversations'] : ['detail'])
     return null
   } catch (error) {
     if (error instanceof ApiError) return tm(error.localized)

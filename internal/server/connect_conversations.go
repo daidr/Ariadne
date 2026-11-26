@@ -59,7 +59,12 @@ func (h *conversationServiceHandler) GetConversation(
 	}
 	var model any
 	if h.api.options.Settings != nil {
-		model = map[string]any(h.api.options.Settings.ConversationModel(snapshot.Conversation.Role, snapshot.ThreadModel, snapshot.ThreadEffort))
+		model = map[string]any(h.api.options.Settings.ConversationModelForProject(
+			snapshot.Conversation.Role,
+			snapshot.ThreadModel,
+			snapshot.ThreadEffort,
+			&snapshot.ProjectModels,
+		))
 	} else if h.api.options.ModelOf != nil {
 		dummyReq, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
 		if reqErr == nil {

@@ -39,6 +39,7 @@ function makeProjectSummary(id: string, name: string, needsMe = 0): ProjectView 
       routines: [],
       review: { enabled: false },
       autopilot: { enabled: false, method: 'merge' },
+      models: { thread: null, coordinator: null, research: null },
     },
     detected: { setup: null, check: null },
     autopilotPaused: false,

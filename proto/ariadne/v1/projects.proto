@@ -109,6 +109,17 @@ message ProjectAutopilotSettings {
   string method = 2;
 }
 
+message ProjectModelRoleSettings {
+  optional string model = 1;
+  optional string effort = 2;
+}
+
+message ProjectModelSettings {
+  optional ProjectModelRoleSettings thread = 1;
+  optional ProjectModelRoleSettings coordinator = 2;
+  optional ProjectModelRoleSettings research = 3;
+}
+
 message ProjectSettings {
   reserved 4;
   reserved "budget";
@@ -119,6 +130,7 @@ message ProjectSettings {
   repeated ProjectRoutine routines = 6;
   ProjectReviewSettings review = 7;
   ProjectAutopilotSettings autopilot = 8;
+  optional ProjectModelSettings models = 9;
 }
 
 message ProjectDetectedCommand {

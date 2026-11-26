@@ -11,6 +11,7 @@ import (
 
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/modelstep"
+	"github.com/daidr/Ariadne/internal/projectsettings"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/textutil"
 	"github.com/daidr/Ariadne/internal/transcript"
@@ -60,7 +61,15 @@ func (turn *turn) researchTool(available []tool, parent *settings.ResolvedModel,
 		if question == "" || len(question) > 32000 || textutil.HeadUnits(question, 8000) != question {
 			return "", errors.New("give a research question of at most 8000 characters")
 		}
-		model, err := turn.Settings.ResolveResearch(parent, turn.Models.Kinds())
+		var overrides *projectsettings.Models
+		if turn.Repository != nil && turn.conversation.ProjectID != "" {
+			project, err := turn.Repository.GetProjectForRun(ctx, turn.conversation.ProjectID)
+			if err != nil {
+				return "", err
+			}
+			overrides = &project.Settings.Models
+		}
+		model, err := turn.Settings.ResolveResearchForProject(parent, overrides, turn.Models.Kinds())
 		if err != nil {
 			return "", err
 		}

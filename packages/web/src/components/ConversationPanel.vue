@@ -339,12 +339,18 @@ const modelLabel = computed(() => {
   if (!model) return null
   return formatModelEffort(model.label, view.value.model?.effort ?? null)
 })
+const effectiveThreadDefault = computed(() => {
+  const override = state.detail?.project.settings?.models?.thread
+  if (override?.model && state.models.some((item) => item.id === override.model)) {
+    return { model: override.model, effort: override.effort }
+  }
+  return { model: state.threadDefault, effort: state.threadDefaultEffort }
+})
 const defaultLabel = computed(() => {
-  const model = state.models.find((item) => item.id === state.threadDefault)
+  const { model: id, effort } = effectiveThreadDefault.value
+  const model = state.models.find((item) => item.id === id)
   if (!model) return ''
-  const defaultEffort = state.threadDefaultEffort
-    ? effortWithin(state.threadDefaultEffort, effortsOf(model.efforts))
-    : null
+  const defaultEffort = effort ? effortWithin(effort, effortsOf(model.efforts)) : null
   return formatModelEffort(model.label, defaultEffort)
 })
 // A model since removed from the settings falls back to the default, so that is shown.

@@ -952,3 +952,149 @@ func TestProjectServiceListAllNeedsMeAndGlobalSearch(t *testing.T) {
 		t.Fatalf("messages[1] = %+v, want Beta thread message", msgResp.Msg.Messages[1])
 	}
 }
+
+func TestProjectSettingsModelsRPCAndConversationModel(t *testing.T) {
+	ctx := t.Context()
+	home := t.TempDir()
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	settingsStore, err := settings.Open(filepath.Join(home, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := []sdk.ModelProviderInfo{{Kind: "anthropic", Title: sdk.LocalizedText{"en": "Anthropic"}}}
+	if _, err := settingsStore.UpdateModels(settings.Object{
+		"providers": []any{
+			settings.Object{"id": "p1", "kind": "anthropic", "name": "Claude", "settings": settings.Object{}},
+		},
+		"models": []any{
+			settings.Object{"id": "m-opus", "provider": "p1", "model": "claude-opus", "contextTokens": float64(200000), "efforts": []any{"low", "medium", "high", "max"}},
+			settings.Object{"id": "m-sonnet", "provider": "p1", "model": "claude-sonnet", "contextTokens": float64(128000), "efforts": []any{"low", "medium", "high"}},
+			settings.Object{"id": "m-haiku", "provider": "p1", "model": "claude-haiku", "contextTokens": float64(100000), "efforts": []any{"low", "medium"}},
+		},
+		"roles": settings.Object{
+			"thread":      settings.Object{"model": "m-sonnet", "effort": "medium"},
+			"coordinator": settings.Object{"model": nil, "effort": nil},
+			"research":    settings.Object{"model": "m-haiku", "effort": "low"},
+		},
+	}, kinds); err != nil {
+		t.Fatal(err)
+	}
+
+	api, err := New(Options{
+		Repository: repo,
+		Settings:   settingsStore,
+		Token:      "test-token",
+		Version:    "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(api)
+	defer func() {
+		ts.Close()
+		api.Close()
+	}()
+
+	clientOpts := []connect.ClientOption{
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	}
+	baseURL := ts.URL + rpcPrefix
+	projects := ariadnev1connect.NewProjectServiceClient(ts.Client(), baseURL, clientOpts...)
+	conversations := ariadnev1connect.NewConversationServiceClient(ts.Client(), baseURL, clientOpts...)
+
+	name := "Model Override Project"
+	created, err := projects.CreateProject(ctx, connect.NewRequest(&ariadnev1.CreateProjectRequest{Name: &name}))
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	projectID := created.Msg.Project.Id
+	coordinatorID := created.Msg.Project.CoordinatorId
+	thread, err := repo.CreateThread(ctx, projectID, core.NewThread{Title: "Thread A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	strPtr := func(v string) *string { return &v }
+
+	// Unknown model ID is rejected.
+	if _, err := projects.UpdateProject(ctx, connect.NewRequest(&ariadnev1.UpdateProjectRequest{
+		ProjectId: projectID,
+		Settings: &ariadnev1.ProjectSettings{
+			Models: &ariadnev1.ProjectModelSettings{
+				Thread: &ariadnev1.ProjectModelRoleSettings{Model: strPtr("m-missing"), Effort: strPtr("high")},
+			},
+		},
+	})); err == nil {
+		t.Fatal("expected unknown model ID in project settings to be rejected")
+	}
+
+	// Valid overrides round-trip via UpdateProject and GetProjectSettings.
+	updated, err := projects.UpdateProject(ctx, connect.NewRequest(&ariadnev1.UpdateProjectRequest{
+		ProjectId: projectID,
+		Settings: &ariadnev1.ProjectSettings{
+			Models: &ariadnev1.ProjectModelSettings{
+				Thread:   &ariadnev1.ProjectModelRoleSettings{Model: strPtr("m-opus"), Effort: strPtr("max")},
+				Research: &ariadnev1.ProjectModelRoleSettings{Effort: strPtr("low")},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("UpdateProject with models: %v", err)
+	}
+	gotModels := updated.Msg.SettingsView.Settings.Models
+	if gotModels == nil || gotModels.Thread == nil || gotModels.Thread.GetModel() != "m-opus" || gotModels.Thread.GetEffort() != "max" {
+		t.Fatalf("unexpected thread override in response: %+v", gotModels)
+	}
+	if gotModels.Coordinator != nil {
+		t.Fatalf("expected coordinator override to remain nil, got %+v", gotModels.Coordinator)
+	}
+	if gotModels.Research == nil || gotModels.Research.Model != nil || gotModels.Research.GetEffort() != "low" {
+		t.Fatalf("unexpected research override in response: %+v", gotModels.Research)
+	}
+
+	// GetConversation reflects project overrides for both thread and coordinator (inheriting project thread with low effort).
+	threadConv, err := conversations.GetConversation(ctx, connect.NewRequest(&ariadnev1.GetConversationRequest{
+		ConversationId: thread.ID,
+	}))
+	if err != nil {
+		t.Fatalf("GetConversation(thread): %v", err)
+	}
+	if threadConv.Msg.Model == nil || threadConv.Msg.Model.Id != "m-opus" || threadConv.Msg.Model.GetEffort() != "max" {
+		t.Fatalf("thread conversation model = %+v, want m-opus/max", threadConv.Msg.Model)
+	}
+	coordConv, err := conversations.GetConversation(ctx, connect.NewRequest(&ariadnev1.GetConversationRequest{
+		ConversationId: coordinatorID,
+	}))
+	if err != nil {
+		t.Fatalf("GetConversation(coordinator): %v", err)
+	}
+	if coordConv.Msg.Model == nil || coordConv.Msg.Model.Id != "m-opus" || coordConv.Msg.Model.GetEffort() != "low" {
+		t.Fatalf("coordinator conversation model = %+v, want m-opus/low", coordConv.Msg.Model)
+	}
+
+	// Clearing models reverts GetConversation to global settings.
+	cleared, err := projects.UpdateProject(ctx, connect.NewRequest(&ariadnev1.UpdateProjectRequest{
+		ProjectId: projectID,
+		Settings:  &ariadnev1.ProjectSettings{},
+	}))
+	if err != nil {
+		t.Fatalf("UpdateProject clear models: %v", err)
+	}
+	if cleared.Msg.SettingsView.Settings.Models != nil {
+		t.Fatalf("expected cleared models to be nil, got %+v", cleared.Msg.SettingsView.Settings.Models)
+	}
+	threadConvAfter, err := conversations.GetConversation(ctx, connect.NewRequest(&ariadnev1.GetConversationRequest{
+		ConversationId: thread.ID,
+	}))
+	if err != nil {
+		t.Fatalf("GetConversation(thread after clear): %v", err)
+	}
+	if threadConvAfter.Msg.Model == nil || threadConvAfter.Msg.Model.Id != "m-sonnet" || threadConvAfter.Msg.Model.GetEffort() != "medium" {
+		t.Fatalf("thread conversation model after clear = %+v, want m-sonnet/medium", threadConvAfter.Msg.Model)
+	}
+}

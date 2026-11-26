@@ -23,6 +23,7 @@ const DefaultBranchPrefix = "ariadne/"
 const MaxReviewRounds = 2
 
 var ShellChoices = []string{"auto", "bash", "zsh", "sh", "pwsh", "powershell", "cmd"}
+var modelEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 var prefixPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 var slugPattern = regexp.MustCompile(`[^a-z0-9]+`)
 var routineID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
@@ -58,6 +59,20 @@ type Autopilot struct {
 	Enabled bool   `json:"enabled"`
 	Method  string `json:"method"`
 }
+type ModelRole struct {
+	Model  *string `json:"model"`
+	Effort *string `json:"effort"`
+}
+type Models struct {
+	Thread      *ModelRole `json:"thread,omitempty"`
+	Coordinator *ModelRole `json:"coordinator,omitempty"`
+	Research    *ModelRole `json:"research,omitempty"`
+}
+
+func (m Models) IsZero() bool {
+	return m.Thread == nil && m.Coordinator == nil && m.Research == nil
+}
+
 type Settings struct {
 	Instructions string    `json:"instructions"`
 	Delivery     Delivery  `json:"delivery"`
@@ -66,6 +81,7 @@ type Settings struct {
 	Routines     []Routine `json:"routines"`
 	Review       Review    `json:"review"`
 	Autopilot    Autopilot `json:"autopilot"`
+	Models       Models    `json:"models"`
 }
 
 func Defaults() Settings {
@@ -280,6 +296,85 @@ func Parse(input any, allowedTools []string) (Settings, error) {
 		}
 		out.Autopilot = Autopilot{Enabled: enabled, Method: method}
 	}
+	if raw, exists := body["models"]; exists && raw != nil {
+		models, err := parseModels(raw)
+		if err != nil {
+			return Settings{}, err
+		}
+		out.Models = models
+	}
+	return out, nil
+}
+
+func validModelEffort(role, value string) bool {
+	return contains(modelEfforts, value) || (role == "coordinator" && value == "default")
+}
+
+func parseModelRole(role string, raw any) (*ModelRole, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	value, ok := raw.(map[string]any)
+	if !ok {
+		return nil, bad("models." + role)
+	}
+	var modelPtr *string
+	if given, exists := value["model"]; exists && given != nil {
+		id, ok := given.(string)
+		if !ok || id == "" || length(id) > 128 {
+			return nil, bad("models." + role + ".model")
+		}
+		modelPtr = &id
+	}
+	var effortPtr *string
+	if given, exists := value["effort"]; exists && given != nil {
+		effort, ok := given.(string)
+		if !ok || !validModelEffort(role, effort) {
+			return nil, bad("models." + role + ".effort")
+		}
+		effortPtr = &effort
+	}
+	if role == "thread" {
+		if modelPtr == nil {
+			if effortPtr != nil {
+				return nil, bad("models.thread.model")
+			}
+			return nil, nil
+		}
+	}
+	if role == "coordinator" && modelPtr != nil && effortPtr != nil && *effortPtr == "default" {
+		effortPtr = nil
+	}
+	return &ModelRole{Model: modelPtr, Effort: effortPtr}, nil
+}
+
+func parseModels(raw any) (Models, error) {
+	value, ok := raw.(map[string]any)
+	if !ok {
+		return Models{}, bad("models")
+	}
+	var out Models
+	if given, exists := value["thread"]; exists {
+		role, err := parseModelRole("thread", given)
+		if err != nil {
+			return Models{}, err
+		}
+		out.Thread = role
+	}
+	if given, exists := value["coordinator"]; exists {
+		role, err := parseModelRole("coordinator", given)
+		if err != nil {
+			return Models{}, err
+		}
+		out.Coordinator = role
+	}
+	if given, exists := value["research"]; exists {
+		role, err := parseModelRole("research", given)
+		if err != nil {
+			return Models{}, err
+		}
+		out.Research = role
+	}
 	return out, nil
 }
 
@@ -368,6 +463,9 @@ func Stored(raw string) (Settings, error) {
 		if auto, exists := fields["auto"]; !exists || string(auto) == "null" {
 			out.Workspace.Auto = Auto{Setup: out.Workspace.Setup == "", Check: out.Workspace.Check == ""}
 		}
+	}
+	if out.Models.Thread != nil && (out.Models.Thread.Model == nil || *out.Models.Thread.Model == "") {
+		out.Models.Thread = nil
 	}
 	return out, nil
 }

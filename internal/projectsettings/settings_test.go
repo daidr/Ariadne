@@ -132,3 +132,103 @@ func TestRoutineNextRunAcrossDST(t *testing.T) {
 		t.Fatalf("same minute repeated: %v", again)
 	}
 }
+
+func TestProjectModelsValidationAndStorage(t *testing.T) {
+	parsed, err := Parse(map[string]any{}, nil)
+	if err != nil {
+		t.Fatalf("Parse empty: %v", err)
+	}
+	if !parsed.Models.IsZero() {
+		t.Fatalf("expected empty models by default, got %+v", parsed.Models)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(`{
+		"models": {
+			"thread": {"model": "m-opus", "effort": "high"},
+			"coordinator": {"model": "m-sonnet", "effort": "default"},
+			"research": {"model": null, "effort": "low"}
+		}
+	}`), &raw); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err = Parse(raw, nil)
+	if err != nil {
+		t.Fatalf("Parse valid models: %v", err)
+	}
+	if parsed.Models.Thread == nil || parsed.Models.Thread.Model == nil || *parsed.Models.Thread.Model != "m-opus" ||
+		parsed.Models.Thread.Effort == nil || *parsed.Models.Thread.Effort != "high" {
+		t.Fatalf("unexpected thread override: %+v", parsed.Models.Thread)
+	}
+	if parsed.Models.Coordinator == nil || parsed.Models.Coordinator.Model == nil || *parsed.Models.Coordinator.Model != "m-sonnet" ||
+		parsed.Models.Coordinator.Effort != nil {
+		t.Fatalf("unexpected coordinator override (default should canonicalize to nil): %+v", parsed.Models.Coordinator)
+	}
+	if parsed.Models.Research == nil || parsed.Models.Research.Model != nil ||
+		parsed.Models.Research.Effort == nil || *parsed.Models.Research.Effort != "low" {
+		t.Fatalf("unexpected research override: %+v", parsed.Models.Research)
+	}
+
+	raw = nil
+	if err := json.Unmarshal([]byte(`{
+		"models": {
+			"thread": {"model": null, "effort": null},
+			"coordinator": {"model": null, "effort": "default"},
+			"research": {"model": null, "effort": null}
+		}
+	}`), &raw); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err = Parse(raw, nil)
+	if err != nil {
+		t.Fatalf("Parse null-model overrides: %v", err)
+	}
+	if parsed.Models.Thread != nil {
+		t.Fatalf("thread {model:null,effort:null} should normalize to nil, got %+v", parsed.Models.Thread)
+	}
+	if parsed.Models.Coordinator == nil || parsed.Models.Coordinator.Model != nil ||
+		parsed.Models.Coordinator.Effort == nil || *parsed.Models.Coordinator.Effort != "default" {
+		t.Fatalf("coordinator {model:null,effort:default} not preserved: %+v", parsed.Models.Coordinator)
+	}
+	if parsed.Models.Research == nil || parsed.Models.Research.Model != nil || parsed.Models.Research.Effort != nil {
+		t.Fatalf("research {model:null,effort:null} not preserved: %+v", parsed.Models.Research)
+	}
+
+	encoded, err := json.Marshal(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := Stored(string(encoded))
+	if err != nil {
+		t.Fatalf("Stored round-trip: %v", err)
+	}
+	if restored.Models.Thread != nil ||
+		restored.Models.Coordinator == nil || restored.Models.Coordinator.Effort == nil || *restored.Models.Coordinator.Effort != "default" ||
+		restored.Models.Research == nil || restored.Models.Research.Model != nil || restored.Models.Research.Effort != nil {
+		t.Fatalf("Stored round-trip mismatch: %+v", restored.Models)
+	}
+	legacy, err := Stored(`{"instructions":"legacy"}`)
+	if err != nil || !legacy.Models.IsZero() {
+		t.Fatalf("Stored legacy: %+v err=%v", legacy.Models, err)
+	}
+
+	for _, badJSON := range []string{
+		`{"models":"bad"}`,
+		`{"models":{"thread":"bad"}}`,
+		`{"models":{"thread":{"model":null,"effort":"high"}}}`,
+		`{"models":{"thread":{"model":"","effort":"high"}}}`,
+		`{"models":{"thread":{"model":"m1","effort":"default"}}}`,
+		`{"models":{"coordinator":{"model":"m1","effort":"ultra"}}}`,
+		`{"models":{"coordinator":{"model":"","effort":null}}}`,
+		`{"models":{"research":{"model":null,"effort":"default"}}}`,
+		`{"models":{"research":{"model":"m1","effort":"bogus"}}}`,
+	} {
+		var input map[string]any
+		if err := json.Unmarshal([]byte(badJSON), &input); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Parse(input, nil); err == nil {
+			t.Fatalf("expected Parse(%s) to fail", badJSON)
+		}
+	}
+}

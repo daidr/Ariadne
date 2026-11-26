@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
+	"github.com/daidr/Ariadne/internal/projectsettings"
 	"github.com/daidr/Ariadne/sdk"
 )
 
@@ -760,5 +761,164 @@ func TestDefaultCompactShare(t *testing.T) {
 	limits := object(store.Current()["limits"])
 	if got, _ := number(limits["compactShare"]); got != 0.75 {
 		t.Fatalf("default compactShare = %v, want 0.75", got)
+	}
+}
+
+func TestProjectModelOverridesPriorityAndFallbacks(t *testing.T) {
+	store := newStore(t)
+	kinds := testModelKinds()
+	strPtr := func(v string) *string { return &v }
+
+	baseProviders := `[{"id":"p1","kind":"anthropic","name":"Claude","settings":{"apiKey":"sk-1"}}]`
+	baseModels := `[
+		{"id":"m-opus","provider":"p1","model":"claude-opus","contextTokens":200000,"efforts":["low","medium","high","max"]},
+		{"id":"m-sonnet","provider":"p1","model":"claude-sonnet","contextTokens":150000,"efforts":["low","medium","high"]},
+		{"id":"m-medhigh","provider":"p1","model":"claude-medhigh","contextTokens":128000,"efforts":["medium","high"]},
+		{"id":"m-haiku","provider":"p1","model":"claude-haiku","contextTokens":100000,"efforts":["low","medium"]},
+		{"id":"m-plain","provider":"p1","model":"claude-plain","contextTokens":64000,"efforts":[]}
+	]`
+	updateRoles := func(rolesJSON string) {
+		t.Helper()
+		if _, err := store.UpdateModels(jsonObject(`{"providers":`+baseProviders+`,"models":`+baseModels+`,"roles":`+rolesJSON+`}`), kinds); err != nil {
+			t.Fatalf("UpdateModels(%s): %v", rolesJSON, err)
+		}
+	}
+
+	// Global: thread=m-sonnet(high), coordinator=unset (inherits thread with low effort), research=m-haiku(low).
+	updateRoles(`{"thread":{"model":"m-sonnet","effort":"high"},"coordinator":{"model":null,"effort":null},"research":{"model":"m-haiku","effort":"low"}}`)
+
+	// 1. Empty project overrides fall back completely to global roles.
+	empty := &projectsettings.Models{}
+	if got, err := store.ResolveModelForProject("thread", "", "", empty, kinds); err != nil || got == nil || got.Model != "claude-sonnet" || got.Effort != "high" {
+		t.Fatalf("empty override thread = %+v, err=%v", got, err)
+	}
+	if got, err := store.ResolveCoordinatorForProject(false, 0, empty, kinds); err != nil || got == nil || got.Model != "claude-sonnet" || got.Effort != "low" {
+		t.Fatalf("empty override coordinator = %+v, err=%v", got, err)
+	}
+	parent, _ := store.ResolveModelForProject("thread", "", "", empty, kinds)
+	if got, err := store.ResolveResearchForProject(parent, empty, kinds); err != nil || got == nil || got.Model != "claude-haiku" || got.Effort != "low" {
+		t.Fatalf("empty override research = %+v, err=%v", got, err)
+	}
+
+	// 2. Project thread override overrides global thread; per-thread override still takes highest priority;
+	// coordinator with unset global role inherits the project thread model with low effort.
+	threadOnly := &projectsettings.Models{
+		Thread: &projectsettings.ModelRole{Model: strPtr("m-opus"), Effort: strPtr("max")},
+	}
+	if got, err := store.ResolveModelForProject("thread", "", "", threadOnly, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "max" {
+		t.Fatalf("project thread override = %+v, err=%v", got, err)
+	}
+	if got, err := store.ResolveModelForProject("thread", "m-haiku", "medium", threadOnly, kinds); err != nil || got == nil || got.Model != "claude-haiku" || got.Effort != "medium" {
+		t.Fatalf("per-thread override over project = %+v, err=%v", got, err)
+	}
+	if got, err := store.ResolveModelForProject("thread", "m-deleted", "low", threadOnly, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "max" {
+		t.Fatalf("deleted per-thread override should fall back to project thread = %+v, err=%v", got, err)
+	}
+	if got, err := store.ResolveCoordinatorForProject(false, 0, threadOnly, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "low" {
+		t.Fatalf("coordinator inheriting project thread = %+v, err=%v", got, err)
+	}
+	if got, err := store.ResolveCoordinatorForProject(true, 1000, threadOnly, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "low" {
+		t.Fatalf("triage inheriting project thread = %+v, err=%v", got, err)
+	}
+	if conv := store.ConversationModelForProject("coordinator", "", "", threadOnly); conv["id"] != "m-opus" || conv["effort"] != "low" || conv["contextTokens"] != float64(200000) {
+		t.Fatalf("ConversationModelForProject(coordinator) = %#v", conv)
+	}
+
+	// 3. Project thread override with default effort (nil) does NOT inherit global thread effort ("high").
+	threadDefaultEffort := &projectsettings.Models{
+		Thread: &projectsettings.ModelRole{Model: strPtr("m-opus"), Effort: nil},
+	}
+	if got, err := store.ResolveModelForProject("thread", "", "", threadDefaultEffort, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "" {
+		t.Fatalf("project thread default effort = %+v, err=%v", got, err)
+	}
+
+	// 4. Coordinator inheriting project thread that does not accept "low" falls back to model default effort.
+	threadNoLow := &projectsettings.Models{
+		Thread: &projectsettings.ModelRole{Model: strPtr("m-medhigh"), Effort: strPtr("high")},
+	}
+	if got, err := store.ResolveCoordinatorForProject(false, 0, threadNoLow, kinds); err != nil || got == nil || got.Model != "claude-medhigh" || got.Effort != "" {
+		t.Fatalf("coordinator inheriting project thread without low = %+v, err=%v", got, err)
+	}
+
+	// 5. Global coordinator explicitly set to "default" effort keeps model default when inheriting project thread.
+	updateRoles(`{"thread":{"model":"m-sonnet","effort":"high"},"coordinator":{"model":null,"effort":"default"},"research":{"model":"m-haiku","effort":"low"}}`)
+	if got, err := store.ResolveCoordinatorForProject(false, 0, threadOnly, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "" {
+		t.Fatalf("global coordinator explicit default + project thread = %+v, err=%v", got, err)
+	}
+
+	// 6. Global coordinator pinned to m-sonnet(medium) and legacy triage pinned to m-haiku(low):
+	//    - Unset project coordinator keeps global pinned coordinator.
+	//    - Explicit project coordinator overrides both coordinator and legacy global triage.
+	//    - Project coordinator set to {model:nil, effort:nil} overrides back to "same as threads · low".
+	//    - Project coordinator set to {model:nil, effort:"default"} overrides back to "same as threads · default".
+	updateRoles(`{"thread":{"model":"m-sonnet","effort":"high"},"coordinator":{"model":"m-sonnet","effort":"medium"},"triage":{"model":"m-haiku","effort":"low"},"research":{"model":"m-haiku","effort":"low"}}`)
+	if got, err := store.ResolveCoordinatorForProject(false, 0, threadOnly, kinds); err != nil || got == nil || got.Model != "claude-sonnet" || got.Effort != "medium" {
+		t.Fatalf("unset project coordinator should keep global pinned = %+v, err=%v", got, err)
+	}
+	explicitCoord := &projectsettings.Models{
+		Coordinator: &projectsettings.ModelRole{Model: strPtr("m-opus"), Effort: strPtr("high")},
+	}
+	if got, err := store.ResolveCoordinatorForProject(false, 0, explicitCoord, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "high" {
+		t.Fatalf("explicit project coordinator = %+v, err=%v", got, err)
+	}
+	if got, err := store.ResolveCoordinatorForProject(true, 1000, explicitCoord, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "high" {
+		t.Fatalf("explicit project coordinator should supersede legacy global triage = %+v, err=%v", got, err)
+	}
+	coordSameAsThread := &projectsettings.Models{
+		Thread:      &projectsettings.ModelRole{Model: strPtr("m-opus"), Effort: strPtr("max")},
+		Coordinator: &projectsettings.ModelRole{Model: nil, Effort: nil},
+	}
+	if got, err := store.ResolveCoordinatorForProject(true, 1000, coordSameAsThread, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "low" {
+		t.Fatalf("project coordinator same-as-thread default = %+v, err=%v", got, err)
+	}
+	coordSameAsThreadDefault := &projectsettings.Models{
+		Thread:      &projectsettings.ModelRole{Model: strPtr("m-opus"), Effort: strPtr("max")},
+		Coordinator: &projectsettings.ModelRole{Model: nil, Effort: strPtr("default")},
+	}
+	if got, err := store.ResolveCoordinatorForProject(false, 0, coordSameAsThreadDefault, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "" {
+		t.Fatalf("project coordinator same-as-thread explicit default = %+v, err=%v", got, err)
+	}
+
+	// 7. Project research overrides: explicit model, same-as-asking (overriding global m-haiku), and same-as-asking with effort.
+	opusParent, err := store.ResolveModelForProject("thread", "", "", threadOnly, kinds)
+	if err != nil || opusParent == nil {
+		t.Fatalf("resolve opusParent: %v", err)
+	}
+	researchExplicit := &projectsettings.Models{
+		Research: &projectsettings.ModelRole{Model: strPtr("m-sonnet"), Effort: strPtr("medium")},
+	}
+	if got, err := store.ResolveResearchForProject(opusParent, researchExplicit, kinds); err != nil || got == nil || got.Model != "claude-sonnet" || got.Effort != "medium" {
+		t.Fatalf("project research explicit = %+v, err=%v", got, err)
+	}
+	researchSameAsAsking := &projectsettings.Models{
+		Research: &projectsettings.ModelRole{Model: nil, Effort: nil},
+	}
+	if got, err := store.ResolveResearchForProject(opusParent, researchSameAsAsking, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "max" {
+		t.Fatalf("project research same-as-asking = %+v, err=%v", got, err)
+	}
+	researchSameAsAskingLow := &projectsettings.Models{
+		Research: &projectsettings.ModelRole{Model: nil, Effort: strPtr("low")},
+	}
+	if got, err := store.ResolveResearchForProject(opusParent, researchSameAsAskingLow, kinds); err != nil || got == nil || got.Model != "claude-opus" || got.Effort != "low" {
+		t.Fatalf("project research same-as-asking low = %+v, err=%v", got, err)
+	}
+	if opusParent.Effort != "max" {
+		t.Fatalf("ResolveResearchForProject mutated parent effort to %q", opusParent.Effort)
+	}
+
+	// 8. Deleted model IDs in project overrides fall back gracefully to global settings.
+	deletedOverrides := &projectsettings.Models{
+		Thread:      &projectsettings.ModelRole{Model: strPtr("m-deleted"), Effort: strPtr("low")},
+		Coordinator: &projectsettings.ModelRole{Model: strPtr("m-deleted"), Effort: strPtr("high")},
+		Research:    &projectsettings.ModelRole{Model: strPtr("m-deleted"), Effort: strPtr("max")},
+	}
+	if got, err := store.ResolveModelForProject("thread", "", "", deletedOverrides, kinds); err != nil || got == nil || got.Model != "claude-sonnet" || got.Effort != "high" {
+		t.Fatalf("deleted project thread fallback = %+v, err=%v", got, err)
+	}
+	if got, err := store.ResolveCoordinatorForProject(false, 0, deletedOverrides, kinds); err != nil || got == nil || got.Model != "claude-sonnet" || got.Effort != "medium" {
+		t.Fatalf("deleted project coordinator fallback = %+v, err=%v", got, err)
+	}
+	if got, err := store.ResolveResearchForProject(opusParent, deletedOverrides, kinds); err != nil || got == nil || got.Model != "claude-haiku" || got.Effort != "low" {
+		t.Fatalf("deleted project research fallback = %+v, err=%v", got, err)
 	}
 }

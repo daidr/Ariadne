@@ -11,6 +11,7 @@ import (
 
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/models"
+	"github.com/daidr/Ariadne/internal/projectsettings"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/transcript"
 	"github.com/daidr/Ariadne/sdk"
@@ -323,4 +324,109 @@ func TestResearchRoleLimitsAndDescription(t *testing.T) {
 			t.Fatalf("thread step 2 should still have tools under 2 MiB cap")
 		}
 	})
+}
+
+func TestRunnerResolvesProjectModelOverrides(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	home := t.TempDir()
+	repo, err := core.Open(ctx, core.Options{Path: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	store, err := settings.Open(filepath.Join(home, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var seenRequests []sdk.Request
+	modelRegistry := models.New()
+	if _, err := modelRegistry.Register(sdk.ModelProvider{
+		Info: sdk.ModelProviderInfo{
+			Kind:  "anthropic",
+			Title: sdk.LocalizedText{"en": "Anthropic"},
+		},
+		Stream: func(_ context.Context, _ map[string]any, req sdk.Request) iter.Seq[sdk.Part] {
+			seenRequests = append(seenRequests, req)
+			return func(yield func(sdk.Part) bool) {
+				yield(sdk.Part{Type: "text", Text: "Done."})
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateModels(settings.Object{
+		"providers": []any{
+			settings.Object{"id": "p1", "kind": "anthropic", "name": "Claude", "settings": settings.Object{}},
+		},
+		"models": []any{
+			settings.Object{"id": "m-opus", "provider": "p1", "model": "claude-opus", "efforts": []any{"low", "medium", "high", "max"}},
+			settings.Object{"id": "m-sonnet", "provider": "p1", "model": "claude-sonnet", "efforts": []any{"low", "medium", "high"}},
+			settings.Object{"id": "m-haiku", "provider": "p1", "model": "claude-haiku", "efforts": []any{"low", "medium"}},
+		},
+		"roles": settings.Object{
+			"thread":      settings.Object{"model": "m-sonnet", "effort": "medium"},
+			"coordinator": settings.Object{"model": nil, "effort": nil},
+			"research":    settings.Object{"model": "m-haiku", "effort": "low"},
+		},
+	}, modelRegistry.Kinds()); err != nil {
+		t.Fatal(err)
+	}
+
+	project, err := repo.CreateProject(ctx, new("Specialized Project"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	strPtr := func(v string) *string { return &v }
+	nextSettings := project.Settings
+	nextSettings.Models = projectsettings.Models{
+		Thread:      &projectsettings.ModelRole{Model: strPtr("m-opus"), Effort: strPtr("max")},
+		Coordinator: nil, // Inherits project thread (m-opus) with coordinator default low effort.
+		Research:    &projectsettings.ModelRole{Model: nil, Effort: strPtr("medium")},
+	}
+	if _, err := repo.UpdateProject(ctx, project.ID, core.ProjectPatch{
+		Settings:    nextSettings,
+		HasSettings: true,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Scoped task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{Repository: repo, Settings: store, Models: modelRegistry}
+
+	// Thread uses project thread override.
+	threadConv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+	resolvedThread, err := r.Resolve(ctx, threadConv)
+	if err != nil || resolvedThread == nil || resolvedThread.Model != "claude-opus" || resolvedThread.Effort != "max" {
+		t.Fatalf("Resolve(thread) = %+v, err=%v", resolvedThread, err)
+	}
+
+	// Coordinator inherits project thread override with low effort.
+	coordConv := core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}
+	resolvedCoord, err := r.Resolve(ctx, coordConv)
+	if err != nil || resolvedCoord == nil || resolvedCoord.Model != "claude-opus" || resolvedCoord.Effort != "low" {
+		t.Fatalf("Resolve(coordinator) = %+v, err=%v", resolvedCoord, err)
+	}
+
+	// Research uses project research override (same as asking conversation with medium effort).
+	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{ConversationID: thread.ID, Author: "user", Content: "check"}); err != nil {
+		t.Fatal(err)
+	}
+	turnID, err := repo.StartScheduledTurn(ctx, thread.ID, resolvedThread.Label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeTurn := &turn{Runner: r, conversation: threadConv, id: turnID}
+	entry := activeTurn.researchTool(nil, resolvedThread, args{"modelRetries": float64(0)})
+	if _, err := entry.withCallID(ctx, "call_proj_res", args{"question": "Check project research override"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seenRequests) != 1 || seenRequests[0].Model != "claude-opus" || seenRequests[0].Effort != "medium" {
+		t.Fatalf("project research request = %+v", seenRequests)
+	}
 }

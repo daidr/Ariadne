@@ -2,12 +2,82 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { defineComponent, h, ref } from 'vue'
-import { api, type ProjectDetail, type ProjectSettingsView } from '../api'
+import { api, type ModelSettings, type ProjectDetail, type ProjectSettingsView } from '../api'
 import { locale } from '../i18n'
+import { openSettingsKey } from '../open-settings'
 import { state } from '../store'
 import ProjectSettingsDialog from './ProjectSettings.vue'
 
 const wrappers: VueWrapper[] = []
+
+function makeModelSettings(): ModelSettings {
+  return {
+    kinds: [
+      {
+        kind: 'openai-compatible',
+        title: { 'zh-CN': 'OpenAI', en: 'OpenAI' },
+        settings: { type: 'object', properties: {} },
+      },
+      {
+        kind: 'anthropic',
+        title: { 'zh-CN': 'Anthropic', en: 'Anthropic' },
+        settings: { type: 'object', properties: {} },
+      },
+    ],
+    providers: [
+      {
+        id: 'p-oa',
+        kind: 'openai-compatible',
+        name: 'OpenAI',
+        settings: {},
+        secretsSet: [],
+        headers: [],
+        extraBody: {},
+        timeoutSeconds: null,
+      },
+      {
+        id: 'p-anth',
+        kind: 'anthropic',
+        name: 'Claude',
+        settings: {},
+        secretsSet: [],
+        headers: [],
+        extraBody: {},
+        timeoutSeconds: null,
+      },
+    ],
+    models: [
+      {
+        id: 'm-gpt',
+        provider: 'p-oa',
+        model: 'gpt-5',
+        contextTokens: 128000,
+        efforts: ['low', 'medium', 'high'],
+      },
+      {
+        id: 'm-opus',
+        provider: 'p-anth',
+        model: 'claude-opus',
+        contextTokens: 200000,
+        efforts: ['low', 'medium', 'high', 'max'],
+      },
+      {
+        id: 'm-haiku',
+        provider: 'p-anth',
+        model: 'claude-haiku',
+        contextTokens: 100000,
+        efforts: ['low', 'medium'],
+      },
+    ],
+    roles: {
+      thread: { model: 'm-gpt', effort: 'high' },
+      coordinator: { model: null, effort: null },
+      triage: { model: null, effort: null },
+      research: { model: 'm-haiku', effort: 'low' },
+    },
+    showCost: false,
+  }
+}
 
 function makeProjectSettingsView(): ProjectSettingsView {
   return {
@@ -26,6 +96,7 @@ function makeProjectSettingsView(): ProjectSettingsView {
       routines: [],
       review: { enabled: false },
       autopilot: { enabled: false, method: 'squash' },
+      models: { thread: null, coordinator: null, research: null },
     },
     detected: { setup: null, check: null },
     env: [],
@@ -69,14 +140,22 @@ function makeProjectDetail(): ProjectDetail {
 
 beforeEach(() => {
   locale.value = 'zh-CN'
+  state.currentId = 'prj_test'
   state.detail = makeProjectDetail()
   state.projectSettingsOpen = false
   state.projectSettingsTab = 'source'
+  state.models = []
+  state.threadDefault = null
+  state.threadDefaultEffort = null
 })
 
 afterEach(() => {
   state.projectSettingsOpen = false
   state.detail = null
+  state.currentId = null
+  state.models = []
+  state.threadDefault = null
+  state.threadDefaultEffort = null
   wrappers.splice(0).forEach((wrapper) => wrapper.unmount())
   vi.restoreAllMocks()
 })
@@ -96,6 +175,7 @@ describe('ProjectSettings', () => {
     vi.spyOn(api, 'getProjectSettings').mockResolvedValue(view)
     vi.spyOn(api, 'getMcpSettings').mockResolvedValue({ servers: [], status: [] })
     vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(makeModelSettings())
 
     const wrapper = mount(ProjectSettingsDialog, {
       props: { layoutMode: 'wide' },
@@ -116,7 +196,7 @@ describe('ProjectSettings', () => {
     await flushPromises()
 
     const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(5)
+    expect(tabs).toHaveLength(6)
     for (const tab of tabs) {
       expect(tab.find('.dou-tabs__icon').exists()).toBe(true)
     }
@@ -165,6 +245,7 @@ describe('ProjectSettings', () => {
       .mockResolvedValue(makeProjectSettingsView())
     vi.spyOn(api, 'getMcpSettings').mockResolvedValue({ servers: [], status: [] })
     vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(makeModelSettings())
 
     state.projectSettingsOpen = true
 
@@ -187,7 +268,7 @@ describe('ProjectSettings', () => {
 
     expect(getProjectSettings).toHaveBeenCalledTimes(1)
     expect(getProjectSettings).toHaveBeenCalledWith('prj_test')
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(5)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(6)
   })
 
   test('tracks FileSourcesForm dirty state on usage tab and across close/reopen', async () => {
@@ -196,6 +277,7 @@ describe('ProjectSettings', () => {
       .mockResolvedValue(makeProjectSettingsView())
     vi.spyOn(api, 'getMcpSettings').mockResolvedValue({ servers: [], status: [] })
     vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(makeModelSettings())
 
     const FileSourcesStub = defineComponent({
       name: 'FileSourcesForm',
@@ -268,5 +350,166 @@ describe('ProjectSettings', () => {
     state.projectSettingsOpen = true
     await flushPromises()
     expect(getProjectSettings).toHaveBeenCalledTimes(1)
+  })
+
+  test('displays inherited global models by default, supports cascading overrides, one-click clear, and saves', async () => {
+    const view = makeProjectSettingsView()
+    vi.spyOn(api, 'getProjectSettings').mockResolvedValue(view)
+    vi.spyOn(api, 'getMcpSettings').mockResolvedValue({ servers: [], status: [] })
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(makeModelSettings())
+
+    let updatedPatch: Parameters<typeof api.updateProject>[1] | null = null
+    vi.spyOn(api, 'updateProject').mockImplementation(async (_id, patch) => {
+      updatedPatch = patch
+      const nextSettings = patch.settings ?? view.settings
+      return {
+        ...view,
+        settings: nextSettings,
+        project: {
+          ...state.detail!.project,
+          settings: nextSettings,
+        },
+      }
+    })
+    vi.spyOn(api, 'getProject').mockResolvedValue({
+      ...state.detail!,
+      sync: { cursor: '1', partial: false },
+    })
+    const getConversationSpy = vi.spyOn(api, 'getConversation').mockResolvedValue({
+      conversation: {
+        id: 'thr_coord',
+        projectId: 'prj_test',
+        role: 'coordinator',
+        pendingSeq: 0,
+        turn: null,
+        lastOutcome: null,
+        lastError: null,
+        usage: state.detail!.project.usage,
+        contextTokens: 0,
+        compactions: 0,
+        wait: null,
+      },
+      messages: [],
+      notices: [],
+      more: false,
+      lastSeq: 1,
+      todo: { conversationId: 'thr_coord', items: [], updatedAt: 0 },
+      model: { id: 'm-opus', contextTokens: 200000, compactAt: 150000, effort: 'low' },
+    })
+
+    state.projectSettingsTab = 'models'
+    const wrapper = mount(ProjectSettingsDialog, {
+      props: { layoutMode: 'wide' },
+      global: {
+        stubs: {
+          FileSourcesForm: true,
+          SourceNotes: true,
+          MemoryList: true,
+          ProjectUsage: true,
+          SecretPairs: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+
+    state.projectSettingsOpen = true
+    await flushPromises()
+
+    const cascaders = () => wrapper.findAllComponents({ name: 'DouCascader' })
+    expect(cascaders()).toHaveLength(3)
+
+    // Default inherited placeholders show resolved global settings (including coordinator's default low effort).
+    expect(cascaders()[0]!.props('modelValue')).toBeNull()
+    expect(cascaders()[0]!.props('placeholder')).toBe('沿用全局设置（gpt-5 · 高）')
+    expect(cascaders()[1]!.props('modelValue')).toBeNull()
+    expect(cascaders()[1]!.props('placeholder')).toBe('沿用全局设置（gpt-5 · 低）')
+    expect(cascaders()[2]!.props('modelValue')).toBeNull()
+    expect(cascaders()[2]!.props('placeholder')).toBe('沿用全局设置（claude-haiku · 低）')
+
+    // Overriding project thread model dynamically updates the inherited coordinator placeholder.
+    cascaders()[0]!.vm.$emit('update:modelValue', ['m-opus', 'max'])
+    await flushPromises()
+    expect(cascaders()[0]!.props('modelValue')).toEqual(['m-opus', 'max'])
+    expect(cascaders()[1]!.props('placeholder')).toBe('沿用全局设置（claude-opus · 低）')
+
+    // Overriding coordinator to "same as thread · default" and research to "same as asking · medium".
+    cascaders()[1]!.vm.$emit('update:modelValue', ['', ''])
+    cascaders()[2]!.vm.$emit('update:modelValue', ['', 'medium'])
+    await flushPromises()
+    expect(cascaders()[1]!.props('modelValue')).toEqual(['', ''])
+    expect(cascaders()[2]!.props('modelValue')).toEqual(['', 'medium'])
+
+    // One-click clear resets coordinator back to inheriting global setting.
+    const clearButtons = wrapper.findAll('button.dou-picker__clear')
+    expect(clearButtons.length).toBe(3)
+    await clearButtons[1]!.trigger('click')
+    await flushPromises()
+    expect(cascaders()[1]!.props('modelValue')).toBeNull()
+    expect(cascaders()[1]!.props('placeholder')).toBe('沿用全局设置（claude-opus · 低）')
+
+    const saveButton = wrapper.findAll('button').find((button) => button.text().trim() === '保存')
+    expect(saveButton).toBeTruthy()
+    await saveButton!.trigger('click')
+    await flushPromises()
+
+    expect(updatedPatch).not.toBeNull()
+    expect(updatedPatch!.settings?.models).toEqual({
+      thread: { model: 'm-opus', effort: 'max' },
+      coordinator: null,
+      research: { model: null, effort: 'medium' },
+    })
+    expect(getConversationSpy).toHaveBeenCalled()
+  })
+
+  test('shows an action to open global model settings when no models are configured', async () => {
+    const emptyModels: ModelSettings = {
+      ...makeModelSettings(),
+      providers: [],
+      models: [],
+      roles: {
+        thread: { model: null, effort: null },
+        coordinator: { model: null, effort: null },
+        triage: { model: null, effort: null },
+        research: { model: null, effort: null },
+      },
+    }
+    vi.spyOn(api, 'getProjectSettings').mockResolvedValue(makeProjectSettingsView())
+    vi.spyOn(api, 'getMcpSettings').mockResolvedValue({ servers: [], status: [] })
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(emptyModels)
+    const openSettings = vi.fn()
+
+    state.projectSettingsTab = 'models'
+    const wrapper = mount(ProjectSettingsDialog, {
+      props: { layoutMode: 'wide' },
+      global: {
+        provide: { [openSettingsKey as symbol]: openSettings },
+        stubs: {
+          FileSourcesForm: true,
+          SourceNotes: true,
+          MemoryList: true,
+          ProjectUsage: true,
+          SecretPairs: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+
+    state.projectSettingsOpen = true
+    await flushPromises()
+
+    expect(wrapper.findAllComponents({ name: 'DouCascader' })).toHaveLength(0)
+    const openButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('前往全局设置添加模型'))
+    expect(openButton).toBeTruthy()
+    await openButton!.trigger('click')
+    await flushPromises()
+
+    expect(state.projectSettingsOpen).toBe(false)
+    expect(openSettings).toHaveBeenCalledWith('models')
   })
 })

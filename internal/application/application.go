@@ -339,7 +339,11 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 				model, _ = thread.Model.(string)
 				effort, _ = thread.Effort.(string)
 			}
-			return user.ConversationModel(conversation.Role, model, effort), nil
+			project, err := repo.GetProjectForRun(r.Context(), conversation.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			return user.ConversationModelForProject(conversation.Role, model, effort, &project.Settings.Models), nil
 		},
 		OnProjectDeleted: func(id string) {
 			drafts.DropProject(id)

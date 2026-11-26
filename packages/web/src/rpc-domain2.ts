@@ -27,7 +27,10 @@ import type {
   PlanUndoPreview,
   PlanView,
   ProjectActivity,
+  ProjectCoordinatorEffort,
   ProjectDetected,
+  ProjectModelEffort,
+  ProjectModelRole,
   ProjectSettings,
   ProjectSource,
   ProjectView,
@@ -68,6 +71,7 @@ import {
   type ProjectAskBlock,
   type ProjectDetected as ProtoProjectDetected,
   type ProjectFormValue,
+  type ProjectModelRoleSettings as ProtoProjectModelRoleSettings,
   type ProjectSettings as ProtoProjectSettings,
   type ProjectSettingsView as ProtoProjectSettingsView,
   type ProjectSource as ProtoProjectSource,
@@ -304,6 +308,24 @@ function fromProtoFileSourceSet(set?: ProtoFileSourceSet): FileSourceSet | undef
   }
 }
 
+function fromProtoProjectModelRole<E extends string = ProjectModelEffort>(
+  role?: ProtoProjectModelRoleSettings,
+): ProjectModelRole<E> | null {
+  if (!role) return null
+  return {
+    model: role.model ?? null,
+    effort: (role.effort as E | undefined) ?? null,
+  }
+}
+
+function toProtoProjectModelRole<E extends string>(role: ProjectModelRole<E> | null | undefined) {
+  if (!role) return undefined
+  return {
+    ...(role.model !== null ? { model: role.model } : {}),
+    ...(role.effort !== null ? { effort: role.effort } : {}),
+  }
+}
+
 function fromProtoProjectSettings(settings?: ProtoProjectSettings): ProjectSettings {
   return {
     instructions: settings?.instructions ?? '',
@@ -338,10 +360,20 @@ function fromProtoProjectSettings(settings?: ProtoProjectSettings): ProjectSetti
       enabled: settings?.autopilot?.enabled ?? false,
       method: (settings?.autopilot?.method || 'merge') as ProjectSettings['autopilot']['method'],
     },
+    models: {
+      thread: fromProtoProjectModelRole(settings?.models?.thread),
+      coordinator: fromProtoProjectModelRole<ProjectCoordinatorEffort>(
+        settings?.models?.coordinator,
+      ),
+      research: fromProtoProjectModelRole(settings?.models?.research),
+    },
   }
 }
 
 function toProtoProjectSettingsInput(settings: ProjectSettings) {
+  const threadRole = toProtoProjectModelRole(settings.models?.thread)
+  const coordinatorRole = toProtoProjectModelRole(settings.models?.coordinator)
+  const researchRole = toProtoProjectModelRole(settings.models?.research)
   return {
     instructions: settings.instructions,
     delivery: {
@@ -374,6 +406,15 @@ function toProtoProjectSettingsInput(settings: ProjectSettings) {
       enabled: settings.autopilot.enabled,
       method: settings.autopilot.method,
     },
+    ...(threadRole || coordinatorRole || researchRole
+      ? {
+          models: {
+            ...(threadRole ? { thread: threadRole } : {}),
+            ...(coordinatorRole ? { coordinator: coordinatorRole } : {}),
+            ...(researchRole ? { research: researchRole } : {}),
+          },
+        }
+      : {}),
   }
 }
 

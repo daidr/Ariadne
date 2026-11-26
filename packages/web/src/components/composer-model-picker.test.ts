@@ -251,4 +251,43 @@ describe('ConversationPanel cascading model and effort switcher', () => {
     await nextTick()
     expect(wrapper.find('.conversation-model').text()).toBe('GPT-4o')
   })
+
+  test('shows project thread model override as the default label in the thread model picker', async () => {
+    state.detail!.project = {
+      ...state.detail!.project,
+      settings: {
+        instructions: '',
+        delivery: { mode: 'merge', instructions: '' },
+        tools: [],
+        workspace: {
+          retention: 'auto',
+          auto: { setup: true, check: true },
+          setup: '',
+          shell: 'auto',
+          check: '',
+          branchPrefix: '',
+        },
+        routines: [],
+        review: { enabled: true },
+        autopilot: { enabled: false, method: 'squash' },
+        models: {
+          thread: { model: 'm-claude', effort: 'max' },
+          coordinator: null,
+          research: null,
+        },
+      },
+    }
+
+    const wrapper = mount(ConversationPanel, {
+      props: { threadId: 'thr_1' },
+      global: { stubs: { teleport: true } },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    await wrapper.find(`button[title="${t('thread.model')}"]`).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('默认（Claude Opus · Max）')
+  })
 })

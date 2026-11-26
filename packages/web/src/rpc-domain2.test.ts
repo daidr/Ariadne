@@ -87,6 +87,11 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
             routines: [],
             review: { enabled: true },
             autopilot: { enabled: true, method: 'squash' },
+            models: {
+              thread: { model: 'm-opus', effort: 'high' },
+              coordinator: { effort: 'default' },
+              research: {},
+            },
           },
           detected: {},
           autopilotPaused: true,
@@ -108,6 +113,11 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
             routines: [],
             review: { enabled: true },
             autopilot: { enabled: true, method: 'squash' },
+            models: {
+              thread: { model: 'm-opus', effort: 'high' },
+              coordinator: { effort: 'default' },
+              research: {},
+            },
           },
           detected: {},
           env: ['NODE_ENV'],
@@ -141,6 +151,11 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
         routines: [],
         review: { enabled: true },
         autopilot: { enabled: true, method: 'squash' },
+        models: {
+          thread: { model: 'm-opus', effort: 'high' },
+          coordinator: { model: null, effort: 'default' },
+          research: { model: null, effort: null },
+        },
       },
       env: [{ name: 'NODE_ENV', value: 'test' }],
       slots: 3,
@@ -158,10 +173,22 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
     expect(decodedReq.mcpServers?.values).toEqual(['srv_1'])
     expect(decodedReq.autopilotPaused).toBe(true)
     expect(decodedReq.env?.entries).toHaveLength(1)
+    expect(decodedReq.settings?.models?.thread?.model).toBe('m-opus')
+    expect(decodedReq.settings?.models?.thread?.effort).toBe('high')
+    expect(decodedReq.settings?.models?.coordinator?.model).toBeUndefined()
+    expect(decodedReq.settings?.models?.coordinator?.effort).toBe('default')
+    expect(decodedReq.settings?.models?.research).toBeDefined()
+    expect(decodedReq.settings?.models?.research?.model).toBeUndefined()
+    expect(decodedReq.settings?.models?.research?.effort).toBeUndefined()
 
     expect(result.project.slots).toBe(3)
     expect(result.project.mcp).toEqual(['srv_1'])
     expect(result.project.detected).toEqual({ setup: null, check: null })
+    expect(result.settings.models).toEqual({
+      thread: { model: 'm-opus', effort: 'high' },
+      coordinator: { model: null, effort: 'default' },
+      research: { model: null, effort: null },
+    })
     expect(result.env).toEqual(['NODE_ENV'])
     expect(result.hostedMerge).toBe(true)
   })
@@ -427,6 +454,7 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
       routines: [],
       review: { enabled: false },
       autopilot: { enabled: false, method: 'merge' as const },
+      models: { thread: null, coordinator: null, research: null },
     }
     const detail = {
       project: {

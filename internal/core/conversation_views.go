@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
+	"github.com/daidr/Ariadne/internal/projectsettings"
 	"github.com/daidr/Ariadne/internal/textutil"
 )
 
@@ -431,9 +432,10 @@ type ConversationSnapshot struct {
 	More         bool
 	LastSeq      int64
 	Todo         object
-	ReadThrough  string
-	ThreadModel  string
-	ThreadEffort string
+	ReadThrough   string
+	ThreadModel   string
+	ThreadEffort  string
+	ProjectModels projectsettings.Models
 }
 
 func (reader Reader) GetConversationSnapshot(ctx context.Context, id string, cursor MessageCursor) (result ConversationSnapshot, err error) {
@@ -463,27 +465,42 @@ func (reader Reader) GetConversationSnapshot(ctx context.Context, id string, cur
 		}
 		threadModel := ""
 		threadEffort := ""
-		if conv.Role == "thread" {
-			rows, err := records(ctx, tx, "SELECT model, effort FROM threads WHERE id = ?", id)
-			if err != nil {
-				return err
+			if conv.Role == "thread" {
+				rows, err := records(ctx, tx, "SELECT model, effort FROM threads WHERE id = ?", id)
+				if err != nil {
+					return err
+				}
+				if len(rows) > 0 {
+					threadModel = rows[0].text("model")
+					threadEffort = rows[0].text("effort")
+				}
 			}
-			if len(rows) > 0 {
-				threadModel = rows[0].text("model")
-				threadEffort = rows[0].text("effort")
+			var projectModels projectsettings.Models
+			if conv.ProjectID != "" {
+				rows, err := records(ctx, tx, "SELECT settings FROM projects WHERE id = ?", conv.ProjectID)
+				if err != nil {
+					return err
+				}
+				if len(rows) > 0 {
+					parsed, err := projectsettings.Stored(rows[0].text("settings"))
+					if err != nil {
+						return err
+					}
+					projectModels = parsed.Models
+				}
 			}
-		}
-		result = ConversationSnapshot{
-			Conversation: conv,
-			Messages:     page.Messages,
-			Notices:      page.Notices,
-			More:         page.More,
-			LastSeq:      seq,
-			Todo:         todo,
-			ReadThrough:  readThrough,
-			ThreadModel:  threadModel,
-			ThreadEffort: threadEffort,
-		}
+			result = ConversationSnapshot{
+				Conversation:  conv,
+				Messages:      page.Messages,
+				Notices:       page.Notices,
+				More:          page.More,
+				LastSeq:       seq,
+				Todo:          todo,
+				ReadThrough:   readThrough,
+				ThreadModel:   threadModel,
+				ThreadEffort:  threadEffort,
+				ProjectModels: projectModels,
+			}
 		return nil
 	})
 	return

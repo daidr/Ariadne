@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
+	"github.com/daidr/Ariadne/internal/projectsettings"
 	"github.com/daidr/Ariadne/internal/transcript"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -159,15 +160,84 @@ func resolveModel(config Object, role, given, givenEffort string, kinds []sdk.Mo
 	chosen, matchedGiven := modelFor(config, role, given)
 	return resolveConfig(config, role, givenEffort, chosen, matchedGiven, kinds)
 }
+func projectRoleEntry(role *projectsettings.ModelRole) Object {
+	entry := Object{"model": nil, "effort": nil}
+	if role.Model != nil && *role.Model != "" {
+		entry["model"] = *role.Model
+	}
+	if role.Effort != nil && *role.Effort != "" {
+		entry["effort"] = *role.Effort
+	}
+	if entry["model"] != nil && entry["effort"] == defaultEffort {
+		entry["effort"] = nil
+	}
+	return entry
+}
+
+func withProjectModels(config Object, overrides *projectsettings.Models) Object {
+	if overrides == nil || overrides.IsZero() {
+		return config
+	}
+	models := object(config["models"])
+	items := list(models["models"])
+	roleMap := cloneMap(object(models["roles"]))
+	changed := false
+
+	applyRole := func(name string, override *projectsettings.ModelRole, allowInheritModel bool) bool {
+		if override == nil {
+			return false
+		}
+		if override.Model != nil && *override.Model != "" {
+			if findByID(items, *override.Model) == nil {
+				return false
+			}
+			roleMap[name] = projectRoleEntry(override)
+			return true
+		}
+		if allowInheritModel {
+			roleMap[name] = projectRoleEntry(override)
+			return true
+		}
+		return false
+	}
+
+	if applyRole("thread", overrides.Thread, false) {
+		changed = true
+	}
+	if applyRole("coordinator", overrides.Coordinator, true) {
+		changed = true
+		roleMap["triage"] = Object{"model": nil, "effort": nil}
+	}
+	if applyRole("research", overrides.Research, true) {
+		changed = true
+	}
+	if !changed {
+		return config
+	}
+	nextModels := cloneMap(models)
+	nextModels["roles"] = roleMap
+	nextConfig := cloneMap(config)
+	nextConfig["models"] = nextModels
+	return nextConfig
+}
+
 func (store *Store) ResolveModel(role, given, givenEffort string, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
+	return store.ResolveModelForProject(role, given, givenEffort, nil, kinds)
+}
+
+func (store *Store) ResolveModelForProject(role, given, givenEffort string, overrides *projectsettings.Models, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
 	if !hasString(roles, role) {
 		return nil, bad("role")
 	}
-	return resolveModel(store.snapshot(), role, given, givenEffort, kinds)
+	return resolveModel(withProjectModels(store.snapshot(), overrides), role, given, givenEffort, kinds)
 }
 
 func (store *Store) ResolveResearch(parent *ResolvedModel, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
-	config := store.snapshot()
+	return store.ResolveResearchForProject(parent, nil, kinds)
+}
+
+func (store *Store) ResolveResearchForProject(parent *ResolvedModel, overrides *projectsettings.Models, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
+	config := withProjectModels(store.snapshot(), overrides)
 	model, err := resolveModel(config, "research", "", "", kinds)
 	if err != nil {
 		return nil, err
@@ -188,7 +258,11 @@ func (store *Store) ResolveResearch(parent *ResolvedModel, kinds []sdk.ModelProv
 }
 
 func (store *Store) ConversationModel(role, given, givenEffort string) Object {
-	config := store.snapshot()
+	return store.ConversationModelForProject(role, given, givenEffort, nil)
+}
+
+func (store *Store) ConversationModelForProject(role, given, givenEffort string, overrides *projectsettings.Models) Object {
+	config := withProjectModels(store.snapshot(), overrides)
 	chosen, matchedGiven := modelFor(config, role, given)
 	if chosen == nil {
 		return nil
@@ -208,7 +282,10 @@ func (store *Store) ResolveSaved(model Object, kinds []sdk.ModelProviderInfo) (*
 	return resolveConfig(store.snapshot(), "thread", "", model, false, kinds)
 }
 func (store *Store) ResolveCoordinator(triage bool, contextTokens float64, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
-	config := store.snapshot()
+	return store.ResolveCoordinatorForProject(triage, contextTokens, nil, kinds)
+}
+func (store *Store) ResolveCoordinatorForProject(triage bool, contextTokens float64, overrides *projectsettings.Models, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
+	config := withProjectModels(store.snapshot(), overrides)
 	coordinator, err := resolveModel(config, "coordinator", "", "", kinds)
 	if !triage || err != nil {
 		return coordinator, err

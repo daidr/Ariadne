@@ -76,6 +76,27 @@ export interface ProjectSettings {
    * review on.
    */
   autopilot: { enabled: boolean; method: MergeMethod }
+  /** Optional per-project overrides for thread, coordinator, and sub-research models. */
+  models: ProjectModelsSettings
+}
+
+export type ProjectModelEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+export type ProjectCoordinatorEffort = ProjectModelEffort | 'default'
+
+export interface ProjectModelRole<E extends string = ProjectModelEffort> {
+  model: string | null
+  effort: E | null
+}
+
+/**
+ * Optional per-project overrides for thread, coordinator, and sub-research models.
+ * A `null` role inherits the global setting.
+ */
+export interface ProjectModelsSettings {
+  thread: ProjectModelRole | null
+  coordinator: ProjectModelRole<ProjectCoordinatorEffort> | null
+  research: ProjectModelRole | null
 }
 
 export type MergeMethod = 'squash' | 'merge'

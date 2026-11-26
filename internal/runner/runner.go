@@ -294,6 +294,11 @@ func (turn *turn) todoHint(ctx context.Context, state *todoHintState) (string, e
 
 func (runner *Runner) Resolve(ctx context.Context, conversation core.ConversationView) (*settings.ResolvedModel, error) {
 	kinds := runner.Models.Kinds()
+	project, err := runner.Repository.GetProjectForRun(ctx, conversation.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	overrides := &project.Settings.Models
 	if conversation.Role == "thread" {
 		thread, err := runner.Repository.GetThread(ctx, conversation.ID)
 		if err != nil {
@@ -301,13 +306,13 @@ func (runner *Runner) Resolve(ctx context.Context, conversation core.Conversatio
 		}
 		model, _ := thread.Model.(string)
 		effort, _ := thread.Effort.(string)
-		return runner.Settings.ResolveModel("thread", model, effort, kinds)
+		return runner.Settings.ResolveModelForProject("thread", model, effort, overrides, kinds)
 	}
 	triage, err := runner.Repository.PendingIsTriage(ctx, conversation.ID)
 	if err != nil {
 		return nil, err
 	}
-	return runner.Settings.ResolveCoordinator(triage, float64(conversation.ContextTokens), kinds)
+	return runner.Settings.ResolveCoordinatorForProject(triage, float64(conversation.ContextTokens), overrides, kinds)
 }
 
 func (runner *Runner) Run(ctx context.Context, conversation core.ConversationView) error {

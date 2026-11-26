@@ -18,6 +18,7 @@ import (
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/projectsettings"
 	"github.com/daidr/Ariadne/internal/sources"
+	"github.com/daidr/Ariadne/sdk"
 )
 
 var projectToolSwitches = []string{"fetch", "search", "commands", "research", "issueWrites"}
@@ -272,6 +273,9 @@ func (s *projectService) UpdateProject(
 		if err != nil {
 			return nil, err
 		}
+		if err := s.validateProjectModelOverrides(parsed.Models, current.Settings.Models); err != nil {
+			return nil, err
+		}
 		autopilotEnabled = parsed.Autopilot.Enabled
 		patch.Settings = rawSettings
 		patch.HasSettings = true
@@ -346,6 +350,54 @@ func (s *projectService) UpdateProject(
 		Project:      toProtoProjectView(project),
 		SettingsView: s.buildProjectSettingsView(ctx, project, env),
 	}), nil
+}
+
+func (s *projectService) validateProjectModelOverrides(next, current projectsettings.Models) error {
+	if s.api.options.Settings == nil {
+		return nil
+	}
+	var kinds []sdk.ModelProviderInfo
+	if s.api.options.Models != nil {
+		kinds = s.api.options.Models.Kinds()
+	}
+	var known map[string]bool
+	ensureKnown := func() map[string]bool {
+		if known != nil {
+			return known
+		}
+		known = map[string]bool{}
+		for _, raw := range s.api.options.Settings.ModelChoices(kinds) {
+			if choice := protoMap(raw); choice != nil {
+				if id, ok := choice["id"].(string); ok && id != "" {
+					known[id] = true
+				}
+			}
+		}
+		return known
+	}
+	checkRole := func(name string, nextRole, curRole *projectsettings.ModelRole) error {
+		if nextRole == nil || nextRole.Model == nil || *nextRole.Model == "" {
+			return nil
+		}
+		id := *nextRole.Model
+		if curRole != nil && curRole.Model != nil && *curRole.Model == id {
+			return nil
+		}
+		if !ensureKnown()[id] {
+			return badInput("models." + name + ".model")
+		}
+		return nil
+	}
+	if err := checkRole("thread", next.Thread, current.Thread); err != nil {
+		return err
+	}
+	if err := checkRole("coordinator", next.Coordinator, current.Coordinator); err != nil {
+		return err
+	}
+	if err := checkRole("research", next.Research, current.Research); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *projectService) DeleteProject(
@@ -947,7 +999,7 @@ func toProtoProjectSettings(settings projectsettings.Settings) *ariadnev1.Projec
 	}
 	tools := make([]string, len(settings.Tools))
 	copy(tools, settings.Tools)
-	return &ariadnev1.ProjectSettings{
+	out := &ariadnev1.ProjectSettings{
 		Instructions: settings.Instructions,
 		Delivery: &ariadnev1.ProjectDeliverySettings{
 			Mode:         settings.Delivery.Mode,
@@ -974,6 +1026,41 @@ func toProtoProjectSettings(settings projectsettings.Settings) *ariadnev1.Projec
 			Method:  settings.Autopilot.Method,
 		},
 	}
+	if !settings.Models.IsZero() {
+		out.Models = &ariadnev1.ProjectModelSettings{
+			Thread:      toProtoProjectModelRole(settings.Models.Thread),
+			Coordinator: toProtoProjectModelRole(settings.Models.Coordinator),
+			Research:    toProtoProjectModelRole(settings.Models.Research),
+		}
+	}
+	return out
+}
+
+func toProtoProjectModelRole(role *projectsettings.ModelRole) *ariadnev1.ProjectModelRoleSettings {
+	if role == nil {
+		return nil
+	}
+	out := &ariadnev1.ProjectModelRoleSettings{}
+	if role.Model != nil {
+		v := *role.Model
+		out.Model = &v
+	}
+	if role.Effort != nil {
+		v := *role.Effort
+		out.Effort = &v
+	}
+	return out
+}
+
+func fromProtoProjectModelRole(role *ariadnev1.ProjectModelRoleSettings) object {
+	entry := object{"model": nil, "effort": nil}
+	if role.Model != nil {
+		entry["model"] = *role.Model
+	}
+	if role.Effort != nil {
+		entry["effort"] = *role.Effort
+	}
+	return entry
 }
 
 func fromProtoProjectSettings(settings *ariadnev1.ProjectSettings) object {
@@ -1030,6 +1117,19 @@ func fromProtoProjectSettings(settings *ariadnev1.ProjectSettings) object {
 			"enabled": settings.Autopilot.Enabled,
 			"method":  settings.Autopilot.Method,
 		}
+	}
+	if settings.Models != nil {
+		modelsObj := object{}
+		if settings.Models.Thread != nil {
+			modelsObj["thread"] = fromProtoProjectModelRole(settings.Models.Thread)
+		}
+		if settings.Models.Coordinator != nil {
+			modelsObj["coordinator"] = fromProtoProjectModelRole(settings.Models.Coordinator)
+		}
+		if settings.Models.Research != nil {
+			modelsObj["research"] = fromProtoProjectModelRole(settings.Models.Research)
+		}
+		out["models"] = modelsObj
 	}
 	return out
 }
