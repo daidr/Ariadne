@@ -504,8 +504,16 @@ describe('ModelSettings', () => {
     expect(detail.findAll('.settings-number')).toHaveLength(6)
     expect(detail.text()).toContain('价格（每 1M token）')
 
-    const currencySelect = detail.find('.settings-currency [role="combobox"]')
+    const scopeId = detail.element.getAttributeNames().find((name) => name.startsWith('data-v-'))
+    expect(scopeId).toBeTruthy()
+
+    const dialogPanel = wrapper.find('[role="dialog"]')
+    expect(dialogPanel.exists()).toBe(true)
+    expect(dialogPanel.attributes(scopeId!)).toBe('')
+
+    const currencySelect = detail.find('.settings-currency[role="combobox"]')
     expect(currencySelect.exists()).toBe(true)
+    expect(currencySelect.attributes(scopeId!)).toBe('')
     expect(currencySelect.attributes('aria-label')).toBe('币种')
     expect(currencySelect.attributes('aria-labelledby')).toBeUndefined()
 

@@ -481,14 +481,13 @@ async function save() {
                   multiple
                   size="sm"
                 />
-                <div class="project-routine-time">
-                  <DouTimePicker
-                    v-model="routine.time as string"
-                    format="HH:mm"
-                    size="sm"
-                    :minute-step="5"
-                  />
-                </div>
+                <DouTimePicker
+                  v-model="routine.time as string"
+                  class="project-routine-time"
+                  format="HH:mm"
+                  size="sm"
+                  :minute-step="5"
+                />
                 <DouText variant="tertiary" size="sm" class="project-routine-next">
                   {{ nextText(routine) }}
                 </DouText>
@@ -524,8 +523,7 @@ async function save() {
   </DouDialog>
 </template>
 
-<style>
-/* The dialog panel teleports outside this component, so safe-area padding stays unscoped. */
+<style scoped>
 .project-settings-dialog-fullscreen {
   padding-top: var(--ariadne-safe-top);
   padding-right: var(--ariadne-safe-right);
@@ -536,9 +534,7 @@ async function save() {
 .project-settings-dialog-narrow {
   --dou-dialog-padding: 16px;
 }
-</style>
 
-<style scoped>
 .project-settings-body.is-fullscreen {
   display: flex;
   flex-direction: column;

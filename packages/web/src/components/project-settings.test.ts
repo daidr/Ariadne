@@ -83,7 +83,17 @@ afterEach(() => {
 
 describe('ProjectSettings', () => {
   test('renders icons for every tab and adapts dialog fullscreen and tab placement by layoutMode', async () => {
-    vi.spyOn(api, 'getProjectSettings').mockResolvedValue(makeProjectSettingsView())
+    const view = makeProjectSettingsView()
+    view.settings.routines = [
+      {
+        id: 'rtn_1',
+        prompt: '每天整理新 issue',
+        days: [1, 2, 3, 4, 5],
+        time: '09:00',
+        enabled: true,
+      },
+    ]
+    vi.spyOn(api, 'getProjectSettings').mockResolvedValue(view)
     vi.spyOn(api, 'getMcpSettings').mockResolvedValue({ servers: [], status: [] })
     vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
 
@@ -124,6 +134,15 @@ describe('ProjectSettings', () => {
     expect(tabBar().props('placement')).toBe('start')
     expect(tabBar().props('height')).toBe('100%')
 
+    const scopeId = wrapper
+      .find('.project-settings-body')
+      .element.getAttributeNames()
+      .find((name) => name.startsWith('data-v-'))
+    expect(scopeId).toBeTruthy()
+    const dialogPanel = wrapper.find('[role="dialog"]')
+    expect(dialogPanel.exists()).toBe(true)
+    expect(dialogPanel.attributes(scopeId!)).toBe('')
+
     await wrapper.setProps({ layoutMode: 'narrow' })
     await flushPromises()
     expect(dialog().props('fullscreen')).toBe(true)
@@ -134,6 +153,10 @@ describe('ProjectSettings', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('每个讨论串最多用')
     expect(wrapper.text()).not.toContain('整个项目最多用')
+
+    const routineTimePicker = wrapper.find('.project-routine-time.dou-picker')
+    expect(routineTimePicker.exists()).toBe(true)
+    expect(routineTimePicker.attributes(scopeId!)).toBe('')
   })
 
   test('loads settings immediately when mounted with projectSettingsOpen already true', async () => {
@@ -202,6 +225,23 @@ describe('ProjectSettings', () => {
     state.projectSettingsOpen = true
     await flushPromises()
     expect(getProjectSettings).toHaveBeenCalledTimes(1)
+
+    // Real Teleport preserves parent scopeId and reactive dialog classes on the panel.
+    const bodyEl = document.body.querySelector('.project-settings-body')
+    const scopeId = bodyEl?.getAttributeNames().find((name) => name.startsWith('data-v-'))
+    const dialogPanel = document.body.querySelector('[role="dialog"]')
+    expect(scopeId).toBeTruthy()
+    expect(dialogPanel?.getAttribute(scopeId!)).toBe('')
+    await wrapper.setProps({ layoutMode: 'medium' })
+    await flushPromises()
+    expect(dialogPanel?.classList.contains('project-settings-dialog-fullscreen')).toBe(true)
+    expect(dialogPanel?.classList.contains('project-settings-dialog-narrow')).toBe(false)
+    await wrapper.setProps({ layoutMode: 'narrow' })
+    await flushPromises()
+    expect(dialogPanel?.classList.contains('project-settings-dialog-fullscreen')).toBe(true)
+    expect(dialogPanel?.classList.contains('project-settings-dialog-narrow')).toBe(true)
+    await wrapper.setProps({ layoutMode: 'wide' })
+    await flushPromises()
 
     // Clean usage tab hides Save and only shows Close.
     state.projectSettingsTab = 'usage'
