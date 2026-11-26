@@ -42,6 +42,35 @@ export const PROTOTYPE_HEADER_HEIGHT = 36
 export const PROTOTYPE_DEFAULT_VIEWPORT_WIDTH = 1280
 export const PROTOTYPE_DEFAULT_VIEWPORT_HEIGHT = 800
 
+export interface PrototypeHeaderLayout {
+  /** Whether the viewport dimensions (e.g. `1280×800`) fit inline beside the title. */
+  showSize: boolean
+  /** Whether the Tweaks button collapses its text label to icon-only (+ count badge when modified). */
+  compactTweaks: boolean
+  /** Whether the Interact button collapses its text label to icon-only. */
+  compactInteract: boolean
+  /** Whether the interacting status tag uses compact wording. */
+  compactModeTag: boolean
+}
+
+/**
+ * Resolves how much chrome to display in a prototype node's 36px header bar based on its
+ * rendered card width, so title, dimensions, and action buttons never collide on narrow
+ * portrait viewports or resized cards.
+ */
+export function resolvePrototypeHeaderLayout(
+  cardWidth: number,
+  options: { hasTweaks: boolean; interacting: boolean },
+): PrototypeHeaderLayout {
+  const width = Number.isFinite(cardWidth) && cardWidth > 0 ? cardWidth : 480
+  const { hasTweaks, interacting } = options
+  const showSize = width >= (interacting ? 460 : hasTweaks ? 380 : 320)
+  const compactModeTag = interacting && width < 420
+  const compactTweaks = hasTweaks && (width < 270 || (interacting && width < 360))
+  const compactInteract = !interacting && width < (hasTweaks ? 270 : 220)
+  return { showSize, compactTweaks, compactInteract, compactModeTag }
+}
+
 const TWEAK_KEY_RE = /^[a-zA-Z0-9_-]{1,64}$/
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 const PROTOTYPE_SRC_RE = /^\/api\/files\/fil_[\w-]+$/
