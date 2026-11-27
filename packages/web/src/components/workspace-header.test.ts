@@ -51,6 +51,12 @@ function visiblePopovers() {
   )
 }
 
+function visibleDropdowns() {
+  return [...document.querySelectorAll<HTMLElement>('.dou-dropdown')].filter(
+    (el) => el.style.display !== 'none',
+  )
+}
+
 const wrappers: VueWrapper[] = []
 
 function mountHeader(
@@ -58,11 +64,13 @@ function mountHeader(
     layoutMode?: WorkspaceLayoutMode
     projectsCollapsed?: boolean
     sideCollapsed?: boolean
+    unauthorized?: boolean
   } = {},
 ) {
   const layoutMode = ref<WorkspaceLayoutMode>(options.layoutMode ?? 'medium')
   const projectsCollapsed = ref(options.projectsCollapsed ?? false)
   const sideCollapsed = ref(options.sideCollapsed ?? false)
+  const unauthorized = ref(options.unauthorized ?? false)
   const projectsPopoverOpen = ref(false)
   const onToggleSide = vi.fn(() => {
     sideCollapsed.value = !sideCollapsed.value
@@ -80,6 +88,7 @@ function mountHeader(
             layoutMode: layoutMode.value,
             projectsCollapsed: projectsCollapsed.value,
             sideCollapsed: sideCollapsed.value,
+            unauthorized: unauthorized.value,
             projectsPopoverOpen: projectsPopoverOpen.value,
             'onUpdate:projectsPopoverOpen': (value: boolean) => {
               projectsPopoverOpen.value = value
@@ -99,6 +108,7 @@ function mountHeader(
     layoutMode,
     projectsCollapsed,
     sideCollapsed,
+    unauthorized,
     projectsPopoverOpen,
     onToggleSide,
     onToggleProjects,
@@ -325,94 +335,216 @@ describe('WorkspaceHeader medium layout', () => {
     expect(wrapper.find('button[aria-label="设置"] .dou-badge__mark').exists()).toBe(false)
   })
 
-  test('renders the pulse activity pill and toggles the pulse main view while hiding side-pane controls', async () => {
-    state.detail = {
-      project: {
-        ...state.projects[0]!,
-        settings: { autopilot: { enabled: false, method: 'squash' } },
-      } as never,
-      threads: [{ id: 'thr_run', title: '执行中', stage: 'working' } as never],
-      needsMe: [],
-      hasTracker: false,
-    }
-    const { wrapper } = mountHeader({ layoutMode: 'medium' })
-    await nextTick()
-
-    const pill = wrapper.get<HTMLButtonElement>('[data-pulse-pill]')
-    expect(pill.attributes('aria-pressed')).toBe('false')
-    expect(pill.text()).toContain('1 运行中')
-    expect(wrapper.find('button[aria-label="收起项目面板"]').exists()).toBe(true)
-
-    await pill.trigger('click')
-    await nextTick()
-    expect(state.main).toEqual({ kind: 'pulse' })
-    expect(pill.attributes('aria-pressed')).toBe('true')
-    expect(wrapper.find('button[aria-label="收起项目面板"]').exists()).toBe(false)
-
-    await pill.trigger('click')
-    await nextTick()
-    expect(state.main).toEqual({ kind: 'conversation' })
-    expect(wrapper.find('button[aria-label="收起项目面板"]').exists()).toBe(true)
-  })
-
-  test('does not double-count authors under review in the pulse activity pill', async () => {
-    state.projects = [
-      { ...makeProjectSummary('prj_1', 'Ariadne', 0), runningTurns: 1 } as ProjectView,
-    ]
-    state.detail = {
-      project: {
-        ...state.projects[0]!,
-        settings: { autopilot: { enabled: false, method: 'squash' } },
-      } as never,
-      threads: [
-        {
-          id: 'thr_author',
-          title: '作者任务',
-          stage: 'working',
-          review: { reviewerId: 'thr_reviewer', rounds: 1, reviewing: true },
-        } as never,
-        {
-          id: 'thr_reviewer',
-          title: '审阅任务',
-          stage: 'working',
-          reviewOf: 'thr_author',
-          review: null,
-        } as never,
-      ],
-      needsMe: [],
-      hasTracker: false,
-    }
+  test('opens logo menu to navigate to gallery and pulse with active state and no header pulse pill', async () => {
     const { wrapper } = mountHeader({ layoutMode: 'wide' })
     await nextTick()
 
-    const pill = wrapper.get<HTMLButtonElement>('[data-pulse-pill]')
-    expect(pill.text()).toContain('1 运行中')
-    expect(pill.text()).not.toContain('2 运行中')
+    expect(wrapper.find('[data-pulse-pill]').exists()).toBe(false)
+    const trigger = wrapper.get<HTMLButtonElement>('[data-logo-menu-trigger]')
+    expect(trigger.text()).toContain('Ariadne')
+    expect(trigger.attributes('aria-haspopup')).toBe('menu')
+    expect(trigger.attributes('aria-expanded')).toBe('false')
 
-    // When the reviewer is queued and no turn is running, show queued rather than running.
-    state.projects = [
-      { ...makeProjectSummary('prj_1', 'Ariadne', 0), runningTurns: 0 } as ProjectView,
-    ]
-    state.detail = {
-      ...state.detail,
-      threads: [
-        {
-          id: 'thr_author',
-          title: '作者任务',
-          stage: 'working',
-          review: { reviewerId: 'thr_reviewer', rounds: 1, reviewing: true },
-        } as never,
-        {
-          id: 'thr_reviewer',
-          title: '审阅任务',
-          stage: 'queued',
-          reviewOf: 'thr_author',
-          review: null,
-        } as never,
-      ],
-    }
+    await trigger.trigger('click')
     await nextTick()
-    expect(pill.text()).toContain('1 排队中')
-    expect(pill.text()).not.toContain('运行中')
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+    expect(visibleDropdowns()).toHaveLength(1)
+
+    const galleryItem = document.querySelector<HTMLElement>('[data-logo-menu-item="gallery"]')
+    const pulseItem = document.querySelector<HTMLElement>('[data-logo-menu-item="pulse"]')
+    expect(galleryItem).not.toBeNull()
+    expect(pulseItem).not.toBeNull()
+    expect(galleryItem!.textContent).toContain('产物画廊')
+    expect(pulseItem!.textContent).toContain('协作时间线')
+    expect(galleryItem!.getAttribute('aria-current')).toBeNull()
+    expect(pulseItem!.getAttribute('aria-current')).toBeNull()
+
+    // Choose gallery: navigates to gallery, closes menu, hides vertical project divider.
+    galleryItem!.click()
+    await nextTick()
+    expect(state.main).toEqual({ kind: 'gallery' })
+    expect(visibleDropdowns()).toHaveLength(0)
+    expect(wrapper.find('.header-actions .dou-divider').exists()).toBe(false)
+
+    // Reopen menu: gallery is marked active.
+    await trigger.trigger('click')
+    await nextTick()
+    const activeGallery = document.querySelector<HTMLElement>('[data-logo-menu-item="gallery"]')!
+    const inactivePulse = document.querySelector<HTMLElement>('[data-logo-menu-item="pulse"]')!
+    expect(activeGallery.getAttribute('aria-current')).toBe('page')
+    expect(activeGallery.classList.contains('logo-menu-item-active')).toBe(true)
+    expect(activeGallery.querySelector('.logo-menu-check')).not.toBeNull()
+    expect(inactivePulse.getAttribute('aria-current')).toBeNull()
+
+    // Choose pulse: navigates to pulse and closes menu.
+    inactivePulse.click()
+    await nextTick()
+    await flushPromises()
+    expect(state.main).toEqual({ kind: 'pulse' })
+    expect(visibleDropdowns()).toHaveLength(0)
+
+    // Reopen menu: pulse is marked active.
+    await trigger.trigger('click')
+    await nextTick()
+    const activePulse = document.querySelector<HTMLElement>('[data-logo-menu-item="pulse"]')!
+    expect(activePulse.getAttribute('aria-current')).toBe('page')
+    expect(activePulse.classList.contains('logo-menu-item-active')).toBe(true)
+    expect(activePulse.querySelector('.logo-menu-check')).not.toBeNull()
+    expect(
+      document
+        .querySelector<HTMLElement>('[data-logo-menu-item="gallery"]')!
+        .getAttribute('aria-current'),
+    ).toBeNull()
+  })
+
+  test('supports keyboard navigation in the logo menu and closes on Escape', async () => {
+    const { wrapper } = mountHeader({ layoutMode: 'wide' })
+    await nextTick()
+
+    const trigger = wrapper.get<HTMLButtonElement>('[data-logo-menu-trigger]')
+    trigger.element.focus()
+    await trigger.trigger('keydown', { key: 'ArrowDown' })
+    await nextTick()
+
+    const menu = visibleDropdowns()[0]
+    expect(menu).toBeDefined()
+    const galleryItem = document.querySelector<HTMLElement>('[data-logo-menu-item="gallery"]')!
+    const pulseItem = document.querySelector<HTMLElement>('[data-logo-menu-item="pulse"]')!
+    expect(document.activeElement).toBe(galleryItem)
+
+    menu!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(pulseItem)
+
+    menu!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await nextTick()
+    await flushPromises()
+    expect(state.main).toEqual({ kind: 'pulse' })
+    expect(visibleDropdowns()).toHaveLength(0)
+    expect(document.activeElement).toBe(trigger.element)
+
+    // ArrowDown opens again and Escape closes cleanly.
+    await trigger.trigger('keydown', { key: 'ArrowDown' })
+    await nextTick()
+    expect(visibleDropdowns()).toHaveLength(1)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await nextTick()
+    expect(visibleDropdowns()).toHaveLength(0)
+  })
+
+  test('coordinates logo menu across medium, narrow, unauthorized, and no-project states', async () => {
+    const { wrapper, layoutMode, projectsPopoverOpen, unauthorized } = mountHeader({
+      layoutMode: 'medium',
+    })
+    await nextTick()
+
+    // Medium layout: icon-only logo button sits beside the project switcher and closes it mutually.
+    const logoTrigger = wrapper.get<HTMLButtonElement>('[data-logo-menu-trigger]')
+    expect(logoTrigger.classes()).toContain('is-icon-only')
+    expect(wrapper.find('button[aria-label="收起项目面板"]').exists()).toBe(true)
+
+    await wrapper.get<HTMLButtonElement>('button.header-project-trigger').trigger('click')
+    await nextTick()
+    expect(projectsPopoverOpen.value).toBe(true)
+
+    await logoTrigger.trigger('click')
+    await nextTick()
+    expect(visibleDropdowns()).toHaveLength(1)
+    expect(projectsPopoverOpen.value).toBe(false)
+
+    // Entering pulse from medium hides the side-pane toggle button.
+    document.querySelector<HTMLElement>('[data-logo-menu-item="pulse"]')!.click()
+    await nextTick()
+    await flushPromises()
+    expect(state.main).toEqual({ kind: 'pulse' })
+    expect(wrapper.find('button[aria-label="收起项目面板"]').exists()).toBe(false)
+
+    // Resizing to narrow inner page keeps icon-only logo trigger next to Back button and hides vertical divider.
+    layoutMode.value = 'narrow'
+    state.workspaceLevel = 'coordinator'
+    await nextTick()
+    expect(visibleDropdowns()).toHaveLength(0)
+    expect(wrapper.find('button[aria-label="返回项目列表"]').exists()).toBe(true)
+    expect(wrapper.get('[data-logo-menu-trigger]').classes()).toContain('is-icon-only')
+    expect(wrapper.find('.header-actions .dou-divider').exists()).toBe(false)
+
+    // Backing out to narrow projects home shows branded logo trigger and clears page active mark.
+    state.workspaceLevel = 'projects'
+    await nextTick()
+    const narrowHomeTrigger = wrapper.get<HTMLButtonElement>('[data-logo-menu-trigger]')
+    expect(narrowHomeTrigger.classes()).not.toContain('is-icon-only')
+    expect(narrowHomeTrigger.text()).toContain('Ariadne')
+    await narrowHomeTrigger.trigger('click')
+    await nextTick()
+    expect(
+      document
+        .querySelector<HTMLElement>('[data-logo-menu-item="pulse"]')!
+        .getAttribute('aria-current'),
+    ).toBeNull()
+
+    // Cold gallery load with no currentId still opens the first project into pulse.
+    state.currentId = null
+    state.detail = null
+    state.main = { kind: 'gallery' }
+    state.workspaceLevel = 'coordinator'
+    await nextTick()
+    await wrapper.get<HTMLButtonElement>('[data-logo-menu-trigger]').trigger('click')
+    await nextTick()
+    document.querySelector<HTMLElement>('[data-logo-menu-item="pulse"]')!.click()
+    await nextTick()
+    await flushPromises()
+    expect(state.currentId).toBe('prj_1')
+    expect(state.main).toEqual({ kind: 'pulse' })
+
+    // When there are zero projects, pulse menu item is disabled.
+    state.projects = []
+    state.currentId = null
+    state.detail = null
+    state.main = { kind: 'gallery' }
+    await nextTick()
+    await wrapper.get<HTMLButtonElement>('[data-logo-menu-trigger]').trigger('click')
+    await nextTick()
+    expect(
+      document
+        .querySelector<HTMLElement>('[data-logo-menu-item="pulse"]')!
+        .getAttribute('aria-disabled'),
+    ).toBe('true')
+
+    // Unauthorized renders static brand without interactive menu trigger.
+    unauthorized.value = true
+    await nextTick()
+    expect(wrapper.find('[data-logo-menu-trigger]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Ariadne')
+  })
+
+  test('closes an open logo menu when project, level, main view, or starting state changes externally', async () => {
+    const { wrapper } = mountHeader({ layoutMode: 'narrow' })
+    await nextTick()
+
+    const openMenu = async () => {
+      await wrapper.get<HTMLButtonElement>('[data-logo-menu-trigger]').trigger('click')
+      await nextTick()
+      expect(visibleDropdowns()).toHaveLength(1)
+    }
+
+    await openMenu()
+    state.currentId = 'prj_2'
+    await nextTick()
+    expect(visibleDropdowns()).toHaveLength(0)
+
+    await openMenu()
+    state.workspaceLevel = 'projects'
+    await nextTick()
+    expect(visibleDropdowns()).toHaveLength(0)
+
+    await openMenu()
+    state.main = { kind: 'trace', conversationId: 'crd_prj_2' }
+    await nextTick()
+    expect(visibleDropdowns()).toHaveLength(0)
+
+    await openMenu()
+    state.starting = true
+    await nextTick()
+    expect(visibleDropdowns()).toHaveLength(0)
   })
 })
