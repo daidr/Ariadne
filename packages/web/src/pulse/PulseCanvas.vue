@@ -6,9 +6,12 @@ import type {
   PulseLane,
   PulseMarker,
   PulseSpan,
+  ThreadPullRequest,
+  ThreadStage,
   ThreadView,
 } from '@ariadne/core'
-import { ChevronDownIcon, ChevronRightIcon, FolderIcon } from '@dou-ui/icons'
+import { ChevronDownIcon, ChevronRightIcon, CornerDownRightIcon, FolderIcon } from '@dou-ui/icons'
+import { DouButton, DouTooltip } from 'dou-ui'
 import {
   computed,
   nextTick,
@@ -19,34 +22,40 @@ import {
   useTemplateRef,
   watch,
 } from 'vue'
+import StageIcon from '../components/StageIcon.vue'
 import { locale, t } from '../i18n'
-import { branchChanges } from '../review/merge-offered'
 import {
   buildAxisTicks,
   buildConcurrencyBars,
   clamp,
   classifyHandoffTone,
   classifyMarkerTone,
+  computeAxisHeaderLayout,
   countLiveSlotOccupancy,
+  DEFAULT_LABEL_COL_WIDTH,
   formatClockShort,
   formatDurationCompact,
   isNeedsLane,
-  laneStatusDotClass,
   liveCommandLabel,
+  MAX_LABEL_COL_WIDTH,
+  MIN_LABEL_COL_WIDTH,
   percentOf,
+  resolveLaneStage,
+  resolveSpanToneGroup,
   resolveSpanVisualKind,
-  type PulseDensity,
+  spansMultipleDays,
   type PulseHandoffTone,
   type PulseLaneRow,
   type PulsePartitionedLanes,
   type PulseRibbonBar,
   type PulseScope,
+  type PulseSpanToneGroup,
   type PulseSpanVisualKind,
-  type PulseTooltipData,
 } from './model'
 
-const LABEL_COL_WIDTH = 258
 const FALLBACK_TRACK_WIDTH = 800
+const LANE_HEIGHT_PX = 38
+const SPAN_HEIGHT_PX = 20
 
 const props = defineProps<{
   partitioned: PulsePartitionedLanes
@@ -59,10 +68,6 @@ const props = defineProps<{
   nowMs: number
   viewStart: number
   viewEnd: number
-  density: PulseDensity
-  showConcurrency: boolean
-  showHandoffs: boolean
-  showReturnLine: boolean
   showCompleted: boolean
   selectedLaneId: string | null
   selectedSpanId: number | null
@@ -70,6 +75,8 @@ const props = defineProps<{
   threads: ReadonlyMap<string, ThreadView>
   liveCommands: Readonly<Record<string, LiveCommand>>
 }>()
+
+const labelWidth = defineModel<number>('labelWidth', { default: DEFAULT_LABEL_COL_WIDTH })
 
 const emit = defineEmits<{
   'update:showCompleted': [value: boolean]
@@ -85,21 +92,17 @@ const scrollEl = useTemplateRef<HTMLDivElement>('scrollEl')
 const axisTrackEl = useTemplateRef<HTMLDivElement>('axisTrackEl')
 const lanesInnerEl = useTemplateRef<HTMLDivElement>('lanesInnerEl')
 
-const isCompact = computed(() => props.density === 'compact')
-const laneHeightPx = computed(() => (isCompact.value ? 34 : 44))
-const spanHeightPx = computed(() => (isCompact.value ? 15 : 19))
+const trackWidthPx = ref(FALLBACK_TRACK_WIDTH)
 
 const ribbonBars = computed(() =>
-  props.showConcurrency
-    ? buildConcurrencyBars(
-        props.concurrency,
-        props.allSpans,
-        props.viewStart,
-        props.viewEnd,
-        props.nowMs,
-        48,
-      )
-    : [],
+  buildConcurrencyBars(
+    props.concurrency,
+    props.allSpans,
+    props.viewStart,
+    props.viewEnd,
+    props.nowMs,
+    48,
+  ),
 )
 
 const liveSlotActive = computed(() => {
@@ -121,40 +124,36 @@ const slotBadgeText = computed(() => {
 
 const axisTicks = computed(() => buildAxisTicks(props.viewStart, props.viewEnd))
 
-const windowRangeText = computed(() => {
-  const startText = formatClockShort(props.viewStart, props.viewStart, props.viewEnd, locale.value)
-  const endAt = Math.min(props.viewEnd, props.nowMs)
-  const endText = formatClockShort(
-    Math.max(props.viewStart, endAt),
-    props.viewStart,
-    props.viewEnd,
-    locale.value,
-  )
-  return `${startText} — ${endText}`
-})
-
 const nowPct = computed(() => percentOf(props.nowMs, props.viewStart, props.viewEnd))
 const showNowLine = computed(() => nowPct.value >= 0 && nowPct.value <= 100)
 
 const returnGeometry = computed(() => {
-  if (!props.showReturnLine || props.lastReturnedAt === null) return null
+  if (props.lastReturnedAt === null) return null
   const retPct = percentOf(props.lastReturnedAt, props.viewStart, props.viewEnd)
   const endPct = Math.min(100, Math.max(retPct, nowPct.value))
   if (endPct <= 0 || retPct >= 100) return null
   const showLine = retPct >= 0 && retPct <= 100
-  const showBadge = retPct >= 0 && retPct <= 96
   const bandLeft = Math.max(0, retPct)
   const bandWidth = Math.max(0, endPct - bandLeft)
   return {
     at: props.lastReturnedAt,
     retPct,
     showLine,
-    showBadge,
     bandLeft,
     bandWidth,
     timeText: formatClockShort(props.lastReturnedAt, props.viewStart, props.viewEnd, locale.value),
   }
 })
+
+const axisHeaderLayout = computed(() =>
+  computeAxisHeaderLayout({
+    ticks: axisTicks.value,
+    trackWidthPx: trackWidthPx.value,
+    nowPct: showNowLine.value ? nowPct.value : null,
+    returnPct: returnGeometry.value?.showLine ? returnGeometry.value.retPct : null,
+    spansDays: spansMultipleDays(props.viewStart, props.viewEnd),
+  }),
+)
 
 const nowTimeText = computed(() =>
   formatClockShort(props.nowMs, props.viewStart, props.viewEnd, locale.value),
@@ -171,6 +170,7 @@ const completedPreviewTitles = computed(() => {
 interface RenderedSpan {
   span: PulseSpan
   visualKind: PulseSpanVisualKind
+  toneGroup: PulseSpanToneGroup
   leftPct: number
   widthPct: number
   running: boolean
@@ -196,6 +196,7 @@ function spansForLane(lane: PulseLane): RenderedSpan[] {
     const widthPct = Math.max(0.65, rightPct - leftPct)
     const running = span.endedAt === null
     const visualKind = resolveSpanVisualKind(span, lane.role)
+    const toneGroup = resolveSpanToneGroup(visualKind)
     const stageText = t(`pulse.stage.${visualKind}`)
     const baseLabel =
       span.label || (running && span.stage === 'working' && liveCmd ? liveCmd : stageText)
@@ -206,6 +207,7 @@ function spansForLane(lane: PulseLane): RenderedSpan[] {
     out.push({
       span,
       visualKind,
+      toneGroup,
       leftPct,
       widthPct,
       running,
@@ -244,42 +246,13 @@ function laneTitle(lane: PulseLane): string {
   return lane.title || lane.conversationId
 }
 
-function laneDotClass(lane: PulseLane): string {
-  return laneStatusDotClass(lane)
+function laneStage(lane: PulseLane): ThreadStage {
+  return resolveLaneStage(lane)
 }
 
-interface LaneMetaSummary {
-  project: string | null
-  pr: string | null
-  diff: { added: number; removed: number } | null
-  progress: string | null
-  fallback: string | null
-}
-
-function laneMeta(lane: PulseLane): LaneMetaSummary {
-  const liveCmd = liveCommandText(lane)
-  const project =
-    props.scope === 'all' && lane.completed && lane.projectName ? lane.projectName : null
-  if (lane.role === 'coordinator') {
-    return {
-      project,
-      pr: null,
-      diff: null,
-      progress: null,
-      fallback: liveCmd ? `$ ${liveCmd}` : (lane.lastHeadline ?? t('pulse.stage.coord')),
-    }
-  }
-  const thread = props.threads.get(lane.conversationId)
-  const pr = thread?.pullRequest?.number ? `#${thread.pullRequest.number}` : null
-  const changes = thread ? branchChanges(thread) : null
-  const diff = changes ? { added: changes.added, removed: changes.removed } : null
-  const progress =
-    thread?.progress && thread.progress.total > 0 && thread.progress.done < thread.progress.total
-      ? `${thread.progress.done}/${thread.progress.total}`
-      : null
-  const fallback =
-    pr || diff || progress ? null : liveCmd ? `$ ${liveCmd}` : (lane.lastHeadline ?? null)
-  return { project, pr, diff, progress, fallback }
+function lanePullRequestState(lane: PulseLane): ThreadPullRequest['state'] | undefined {
+  if (lane.role === 'coordinator') return undefined
+  return props.threads.get(lane.conversationId)?.pullRequest?.state
 }
 
 function laneAlertBadge(lane: PulseLane): { tone: 'warning' | 'danger'; text: string } | null {
@@ -289,22 +262,18 @@ function laneAlertBadge(lane: PulseLane): { tone: 'warning' | 'danger'; text: st
     const since = openSpan?.startedAt ?? lane.activeAt
     return { tone: 'warning', text: formatDurationCompact(Math.max(0, props.nowMs - since)) }
   }
-  if (lane.stage === 'stopped') {
-    return { tone: 'warning', text: t('thread.stage.stopped') }
-  }
   if (lane.stage === 'blocked' || lane.stage === 'halted' || lane.stage === 'silent') {
     const failures = props.threads.get(lane.conversationId)?.pullRequest?.checks.failed.length ?? 0
-    return { tone: 'danger', text: failures > 0 ? `×${failures}` : '!' }
+    if (failures > 0) return { tone: 'danger', text: `×${failures}` }
   }
   return null
 }
 
-function laneRowClasses(row: PulseLaneRow): Record<string, boolean> {
-  const { lane, nested } = row
+function laneRowClasses(row: PulseLaneRow) {
+  const lane = row.lane
   return {
-    'is-compact': isCompact.value,
     'is-coordinator': lane.role === 'coordinator',
-    'is-nested': nested,
+    'is-nested': row.nested,
     'is-needs-me': lane.stage === 'answer' || lane.stage === 'stopped' || lane.attentionId !== null,
     'is-blocked': lane.stage === 'blocked' || lane.stage === 'halted' || lane.stage === 'silent',
     'is-selected': props.selectedLaneId === lane.conversationId,
@@ -317,6 +286,30 @@ function groupHeaderTitle(group: PulsePartitionedLanes['groups'][number]): strin
   if (group.kind === 'project') return group.title ?? group.projectId ?? ''
   if (group.kind === 'node') return t('pulse.group.nodePrefix', { title: group.title ?? '' })
   return t('pulse.group.unlinkedNode')
+}
+
+function spanTooltipMeta(item: RenderedSpan): string {
+  const startText = formatClockShort(
+    item.span.startedAt,
+    props.viewStart,
+    props.viewEnd,
+    locale.value,
+  )
+  const endText = item.running
+    ? t('pulse.tip.running')
+    : formatClockShort(item.endAt, props.viewStart, props.viewEnd, locale.value)
+  const durText = formatDurationCompact(item.endAt - item.span.startedAt)
+  return t('pulse.tip.duration', { start: startText, end: endText, duration: durText })
+}
+
+function markerTooltipSub(item: RenderedMarker): string {
+  const kindLabel = t(`pulse.marker.${item.marker.kind}`)
+  return item.marker.label ? `${kindLabel} · ${item.marker.label}` : kindLabel
+}
+
+function ribbonTooltipSub(bar: PulseRibbonBar): string {
+  const time = formatClockShort(bar.midAt, props.viewStart, props.viewEnd, locale.value)
+  return bar.full ? t('pulse.ribbon.tipFull', { time }) : t('pulse.ribbon.tipNormal', { time })
 }
 
 // --- Handoff SVG arc calculation ---
@@ -333,18 +326,32 @@ const handoffSvgSize = shallowRef({ width: FALLBACK_TRACK_WIDTH, height: 0 })
 const handoffArcs = shallowRef<HandoffArc[]>([])
 let handoffFrame: number | null = null
 
+function updateTrackWidth() {
+  const el = axisTrackEl.value
+  if (el && el.clientWidth > 0) {
+    trackWidthPx.value = el.clientWidth
+    return
+  }
+  const inner = lanesInnerEl.value
+  if (inner && inner.clientWidth > labelWidth.value) {
+    trackWidthPx.value = inner.clientWidth - labelWidth.value
+  }
+}
+
 function computeHandoffArcsNow() {
   handoffFrame = null
-  if (!props.showHandoffs || !props.handoffs.length) {
+  updateTrackWidth()
+  if (!props.handoffs.length) {
     handoffArcs.value = []
     return
   }
 
   const inner = lanesInnerEl.value
+  const currentLabelW = labelWidth.value
   const trackWidth = Math.max(
     1,
-    inner && inner.clientWidth > LABEL_COL_WIDTH
-      ? inner.clientWidth - LABEL_COL_WIDTH
+    inner && inner.clientWidth > currentLabelW
+      ? inner.clientWidth - currentLabelW
       : FALLBACK_TRACK_WIDTH,
   )
 
@@ -374,7 +381,7 @@ function computeHandoffArcsNow() {
 
   // Deterministic fallback for headless DOM environments without layout geometry.
   if (laneCenters.size === 0 && visibleOrder.length > 0) {
-    const stride = laneHeightPx.value
+    const stride = LANE_HEIGHT_PX
     visibleOrder.forEach((id, idx) => {
       laneCenters.set(id, idx * stride + stride / 2)
     })
@@ -421,11 +428,10 @@ watch(
   [
     () => props.handoffs,
     () => props.partitioned,
-    () => props.density,
     () => props.showCompleted,
-    () => props.showHandoffs,
     () => props.viewStart,
     () => props.viewEnd,
+    labelWidth,
   ],
   async () => {
     await nextTick()
@@ -436,12 +442,65 @@ watch(
 
 let resizeObserver: ResizeObserver | null = null
 onMounted(() => {
-  if (typeof ResizeObserver !== 'undefined' && lanesInnerEl.value) {
+  if (typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(() => scheduleHandoffRecalc())
-    resizeObserver.observe(lanesInnerEl.value)
+    if (lanesInnerEl.value) resizeObserver.observe(lanesInnerEl.value)
+    if (axisTrackEl.value) resizeObserver.observe(axisTrackEl.value)
   }
   computeHandoffArcsNow()
 })
+
+// --- Draggable label-column divider (aligned with @dou-ui/gantt) ---
+const resizingCol = ref(false)
+let colResizeState: { pointerId: number; startX: number; startWidth: number } | null = null
+
+function onColDividerPointerDown(event: PointerEvent) {
+  if (event.button !== 0) return
+  event.preventDefault()
+  colResizeState = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startWidth: labelWidth.value,
+  }
+  resizingCol.value = true
+  window.addEventListener('pointermove', onColDividerMove)
+  window.addEventListener('pointerup', stopColResize)
+  window.addEventListener('pointercancel', stopColResize)
+}
+
+function onColDividerMove(event: PointerEvent) {
+  if (!colResizeState || event.pointerId !== colResizeState.pointerId) return
+  const next = Math.round(
+    clamp(
+      colResizeState.startWidth + (event.clientX - colResizeState.startX),
+      MIN_LABEL_COL_WIDTH,
+      MAX_LABEL_COL_WIDTH,
+    ),
+  )
+  if (next !== labelWidth.value) labelWidth.value = next
+}
+
+function stopColResize() {
+  if (!colResizeState) return
+  colResizeState = null
+  resizingCol.value = false
+  window.removeEventListener('pointermove', onColDividerMove)
+  window.removeEventListener('pointerup', stopColResize)
+  window.removeEventListener('pointercancel', stopColResize)
+}
+
+function onColDividerKeydown(event: KeyboardEvent) {
+  if (event.key === 'ArrowLeft') {
+    event.preventDefault()
+    labelWidth.value = clamp(labelWidth.value - 12, MIN_LABEL_COL_WIDTH, MAX_LABEL_COL_WIDTH)
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault()
+    labelWidth.value = clamp(labelWidth.value + 12, MIN_LABEL_COL_WIDTH, MAX_LABEL_COL_WIDTH)
+  } else if (event.key === 'Home') {
+    event.preventDefault()
+    labelWidth.value = DEFAULT_LABEL_COL_WIDTH
+  }
+}
 
 // --- Pointer drag pan & wheel zoom ---
 let panState: {
@@ -493,7 +552,7 @@ function onWindowPointerMove(event: PointerEvent) {
 
 function stopPan() {
   if (!panState) return
-  if (panState.moved) suppressTrackClickUntil = Date.now() + 80
+  if (panState.moved) suppressTrackClickUntil = Date.now() + 250
   panState = null
   panning.value = false
   window.removeEventListener('pointermove', onWindowPointerMove)
@@ -501,121 +560,39 @@ function stopPan() {
   window.removeEventListener('pointercancel', onWindowPointerUp)
 }
 
+function onWindowPointerUp(event: PointerEvent) {
+  if (!panState || event.pointerId !== panState.pointerId) return
+  stopPan()
+}
+
 function onLaneTrackClick(laneId: string) {
   if (Date.now() < suppressTrackClickUntil) return
   emit('select', laneId, null)
 }
 
-function onWindowPointerUp(event: PointerEvent) {
-  if (panState && event.pointerId === panState.pointerId) stopPan()
-}
-
 function onScrollWheel(event: WheelEvent) {
   const rect = getTrackRect()
-  if (!rect) return
-  const sideways = event.shiftKey ? event.deltaY : event.deltaX
-  if (Math.abs(sideways) > Math.abs(event.deltaY) || event.shiftKey) {
+  if (!rect || rect.width <= 0) return
+
+  if (event.ctrlKey || event.metaKey) {
     event.preventDefault()
-    const deltaMs = (sideways / Math.max(1, rect.width)) * (props.viewEnd - props.viewStart)
-    emit('pan', deltaMs)
+    const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1)
+    const factor = event.deltaY > 0 ? 1.25 : 0.8
+    emit('zoom', ratio, factor)
     return
   }
-  const overTrack =
-    event.ctrlKey ||
-    event.metaKey ||
-    (event.target instanceof Element && !!event.target.closest('.pulse-track-col'))
-  if (!overTrack || event.clientX < rect.left) return
-  event.preventDefault()
-  const anchorRatio = clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1)
-  const factor = Math.exp(event.deltaY * 0.0015)
-  emit('zoom', anchorRatio, factor)
-}
 
-// --- Floating hover tooltip ---
-const tooltip = shallowRef<PulseTooltipData | null>(null)
-const tooltipPos = shallowRef({ left: 0, top: 0 })
-
-function positionTooltip(event: MouseEvent | PointerEvent) {
-  const maxLeft = typeof window !== 'undefined' ? window.innerWidth - 308 : 900
-  const maxTop = typeof window !== 'undefined' ? window.innerHeight - 110 : 600
-  tooltipPos.value = {
-    left: Math.max(8, Math.min(maxLeft, event.clientX + 12)),
-    top: Math.max(8, Math.min(maxTop, event.clientY + 14)),
+  const horizontalDelta =
+    Math.abs(event.deltaX) > Math.abs(event.deltaY)
+      ? event.deltaX
+      : event.shiftKey
+        ? event.deltaY
+        : 0
+  if (horizontalDelta !== 0) {
+    event.preventDefault()
+    const deltaMs = (horizontalDelta / rect.width) * (props.viewEnd - props.viewStart)
+    emit('pan', deltaMs)
   }
-}
-
-function showTooltip(data: PulseTooltipData, event: MouseEvent | PointerEvent) {
-  tooltip.value = data
-  positionTooltip(event)
-}
-
-function hideTooltip() {
-  tooltip.value = null
-}
-
-function showSpanTooltip(lane: PulseLane, item: RenderedSpan, event: MouseEvent) {
-  const startText = formatClockShort(
-    item.span.startedAt,
-    props.viewStart,
-    props.viewEnd,
-    locale.value,
-  )
-  const endText = item.running
-    ? t('pulse.tip.running')
-    : formatClockShort(item.endAt, props.viewStart, props.viewEnd, locale.value)
-  const durText = formatDurationCompact(item.endAt - item.span.startedAt)
-  showTooltip(
-    {
-      title: `${laneTitle(lane)} · ${t(`pulse.stage.${item.visualKind}`)}`,
-      subtitle: item.span.label || undefined,
-      meta: t('pulse.tip.duration', { start: startText, end: endText, duration: durText }),
-      detail: item.liveCommand
-        ? t('pulse.tip.liveCommand', { command: item.liveCommand })
-        : undefined,
-    },
-    event,
-  )
-}
-
-function showMarkerTooltip(lane: PulseLane, item: RenderedMarker, event: MouseEvent) {
-  const kindLabel = t(`pulse.marker.${item.marker.kind}`)
-  showTooltip(
-    {
-      title: laneTitle(lane),
-      subtitle: item.marker.label ? `${kindLabel} · ${item.marker.label}` : kindLabel,
-      meta: t('pulse.tip.at', {
-        time: formatClockShort(item.marker.at, props.viewStart, props.viewEnd, locale.value),
-      }),
-    },
-    event,
-  )
-}
-
-function showRibbonTooltip(bar: PulseRibbonBar, event: MouseEvent) {
-  const time = formatClockShort(bar.midAt, props.viewStart, props.viewEnd, locale.value)
-  showTooltip(
-    {
-      title: t('pulse.ribbon.tipTitle', { active: bar.active, slots: bar.slots }),
-      subtitle: bar.full
-        ? t('pulse.ribbon.tipFull', { time })
-        : t('pulse.ribbon.tipNormal', { time }),
-    },
-    event,
-  )
-}
-
-function showHandoffTooltip(arc: HandoffArc, event: MouseEvent) {
-  const toneLabel = t(`pulse.handoff.${arc.tone}`)
-  showTooltip(
-    {
-      title: toneLabel,
-      subtitle: arc.handoff.label || undefined,
-      meta: t('pulse.tip.at', {
-        time: formatClockShort(arc.handoff.at, props.viewStart, props.viewEnd, locale.value),
-      }),
-    },
-    event,
-  )
 }
 
 function onLaneOpenClick(lane: PulseLane) {
@@ -625,11 +602,11 @@ function onLaneOpenClick(lane: PulseLane) {
 
 function onScrollPointerLeave() {
   emit('hoveringChange', false)
-  hideTooltip()
 }
 
 onBeforeUnmount(() => {
   stopPan()
+  stopColResize()
   resizeObserver?.disconnect()
   if (handoffFrame !== null) cancelAnimationFrame(handoffFrame)
 })
@@ -638,8 +615,13 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="pulse-canvas"
-    :class="{ 'is-panning': panning }"
-    :style="{ '--pulse-lane-h': `${laneHeightPx}px`, '--pulse-span-h': `${spanHeightPx}px` }"
+    data-pulse-canvas
+    :class="{ 'is-panning': panning, 'is-resizing-col': resizingCol }"
+    :style="{
+      '--pulse-label-w': `${labelWidth}px`,
+      '--pulse-lane-h': `${LANE_HEIGHT_PX}px`,
+      '--pulse-span-h': `${SPAN_HEIGHT_PX}px`,
+    }"
   >
     <div
       ref="scrollEl"
@@ -649,41 +631,51 @@ onBeforeUnmount(() => {
       @pointerleave="onScrollPointerLeave"
     >
       <div class="pulse-sticky-head">
-        <!-- Concurrency slot watermark ribbon -->
-        <div v-if="showConcurrency" class="pulse-grid-row pulse-ribbon-row" data-pulse-ribbon>
+        <!-- Concurrency watermark ribbon -->
+        <div class="pulse-grid-row pulse-ribbon-row" data-pulse-ribbon>
           <div class="pulse-label-col pulse-ribbon-label">
-            <span>{{ t('pulse.ribbon.label') }}</span>
+            <span class="pulse-axis-title">{{ t('pulse.ribbon.label') }}</span>
             <span
-              class="pulse-badge pulse-mono"
-              :class="slotFull ? 'is-warning' : 'is-primary'"
+              class="pulse-slot-value pulse-mono"
+              :class="{ 'is-full': slotFull }"
               data-pulse-slot-badge
             >
               {{ slotBadgeText }}
             </span>
           </div>
           <div class="pulse-track-col pulse-ribbon-track">
-            <div
+            <DouTooltip
               v-for="bar in ribbonBars"
               :key="bar.index"
-              class="pulse-ribbon-bar"
-              :class="bar.full ? 'is-full' : 'is-normal'"
-              :style="{
-                left: `${bar.leftPct}%`,
-                width: `${bar.widthPct}%`,
-                height: `${bar.heightPx}px`,
-              }"
-              @pointerenter="showRibbonTooltip(bar, $event)"
-              @pointermove="positionTooltip($event)"
-              @pointerleave="hideTooltip()"
-            />
+              follow-cursor
+              :show-delay="80"
+              :hide-delay="40"
+            >
+              <div
+                class="pulse-ribbon-bar"
+                :class="bar.full ? 'is-full' : 'is-normal'"
+                :style="{
+                  left: `${bar.leftPct}%`,
+                  width: `${bar.widthPct}%`,
+                  height: `${bar.heightPx}px`,
+                }"
+              />
+              <template #content>
+                <div class="pulse-tip-content">
+                  <div class="pulse-tip-head">
+                    {{ t('pulse.ribbon.tipTitle', { active: bar.active, slots: bar.slots }) }}
+                  </div>
+                  <div class="pulse-tip-sub">{{ ribbonTooltipSub(bar) }}</div>
+                </div>
+              </template>
+            </DouTooltip>
           </div>
         </div>
 
         <!-- Time axis header -->
         <div class="pulse-grid-row pulse-axis-row">
           <div class="pulse-label-col pulse-axis-label">
-            <span>{{ t('pulse.axis.lanes') }}</span>
-            <span class="pulse-mono" data-pulse-window-range>{{ windowRangeText }}</span>
+            <span class="pulse-axis-title">{{ t('pulse.axis.lanes') }}</span>
           </div>
           <div
             ref="axisTrackEl"
@@ -692,7 +684,7 @@ onBeforeUnmount(() => {
             @dblclick="emit('resetWindow')"
           >
             <div
-              v-for="tick in axisTicks"
+              v-for="tick in axisHeaderLayout.visibleLabelTicks"
               :key="tick.at"
               class="pulse-axis-tick pulse-mono"
               :style="{ left: `${tick.pct}%` }"
@@ -700,18 +692,25 @@ onBeforeUnmount(() => {
               {{ formatClockShort(tick.at, viewStart, viewEnd, locale) }}
             </div>
             <div
-              v-if="returnGeometry?.showBadge"
+              v-if="returnGeometry && axisHeaderLayout.showReturnBadge"
               class="pulse-axis-return-badge pulse-mono"
+              :class="`is-${axisHeaderLayout.returnAlign}`"
               data-pulse-return-badge
-              :style="{ left: `${clamp(returnGeometry.retPct, 6, 92)}%` }"
+              :style="{ left: `${returnGeometry.retPct}%` }"
             >
               {{ t('pulse.axis.returnBadge', { time: returnGeometry.timeText }) }}
             </div>
             <div
               v-if="showNowLine"
+              class="pulse-axis-now-mark"
+              aria-hidden="true"
+              :style="{ left: `${nowPct}%` }"
+            />
+            <div
+              v-if="showNowLine"
               class="pulse-axis-now-badge pulse-mono"
+              :class="`is-${axisHeaderLayout.nowAlign}`"
               data-pulse-now-badge
-              :class="{ 'is-right-aligned': nowPct > 91 }"
               :style="{ left: `${nowPct}%` }"
             >
               {{ t('pulse.axis.nowBadge', { time: nowTimeText }) }}
@@ -749,20 +748,29 @@ onBeforeUnmount(() => {
 
         <!-- Author <-> reviewer handoff Bezier arcs -->
         <svg
-          v-if="showHandoffs && handoffArcs.length"
+          v-if="handoffArcs.length"
           class="pulse-handoff-svg"
           data-pulse-handoff-svg
           :viewBox="`0 0 ${handoffSvgSize.width} ${handoffSvgSize.height}`"
           :style="{ height: `${handoffSvgSize.height}px` }"
         >
           <g v-for="arc in handoffArcs" :key="arc.key" data-pulse-handoff-arc>
-            <path
-              class="pulse-handoff-hit"
-              :d="arc.d"
-              @pointerenter="showHandoffTooltip(arc, $event)"
-              @pointermove="positionTooltip($event)"
-              @pointerleave="hideTooltip()"
-            />
+            <DouTooltip follow-cursor :show-delay="80" :hide-delay="40">
+              <path class="pulse-handoff-hit" :d="arc.d" />
+              <template #content>
+                <div class="pulse-tip-content">
+                  <div class="pulse-tip-head">{{ t(`pulse.handoff.${arc.tone}`) }}</div>
+                  <div v-if="arc.handoff.label" class="pulse-tip-sub">{{ arc.handoff.label }}</div>
+                  <div class="pulse-tip-meta pulse-mono">
+                    {{
+                      t('pulse.tip.at', {
+                        time: formatClockShort(arc.handoff.at, viewStart, viewEnd, locale),
+                      })
+                    }}
+                  </div>
+                </div>
+              </template>
+            </DouTooltip>
             <path class="pulse-handoff-path" :class="`is-${arc.tone}`" :d="arc.d" />
             <circle
               class="pulse-handoff-dot"
@@ -770,9 +778,6 @@ onBeforeUnmount(() => {
               :cx="arc.x"
               :cy="arc.y2"
               r="3.5"
-              @pointerenter="showHandoffTooltip(arc, $event)"
-              @pointermove="positionTooltip($event)"
-              @pointerleave="hideTooltip()"
             />
           </g>
         </svg>
@@ -789,11 +794,7 @@ onBeforeUnmount(() => {
             @click="emit('select', partitioned.coordinator.conversationId, null)"
           >
             <div class="pulse-lane-head">
-              <span
-                class="pulse-dot"
-                :class="laneDotClass(partitioned.coordinator)"
-                aria-hidden="true"
-              />
+              <StageIcon :stage="laneStage(partitioned.coordinator)" />
               <button
                 type="button"
                 class="pulse-lane-title"
@@ -804,15 +805,10 @@ onBeforeUnmount(() => {
               </button>
               <span
                 v-if="laneAlertBadge(partitioned.coordinator)"
-                class="pulse-badge pulse-mono"
+                class="pulse-lane-alert pulse-mono"
                 :class="`is-${laneAlertBadge(partitioned.coordinator)!.tone}`"
               >
                 {{ laneAlertBadge(partitioned.coordinator)!.text }}
-              </span>
-            </div>
-            <div v-if="!isCompact" class="pulse-lane-meta">
-              <span v-if="laneMeta(partitioned.coordinator).fallback">
-                {{ laneMeta(partitioned.coordinator).fallback }}
               </span>
             </div>
           </div>
@@ -822,38 +818,71 @@ onBeforeUnmount(() => {
             @click="onLaneTrackClick(partitioned.coordinator.conversationId)"
             @dblclick="emit('resetWindow')"
           >
-            <div
+            <DouTooltip
               v-for="item in spansForLane(partitioned.coordinator)"
               :key="item.span.id"
-              class="pulse-span"
-              :class="[
-                `is-${item.visualKind}`,
-                {
-                  'pulse-span-running': item.running,
-                  'is-selected': selectedSpanId === item.span.id,
-                },
-              ]"
-              :data-span-id="item.span.id"
-              :style="{ left: `${item.leftPct}%`, width: `${item.widthPct}%` }"
-              @click.stop="emit('select', partitioned.coordinator.conversationId, item.span.id)"
-              @pointerenter="showSpanTooltip(partitioned.coordinator, item, $event)"
-              @pointermove="positionTooltip($event)"
-              @pointerleave="hideTooltip()"
+              follow-cursor
+              :show-delay="80"
+              :hide-delay="40"
             >
-              <span v-if="item.showText" class="pulse-span-text">{{ item.inlineText }}</span>
-            </div>
-            <div
+              <div
+                class="pulse-span"
+                :class="[
+                  `is-${item.visualKind}`,
+                  `is-tone-${item.toneGroup}`,
+                  {
+                    'pulse-span-running': item.running,
+                    'is-selected': selectedSpanId === item.span.id,
+                  },
+                ]"
+                :data-span-id="item.span.id"
+                :style="{ left: `${item.leftPct}%`, width: `${item.widthPct}%` }"
+                @click.stop="emit('select', partitioned.coordinator.conversationId, item.span.id)"
+              >
+                <span v-if="item.showText" class="pulse-span-text">{{ item.inlineText }}</span>
+              </div>
+              <template #content>
+                <div class="pulse-tip-content">
+                  <div class="pulse-tip-head">
+                    {{ laneTitle(partitioned.coordinator) }} ·
+                    {{ t(`pulse.stage.${item.visualKind}`) }}
+                  </div>
+                  <div v-if="item.span.label" class="pulse-tip-sub">{{ item.span.label }}</div>
+                  <div v-if="item.liveCommand" class="pulse-tip-detail pulse-mono">
+                    {{ t('pulse.tip.liveCommand', { command: item.liveCommand }) }}
+                  </div>
+                  <div class="pulse-tip-meta pulse-mono">{{ spanTooltipMeta(item) }}</div>
+                </div>
+              </template>
+            </DouTooltip>
+            <DouTooltip
               v-for="item in markersForLane(partitioned.coordinator)"
               :key="`${item.marker.seq}-${item.marker.kind}`"
-              class="pulse-marker"
-              :class="`is-${item.tone}`"
-              :data-marker-kind="item.marker.kind"
-              :style="{ left: `${item.pct}%` }"
-              @click.stop="emit('select', partitioned.coordinator.conversationId, null)"
-              @pointerenter="showMarkerTooltip(partitioned.coordinator, item, $event)"
-              @pointermove="positionTooltip($event)"
-              @pointerleave="hideTooltip()"
-            />
+              follow-cursor
+              :show-delay="80"
+              :hide-delay="40"
+            >
+              <div
+                class="pulse-marker"
+                :class="`is-${item.tone}`"
+                :data-marker-kind="item.marker.kind"
+                :style="{ left: `${item.pct}%` }"
+                @click.stop="emit('select', partitioned.coordinator.conversationId, null)"
+              />
+              <template #content>
+                <div class="pulse-tip-content">
+                  <div class="pulse-tip-head">{{ laneTitle(partitioned.coordinator) }}</div>
+                  <div class="pulse-tip-sub">{{ markerTooltipSub(item) }}</div>
+                  <div class="pulse-tip-meta pulse-mono">
+                    {{
+                      t('pulse.tip.at', {
+                        time: formatClockShort(item.marker.at, viewStart, viewEnd, locale),
+                      })
+                    }}
+                  </div>
+                </div>
+              </template>
+            </DouTooltip>
           </div>
         </div>
 
@@ -867,27 +896,15 @@ onBeforeUnmount(() => {
                 aria-hidden="true"
               />
               <span
-                v-else-if="group.kind === 'needs' || group.kind === 'active'"
-                class="pulse-dot"
-                :class="group.kind === 'needs' ? 'is-warning' : 'is-primary'"
-                aria-hidden="true"
-              />
-              <span class="pulse-group-title">{{ groupHeaderTitle(group) }}</span>
+                class="pulse-group-title"
+                :class="group.kind === 'needs' ? 'is-needs' : undefined"
+              >
+                {{ groupHeaderTitle(group) }}
+              </span>
               <span v-if="group.kind === 'project' && group.isCurrent" class="pulse-group-current">
                 {{ t('pulse.group.projectCurrent') }}
               </span>
-              <span
-                class="pulse-badge pulse-mono"
-                :class="
-                  group.kind === 'needs'
-                    ? 'is-warning'
-                    : group.kind === 'active'
-                      ? 'is-primary'
-                      : 'is-neutral'
-                "
-              >
-                {{ group.rows.length }}
-              </span>
+              <span class="pulse-group-count pulse-mono">{{ group.rows.length }}</span>
             </div>
             <div class="pulse-track-col pulse-group-track" aria-hidden="true" />
           </div>
@@ -905,7 +922,16 @@ onBeforeUnmount(() => {
               @click="emit('select', row.lane.conversationId, null)"
             >
               <div class="pulse-lane-head">
-                <span class="pulse-dot" :class="laneDotClass(row.lane)" aria-hidden="true" />
+                <CornerDownRightIcon
+                  v-if="row.nested"
+                  :size="13"
+                  class="pulse-nested-prefix"
+                  aria-hidden="true"
+                />
+                <StageIcon
+                  :stage="laneStage(row.lane)"
+                  :pull-request-state="lanePullRequestState(row.lane)"
+                />
                 <button
                   type="button"
                   class="pulse-lane-title"
@@ -916,27 +942,15 @@ onBeforeUnmount(() => {
                   "
                   @click.stop="onLaneOpenClick(row.lane)"
                 >
-                  <span v-if="row.nested" class="pulse-nested-prefix" aria-hidden="true">↳</span>
                   {{ laneTitle(row.lane) }}
                 </button>
                 <span
                   v-if="laneAlertBadge(row.lane)"
-                  class="pulse-badge pulse-mono"
+                  class="pulse-lane-alert pulse-mono"
                   :class="`is-${laneAlertBadge(row.lane)!.tone}`"
                 >
                   {{ laneAlertBadge(row.lane)!.text }}
                 </span>
-              </div>
-              <div v-if="!isCompact" class="pulse-lane-meta">
-                <template v-for="meta in [laneMeta(row.lane)]" :key="row.lane.conversationId">
-                  <span v-if="meta.pr" class="pulse-mono">{{ meta.pr }}</span>
-                  <span v-if="meta.diff" class="pulse-mono pulse-diff">
-                    <span class="pulse-diff-add">+{{ meta.diff.added }}</span>
-                    <span class="pulse-diff-del">-{{ meta.diff.removed }}</span>
-                  </span>
-                  <span v-if="meta.progress" class="pulse-mono">{{ meta.progress }}</span>
-                  <span v-if="meta.fallback" class="pulse-meta-fallback">{{ meta.fallback }}</span>
-                </template>
               </div>
             </div>
             <div
@@ -945,38 +959,70 @@ onBeforeUnmount(() => {
               @click="onLaneTrackClick(row.lane.conversationId)"
               @dblclick="emit('resetWindow')"
             >
-              <div
+              <DouTooltip
                 v-for="item in spansForLane(row.lane)"
                 :key="item.span.id"
-                class="pulse-span"
-                :class="[
-                  `is-${item.visualKind}`,
-                  {
-                    'pulse-span-running': item.running,
-                    'is-selected': selectedSpanId === item.span.id,
-                  },
-                ]"
-                :data-span-id="item.span.id"
-                :style="{ left: `${item.leftPct}%`, width: `${item.widthPct}%` }"
-                @click.stop="emit('select', row.lane.conversationId, item.span.id)"
-                @pointerenter="showSpanTooltip(row.lane, item, $event)"
-                @pointermove="positionTooltip($event)"
-                @pointerleave="hideTooltip()"
+                follow-cursor
+                :show-delay="80"
+                :hide-delay="40"
               >
-                <span v-if="item.showText" class="pulse-span-text">{{ item.inlineText }}</span>
-              </div>
-              <div
+                <div
+                  class="pulse-span"
+                  :class="[
+                    `is-${item.visualKind}`,
+                    `is-tone-${item.toneGroup}`,
+                    {
+                      'pulse-span-running': item.running,
+                      'is-selected': selectedSpanId === item.span.id,
+                    },
+                  ]"
+                  :data-span-id="item.span.id"
+                  :style="{ left: `${item.leftPct}%`, width: `${item.widthPct}%` }"
+                  @click.stop="emit('select', row.lane.conversationId, item.span.id)"
+                >
+                  <span v-if="item.showText" class="pulse-span-text">{{ item.inlineText }}</span>
+                </div>
+                <template #content>
+                  <div class="pulse-tip-content">
+                    <div class="pulse-tip-head">
+                      {{ laneTitle(row.lane) }} · {{ t(`pulse.stage.${item.visualKind}`) }}
+                    </div>
+                    <div v-if="item.span.label" class="pulse-tip-sub">{{ item.span.label }}</div>
+                    <div v-if="item.liveCommand" class="pulse-tip-detail pulse-mono">
+                      {{ t('pulse.tip.liveCommand', { command: item.liveCommand }) }}
+                    </div>
+                    <div class="pulse-tip-meta pulse-mono">{{ spanTooltipMeta(item) }}</div>
+                  </div>
+                </template>
+              </DouTooltip>
+              <DouTooltip
                 v-for="item in markersForLane(row.lane)"
                 :key="`${item.marker.seq}-${item.marker.kind}`"
-                class="pulse-marker"
-                :class="`is-${item.tone}`"
-                :data-marker-kind="item.marker.kind"
-                :style="{ left: `${item.pct}%` }"
-                @click.stop="emit('select', row.lane.conversationId, null)"
-                @pointerenter="showMarkerTooltip(row.lane, item, $event)"
-                @pointermove="positionTooltip($event)"
-                @pointerleave="hideTooltip()"
-              />
+                follow-cursor
+                :show-delay="80"
+                :hide-delay="40"
+              >
+                <div
+                  class="pulse-marker"
+                  :class="`is-${item.tone}`"
+                  :data-marker-kind="item.marker.kind"
+                  :style="{ left: `${item.pct}%` }"
+                  @click.stop="emit('select', row.lane.conversationId, null)"
+                />
+                <template #content>
+                  <div class="pulse-tip-content">
+                    <div class="pulse-tip-head">{{ laneTitle(row.lane) }}</div>
+                    <div class="pulse-tip-sub">{{ markerTooltipSub(item) }}</div>
+                    <div class="pulse-tip-meta pulse-mono">
+                      {{
+                        t('pulse.tip.at', {
+                          time: formatClockShort(item.marker.at, viewStart, viewEnd, locale),
+                        })
+                      }}
+                    </div>
+                  </div>
+                </template>
+              </DouTooltip>
             </div>
           </div>
         </template>
@@ -985,28 +1031,29 @@ onBeforeUnmount(() => {
 
         <!-- Completed collapsible section -->
         <template v-if="partitioned.completed.length">
-          <button
-            type="button"
-            class="pulse-completed-toggle"
-            data-pulse-completed-toggle
-            :aria-expanded="showCompleted"
-            @click="emit('update:showCompleted', !showCompleted)"
-          >
-            <span class="pulse-completed-left">
-              <ChevronDownIcon
-                v-if="showCompleted"
-                class="pulse-completed-icon"
-                aria-hidden="true"
-              />
-              <ChevronRightIcon v-else class="pulse-completed-icon" aria-hidden="true" />
-              <span>{{
-                t('pulse.completed.summary', { count: partitioned.completed.length })
-              }}</span>
-              <span v-if="completedPreviewTitles" class="pulse-completed-names">
-                （{{ completedPreviewTitles }}）
+          <div class="pulse-completed-bar">
+            <DouButton
+              variant="ghost"
+              size="sm"
+              class="pulse-completed-toggle"
+              data-pulse-completed-toggle
+              :aria-expanded="showCompleted"
+              @click="emit('update:showCompleted', !showCompleted)"
+            >
+              <template #leading>
+                <ChevronDownIcon v-if="showCompleted" aria-hidden="true" />
+                <ChevronRightIcon v-else aria-hidden="true" />
+              </template>
+              <span class="pulse-completed-left">
+                <span>{{
+                  t('pulse.completed.summary', { count: partitioned.completed.length })
+                }}</span>
+                <span v-if="completedPreviewTitles" class="pulse-completed-names">
+                  （{{ completedPreviewTitles }}）
+                </span>
               </span>
-            </span>
-          </button>
+            </DouButton>
+          </div>
 
           <template v-if="showCompleted">
             <div
@@ -1022,29 +1069,27 @@ onBeforeUnmount(() => {
                 @click="emit('select', row.lane.conversationId, null)"
               >
                 <div class="pulse-lane-head">
-                  <span class="pulse-dot" :class="laneDotClass(row.lane)" aria-hidden="true" />
+                  <CornerDownRightIcon
+                    v-if="row.nested"
+                    :size="13"
+                    class="pulse-nested-prefix"
+                    aria-hidden="true"
+                  />
+                  <StageIcon
+                    :stage="laneStage(row.lane)"
+                    :pull-request-state="lanePullRequestState(row.lane)"
+                  />
                   <button
                     type="button"
                     class="pulse-lane-title"
                     :title="t('pulse.openThread', { title: laneTitle(row.lane) })"
                     @click.stop="onLaneOpenClick(row.lane)"
                   >
-                    <span v-if="row.nested" class="pulse-nested-prefix" aria-hidden="true">↳</span>
                     {{ laneTitle(row.lane) }}
                   </button>
-                </div>
-                <div v-if="!isCompact" class="pulse-lane-meta">
-                  <template v-for="meta in [laneMeta(row.lane)]" :key="row.lane.conversationId">
-                    <span v-if="meta.project" class="pulse-meta-project">{{ meta.project }}</span>
-                    <span v-if="meta.pr" class="pulse-mono">{{ meta.pr }}</span>
-                    <span v-if="meta.diff" class="pulse-mono pulse-diff">
-                      <span class="pulse-diff-add">+{{ meta.diff.added }}</span>
-                      <span class="pulse-diff-del">-{{ meta.diff.removed }}</span>
-                    </span>
-                    <span v-if="meta.fallback" class="pulse-meta-fallback">{{
-                      meta.fallback
-                    }}</span>
-                  </template>
+                  <span v-if="scope === 'all' && row.lane.projectName" class="pulse-lane-project">
+                    {{ row.lane.projectName }}
+                  </span>
                 </div>
               </div>
               <div
@@ -1053,38 +1098,67 @@ onBeforeUnmount(() => {
                 @click="onLaneTrackClick(row.lane.conversationId)"
                 @dblclick="emit('resetWindow')"
               >
-                <div
+                <DouTooltip
                   v-for="item in spansForLane(row.lane)"
                   :key="item.span.id"
-                  class="pulse-span"
-                  :class="[
-                    `is-${item.visualKind}`,
-                    {
-                      'pulse-span-running': item.running,
-                      'is-selected': selectedSpanId === item.span.id,
-                    },
-                  ]"
-                  :data-span-id="item.span.id"
-                  :style="{ left: `${item.leftPct}%`, width: `${item.widthPct}%` }"
-                  @click.stop="emit('select', row.lane.conversationId, item.span.id)"
-                  @pointerenter="showSpanTooltip(row.lane, item, $event)"
-                  @pointermove="positionTooltip($event)"
-                  @pointerleave="hideTooltip()"
+                  follow-cursor
+                  :show-delay="80"
+                  :hide-delay="40"
                 >
-                  <span v-if="item.showText" class="pulse-span-text">{{ item.inlineText }}</span>
-                </div>
-                <div
+                  <div
+                    class="pulse-span"
+                    :class="[
+                      `is-${item.visualKind}`,
+                      `is-tone-${item.toneGroup}`,
+                      {
+                        'pulse-span-running': item.running,
+                        'is-selected': selectedSpanId === item.span.id,
+                      },
+                    ]"
+                    :data-span-id="item.span.id"
+                    :style="{ left: `${item.leftPct}%`, width: `${item.widthPct}%` }"
+                    @click.stop="emit('select', row.lane.conversationId, item.span.id)"
+                  >
+                    <span v-if="item.showText" class="pulse-span-text">{{ item.inlineText }}</span>
+                  </div>
+                  <template #content>
+                    <div class="pulse-tip-content">
+                      <div class="pulse-tip-head">
+                        {{ laneTitle(row.lane) }} · {{ t(`pulse.stage.${item.visualKind}`) }}
+                      </div>
+                      <div v-if="item.span.label" class="pulse-tip-sub">{{ item.span.label }}</div>
+                      <div class="pulse-tip-meta pulse-mono">{{ spanTooltipMeta(item) }}</div>
+                    </div>
+                  </template>
+                </DouTooltip>
+                <DouTooltip
                   v-for="item in markersForLane(row.lane)"
                   :key="`${item.marker.seq}-${item.marker.kind}`"
-                  class="pulse-marker"
-                  :class="`is-${item.tone}`"
-                  :data-marker-kind="item.marker.kind"
-                  :style="{ left: `${item.pct}%` }"
-                  @click.stop="emit('select', row.lane.conversationId, null)"
-                  @pointerenter="showMarkerTooltip(row.lane, item, $event)"
-                  @pointermove="positionTooltip($event)"
-                  @pointerleave="hideTooltip()"
-                />
+                  follow-cursor
+                  :show-delay="80"
+                  :hide-delay="40"
+                >
+                  <div
+                    class="pulse-marker"
+                    :class="`is-${item.tone}`"
+                    :data-marker-kind="item.marker.kind"
+                    :style="{ left: `${item.pct}%` }"
+                    @click.stop="emit('select', row.lane.conversationId, null)"
+                  />
+                  <template #content>
+                    <div class="pulse-tip-content">
+                      <div class="pulse-tip-head">{{ laneTitle(row.lane) }}</div>
+                      <div class="pulse-tip-sub">{{ markerTooltipSub(item) }}</div>
+                      <div class="pulse-tip-meta pulse-mono">
+                        {{
+                          t('pulse.tip.at', {
+                            time: formatClockShort(item.marker.at, viewStart, viewEnd, locale),
+                          })
+                        }}
+                      </div>
+                    </div>
+                  </template>
+                </DouTooltip>
               </div>
             </div>
           </template>
@@ -1092,18 +1166,21 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Floating tooltip -->
+    <!-- Draggable left-column divider (aligned with @dou-ui/gantt) -->
     <div
-      v-if="tooltip"
-      class="pulse-tooltip"
-      role="tooltip"
-      :style="{ left: `${tooltipPos.left}px`, top: `${tooltipPos.top}px` }"
-    >
-      <div class="pulse-tip-head">{{ tooltip.title }}</div>
-      <div v-if="tooltip.subtitle" class="pulse-tip-sub">{{ tooltip.subtitle }}</div>
-      <div v-if="tooltip.detail" class="pulse-tip-detail pulse-mono">{{ tooltip.detail }}</div>
-      <div v-if="tooltip.meta" class="pulse-tip-meta pulse-mono">{{ tooltip.meta }}</div>
-    </div>
+      class="pulse-col-divider"
+      data-pulse-col-divider
+      role="separator"
+      aria-orientation="vertical"
+      tabindex="0"
+      :aria-label="t('pulse.axis.resize')"
+      :aria-valuenow="labelWidth"
+      :aria-valuemin="MIN_LABEL_COL_WIDTH"
+      :aria-valuemax="MAX_LABEL_COL_WIDTH"
+      @pointerdown="onColDividerPointerDown"
+      @dblclick="labelWidth = DEFAULT_LABEL_COL_WIDTH"
+      @keydown="onColDividerKeydown"
+    />
   </div>
 </template>
 
@@ -1114,37 +1191,18 @@ onBeforeUnmount(() => {
 }
 
 .pulse-canvas {
-  --pulse-ci-soft: color-mix(in srgb, var(--dou-color-chart-4) 11%, var(--dou-color-bg-surface));
-  --pulse-review-soft: color-mix(
-    in srgb,
-    var(--dou-color-chart-6) 11%,
-    var(--dou-color-bg-surface)
-  );
-  --pulse-review-fill: var(--dou-color-chart-6);
-  --pulse-stripe: rgba(255, 255, 255, 0.34);
   --pulse-return-tint: color-mix(in srgb, var(--dou-color-primary) 5%, transparent);
-  --pulse-label-w: 258px;
+  --pulse-label-w: 248px;
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: var(--dou-color-bg-canvas);
+  background: var(--dou-color-bg-surface);
 }
 
 :global(html[data-dou-theme='dark'] .pulse-canvas) {
-  --pulse-ci-soft: color-mix(in srgb, var(--dou-color-chart-4) 18%, var(--dou-color-bg-surface));
-  --pulse-review-soft: color-mix(
-    in srgb,
-    var(--dou-color-chart-6) 20%,
-    var(--dou-color-bg-surface)
-  );
-  --pulse-review-fill: color-mix(
-    in srgb,
-    var(--dou-color-chart-6) 76%,
-    var(--dou-color-bg-surface)
-  );
-  --pulse-stripe: rgba(255, 255, 255, 0.16);
   --pulse-return-tint: color-mix(in srgb, var(--dou-color-primary) 9%, transparent);
 }
 
@@ -1153,8 +1211,15 @@ onBeforeUnmount(() => {
   cursor: grabbing;
 }
 
+.pulse-canvas.is-resizing-col {
+  user-select: none;
+  cursor: col-resize;
+}
+
 .pulse-lanes-scroll {
   position: relative;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -1165,7 +1230,8 @@ onBeforeUnmount(() => {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: var(--dou-color-bg-surface);
+  flex: none;
+  background: var(--dou-color-bg-canvas);
 }
 
 .pulse-grid-row {
@@ -1190,44 +1256,44 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 
-.pulse-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 9999px;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
+/* Draggable divider aligned with @dou-ui/gantt */
+.pulse-col-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--pulse-label-w);
+  z-index: 25;
+  width: 7px;
+  margin-left: -4px;
+  cursor: col-resize;
 }
 
-.pulse-badge.is-primary {
-  background: var(--dou-color-primary-soft);
-  color: var(--dou-color-primary-text);
+.pulse-col-divider::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background-color 0.14s ease;
 }
 
-.pulse-badge.is-warning {
-  background: var(--dou-color-warning-soft);
-  color: var(--dou-color-warning-text);
+.pulse-col-divider:hover::after,
+.pulse-col-divider:focus-visible::after,
+.pulse-canvas.is-resizing-col .pulse-col-divider::after {
+  background: var(--dou-color-primary);
 }
 
-.pulse-badge.is-danger {
-  background: var(--dou-color-danger-soft);
-  color: var(--dou-color-danger-text);
-}
-
-.pulse-badge.is-neutral {
-  background: var(--dou-color-bg-muted);
-  color: var(--dou-color-text-secondary);
+.pulse-col-divider:focus-visible {
+  outline: none;
 }
 
 /* Concurrency Ribbon */
 .pulse-ribbon-row {
   height: 28px;
   border-bottom: 1px solid var(--dou-color-border-subtle);
-  background: var(--dou-color-bg-surface);
+  background: var(--dou-color-bg-canvas);
 }
 
 .pulse-ribbon-label {
@@ -1236,8 +1302,22 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 8px;
   padding: 0 12px;
+  background: var(--dou-color-bg-canvas);
   font-size: 11.5px;
   color: var(--dou-color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.pulse-slot-value {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--dou-color-text-secondary);
+}
+
+.pulse-slot-value.is-full {
+  color: var(--dou-color-warning-text);
 }
 
 .pulse-ribbon-track {
@@ -1249,24 +1329,32 @@ onBeforeUnmount(() => {
   position: absolute;
   bottom: 3px;
   border-radius: 2px 2px 0 0;
-  transition: height 0.2s ease;
+  transition:
+    height 0.2s ease,
+    background-color 0.12s ease;
 }
 
 .pulse-ribbon-bar.is-normal {
-  background: color-mix(in srgb, var(--dou-color-primary) 26%, transparent);
-  border-top: 1.5px solid color-mix(in srgb, var(--dou-color-primary) 68%, transparent);
+  background: color-mix(in srgb, var(--dou-color-primary) 38%, transparent);
+}
+
+.pulse-ribbon-bar.is-normal:hover {
+  background: color-mix(in srgb, var(--dou-color-primary) 56%, transparent);
 }
 
 .pulse-ribbon-bar.is-full {
-  background: color-mix(in srgb, var(--dou-color-warning) 30%, transparent);
-  border-top: 1.5px solid var(--dou-color-warning);
+  background: color-mix(in srgb, var(--dou-color-warning) 50%, transparent);
 }
 
-/* Axis Header */
+.pulse-ribbon-bar.is-full:hover {
+  background: color-mix(in srgb, var(--dou-color-warning) 68%, transparent);
+}
+
+/* Axis Header: zero wrap, collision-free ticks & badges */
 .pulse-axis-row {
-  height: 30px;
+  height: 32px;
   border-bottom: 1px solid var(--dou-color-border);
-  background: var(--dou-color-bg-surface);
+  background: var(--dou-color-bg-canvas);
 }
 
 .pulse-axis-label {
@@ -1275,9 +1363,19 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 8px;
   padding: 0 12px;
-  font-size: 11.5px;
+  background: var(--dou-color-bg-canvas);
+  font-size: 12px;
   font-weight: 500;
-  color: var(--dou-color-text-tertiary);
+  color: var(--dou-color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.pulse-axis-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pulse-axis-track {
@@ -1296,10 +1394,11 @@ onBeforeUnmount(() => {
   bottom: 0;
   display: flex;
   align-items: center;
-  padding-left: 5px;
+  padding-left: 6px;
   border-left: 1px solid var(--dou-color-border-subtle);
   font-size: 11px;
   color: var(--dou-color-text-tertiary);
+  white-space: nowrap;
   pointer-events: none;
 }
 
@@ -1307,11 +1406,13 @@ onBeforeUnmount(() => {
   position: absolute;
   top: 50%;
   z-index: 3;
-  transform: translate(-50%, -50%);
-  padding: 1px 6px;
-  border-radius: 9999px;
-  border: 1px solid color-mix(in srgb, var(--dou-color-primary) 28%, transparent);
-  background: color-mix(in srgb, var(--dou-color-primary) 12%, var(--dou-color-bg-surface));
+  height: 18px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--dou-color-primary) 35%, transparent);
+  background: var(--dou-color-bg-canvas);
   color: var(--dou-color-primary-text);
   font-size: 10.5px;
   font-weight: 500;
@@ -1319,40 +1420,73 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+.pulse-axis-return-badge.is-left {
+  transform: translate(4px, -50%);
+}
+
+.pulse-axis-return-badge.is-right {
+  transform: translate(calc(-100% - 4px), -50%);
+}
+
+.pulse-axis-now-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 1.5px;
+  background: var(--dou-color-primary);
+  pointer-events: none;
+}
+
+.pulse-axis-now-mark::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 7px;
+  height: 5px;
+  background: var(--dou-color-primary);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
 .pulse-axis-now-badge {
   position: absolute;
   top: 50%;
   z-index: 4;
-  transform: translate(-50%, -50%);
-  padding: 1px 6px;
-  border-radius: 9999px;
-  background: var(--dou-color-primary);
-  color: var(--dou-color-primary-on);
+  height: 18px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--dou-color-primary) 38%, transparent);
+  background: var(--dou-color-primary-soft);
+  color: var(--dou-color-primary-text);
   font-size: 10.5px;
   font-weight: 600;
   white-space: nowrap;
   pointer-events: none;
 }
 
-.pulse-axis-now-badge.is-right-aligned {
-  transform: translate(-90%, -50%);
+.pulse-axis-now-badge.is-right {
+  transform: translate(calc(-100% - 4px), -50%);
 }
 
-/* Swimlanes area & overlays */
+.pulse-axis-now-badge.is-left {
+  transform: translate(4px, -50%);
+}
+
+/* Lanes container & background overlays */
 .pulse-lanes-inner {
   position: relative;
-  min-height: calc(100% - 58px);
+  flex: 1 0 auto;
 }
 
 .pulse-grid-overlay {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: var(--pulse-label-w);
-  right: 0;
+  inset: 0 0 0 var(--pulse-label-w);
+  pointer-events: none;
   z-index: 1;
   overflow: hidden;
-  pointer-events: none;
 }
 
 .pulse-grid-line {
@@ -1371,7 +1505,7 @@ onBeforeUnmount(() => {
 }
 
 .pulse-return-band.has-border {
-  border-left: 1.5px dashed color-mix(in srgb, var(--dou-color-primary) 50%, transparent);
+  border-left: 1px dashed color-mix(in srgb, var(--dou-color-primary) 48%, transparent);
 }
 
 .pulse-now-line {
@@ -1411,7 +1545,7 @@ onBeforeUnmount(() => {
 }
 
 .pulse-handoff-path.is-request {
-  stroke: var(--dou-color-chart-6);
+  stroke: var(--dou-color-primary);
 }
 
 .pulse-handoff-path.is-changes {
@@ -1423,12 +1557,11 @@ onBeforeUnmount(() => {
 }
 
 .pulse-handoff-dot {
-  pointer-events: all;
-  cursor: pointer;
+  pointer-events: none;
 }
 
 .pulse-handoff-dot.is-request {
-  fill: var(--dou-color-chart-6);
+  fill: var(--dou-color-primary);
 }
 
 .pulse-handoff-dot.is-changes {
@@ -1467,31 +1600,29 @@ onBeforeUnmount(() => {
   color: var(--dou-color-text-tertiary);
 }
 
-.pulse-group-current {
-  flex: none;
-  padding: 1px 5px;
-  border-radius: 9999px;
-  background: var(--dou-color-primary-soft);
-  color: var(--dou-color-primary-text);
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 1.4;
-}
-
-.pulse-meta-project {
-  flex: none;
-  max-width: 96px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--dou-color-text-secondary);
-}
-
 .pulse-group-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pulse-group-title.is-needs {
+  color: var(--dou-color-warning-text);
+}
+
+.pulse-group-current {
+  flex: none;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dou-color-primary-text);
+}
+
+.pulse-group-count {
+  flex: none;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dou-color-text-tertiary);
 }
 
 .pulse-group-track {
@@ -1502,9 +1633,29 @@ onBeforeUnmount(() => {
 .pulse-lane-row {
   position: relative;
   z-index: 2;
-  height: var(--pulse-lane-h, 44px);
+  height: var(--pulse-lane-h, 38px);
   border-bottom: 1px solid var(--dou-color-border-subtle);
   transition: background-color 0.12s ease;
+}
+
+.pulse-lane-row.is-coordinator .pulse-label-col {
+  background: color-mix(in srgb, var(--dou-color-bg-muted) 40%, var(--dou-color-bg-surface));
+}
+
+.pulse-lane-row.is-needs-me .pulse-label-col {
+  background: color-mix(in oklab, var(--dou-color-warning) 4%, var(--dou-color-bg-surface));
+}
+
+.pulse-lane-row.is-needs-me .pulse-track-col {
+  background: color-mix(in oklab, var(--dou-color-warning) 3%, transparent);
+}
+
+.pulse-lane-row.is-blocked .pulse-label-col {
+  background: color-mix(in oklab, var(--dou-color-danger) 4%, var(--dou-color-bg-surface));
+}
+
+.pulse-lane-row.is-blocked .pulse-track-col {
+  background: color-mix(in oklab, var(--dou-color-danger) 3%, transparent);
 }
 
 .pulse-lane-row:hover .pulse-label-col,
@@ -1517,16 +1668,8 @@ onBeforeUnmount(() => {
   background: var(--dou-color-primary-soft);
 }
 
-.pulse-lane-row.is-coordinator .pulse-label-col {
-  background: color-mix(in srgb, var(--dou-color-bg-muted) 35%, var(--dou-color-bg-surface));
-}
-
-.pulse-lane-row.is-needs-me .pulse-label-col {
-  box-shadow: inset 3px 0 0 var(--dou-color-warning);
-}
-
-.pulse-lane-row.is-blocked .pulse-label-col {
-  box-shadow: inset 3px 0 0 var(--dou-color-danger);
+.pulse-lane-row.is-completed {
+  opacity: 0.76;
 }
 
 .pulse-lane-label {
@@ -1540,7 +1683,7 @@ onBeforeUnmount(() => {
 }
 
 .pulse-lane-row.is-nested .pulse-lane-label {
-  padding-left: 26px;
+  padding-left: 18px;
 }
 
 .pulse-lane-head {
@@ -1586,38 +1729,33 @@ onBeforeUnmount(() => {
 }
 
 .pulse-nested-prefix {
-  margin-right: 3px;
+  flex: none;
   color: var(--dou-color-text-tertiary);
 }
 
-.pulse-lane-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-left: 14px;
+.pulse-lane-alert {
+  flex: none;
   font-size: 11px;
-  color: var(--dou-color-text-tertiary);
-  overflow: hidden;
+  font-weight: 500;
   white-space: nowrap;
 }
 
-.pulse-meta-fallback {
-  min-width: 0;
+.pulse-lane-alert.is-warning {
+  color: var(--dou-color-warning-text);
+}
+
+.pulse-lane-alert.is-danger {
+  color: var(--dou-color-danger-text);
+}
+
+.pulse-lane-project {
+  flex: none;
+  max-width: 88px;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.pulse-diff {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.pulse-diff-add {
-  color: var(--dou-color-success-text);
-}
-
-.pulse-diff-del {
-  color: var(--dou-color-danger-text);
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--dou-color-text-tertiary);
 }
 
 .pulse-lane-track {
@@ -1630,82 +1768,16 @@ onBeforeUnmount(() => {
   cursor: grabbing;
 }
 
-/* Status dots */
-.pulse-dot {
-  position: relative;
-  display: inline-block;
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 9999px;
-}
-
-.pulse-dot.is-primary {
-  background: var(--dou-color-primary);
-  color: var(--dou-color-primary);
-}
-
-.pulse-dot.is-warning {
-  background: var(--dou-color-warning);
-  color: var(--dou-color-warning);
-}
-
-.pulse-dot.is-danger {
-  background: var(--dou-color-danger);
-  color: var(--dou-color-danger);
-}
-
-.pulse-dot.is-success {
-  background: var(--dou-color-success);
-  color: var(--dou-color-success);
-}
-
-.pulse-dot.is-ci {
-  background: var(--dou-color-chart-4);
-  color: var(--dou-color-chart-4);
-}
-
-.pulse-dot.is-review {
-  background: var(--dou-color-chart-6);
-  color: var(--dou-color-chart-6);
-}
-
-.pulse-dot.is-neutral {
-  background: var(--dou-color-text-tertiary);
-  color: var(--dou-color-text-tertiary);
-}
-
-.pulse-dot.is-pulse::after {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border-radius: 9999px;
-  border: 1.5px solid currentColor;
-  opacity: 0;
-  animation: pulse-ripple 1.8s cubic-bezier(0.2, 0, 0, 1) infinite;
-}
-
-@keyframes pulse-ripple {
-  0% {
-    transform: scale(0.6);
-    opacity: 0.65;
-  }
-  100% {
-    transform: scale(1.65);
-    opacity: 0;
-  }
-}
-
-/* Spans */
+/* 4-group quiet semantic span palette (aligned with @dou-ui/gantt) */
 .pulse-span {
   position: absolute;
   top: 50%;
   z-index: 2;
   display: flex;
   align-items: center;
-  height: var(--pulse-span-h, 19px);
-  padding: 0 6px;
-  border-radius: 4px;
+  height: var(--pulse-span-h, 20px);
+  padding: 0 7px;
+  border-radius: 5px;
   border: 1px solid transparent;
   transform: translateY(-50%);
   overflow: hidden;
@@ -1713,98 +1785,64 @@ onBeforeUnmount(() => {
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
-  transition: box-shadow 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.pulse-span.is-tone-active {
+  background: var(--dou-color-primary-soft);
+  border-color: color-mix(in srgb, var(--dou-color-primary) 42%, transparent);
+  color: var(--dou-color-primary-text);
+}
+
+.pulse-span.is-tone-attention {
+  background: var(--dou-color-warning-soft);
+  border-color: color-mix(in srgb, var(--dou-color-warning) 48%, transparent);
+  color: var(--dou-color-warning-text);
+}
+
+.pulse-span.is-tone-danger {
+  background: var(--dou-color-danger-soft);
+  border-color: color-mix(in srgb, var(--dou-color-danger) 48%, transparent);
+  color: var(--dou-color-danger-text);
+}
+
+.pulse-span.is-tone-passive {
+  background: var(--dou-color-bg-muted);
+  border: 1px dashed var(--dou-color-border-strong);
+  color: var(--dou-color-text-secondary);
+}
+
+.pulse-span.is-coord {
+  background: color-mix(in srgb, var(--dou-color-neutral) 7%, var(--dou-color-bg-surface));
+  border: 1px solid var(--dou-color-border-strong);
+  color: var(--dou-color-text-secondary);
 }
 
 .pulse-span:hover {
   z-index: 6;
-  box-shadow:
-    0 0 0 1.5px var(--dou-color-bg-surface),
-    0 0 0 3px var(--dou-color-primary);
+  border-color: var(--dou-color-primary);
 }
 
 .pulse-span.is-selected {
   z-index: 7;
-  box-shadow:
-    0 0 0 1.5px var(--dou-color-bg-surface),
-    0 0 0 3px var(--dou-color-primary);
+  border-color: var(--dou-color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dou-color-focus) 32%, transparent);
 }
 
-.pulse-span.is-working {
-  background: var(--dou-color-primary);
-  color: var(--dou-color-primary-on);
+/* Subtle breathing cadence for currently running spans */
+.pulse-span-running {
+  animation: pulse-span-breathe 2.2s ease-in-out infinite;
 }
 
-.pulse-span.is-reviewing {
-  background: var(--pulse-review-fill);
-  color: #fff;
-}
-
-.pulse-span.is-waiting_review {
-  background: var(--pulse-review-soft);
-  color: var(--dou-color-chart-6);
-  border: 1px dashed color-mix(in srgb, var(--dou-color-chart-6) 55%, transparent);
-}
-
-.pulse-span.is-waiting_user {
-  background: var(--dou-color-warning-soft);
-  color: var(--dou-color-warning-text);
-  border-color: color-mix(in srgb, var(--dou-color-warning) 55%, transparent);
-}
-
-.pulse-span.is-waiting_ci {
-  background: var(--pulse-ci-soft);
-  color: var(--dou-color-chart-4);
-  border: 1px dashed color-mix(in srgb, var(--dou-color-chart-4) 70%, transparent);
-}
-
-.pulse-span.is-blocked {
-  background: var(--dou-color-danger-soft);
-  color: var(--dou-color-danger-text);
-  border-color: color-mix(in srgb, var(--dou-color-danger) 55%, transparent);
-}
-
-.pulse-span.is-queued {
-  background: var(--dou-color-bg-muted);
-  color: var(--dou-color-text-tertiary);
-  border: 1px dashed var(--dou-color-border-strong);
-}
-
-.pulse-span.is-waiting {
-  background: var(--dou-color-bg-muted);
-  color: var(--dou-color-text-secondary);
-  border: 1px dotted var(--dou-color-border-strong);
-}
-
-.pulse-span.is-aside {
-  background: var(--dou-color-neutral-soft);
-  color: var(--dou-color-text-tertiary);
-  border: 1px dotted var(--dou-color-border);
-}
-
-.pulse-span.is-coord {
-  background: color-mix(in srgb, var(--dou-color-neutral) 12%, transparent);
-  color: var(--dou-color-text-secondary);
-  border-color: var(--dou-color-border-strong);
-}
-
-.pulse-span-running::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: repeating-linear-gradient(-45deg, transparent 0 5px, var(--pulse-stripe) 5px 10px);
-  background-size: 28px 28px;
-  animation: pulse-stripe-move 1.4s linear infinite;
-}
-
-@keyframes pulse-stripe-move {
-  from {
-    background-position: 0 0;
+@keyframes pulse-span-breathe {
+  0%,
+  100% {
+    opacity: 0.86;
   }
-  to {
-    background-position: 28px 0;
+  50% {
+    opacity: 1;
   }
 }
 
@@ -1831,7 +1869,7 @@ onBeforeUnmount(() => {
 
 .pulse-marker:hover {
   z-index: 8;
-  transform: translate(-50%, -50%) rotate(45deg) scale(1.35);
+  transform: translate(-50%, -50%) rotate(45deg) scale(1.3);
 }
 
 .pulse-marker.is-success {
@@ -1846,64 +1884,34 @@ onBeforeUnmount(() => {
   background: var(--dou-color-warning);
 }
 
-.pulse-marker.is-primary {
+.pulse-marker.is-primary,
+.pulse-marker.is-ci,
+.pulse-marker.is-review {
   background: var(--dou-color-primary);
 }
 
-.pulse-marker.is-ci {
-  background: var(--dou-color-chart-4);
-}
-
-.pulse-marker.is-review {
-  background: var(--dou-color-chart-6);
-}
-
-/* Completed toggle bar */
-.pulse-completed-toggle {
+/* Completed collapsible bar */
+.pulse-completed-bar {
   position: relative;
   z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  padding: 9px 14px;
-  border: 0;
   border-bottom: 1px solid var(--dou-color-border-subtle);
   background: var(--dou-color-bg-surface);
+  padding: 2px 6px;
+}
+
+.pulse-completed-toggle {
+  width: 100%;
+  justify-content: flex-start;
   color: var(--dou-color-text-secondary);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background-color 0.12s ease,
-    color 0.12s ease;
-}
-
-.pulse-completed-toggle:hover {
-  background: var(--dou-color-bg-muted);
-  color: var(--dou-color-text);
-}
-
-.pulse-completed-toggle:focus-visible {
-  outline: 2px solid var(--dou-color-focus);
-  outline-offset: -2px;
+  font-weight: 400;
 }
 
 .pulse-completed-left {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-}
-
-.pulse-completed-icon {
-  flex: none;
-  width: 14px;
-  height: 14px;
 }
 
 .pulse-completed-names {
@@ -1913,50 +1921,42 @@ onBeforeUnmount(() => {
   color: var(--dou-color-text-tertiary);
 }
 
-/* Floating tooltip */
-.pulse-tooltip {
-  position: fixed;
-  z-index: 60;
-  max-width: 300px;
-  padding: 8px 10px;
-  border: 1px solid var(--dou-color-border);
-  border-radius: 8px;
-  background: var(--dou-color-bg-surface);
-  box-shadow: var(--dou-shadow-md);
-  pointer-events: none;
+/* Tooltip inner structure (inherits DouTooltip surface & text colors) */
+.pulse-tip-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 260px;
 }
 
 .pulse-tip-head {
   font-size: 12px;
   font-weight: 600;
-  color: var(--dou-color-text);
-  margin-bottom: 2px;
 }
 
 .pulse-tip-sub {
   font-size: 11.5px;
-  color: var(--dou-color-text-secondary);
+  opacity: 0.84;
   word-break: break-word;
 }
 
 .pulse-tip-detail {
-  margin-top: 4px;
+  margin-top: 2px;
   font-size: 11px;
-  color: var(--dou-color-primary-text);
+  opacity: 0.92;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .pulse-tip-meta {
-  margin-top: 4px;
+  margin-top: 2px;
   font-size: 11px;
-  color: var(--dou-color-text-tertiary);
+  opacity: 0.72;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pulse-span-running::after,
-  .pulse-dot.is-pulse::after {
+  .pulse-span-running {
     animation: none;
   }
 }

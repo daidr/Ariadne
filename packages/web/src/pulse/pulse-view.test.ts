@@ -250,6 +250,12 @@ function mountPulse(layoutMode: WorkspaceLayoutMode = 'wide') {
   return wrapper
 }
 
+async function selectFilter(wrapper: VueWrapper, value: 'all' | 'needs' | 'active') {
+  const radio = wrapper.get(`[data-pulse-filters] input[type="radio"][value="${value}"]`)
+  await radio.setValue(true)
+  await nextTick()
+}
+
 describe('PulseView', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -328,25 +334,39 @@ describe('PulseView', () => {
     vi.useRealTimers()
   })
 
-  test('renders ribbon, axis, return line, grouped lanes, handoff arcs and collapsible completed section', async () => {
+  test('renders concurrency ribbon by default without view options or pill clutter, and expands completed section', async () => {
     const getPulse = vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
     const wrapper = mountPulse()
     await flushPromises()
     await nextTick()
 
     expect(getPulse).toHaveBeenCalledTimes(1)
+    // Concurrency watermark ribbon, handoff arcs and return marker render directly; no view menu or legend.
     expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(true)
-    expect(wrapper.get('[data-pulse-slot-badge]').text()).toBe('1 / 3')
+    expect(wrapper.findAll('.pulse-ribbon-bar').length).toBeGreaterThan(0)
+    expect(wrapper.find('[data-pulse-view-menu]').exists()).toBe(false)
+    expect(wrapper.find('[data-pulse-legend]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-pulse-handoff-arc]')).toHaveLength(1)
+    expect(wrapper.get('[data-pulse-slot-badge]').text().trim()).toBe('1 / 3')
     expect(wrapper.find('[data-pulse-return-badge]').exists()).toBe(true)
     expect(wrapper.find('[data-pulse-return-band]').exists()).toBe(true)
     expect(wrapper.find('[data-pulse-now-line]').exists()).toBe(true)
-    expect(wrapper.findAll('[data-pulse-handoff-arc]')).toHaveLength(1)
+
+    // No capsule pill tags or stray status dots outside actively working StageIcon rows.
+    expect(wrapper.find('.dou-tag.is-round, .dou-check-tag.is-round').exists()).toBe(false)
+    expect(wrapper.find('[data-lane-id="thr_reviewer"] .dou-status-dot').exists()).toBe(true)
+    expect(wrapper.find('[data-lane-id="thr_needs"] .dou-status-dot').exists()).toBe(false)
+    expect(wrapper.find('[data-lane-id="thr_author"] .dou-status-dot').exists()).toBe(false)
 
     // Active lanes visible, reviewer nested under author, completed folded by default.
     expect(wrapper.find('[data-lane-id="crd_1"]').exists()).toBe(true)
     expect(wrapper.find('[data-lane-id="thr_needs"]').exists()).toBe(true)
     expect(wrapper.find('[data-lane-id="thr_author"]').exists()).toBe(true)
     expect(wrapper.find('[data-lane-id="thr_reviewer"]').classes()).toContain('is-nested')
+    expect(wrapper.find('[data-lane-id="thr_reviewer"] svg.pulse-nested-prefix').exists()).toBe(
+      true,
+    )
+    expect(wrapper.find('[data-lane-id="thr_reviewer"]').text()).not.toContain('↳')
     expect(wrapper.find('[data-lane-completed="true"]').exists()).toBe(false)
 
     // Expand completed section -> completed lane renders.
@@ -355,28 +375,34 @@ describe('PulseView', () => {
     expect(wrapper.find('[data-lane-id="thr_done"]').exists()).toBe(true)
   })
 
-  test('supports status filtering, density toggle, layer toggles and pan/snap-to-now follow state', async () => {
+  test('supports status filtering via segmented control, column resize and pan/snap-to-now follow state', async () => {
     vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
     const wrapper = mountPulse()
     await flushPromises()
     await nextTick()
 
     // Filter to needs-only.
-    await wrapper.get('[data-pulse-filter="needs"]').trigger('click')
-    await nextTick()
+    await selectFilter(wrapper, 'needs')
     expect(wrapper.find('[data-lane-id="thr_needs"]').exists()).toBe(true)
     expect(wrapper.find('[data-lane-id="thr_author"]').exists()).toBe(false)
 
-    // Filter back to all.
-    await wrapper.get('[data-pulse-filter="all"]').trigger('click')
-    await nextTick()
+    // Filter to active-only.
+    await selectFilter(wrapper, 'active')
+    expect(wrapper.find('[data-lane-id="thr_needs"]').exists()).toBe(false)
     expect(wrapper.find('[data-lane-id="thr_author"]').exists()).toBe(true)
 
-    // Toggle density from comfortable (44px) to compact (34px).
-    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 44px')
-    await wrapper.get('[data-pulse-density]').trigger('click')
+    // Filter back to all.
+    await selectFilter(wrapper, 'all')
+    expect(wrapper.find('[data-lane-id="thr_needs"]').exists()).toBe(true)
+    expect(wrapper.find('[data-lane-id="thr_author"]').exists()).toBe(true)
+
+    // Fixed comfortable single-line lane height and resizable left column width.
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 38px')
+
+    // Keyboard resize on left-column divider updates --pulse-label-w.
+    await wrapper.get('[data-pulse-col-divider]').trigger('keydown', { key: 'ArrowRight' })
     await nextTick()
-    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 34px')
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-label-w: 260px')
 
     // Sideways wheel pans the timeline and switches follow button from live to back-to-now.
     const followBtn = wrapper.get('[data-pulse-follow]')
@@ -384,13 +410,13 @@ describe('PulseView', () => {
     const scrollEl = wrapper.get('.pulse-lanes-scroll')
     const axisTrack = wrapper.get('.pulse-axis-track').element as HTMLElement
     vi.spyOn(axisTrack, 'getBoundingClientRect').mockReturnValue({
-      left: 258,
+      left: 264,
       top: 0,
-      right: 1058,
+      right: 1064,
       bottom: 30,
       width: 800,
       height: 30,
-      x: 258,
+      x: 264,
       y: 0,
       toJSON: () => ({}),
     })
@@ -404,38 +430,6 @@ describe('PulseView', () => {
     await followBtn.trigger('click')
     await nextTick()
     expect(followBtn.text()).toContain('实时跟随')
-
-    // Layer toggles hide concurrency ribbon, handoff arcs and return line.
-    await wrapper.get('[data-pulse-layers]').trigger('click')
-    await nextTick()
-    const layerSwitches = [
-      ...document.querySelectorAll<HTMLButtonElement>('.pulse-layers-list [role="switch"]'),
-    ]
-    expect(layerSwitches).toHaveLength(3)
-    for (const sw of layerSwitches) sw.click()
-    await nextTick()
-    expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(false)
-    expect(wrapper.find('[data-pulse-handoff-svg]').exists()).toBe(false)
-    expect(wrapper.find('[data-pulse-return-band]').exists()).toBe(false)
-  })
-
-  test('groups active lanes by plan node when switching groupBy to node', async () => {
-    vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
-    const wrapper = mountPulse()
-    await flushPromises()
-    await nextTick()
-
-    const nodeOption = wrapper
-      .findAll('.dou-segmented-control label, .dou-segmented-control button')
-      .find((el) => el.text().includes('按计划节点'))
-    expect(nodeOption).toBeDefined()
-    const radio = nodeOption!.find('input[type="radio"]')
-    if (radio.exists()) await radio.setValue(true)
-    else await nodeOption!.trigger('click')
-    await nextTick()
-
-    expect(wrapper.find('[data-pulse-group="node:node_b"]').exists()).toBe(true)
-    expect(wrapper.find('[data-pulse-group="node:unlinked"]').exists()).toBe(true)
   })
 
   test('opens a worker thread and exits pulse when clicking the lane title', async () => {
@@ -493,8 +487,7 @@ describe('PulseView', () => {
     await flushPromises()
     await nextTick()
 
-    await wrapper.get('[data-pulse-filter="needs"]').trigger('click')
-    await nextTick()
+    await selectFilter(wrapper, 'needs')
     expect(wrapper.find('[data-pulse-inline-empty]').exists()).toBe(true)
 
     await wrapper.get('[data-pulse-inline-empty] button').trigger('click')
@@ -512,7 +505,7 @@ describe('PulseView', () => {
     const inner = wrapper.get('.pulse-lanes-inner').element as HTMLElement
     let flowHeight = 620
     const staleScrollHeight = 620
-    Object.defineProperty(inner, 'clientWidth', { configurable: true, get: () => 1058 })
+    Object.defineProperty(inner, 'clientWidth', { configurable: true, get: () => 1048 })
     Object.defineProperty(inner, 'offsetHeight', { configurable: true, get: () => flowHeight })
     Object.defineProperty(inner, 'scrollHeight', {
       configurable: true,
@@ -522,9 +515,9 @@ describe('PulseView', () => {
     const authorEl = wrapper.get('[data-lane-id="thr_author"]').element as HTMLElement
     const reviewerEl = wrapper.get('[data-lane-id="thr_reviewer"]').element as HTMLElement
     Object.defineProperty(authorEl, 'offsetTop', { configurable: true, get: () => 88 })
-    Object.defineProperty(authorEl, 'offsetHeight', { configurable: true, get: () => 44 })
-    Object.defineProperty(reviewerEl, 'offsetTop', { configurable: true, get: () => 132 })
-    Object.defineProperty(reviewerEl, 'offsetHeight', { configurable: true, get: () => 44 })
+    Object.defineProperty(authorEl, 'offsetHeight', { configurable: true, get: () => 38 })
+    Object.defineProperty(reviewerEl, 'offsetTop', { configurable: true, get: () => 126 })
+    Object.defineProperty(reviewerEl, 'offsetHeight', { configurable: true, get: () => 38 })
 
     // Expand completed section at taller flow height -> SVG grows to 620px.
     await wrapper.get('[data-pulse-completed-toggle]').trigger('click')
@@ -1099,14 +1092,30 @@ describe('PulseView', () => {
     await flushPromises()
     await nextTick()
 
-    await wrapper.get('[data-pulse-filter="active"]').trigger('click')
-    await nextTick()
+    expect(wrapper.find('.dou-tag.is-round, .dou-check-tag.is-round').exists()).toBe(false)
+
+    await selectFilter(wrapper, 'active')
     expect(wrapper.find('[data-lane-id="crd_1"]').exists()).toBe(true)
     expect(wrapper.find('[data-pulse-inline-empty]').exists()).toBe(false)
 
-    await wrapper.get('[data-pulse-filter="needs"]').trigger('click')
-    await nextTick()
+    await selectFilter(wrapper, 'needs')
     expect(wrapper.find('[data-lane-id="crd_1"]').exists()).toBe(false)
     expect(wrapper.find('[data-pulse-inline-empty]').exists()).toBe(true)
+  })
+
+  test('restores clamped labelWidth from persisted prefs and ignores obsolete view fields', async () => {
+    localStorage.setItem(
+      'ariadne.pulse.prefs.v2',
+      JSON.stringify({ density: 'compact', laneLines: 'double', labelWidth: 312 }),
+    )
+    vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
+
+    const wrapper = mountPulse('wide')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 38px')
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-label-w: 312px')
+    expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(true)
   })
 })

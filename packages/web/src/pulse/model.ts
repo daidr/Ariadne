@@ -11,6 +11,7 @@ import type {
   PulseLaneRole,
   PulseMarker,
   PulseSpan,
+  ThreadStage,
   ThreadView,
 } from '@ariadne/core'
 
@@ -20,7 +21,6 @@ export type PulseWindowKey = (typeof PULSE_WINDOW_KEYS)[number]
 export type PulseScope = 'project' | 'all'
 export type PulseFilter = 'all' | 'needs' | 'active'
 export type PulseGroupBy = 'stage' | 'node'
-export type PulseDensity = 'comfortable' | 'compact'
 export type PulseNarrowTab = 'cards' | 'feed'
 
 export type PulseSpanVisualKind =
@@ -34,6 +34,15 @@ export type PulseSpanVisualKind =
   | 'waiting'
   | 'aside'
   | 'coord'
+
+/** Restrained 4-group semantic palette shared by desktop bars and narrow mini-strips. */
+export type PulseSpanToneGroup = 'active' | 'attention' | 'danger' | 'passive'
+
+export type PulseDouTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger'
+
+export const DEFAULT_LABEL_COL_WIDTH = 248
+export const MIN_LABEL_COL_WIDTH = 192
+export const MAX_LABEL_COL_WIDTH = 360
 
 export type PulseMarkerTone = 'primary' | 'success' | 'warning' | 'danger' | 'review' | 'ci'
 export type PulseHandoffTone = 'request' | 'pass' | 'changes'
@@ -237,6 +246,36 @@ export function resolveSpanVisualKind(
       return 'aside'
     default:
       return 'waiting'
+  }
+}
+
+export function resolveSpanToneGroup(kind: PulseSpanVisualKind): PulseSpanToneGroup {
+  switch (kind) {
+    case 'working':
+    case 'reviewing':
+      return 'active'
+    case 'waiting_user':
+      return 'attention'
+    case 'blocked':
+      return 'danger'
+    default:
+      return 'passive'
+  }
+}
+
+export function markerToneToDouTone(tone: PulseMarkerTone): PulseDouTone {
+  switch (tone) {
+    case 'success':
+      return 'success'
+    case 'danger':
+      return 'danger'
+    case 'warning':
+      return 'warning'
+    case 'primary':
+    case 'review':
+      return 'primary'
+    default:
+      return 'neutral'
   }
 }
 
@@ -654,18 +693,116 @@ export function buildConcurrencyBars(
   return bars
 }
 
-export function buildAxisTicks(viewStart: number, viewEnd: number): PulseAxisTick[] {
+export function buildAxisTicks(viewStart: number, viewEnd: number, minGapPct = 0): PulseAxisTick[] {
   const len = Math.max(1, viewEnd - viewStart)
   const rawStep = len / 6
   const step = NICE_TICK_STEPS_MS.find((candidate) => candidate >= rawStep) ?? 6 * HOUR_MS
   const first = Math.ceil(viewStart / step) * step
   const ticks: PulseAxisTick[] = []
+  let lastPct = -Infinity
   for (let at = first; at <= viewEnd; at += step) {
     const pct = percentOf(at, viewStart, viewEnd)
     if (pct < 0 || pct > 97) continue
+    if (minGapPct > 0 && pct - lastPct < minGapPct) continue
     ticks.push({ at, pct })
+    lastPct = pct
   }
   return ticks
+}
+
+export interface PulseAxisHeaderLayout {
+  visibleLabelTicks: PulseAxisTick[]
+  nowAlign: 'left' | 'right'
+  showReturnBadge: boolean
+  returnAlign: 'left' | 'right'
+}
+
+export function spansMultipleDays(viewStart: number, viewEnd: number): boolean {
+  const startDate = new Date(viewStart)
+  const endDate = new Date(viewEnd)
+  return (
+    startDate.getFullYear() !== endDate.getFullYear() ||
+    startDate.getMonth() !== endDate.getMonth() ||
+    startDate.getDate() !== endDate.getDate()
+  )
+}
+
+/**
+ * Computes collision-free label placement along the time axis header so tick
+ * timestamps, the live "now" badge, and the "last away" badge never overlap
+ * while vertical gridlines keep rendering at every tick.
+ */
+export function computeAxisHeaderLayout(params: {
+  ticks: readonly PulseAxisTick[]
+  trackWidthPx: number
+  nowPct: number | null
+  returnPct: number | null
+  spansDays: boolean
+}): PulseAxisHeaderLayout {
+  const width = Math.max(120, params.trackWidthPx)
+  const gap = 8
+  const tickLabelW = params.spansDays ? 86 : 48
+  const nowBadgeW = params.spansDays ? 116 : 84
+  const retBadgeW = params.spansDays ? 132 : 98
+
+  const nowX = params.nowPct !== null ? (params.nowPct / 100) * width : null
+  // Default to placing the "now" badge to the left of the vertical now line so it
+  // stays inside the right edge at live tail (96%). Flip to the right only when
+  // the now line is close to the left edge.
+  const nowAlign: 'left' | 'right' = nowX !== null && nowX < nowBadgeW + gap ? 'left' : 'right'
+  const nowRange: [number, number] | null =
+    nowX === null
+      ? null
+      : nowAlign === 'right'
+        ? [nowX - 4 - nowBadgeW, nowX + 4]
+        : [nowX - 4, nowX + 4 + nowBadgeW]
+
+  const retX = params.returnPct !== null ? (params.returnPct / 100) * width : null
+  let returnAlign: 'left' | 'right' = 'left'
+  let retRange: [number, number] | null = null
+  let showReturnBadge = false
+
+  if (retX !== null && retX >= 0 && retX <= width) {
+    // Prefer placing the away badge to the right of the dashed away line, matching
+    // the direction of the shaded away band; fall back to the opposite side if the
+    // preferred side clips the edge or collides with the live "now" badge.
+    const preferred: 'left' | 'right' = retX + 4 + retBadgeW > width - 4 ? 'right' : 'left'
+    const candidates: readonly ('left' | 'right')[] =
+      preferred === 'left' ? ['left', 'right'] : ['right', 'left']
+    for (const align of candidates) {
+      const range: [number, number] =
+        align === 'left' ? [retX - 4, retX + 4 + retBadgeW] : [retX - 4 - retBadgeW, retX + 4]
+      const overlapsNow =
+        nowRange !== null && range[0] < nowRange[1] + gap && range[1] > nowRange[0] - gap
+      if (!overlapsNow && range[0] >= 0 && range[1] <= width) {
+        returnAlign = align
+        showReturnBadge = true
+        retRange = range
+        break
+      }
+    }
+  }
+
+  const visibleLabelTicks: PulseAxisTick[] = []
+  let prevRight = -Infinity
+  for (const tick of params.ticks) {
+    const x = (tick.pct / 100) * width
+    const left = x
+    const right = x + tickLabelW
+    if (left < 0 || right > width - 4) continue
+    if (left < prevRight + gap) continue
+    if (nowRange && left < nowRange[1] + gap && right > nowRange[0] - gap) continue
+    if (retRange && left < retRange[1] + gap && right > retRange[0] - gap) continue
+    visibleLabelTicks.push(tick)
+    prevRight = right
+  }
+
+  return {
+    visibleLabelTicks,
+    nowAlign,
+    showReturnBadge,
+    returnAlign,
+  }
 }
 
 export function formatClockShort(
@@ -675,13 +812,7 @@ export function formatClockShort(
   locale: string,
 ): string {
   const date = new Date(ms)
-  const startDate = new Date(viewStart)
-  const endDate = new Date(viewEnd)
-  const spansDays =
-    startDate.getFullYear() !== endDate.getFullYear() ||
-    startDate.getMonth() !== endDate.getMonth() ||
-    startDate.getDate() !== endDate.getDate()
-  if (spansDays) {
+  if (spansMultipleDays(viewStart, viewEnd)) {
     return date.toLocaleString(locale, {
       month: 'numeric',
       day: 'numeric',
@@ -750,26 +881,27 @@ export function isPulseRelevantEvent(type: AnyStoredEvent['type']): boolean {
   return PULSE_RELEVANT_PREFIXES.has(prefix)
 }
 
-export function laneStatusDotClass(
-  lane: Pick<PulseLane, 'role' | 'stage' | 'attentionId' | 'completed'>,
-): string {
-  if (lane.role === 'coordinator') {
-    if (lane.attentionId !== null || lane.stage === 'answer') return 'is-warning'
-    if (lane.stage === 'halted') return 'is-danger'
-    if (lane.stage === 'working') return 'is-primary is-pulse'
-    return 'is-neutral'
-  }
-  if (lane.stage === 'answer' || lane.stage === 'stopped' || lane.attentionId !== null) {
-    return 'is-warning'
-  }
-  if (lane.stage === 'blocked' || lane.stage === 'halted' || lane.stage === 'silent') {
-    return 'is-danger'
-  }
-  if (lane.completed || lane.stage === 'done') return 'is-success'
-  if (lane.stage === 'review') return 'is-ci'
-  if (lane.role === 'reviewer' && lane.stage === 'working') return 'is-review is-pulse'
-  if (lane.stage === 'working') return 'is-primary is-pulse'
-  return 'is-neutral'
+const KNOWN_THREAD_STAGES: ReadonlySet<ThreadStage> = new Set([
+  'answer',
+  'stopped',
+  'halted',
+  'silent',
+  'working',
+  'blocked',
+  'review',
+  'done',
+  'queued',
+  'idle',
+])
+
+export function resolveLaneStage(
+  lane: Pick<PulseLane, 'stage' | 'attentionId' | 'completed'>,
+): ThreadStage {
+  if (lane.attentionId !== null || lane.stage === 'answer') return 'answer'
+  if (lane.stage === 'waiting') return 'queued'
+  if (lane.completed) return 'done'
+  if (KNOWN_THREAD_STAGES.has(lane.stage as ThreadStage)) return lane.stage as ThreadStage
+  return 'idle'
 }
 
 export function liveCommandLabel(

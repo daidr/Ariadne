@@ -2,6 +2,7 @@
 import type {
   AllNeedsMeResult,
   AttentionView,
+  ChangeTotals as ChangeTotalsData,
   ConversationView,
   LiveCommand,
   NeedsMeItem,
@@ -9,20 +10,31 @@ import type {
   PulseLane,
   PulseMarker,
   PulseSpan,
+  ThreadPullRequest,
+  ThreadStage,
   ThreadView,
 } from '@ariadne/core'
 import {
+  AlertCircleIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CornerDownRightIcon,
+  EyeIcon,
+  FileTextIcon,
   FolderIcon,
+  GitMergeIcon,
+  GitPullRequestIcon,
+  HelpCircleIcon,
   ListTreeIcon,
   PlayIcon,
   RotateCwIcon,
 } from '@dou-ui/icons'
-import { DouButton, DouEmpty, DouSegmentedControl, DouStatusDot, DouText } from 'dou-ui'
-import { computed, ref } from 'vue'
+import { DouButton, DouCard, DouDivider, DouEmpty, DouSegmentedControl, DouText } from 'dou-ui'
+import { computed, ref, type Component } from 'vue'
 import AskBlock from '../blocks/AskBlock.vue'
+import ChangeTotals from '../components/ChangeTotals.vue'
+import StageIcon from '../components/StageIcon.vue'
 import { locale, t } from '../i18n'
 import { branchChanges } from '../review/merge-offered'
 import { endAside, endWait, resumeThread, retryTurn } from '../store'
@@ -32,12 +44,14 @@ import {
   formatDurationCompact,
   isActiveLane,
   isNeedsLane,
-  laneStatusDotClass,
   liveCommandLabel,
+  markerToneToDouTone,
   percentOf,
   PULSE_WINDOW_KEYS,
   resolveLaneAttentions,
+  resolveLaneStage,
   resolveLaneThreadSummary,
+  resolveSpanToneGroup,
   resolveSpanVisualKind,
   type PulseFeedItem,
   type PulseFilter,
@@ -45,6 +59,7 @@ import {
   type PulseNarrowTab,
   type PulsePartitionedLanes,
   type PulseScope,
+  type PulseSpanToneGroup,
   type PulseSpanVisualKind,
   type PulseWindowKey,
 } from './model'
@@ -97,12 +112,24 @@ const tabOptions = computed(() => [
   { value: 'feed' satisfies PulseNarrowTab, label: t('pulse.narrow.tabFeed') },
 ])
 
+const filterOptions = computed(() => [
+  { value: 'all' satisfies PulseFilter, label: t('pulse.filter.all') },
+  { value: 'needs' satisfies PulseFilter, label: t('pulse.filter.needs') },
+  { value: 'active' satisfies PulseFilter, label: t('pulse.filter.active') },
+])
+
 const windowOptions = computed(() =>
   PULSE_WINDOW_KEYS.map((key) => ({
     value: key,
     label: t(`pulse.window.${key}`),
   })),
 )
+
+function filterCount(value: unknown): number {
+  if (value === 'needs') return props.partitioned.counts.needs
+  if (value === 'active') return props.partitioned.counts.active
+  return props.partitioned.counts.all
+}
 
 const liveActiveSlots = computed(() => {
   const fromSpans = countLiveSlotOccupancy(props.allSpans)
@@ -136,6 +163,7 @@ const nowPct = computed(() => {
 interface MiniSpanSegment {
   id: number
   visualKind: PulseSpanVisualKind
+  toneGroup: PulseSpanToneGroup
   leftPct: number
   widthPct: number
   running: boolean
@@ -149,9 +177,11 @@ function miniSpansForLane(lane: PulseLane): MiniSpanSegment[] {
     if (endAt < props.viewStart || span.startedAt > props.viewEnd) continue
     const leftPct = Math.max(0, percentOf(span.startedAt, props.viewStart, props.viewEnd))
     const rightPct = Math.min(100, percentOf(endAt, props.viewStart, props.viewEnd))
+    const visualKind = resolveSpanVisualKind(span, lane.role)
     out.push({
       id: span.id,
-      visualKind: resolveSpanVisualKind(span, lane.role),
+      visualKind,
+      toneGroup: resolveSpanToneGroup(visualKind),
       leftPct,
       widthPct: Math.max(1.5, rightPct - leftPct),
       running: span.endedAt === null,
@@ -165,6 +195,15 @@ function laneTitle(lane: PulseLane): string {
   return lane.title || lane.conversationId
 }
 
+function laneStage(lane: PulseLane): ThreadStage {
+  return resolveLaneStage(lane)
+}
+
+function lanePullRequestState(lane: PulseLane): ThreadPullRequest['state'] | undefined {
+  if (lane.role === 'coordinator') return undefined
+  return props.threads.get(lane.conversationId)?.pullRequest?.state
+}
+
 function latestSpanOf(lane: PulseLane): PulseSpan | null {
   const list = props.spansByConversation.get(lane.conversationId) ?? []
   return list.at(-1) ?? null
@@ -176,7 +215,7 @@ function openSpanOf(lane: PulseLane): PulseSpan | null {
 }
 
 function laneStageSummary(lane: PulseLane): { label: string; duration: string | null } {
-  const liveCmd = liveCommandLabel(lane, props.liveCommands, 44)
+  const liveCmd = liveCommandLabel(lane, props.liveCommands, 64)
   const latest = latestSpanOf(lane)
   if (liveCmd) {
     const dur = latest
@@ -199,44 +238,46 @@ function laneStageSummary(lane: PulseLane): { label: string; duration: string | 
   }
 }
 
-function laneBadge(
-  lane: PulseLane,
-): { tone: 'warning' | 'danger' | 'primary' | 'success' | 'neutral'; text: string } | null {
+function laneAlertBadge(lane: PulseLane): { tone: 'warning' | 'danger'; text: string } | null {
   if (lane.stage === 'answer' || lane.attentionId !== null) {
     const latest = latestSpanOf(lane)
     const since = latest?.endedAt === null ? latest.startedAt : lane.activeAt
     return { tone: 'warning', text: formatDurationCompact(Math.max(0, props.nowMs - since)) }
   }
-  if (lane.stage === 'stopped') {
-    return { tone: 'warning', text: t('thread.stage.stopped') }
-  }
   if (lane.stage === 'blocked' || lane.stage === 'halted' || lane.stage === 'silent') {
     const failures = props.threads.get(lane.conversationId)?.pullRequest?.checks.failed.length ?? 0
-    return { tone: 'danger', text: failures > 0 ? `×${failures}` : '!' }
-  }
-  if (lane.completed || lane.stage === 'done') {
-    return { tone: 'success', text: t('thread.stage.done') }
-  }
-  if (lane.stage === 'working') {
-    return {
-      tone: 'primary',
-      text: t(lane.role === 'reviewer' ? 'pulse.stage.reviewing' : 'pulse.stage.working'),
-    }
-  }
-  if (lane.stage === 'queued') {
-    return { tone: 'neutral', text: t('pulse.stage.queued') }
-  }
-  if (lane.stage === 'review') {
-    return { tone: 'neutral', text: t('pulse.stage.waiting_review') }
+    if (failures > 0) return { tone: 'danger', text: `×${failures}` }
   }
   return null
 }
 
-function laneMeta(lane: PulseLane) {
+function feedIcon(kind: PulseFeedItem['kind']): Component {
+  switch (kind) {
+    case 'review_handoff':
+    case 'review_submitted':
+      return EyeIcon
+    case 'pr_opened':
+      return GitPullRequestIcon
+    case 'pr_merged':
+      return GitMergeIcon
+    case 'ci_failed':
+      return AlertCircleIcon
+    case 'attention_opened':
+      return HelpCircleIcon
+    default:
+      return FileTextIcon
+  }
+}
+
+function laneMeta(lane: PulseLane): {
+  pr: string | null
+  diff: ChangeTotalsData | null
+  progress: string | null
+  project: string | null
+} {
   const thread = props.threads.get(lane.conversationId)
   const pr = thread?.pullRequest?.number ? `#${thread.pullRequest.number}` : null
-  const changes = thread ? branchChanges(thread) : null
-  const diff = changes ? { added: changes.added, removed: changes.removed } : null
+  const diff = thread ? branchChanges(thread) : null
   const progress =
     thread?.progress && thread.progress.total > 0 && thread.progress.done < thread.progress.total
       ? `${thread.progress.done}/${thread.progress.total}`
@@ -380,13 +421,7 @@ const showCardsEmpty = computed(
           :class="{ 'is-full': isSlotsFull }"
           data-pulse-narrow-slots
         >
-          <DouStatusDot
-            v-if="liveActiveSlots > 0"
-            :tone="isSlotsFull ? 'warning' : 'primary'"
-            ripple
-            aria-hidden="true"
-          />
-          <span>{{ slotPillText }}</span>
+          {{ t('pulse.ribbon.label') }} {{ slotPillText }}
         </span>
       </div>
 
@@ -411,50 +446,36 @@ const showCardsEmpty = computed(
         />
       </div>
 
-      <div v-if="tab === 'cards'" class="pulse-narrow-filters" role="group">
-        <button
-          type="button"
-          class="pulse-filter-pill"
-          :class="{ 'is-active': filter === 'all' }"
-          data-pulse-filter="all"
-          :aria-pressed="filter === 'all'"
-          @click="filter = 'all'"
-        >
-          <span>{{ t('pulse.filter.all') }}</span>
-          <span class="pulse-mono">{{ partitioned.counts.all }}</span>
-        </button>
-        <button
-          type="button"
-          class="pulse-filter-pill"
-          :class="{ 'is-active-warning': filter === 'needs' }"
-          data-pulse-filter="needs"
-          :aria-pressed="filter === 'needs'"
-          @click="filter = 'needs'"
-        >
-          <span class="pulse-dot is-warning" aria-hidden="true" />
-          <span>{{ t('pulse.filter.needs') }}</span>
-          <span class="pulse-mono">{{ partitioned.counts.needs }}</span>
-        </button>
-        <button
-          type="button"
-          class="pulse-filter-pill"
-          :class="{ 'is-active': filter === 'active' }"
-          data-pulse-filter="active"
-          :aria-pressed="filter === 'active'"
-          @click="filter = 'active'"
-        >
-          <span class="pulse-dot is-primary" aria-hidden="true" />
-          <span>{{ t('pulse.filter.active') }}</span>
-          <span class="pulse-mono">{{ partitioned.counts.active }}</span>
-        </button>
-      </div>
+      <DouSegmentedControl
+        v-if="tab === 'cards'"
+        v-model="filter"
+        :options="filterOptions"
+        size="sm"
+        block
+        data-pulse-filters
+      >
+        <template #option="{ option }">
+          <span class="pulse-filter-option" :data-pulse-filter="option.value">
+            <span>{{ option.label }}</span>
+            <span
+              class="pulse-filter-count"
+              :class="{ 'is-needs': option.value === 'needs' && partitioned.counts.needs > 0 }"
+            >
+              {{ filterCount(option.value) }}
+            </span>
+          </span>
+        </template>
+      </DouSegmentedControl>
     </div>
 
     <!-- Tab 1: Pulse cards -->
     <div v-if="tab === 'cards'" class="pulse-narrow-scroll" data-pulse-narrow-cards>
       <!-- Pinned coordinator card in single-project mode -->
-      <article
+      <DouCard
         v-if="showCoordinatorCard && partitioned.coordinator"
+        as="article"
+        interactive
+        padding="sm"
         class="pulse-card-item is-coordinator"
         :class="{
           'is-needs':
@@ -467,147 +488,149 @@ const showCardsEmpty = computed(
         :data-lane-needs="isNeedsLane(partitioned.coordinator) ? 'true' : undefined"
         @click="emit('select', partitioned.coordinator.conversationId, null)"
       >
-        <div class="pulse-card-head">
-          <span
-            class="pulse-dot"
-            :class="laneStatusDotClass(partitioned.coordinator)"
-            aria-hidden="true"
-          />
-          <button
-            type="button"
-            class="pulse-card-title-btn"
-            @click.stop="emit('openLane', partitioned.coordinator)"
-          >
-            {{ laneTitle(partitioned.coordinator) }}
-          </button>
-          <span
-            v-if="laneBadge(partitioned.coordinator)"
-            class="pulse-badge pulse-mono"
-            :class="`is-${laneBadge(partitioned.coordinator)!.tone}`"
-          >
-            {{ laneBadge(partitioned.coordinator)!.text }}
-          </span>
-        </div>
-        <div class="pulse-mini-strip" aria-hidden="true">
+        <div class="pulse-card-stack">
+          <div class="pulse-card-head">
+            <StageIcon :stage="laneStage(partitioned.coordinator)" />
+            <button
+              type="button"
+              class="pulse-card-title-btn"
+              @click.stop="emit('openLane', partitioned.coordinator)"
+            >
+              {{ laneTitle(partitioned.coordinator) }}
+            </button>
+            <span
+              v-if="laneAlertBadge(partitioned.coordinator)"
+              class="pulse-card-alert pulse-mono"
+              :class="`is-${laneAlertBadge(partitioned.coordinator)!.tone}`"
+            >
+              {{ laneAlertBadge(partitioned.coordinator)!.text }}
+            </span>
+          </div>
+          <div class="pulse-mini-strip" aria-hidden="true">
+            <div
+              v-for="seg in miniSpansForLane(partitioned.coordinator)"
+              :key="seg.id"
+              class="pulse-mini-seg"
+              :class="[
+                `is-${seg.visualKind}`,
+                `is-tone-${seg.toneGroup}`,
+                { 'is-running': seg.running },
+              ]"
+              :style="{ left: `${seg.leftPct}%`, width: `${seg.widthPct}%` }"
+            />
+            <div
+              v-if="returnPct !== null"
+              class="pulse-mini-return"
+              :style="{ left: `${returnPct}%` }"
+            />
+            <div v-if="nowPct !== null" class="pulse-mini-now" :style="{ left: `${nowPct}%` }" />
+          </div>
+          <div class="pulse-mini-meta">
+            <span class="pulse-mini-stage">{{
+              laneStageSummary(partitioned.coordinator).label
+            }}</span>
+            <span v-if="laneStageSummary(partitioned.coordinator).duration" class="pulse-mono">
+              {{ laneStageSummary(partitioned.coordinator).duration }}
+            </span>
+          </div>
           <div
-            v-for="seg in miniSpansForLane(partitioned.coordinator)"
-            :key="seg.id"
-            class="pulse-mini-seg"
-            :class="[`is-${seg.visualKind}`, { 'is-running': seg.running }]"
-            :style="{ left: `${seg.leftPct}%`, width: `${seg.widthPct}%` }"
-          />
+            v-if="
+              partitioned.coordinator.lastHeadline &&
+              !liveCommandLabel(partitioned.coordinator, liveCommands)
+            "
+            class="pulse-card-headline"
+          >
+            {{ partitioned.coordinator.lastHeadline }}
+          </div>
           <div
-            v-if="returnPct !== null"
-            class="pulse-mini-return"
-            :style="{ left: `${returnPct}%` }"
-          />
-          <div v-if="nowPct !== null" class="pulse-mini-now" :style="{ left: `${nowPct}%` }" />
-        </div>
-        <div class="pulse-mini-meta">
-          <span class="pulse-mini-stage">{{
-            laneStageSummary(partitioned.coordinator).label
-          }}</span>
-          <span v-if="laneStageSummary(partitioned.coordinator).duration" class="pulse-mono">
-            {{ laneStageSummary(partitioned.coordinator).duration }}
-          </span>
-        </div>
-        <div
-          v-if="
-            partitioned.coordinator.lastHeadline &&
-            !liveCommandLabel(partitioned.coordinator, liveCommands)
-          "
-          class="pulse-card-headline"
-        >
-          {{ partitioned.coordinator.lastHeadline }}
-        </div>
-        <div
-          v-if="laneAttentions(partitioned.coordinator).length"
-          class="pulse-card-inline-actions"
-          @click.stop
-        >
-          <template v-for="att in laneAttentions(partitioned.coordinator)" :key="att.id">
-            <div v-if="att.block.type === 'form'" class="pulse-card-quick-row">
-              <DouText size="sm" truncate>{{ att.block.title }}</DouText>
-              <DouButton
-                size="sm"
-                tone="primary"
-                @click="emit('openLane', partitioned.coordinator)"
-              >
-                {{ t('block.fill') }}
-              </DouButton>
-            </div>
-            <div v-else class="pulse-card-ask" data-pulse-inline-ask>
-              <AskBlock
-                :attention-id="att.id"
-                :block="att.block"
-                :answer="null"
-                @answered="emit('mutated')"
-              />
-            </div>
-          </template>
-        </div>
-        <div
-          v-else-if="needsLaneRetry(partitioned.coordinator)"
-          class="pulse-card-quick-row"
-          @click.stop
-        >
-          <DouButton
-            size="sm"
-            variant="outline"
-            data-pulse-retry
-            :loading="isCardActing(partitioned.coordinator.conversationId, 'retry')"
-            @click="
-              runCardAction(partitioned.coordinator.conversationId, 'retry', () =>
-                retryTurn(partitioned.coordinator!.conversationId),
-              )
-            "
+            v-if="laneAttentions(partitioned.coordinator).length"
+            class="pulse-card-inline-actions"
+            @click.stop
           >
-            <template #leading><RotateCwIcon aria-hidden="true" /></template>
-            {{ t('conversation.retry') }}
-          </DouButton>
-          <DouButton
-            size="sm"
-            variant="ghost"
-            data-pulse-open-trace
-            @click="emit('openTrace', partitioned.coordinator)"
+            <template v-for="att in laneAttentions(partitioned.coordinator)" :key="att.id">
+              <div v-if="att.block.type === 'form'" class="pulse-card-quick-row">
+                <DouText size="sm" truncate>{{ att.block.title }}</DouText>
+                <DouButton
+                  size="sm"
+                  tone="primary"
+                  @click="emit('openLane', partitioned.coordinator)"
+                >
+                  {{ t('block.fill') }}
+                </DouButton>
+              </div>
+              <div v-else class="pulse-card-ask" data-pulse-inline-ask>
+                <AskBlock
+                  :attention-id="att.id"
+                  :block="att.block"
+                  :answer="null"
+                  @answered="emit('mutated')"
+                />
+              </div>
+            </template>
+          </div>
+          <div
+            v-else-if="needsLaneRetry(partitioned.coordinator)"
+            class="pulse-card-quick-row"
+            @click.stop
           >
-            <template #leading><ListTreeIcon aria-hidden="true" /></template>
-            {{ t('pulse.inspector.openTrace') }}
-          </DouButton>
+            <DouButton
+              size="sm"
+              variant="outline"
+              data-pulse-retry
+              :loading="isCardActing(partitioned.coordinator.conversationId, 'retry')"
+              @click="
+                runCardAction(partitioned.coordinator.conversationId, 'retry', () =>
+                  retryTurn(partitioned.coordinator!.conversationId),
+                )
+              "
+            >
+              <template #leading><RotateCwIcon aria-hidden="true" /></template>
+              {{ t('conversation.retry') }}
+            </DouButton>
+            <DouButton
+              size="sm"
+              variant="ghost"
+              data-pulse-open-trace
+              @click="emit('openTrace', partitioned.coordinator)"
+            >
+              <template #leading><ListTreeIcon aria-hidden="true" /></template>
+              {{ t('pulse.inspector.openTrace') }}
+            </DouButton>
+          </div>
+          <div
+            v-else-if="isLaneWaiting(partitioned.coordinator)"
+            class="pulse-card-quick-row"
+            @click.stop
+          >
+            <DouButton
+              size="sm"
+              variant="outline"
+              data-pulse-wake
+              :loading="isCardActing(partitioned.coordinator.conversationId, 'wake')"
+              @click="
+                runCardAction(partitioned.coordinator.conversationId, 'wake', () =>
+                  endWait(partitioned.coordinator!.conversationId, 'now'),
+                )
+              "
+            >
+              {{ t('wait.now') }}
+            </DouButton>
+            <DouButton
+              size="sm"
+              variant="ghost"
+              data-pulse-cancel-wait
+              :loading="isCardActing(partitioned.coordinator.conversationId, 'cancelWait')"
+              @click="
+                runCardAction(partitioned.coordinator.conversationId, 'cancelWait', () =>
+                  endWait(partitioned.coordinator!.conversationId, 'cancel'),
+                )
+              "
+            >
+              {{ t('wait.cancel') }}
+            </DouButton>
+          </div>
         </div>
-        <div
-          v-else-if="isLaneWaiting(partitioned.coordinator)"
-          class="pulse-card-quick-row"
-          @click.stop
-        >
-          <DouButton
-            size="sm"
-            variant="outline"
-            data-pulse-wake
-            :loading="isCardActing(partitioned.coordinator.conversationId, 'wake')"
-            @click="
-              runCardAction(partitioned.coordinator.conversationId, 'wake', () =>
-                endWait(partitioned.coordinator!.conversationId, 'now'),
-              )
-            "
-          >
-            {{ t('wait.now') }}
-          </DouButton>
-          <DouButton
-            size="sm"
-            variant="ghost"
-            data-pulse-cancel-wait
-            :loading="isCardActing(partitioned.coordinator.conversationId, 'cancelWait')"
-            @click="
-              runCardAction(partitioned.coordinator.conversationId, 'cancelWait', () =>
-                endWait(partitioned.coordinator!.conversationId, 'cancel'),
-              )
-            "
-          >
-            {{ t('wait.cancel') }}
-          </DouButton>
-        </div>
-      </article>
+      </DouCard>
 
       <!-- Grouped cards -->
       <section
@@ -618,33 +641,21 @@ const showCardsEmpty = computed(
       >
         <div class="pulse-narrow-group-head">
           <FolderIcon v-if="group.kind === 'project'" class="pulse-group-icon" aria-hidden="true" />
-          <span
-            v-else-if="group.kind === 'needs' || group.kind === 'active'"
-            class="pulse-dot"
-            :class="group.kind === 'needs' ? 'is-warning' : 'is-primary'"
-            aria-hidden="true"
-          />
-          <span class="pulse-group-title">{{ groupHeaderTitle(group) }}</span>
+          <span class="pulse-group-title" :class="group.kind === 'needs' ? 'is-needs' : undefined">
+            {{ groupHeaderTitle(group) }}
+          </span>
           <span v-if="group.kind === 'project' && group.isCurrent" class="pulse-group-current">
             {{ t('pulse.group.projectCurrent') }}
           </span>
-          <span
-            class="pulse-badge pulse-mono"
-            :class="
-              group.kind === 'needs'
-                ? 'is-warning'
-                : group.kind === 'active'
-                  ? 'is-primary'
-                  : 'is-neutral'
-            "
-          >
-            {{ group.rows.length }}
-          </span>
+          <span class="pulse-group-count pulse-mono">{{ group.rows.length }}</span>
         </div>
 
-        <article
+        <DouCard
           v-for="row in group.rows"
           :key="row.lane.conversationId"
+          as="article"
+          interactive
+          padding="sm"
           class="pulse-card-item"
           :class="{
             'is-coordinator': row.lane.role === 'coordinator',
@@ -662,176 +673,192 @@ const showCardsEmpty = computed(
           :data-lane-needs="isNeedsLane(row.lane) ? 'true' : undefined"
           @click="emit('select', row.lane.conversationId, null)"
         >
-          <div class="pulse-card-head">
-            <span class="pulse-dot" :class="laneStatusDotClass(row.lane)" aria-hidden="true" />
-            <button
-              type="button"
-              class="pulse-card-title-btn"
-              @click.stop="emit('openLane', row.lane)"
-            >
-              <span v-if="row.nested" class="pulse-nested-prefix" aria-hidden="true">↳</span>
-              {{ laneTitle(row.lane) }}
-            </button>
-            <span v-if="row.lane.role === 'reviewer'" class="pulse-reviewer-tag">
-              {{ t('pulse.narrow.reviewerTag') }}
-            </span>
-            <span
-              v-if="laneBadge(row.lane)"
-              class="pulse-badge pulse-mono"
-              :class="`is-${laneBadge(row.lane)!.tone}`"
-            >
-              {{ laneBadge(row.lane)!.text }}
-            </span>
-          </div>
+          <div class="pulse-card-stack">
+            <div class="pulse-card-head">
+              <CornerDownRightIcon
+                v-if="row.nested"
+                :size="13"
+                class="pulse-nested-prefix"
+                aria-hidden="true"
+              />
+              <StageIcon
+                :stage="laneStage(row.lane)"
+                :pull-request-state="lanePullRequestState(row.lane)"
+              />
+              <button
+                type="button"
+                class="pulse-card-title-btn"
+                @click.stop="emit('openLane', row.lane)"
+              >
+                {{ laneTitle(row.lane) }}
+              </button>
+              <span
+                v-if="laneAlertBadge(row.lane)"
+                class="pulse-card-alert pulse-mono"
+                :class="`is-${laneAlertBadge(row.lane)!.tone}`"
+              >
+                {{ laneAlertBadge(row.lane)!.text }}
+              </span>
+            </div>
 
-          <div
-            v-if="laneMeta(row.lane).pr || laneMeta(row.lane).diff || laneMeta(row.lane).progress"
-            class="pulse-card-meta pulse-mono"
-          >
-            <span v-if="laneMeta(row.lane).pr">{{ laneMeta(row.lane).pr }}</span>
-            <span v-if="laneMeta(row.lane).diff" class="pulse-diff">
-              <span class="pulse-diff-add">+{{ laneMeta(row.lane).diff!.added }}</span>
-              <span class="pulse-diff-del">-{{ laneMeta(row.lane).diff!.removed }}</span>
-            </span>
-            <span v-if="laneMeta(row.lane).progress">{{ laneMeta(row.lane).progress }}</span>
-          </div>
-
-          <div class="pulse-mini-strip" aria-hidden="true">
             <div
-              v-for="seg in miniSpansForLane(row.lane)"
-              :key="seg.id"
-              class="pulse-mini-seg"
-              :class="[`is-${seg.visualKind}`, { 'is-running': seg.running }]"
-              :style="{ left: `${seg.leftPct}%`, width: `${seg.widthPct}%` }"
-            />
+              v-if="laneMeta(row.lane).pr || laneMeta(row.lane).diff || laneMeta(row.lane).progress"
+              class="pulse-card-meta pulse-mono"
+            >
+              <span v-if="laneMeta(row.lane).pr">{{ laneMeta(row.lane).pr }}</span>
+              <ChangeTotals
+                v-if="laneMeta(row.lane).diff"
+                :totals="laneMeta(row.lane).diff!"
+                :thread-id="row.lane.conversationId"
+              />
+              <span v-if="laneMeta(row.lane).progress">{{ laneMeta(row.lane).progress }}</span>
+            </div>
+
+            <div class="pulse-mini-strip" aria-hidden="true">
+              <div
+                v-for="seg in miniSpansForLane(row.lane)"
+                :key="seg.id"
+                class="pulse-mini-seg"
+                :class="[
+                  `is-${seg.visualKind}`,
+                  `is-tone-${seg.toneGroup}`,
+                  { 'is-running': seg.running },
+                ]"
+                :style="{ left: `${seg.leftPct}%`, width: `${seg.widthPct}%` }"
+              />
+              <div
+                v-if="returnPct !== null"
+                class="pulse-mini-return"
+                :style="{ left: `${returnPct}%` }"
+              />
+              <div v-if="nowPct !== null" class="pulse-mini-now" :style="{ left: `${nowPct}%` }" />
+            </div>
+
+            <div class="pulse-mini-meta">
+              <span class="pulse-mini-stage">{{ laneStageSummary(row.lane).label }}</span>
+              <span v-if="laneStageSummary(row.lane).duration" class="pulse-mono">
+                {{ laneStageSummary(row.lane).duration }}
+              </span>
+            </div>
+
             <div
-              v-if="returnPct !== null"
-              class="pulse-mini-return"
-              :style="{ left: `${returnPct}%` }"
-            />
-            <div v-if="nowPct !== null" class="pulse-mini-now" :style="{ left: `${nowPct}%` }" />
-          </div>
+              v-if="row.lane.lastHeadline && !liveCommandLabel(row.lane, liveCommands)"
+              class="pulse-card-headline"
+            >
+              {{ row.lane.lastHeadline }}
+            </div>
 
-          <div class="pulse-mini-meta">
-            <span class="pulse-mini-stage">{{ laneStageSummary(row.lane).label }}</span>
-            <span v-if="laneStageSummary(row.lane).duration" class="pulse-mono">
-              {{ laneStageSummary(row.lane).duration }}
-            </span>
-          </div>
+            <!-- Inline in-place approval / choice -->
+            <div
+              v-if="laneAttentions(row.lane).length"
+              class="pulse-card-inline-actions"
+              @click.stop
+            >
+              <template v-for="att in laneAttentions(row.lane)" :key="att.id">
+                <div v-if="att.block.type === 'form'" class="pulse-card-quick-row">
+                  <DouText size="sm" truncate>{{ att.block.title }}</DouText>
+                  <DouButton size="sm" tone="primary" @click="emit('openLane', row.lane)">
+                    {{ t('block.fill') }}
+                  </DouButton>
+                </div>
+                <div v-else class="pulse-card-ask" data-pulse-inline-ask>
+                  <AskBlock
+                    :attention-id="att.id"
+                    :block="att.block"
+                    :answer="null"
+                    @answered="emit('mutated')"
+                  />
+                </div>
+              </template>
+            </div>
 
-          <div
-            v-if="row.lane.lastHeadline && !liveCommandLabel(row.lane, liveCommands)"
-            class="pulse-card-headline"
-          >
-            {{ row.lane.lastHeadline }}
+            <!-- Quick retry / resume / wait / aside action row -->
+            <div v-else-if="isLaneStopped(row.lane)" class="pulse-card-quick-row" @click.stop>
+              <DouButton
+                size="sm"
+                variant="outline"
+                data-pulse-resume
+                :loading="isCardActing(row.lane.conversationId, 'resume')"
+                @click="
+                  runCardAction(row.lane.conversationId, 'resume', () =>
+                    resumeThread(row.lane.conversationId),
+                  )
+                "
+              >
+                <template #leading><PlayIcon aria-hidden="true" /></template>
+                {{ t('thread.resume') }}
+              </DouButton>
+            </div>
+            <div v-else-if="needsLaneRetry(row.lane)" class="pulse-card-quick-row" @click.stop>
+              <DouButton
+                size="sm"
+                variant="outline"
+                data-pulse-retry
+                :loading="isCardActing(row.lane.conversationId, 'retry')"
+                @click="
+                  runCardAction(row.lane.conversationId, 'retry', () =>
+                    retryTurn(row.lane.conversationId),
+                  )
+                "
+              >
+                <template #leading><RotateCwIcon aria-hidden="true" /></template>
+                {{ t('conversation.retry') }}
+              </DouButton>
+              <DouButton
+                size="sm"
+                variant="ghost"
+                data-pulse-open-trace
+                @click="emit('openTrace', row.lane)"
+              >
+                <template #leading><ListTreeIcon aria-hidden="true" /></template>
+                {{ t('pulse.inspector.openTrace') }}
+              </DouButton>
+            </div>
+            <div v-else-if="isLaneWaiting(row.lane)" class="pulse-card-quick-row" @click.stop>
+              <DouButton
+                size="sm"
+                variant="outline"
+                data-pulse-wake
+                :loading="isCardActing(row.lane.conversationId, 'wake')"
+                @click="
+                  runCardAction(row.lane.conversationId, 'wake', () =>
+                    endWait(row.lane.conversationId, 'now'),
+                  )
+                "
+              >
+                {{ t('wait.now') }}
+              </DouButton>
+              <DouButton
+                size="sm"
+                variant="ghost"
+                data-pulse-cancel-wait
+                :loading="isCardActing(row.lane.conversationId, 'cancelWait')"
+                @click="
+                  runCardAction(row.lane.conversationId, 'cancelWait', () =>
+                    endWait(row.lane.conversationId, 'cancel'),
+                  )
+                "
+              >
+                {{ t('wait.cancel') }}
+              </DouButton>
+            </div>
+            <div v-else-if="isLaneAside(row.lane)" class="pulse-card-quick-row" @click.stop>
+              <DouButton
+                size="sm"
+                variant="outline"
+                data-pulse-end-aside
+                :loading="isCardActing(row.lane.conversationId, 'aside')"
+                @click="
+                  runCardAction(row.lane.conversationId, 'aside', () =>
+                    endAside(row.lane.conversationId),
+                  )
+                "
+              >
+                {{ t('aside.done') }}
+              </DouButton>
+            </div>
           </div>
-
-          <!-- Inline in-place approval / choice -->
-          <div v-if="laneAttentions(row.lane).length" class="pulse-card-inline-actions" @click.stop>
-            <template v-for="att in laneAttentions(row.lane)" :key="att.id">
-              <div v-if="att.block.type === 'form'" class="pulse-card-quick-row">
-                <DouText size="sm" truncate>{{ att.block.title }}</DouText>
-                <DouButton size="sm" tone="primary" @click="emit('openLane', row.lane)">
-                  {{ t('block.fill') }}
-                </DouButton>
-              </div>
-              <div v-else class="pulse-card-ask" data-pulse-inline-ask>
-                <AskBlock
-                  :attention-id="att.id"
-                  :block="att.block"
-                  :answer="null"
-                  @answered="emit('mutated')"
-                />
-              </div>
-            </template>
-          </div>
-
-          <!-- Quick retry / resume / wait / aside action row -->
-          <div v-else-if="isLaneStopped(row.lane)" class="pulse-card-quick-row" @click.stop>
-            <DouButton
-              size="sm"
-              variant="outline"
-              data-pulse-resume
-              :loading="isCardActing(row.lane.conversationId, 'resume')"
-              @click="
-                runCardAction(row.lane.conversationId, 'resume', () =>
-                  resumeThread(row.lane.conversationId),
-                )
-              "
-            >
-              <template #leading><PlayIcon aria-hidden="true" /></template>
-              {{ t('thread.resume') }}
-            </DouButton>
-          </div>
-          <div v-else-if="needsLaneRetry(row.lane)" class="pulse-card-quick-row" @click.stop>
-            <DouButton
-              size="sm"
-              variant="outline"
-              data-pulse-retry
-              :loading="isCardActing(row.lane.conversationId, 'retry')"
-              @click="
-                runCardAction(row.lane.conversationId, 'retry', () =>
-                  retryTurn(row.lane.conversationId),
-                )
-              "
-            >
-              <template #leading><RotateCwIcon aria-hidden="true" /></template>
-              {{ t('conversation.retry') }}
-            </DouButton>
-            <DouButton
-              size="sm"
-              variant="ghost"
-              data-pulse-open-trace
-              @click="emit('openTrace', row.lane)"
-            >
-              <template #leading><ListTreeIcon aria-hidden="true" /></template>
-              {{ t('pulse.inspector.openTrace') }}
-            </DouButton>
-          </div>
-          <div v-else-if="isLaneWaiting(row.lane)" class="pulse-card-quick-row" @click.stop>
-            <DouButton
-              size="sm"
-              variant="outline"
-              data-pulse-wake
-              :loading="isCardActing(row.lane.conversationId, 'wake')"
-              @click="
-                runCardAction(row.lane.conversationId, 'wake', () =>
-                  endWait(row.lane.conversationId, 'now'),
-                )
-              "
-            >
-              {{ t('wait.now') }}
-            </DouButton>
-            <DouButton
-              size="sm"
-              variant="ghost"
-              data-pulse-cancel-wait
-              :loading="isCardActing(row.lane.conversationId, 'cancelWait')"
-              @click="
-                runCardAction(row.lane.conversationId, 'cancelWait', () =>
-                  endWait(row.lane.conversationId, 'cancel'),
-                )
-              "
-            >
-              {{ t('wait.cancel') }}
-            </DouButton>
-          </div>
-          <div v-else-if="isLaneAside(row.lane)" class="pulse-card-quick-row" @click.stop>
-            <DouButton
-              size="sm"
-              variant="outline"
-              data-pulse-end-aside
-              :loading="isCardActing(row.lane.conversationId, 'aside')"
-              @click="
-                runCardAction(row.lane.conversationId, 'aside', () =>
-                  endAside(row.lane.conversationId),
-                )
-              "
-            >
-              {{ t('aside.done') }}
-            </DouButton>
-          </div>
-        </article>
+        </DouCard>
       </section>
 
       <!-- Empty states -->
@@ -857,51 +884,68 @@ const showCardsEmpty = computed(
 
       <!-- Completed collapsible section -->
       <div v-if="partitioned.completed.length" class="pulse-narrow-completed">
-        <button
-          type="button"
+        <DouButton
+          variant="ghost"
+          size="sm"
           class="pulse-completed-toggle"
           data-pulse-completed-toggle
           :aria-expanded="showCompleted"
           @click="showCompleted = !showCompleted"
         >
-          <ChevronDownIcon v-if="showCompleted" class="pulse-completed-icon" aria-hidden="true" />
-          <ChevronRightIcon v-else class="pulse-completed-icon" aria-hidden="true" />
-          <span>{{ t('pulse.completed.summary', { count: partitioned.completed.length }) }}</span>
-        </button>
+          <template #leading>
+            <ChevronDownIcon v-if="showCompleted" aria-hidden="true" />
+            <ChevronRightIcon v-else aria-hidden="true" />
+          </template>
+          {{ t('pulse.completed.summary', { count: partitioned.completed.length }) }}
+        </DouButton>
 
         <template v-if="showCompleted">
-          <article
+          <DouCard
             v-for="row in partitioned.completed"
             :key="row.lane.conversationId"
+            as="article"
+            interactive
+            padding="sm"
             class="pulse-card-item is-completed"
             :class="{ 'is-selected': selectedLaneId === row.lane.conversationId }"
             :data-lane-id="row.lane.conversationId"
             data-lane-completed="true"
             @click="emit('select', row.lane.conversationId, null)"
           >
-            <div class="pulse-card-head">
-              <span class="pulse-dot" :class="laneStatusDotClass(row.lane)" aria-hidden="true" />
-              <button
-                type="button"
-                class="pulse-card-title-btn"
-                @click.stop="emit('openLane', row.lane)"
-              >
-                {{ laneTitle(row.lane) }}
-              </button>
-              <span v-if="laneMeta(row.lane).project" class="pulse-badge is-neutral">
-                {{ laneMeta(row.lane).project }}
-              </span>
+            <div class="pulse-card-stack">
+              <div class="pulse-card-head">
+                <CornerDownRightIcon
+                  v-if="row.nested"
+                  :size="13"
+                  class="pulse-nested-prefix"
+                  aria-hidden="true"
+                />
+                <StageIcon
+                  :stage="laneStage(row.lane)"
+                  :pull-request-state="lanePullRequestState(row.lane)"
+                />
+                <button
+                  type="button"
+                  class="pulse-card-title-btn"
+                  @click.stop="emit('openLane', row.lane)"
+                >
+                  {{ laneTitle(row.lane) }}
+                </button>
+                <span v-if="laneMeta(row.lane).project" class="pulse-card-project">
+                  {{ laneMeta(row.lane).project }}
+                </span>
+              </div>
+              <div class="pulse-mini-strip" aria-hidden="true">
+                <div
+                  v-for="seg in miniSpansForLane(row.lane)"
+                  :key="seg.id"
+                  class="pulse-mini-seg"
+                  :class="[`is-${seg.visualKind}`, `is-tone-${seg.toneGroup}`]"
+                  :style="{ left: `${seg.leftPct}%`, width: `${seg.widthPct}%` }"
+                />
+              </div>
             </div>
-            <div class="pulse-mini-strip" aria-hidden="true">
-              <div
-                v-for="seg in miniSpansForLane(row.lane)"
-                :key="seg.id"
-                class="pulse-mini-seg"
-                :class="`is-${seg.visualKind}`"
-                :style="{ left: `${seg.leftPct}%`, width: `${seg.widthPct}%` }"
-              />
-            </div>
-          </article>
+          </DouCard>
         </template>
       </div>
     </div>
@@ -922,39 +966,48 @@ const showCardsEmpty = computed(
       </div>
       <div v-else class="pulse-feed-list">
         <template v-for="(item, index) in feedItems" :key="item.key">
-          <div
+          <DouDivider
             v-if="index === returnDividerIndex"
+            dashed
             class="pulse-feed-return-divider"
             data-pulse-feed-return
           >
             <span class="pulse-mono">{{ returnDividerText }}</span>
-          </div>
-          <button
+          </DouDivider>
+          <DouCard
+            as="button"
             type="button"
+            interactive
+            padding="sm"
             class="pulse-feed-row"
             :data-feed-lane-id="item.conversationId"
             @click="emit('select', item.conversationId, null)"
           >
-            <span class="pulse-feed-time pulse-mono">{{ formatFeedTime(item.at) }}</span>
-            <span class="pulse-feed-dot" :class="`is-${item.tone}`" aria-hidden="true" />
-            <span class="pulse-feed-body">
-              <span class="pulse-feed-title">{{ feedText(item) }}</span>
-              <span class="pulse-feed-meta">
-                {{ item.laneRole === 'coordinator' ? t('coordinator.title') : item.laneTitle }}
-                <template v-if="scope === 'all' && item.projectName">
-                  · {{ item.projectName }}
-                </template>
+            <span class="pulse-feed-row-inner">
+              <span class="pulse-feed-time pulse-mono">{{ formatFeedTime(item.at) }}</span>
+              <DouText :tone="markerToneToDouTone(item.tone)" class="pulse-feed-icon">
+                <component :is="feedIcon(item.kind)" :size="14" aria-hidden="true" />
+              </DouText>
+              <span class="pulse-feed-body">
+                <span class="pulse-feed-title">{{ feedText(item) }}</span>
+                <span class="pulse-feed-meta">
+                  {{ item.laneRole === 'coordinator' ? t('coordinator.title') : item.laneTitle }}
+                  <template v-if="scope === 'all' && item.projectName">
+                    · {{ item.projectName }}
+                  </template>
+                </span>
               </span>
             </span>
-          </button>
+          </DouCard>
         </template>
-        <div
+        <DouDivider
           v-if="returnDividerIndex === feedItems.length"
+          dashed
           class="pulse-feed-return-divider"
           data-pulse-feed-return
         >
           <span class="pulse-mono">{{ returnDividerText }}</span>
-        </div>
+        </DouDivider>
       </div>
     </div>
   </div>
@@ -967,13 +1020,6 @@ const showCardsEmpty = computed(
 }
 
 .pulse-narrow {
-  --pulse-ci-soft: color-mix(in srgb, var(--dou-color-chart-4) 14%, var(--dou-color-bg-surface));
-  --pulse-review-soft: color-mix(
-    in srgb,
-    var(--dou-color-chart-6) 14%,
-    var(--dou-color-bg-surface)
-  );
-  --pulse-review-fill: var(--dou-color-chart-6);
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -981,20 +1027,6 @@ const showCardsEmpty = computed(
   min-height: 0;
   background: var(--dou-color-bg-canvas);
   overflow: hidden;
-}
-
-:global(html[data-dou-theme='dark'] .pulse-narrow) {
-  --pulse-ci-soft: color-mix(in srgb, var(--dou-color-chart-4) 22%, var(--dou-color-bg-surface));
-  --pulse-review-soft: color-mix(
-    in srgb,
-    var(--dou-color-chart-6) 22%,
-    var(--dou-color-bg-surface)
-  );
-  --pulse-review-fill: color-mix(
-    in srgb,
-    var(--dou-color-chart-6) 76%,
-    var(--dou-color-bg-surface)
-  );
 }
 
 .pulse-narrow-header {
@@ -1023,20 +1055,14 @@ const showCardsEmpty = computed(
 }
 
 .pulse-narrow-slots {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   flex: none;
-  padding: 2px 9px;
-  border-radius: 9999px;
-  background: var(--dou-color-primary-soft);
-  color: var(--dou-color-primary-text);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dou-color-text-secondary);
+  white-space: nowrap;
 }
 
 .pulse-narrow-slots.is-full {
-  background: var(--dou-color-warning-soft);
   color: var(--dou-color-warning-text);
 }
 
@@ -1056,50 +1082,35 @@ const showCardsEmpty = computed(
   display: flex;
 }
 
-.pulse-narrow-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.pulse-filter-pill {
+.pulse-filter-option {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 26px;
-  padding: 0 9px;
-  border-radius: 9999px;
-  border: 1px solid var(--dou-color-border);
-  background: var(--dou-color-bg-surface);
-  color: var(--dou-color-text-secondary);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
 }
 
-.pulse-filter-pill.is-active {
-  border-color: var(--dou-color-primary);
-  background: var(--dou-color-primary-soft);
-  color: var(--dou-color-primary-text);
+.pulse-filter-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dou-color-text-tertiary);
 }
 
-.pulse-filter-pill.is-active-warning {
-  border-color: var(--dou-color-warning);
-  background: var(--dou-color-warning-soft);
+.pulse-filter-count.is-needs {
   color: var(--dou-color-warning-text);
+}
+
+.pulse-mono {
+  font-family: var(--dou-font-family-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .pulse-narrow-scroll {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-height: 0;
+  padding: 10px 12px 24px;
   overflow-y: auto;
-  overflow-x: hidden;
-  padding: 12px;
 }
 
 .pulse-narrow-group {
@@ -1132,54 +1143,70 @@ const showCardsEmpty = computed(
   white-space: nowrap;
 }
 
+.pulse-group-title.is-needs {
+  color: var(--dou-color-warning-text);
+}
+
 .pulse-group-current {
   flex: none;
-  padding: 1px 5px;
-  border-radius: 9999px;
-  background: var(--dou-color-primary-soft);
-  color: var(--dou-color-primary-text);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
+  color: var(--dou-color-primary-text);
+}
+
+.pulse-group-count {
+  flex: none;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dou-color-text-tertiary);
 }
 
 .pulse-card-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 11px 12px;
-  border-radius: var(--dou-radius-container);
-  border: 1px solid var(--dou-color-border);
-  background: var(--dou-color-bg-surface);
   cursor: pointer;
-  transition: border-color 0.15s ease;
 }
 
 .pulse-card-item.is-coordinator {
-  background: var(--dou-color-bg-muted);
+  --dou-card-bg: color-mix(in srgb, var(--dou-color-bg-muted) 35%, var(--dou-color-bg-surface));
 }
 
 .pulse-card-item.is-needs {
-  border-color: color-mix(in srgb, var(--dou-color-warning) 38%, var(--dou-color-border));
-  background: color-mix(in srgb, var(--dou-color-warning-soft) 40%, var(--dou-color-bg-surface));
+  --dou-card-bg: color-mix(in oklab, var(--dou-color-warning) 4%, var(--dou-color-bg-surface));
+  --dou-card-border: color-mix(in oklab, var(--dou-color-warning) 26%, var(--dou-color-border));
+}
+
+.pulse-card-item.is-needs:hover {
+  --dou-card-border: color-mix(in oklab, var(--dou-color-warning) 42%, var(--dou-color-border));
 }
 
 .pulse-card-item.is-blocked {
-  border-color: color-mix(in srgb, var(--dou-color-danger) 38%, var(--dou-color-border));
-  background: color-mix(in srgb, var(--dou-color-danger-soft) 36%, var(--dou-color-bg-surface));
+  --dou-card-bg: color-mix(in oklab, var(--dou-color-danger) 4%, var(--dou-color-bg-surface));
+  --dou-card-border: color-mix(in oklab, var(--dou-color-danger) 26%, var(--dou-color-border));
 }
 
-.pulse-card-item.is-selected {
-  border-color: var(--dou-color-primary);
+.pulse-card-item.is-blocked:hover {
+  --dou-card-border: color-mix(in oklab, var(--dou-color-danger) 42%, var(--dou-color-border));
+}
+
+.pulse-card-item.is-selected,
+.pulse-card-item.is-selected:hover {
+  --dou-card-border: var(--dou-color-primary);
 }
 
 .pulse-card-item.is-completed {
   opacity: 0.78;
 }
 
+.pulse-card-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
 .pulse-card-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   min-width: 0;
 }
 
@@ -1201,22 +1228,39 @@ const showCardsEmpty = computed(
 }
 
 .pulse-card-title-btn:hover {
-  color: var(--dou-color-primary);
+  color: var(--dou-color-primary-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .pulse-nested-prefix {
-  margin-right: 3px;
+  flex: none;
   color: var(--dou-color-text-tertiary);
 }
 
-.pulse-reviewer-tag {
+.pulse-card-alert {
   flex: none;
-  padding: 1px 6px;
-  border-radius: 9999px;
-  background: var(--pulse-review-soft);
-  color: var(--dou-color-chart-6);
-  font-size: 10px;
+  font-size: 11.5px;
   font-weight: 500;
+  white-space: nowrap;
+}
+
+.pulse-card-alert.is-warning {
+  color: var(--dou-color-warning-text);
+}
+
+.pulse-card-alert.is-danger {
+  color: var(--dou-color-danger-text);
+}
+
+.pulse-card-project {
+  flex: none;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--dou-color-text-tertiary);
 }
 
 .pulse-card-meta {
@@ -1224,28 +1268,15 @@ const showCardsEmpty = computed(
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--dou-color-text-tertiary);
 }
 
-.pulse-diff {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.pulse-diff-add {
-  color: var(--dou-color-success-text);
-}
-
-.pulse-diff-del {
-  color: var(--dou-color-danger-text);
-}
-
-/* Mini pulse progress strip */
+/* Mini timeline strip aligned with desktop 4-group quiet palette */
 .pulse-mini-strip {
   position: relative;
-  height: 8px;
-  border-radius: 9999px;
+  height: 10px;
+  border-radius: 5px;
   background: var(--dou-color-bg-muted);
   overflow: hidden;
 }
@@ -1254,55 +1285,61 @@ const showCardsEmpty = computed(
   position: absolute;
   top: 0;
   bottom: 0;
-  border-radius: 9999px;
+  border-radius: 3px;
+  border: 1px solid transparent;
 }
 
-.pulse-mini-seg.is-working {
-  background: var(--dou-color-primary);
+.pulse-mini-seg.is-tone-active {
+  background: var(--dou-color-primary-soft);
+  border-color: color-mix(in srgb, var(--dou-color-primary) 50%, transparent);
 }
 
-.pulse-mini-seg.is-reviewing {
-  background: var(--pulse-review-fill);
+.pulse-mini-seg.is-tone-attention {
+  background: var(--dou-color-warning-soft);
+  border-color: color-mix(in srgb, var(--dou-color-warning) 58%, transparent);
 }
 
-.pulse-mini-seg.is-waiting_review {
-  background: var(--pulse-review-soft);
-  border: 1px dashed var(--dou-color-chart-6);
+.pulse-mini-seg.is-tone-danger {
+  background: var(--dou-color-danger-soft);
+  border-color: color-mix(in srgb, var(--dou-color-danger) 58%, transparent);
 }
 
-.pulse-mini-seg.is-waiting_user {
-  background: var(--dou-color-warning);
-}
-
-.pulse-mini-seg.is-waiting_ci {
-  background: var(--dou-color-chart-4);
-}
-
-.pulse-mini-seg.is-blocked {
-  background: var(--dou-color-danger);
-}
-
-.pulse-mini-seg.is-queued {
-  background: var(--dou-color-text-tertiary);
-  opacity: 0.45;
-}
-
-.pulse-mini-seg.is-waiting,
-.pulse-mini-seg.is-aside {
-  background: var(--dou-color-border-strong);
+.pulse-mini-seg.is-tone-passive {
+  background: color-mix(in srgb, var(--dou-color-border-strong) 35%, transparent);
+  border: 1px dashed var(--dou-color-border-strong);
 }
 
 .pulse-mini-seg.is-coord {
-  background: var(--dou-color-text-secondary);
-  opacity: 0.55;
+  background: color-mix(in srgb, var(--dou-color-neutral) 10%, var(--dou-color-bg-surface));
+  border-color: var(--dou-color-border-strong);
+}
+
+.pulse-mini-seg.is-running {
+  animation: pulse-mini-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes pulse-mini-breathe {
+  0%,
+  100% {
+    opacity: 0.82;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-mini-seg.is-running {
+    animation: none;
+  }
 }
 
 .pulse-mini-return {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 1.5px;
-  background: color-mix(in srgb, var(--dou-color-primary) 60%, transparent);
+  width: 0;
+  border-left: 1.5px dashed color-mix(in srgb, var(--dou-color-primary) 65%, transparent);
 }
 
 .pulse-mini-now {
@@ -1318,9 +1355,8 @@ const showCardsEmpty = computed(
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--dou-color-text-secondary);
-  min-width: 0;
 }
 
 .pulse-mini-stage {
@@ -1332,20 +1368,16 @@ const showCardsEmpty = computed(
 
 .pulse-card-headline {
   font-size: 12px;
-  line-height: 1.45;
-  color: var(--dou-color-text-secondary);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  color: var(--dou-color-text-tertiary);
   overflow: hidden;
-  word-break: break-word;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pulse-card-inline-actions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 2px;
+  gap: 6px;
 }
 
 .pulse-card-ask {
@@ -1356,8 +1388,13 @@ const showCardsEmpty = computed(
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding-top: 2px;
+  gap: 6px;
+}
+
+.pulse-narrow-empty {
+  display: flex;
+  justify-content: center;
+  padding: 28px 12px;
 }
 
 .pulse-narrow-completed {
@@ -1367,28 +1404,12 @@ const showCardsEmpty = computed(
 }
 
 .pulse-completed-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   width: 100%;
-  padding: 8px 10px;
-  border-radius: var(--dou-radius-control);
-  border: 1px solid var(--dou-color-border-subtle);
-  background: var(--dou-color-bg-surface);
+  justify-content: flex-start;
   color: var(--dou-color-text-secondary);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
 }
 
-.pulse-completed-icon {
-  width: 14px;
-  height: 14px;
-  flex: none;
-}
-
-/* Key events feed */
+/* Feed list */
 .pulse-feed-list {
   display: flex;
   flex-direction: column;
@@ -1396,77 +1417,35 @@ const showCardsEmpty = computed(
 }
 
 .pulse-feed-return-divider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 4px 0;
   font-size: 11px;
   color: var(--dou-color-primary-text);
 }
 
-.pulse-feed-return-divider::before,
-.pulse-feed-return-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  border-top: 1px dashed color-mix(in srgb, var(--dou-color-primary) 50%, transparent);
-}
-
 .pulse-feed-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
   width: 100%;
-  padding: 9px 11px;
-  border-radius: var(--dou-radius-container);
-  border: 1px solid var(--dou-color-border);
-  background: var(--dou-color-bg-surface);
-  color: inherit;
-  font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.pulse-feed-row:hover {
-  border-color: var(--dou-color-border-strong);
+.pulse-feed-row-inner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
 }
 
 .pulse-feed-time {
   flex: none;
-  width: 40px;
-  padding-top: 1px;
   font-size: 11px;
   color: var(--dou-color-text-tertiary);
+  line-height: 1.5;
 }
 
-.pulse-feed-dot {
+.pulse-feed-icon {
+  display: inline-flex;
+  align-items: center;
   flex: none;
-  width: 8px;
-  height: 8px;
-  margin-top: 5px;
-  border-radius: 2px;
-  transform: rotate(45deg);
-  background: var(--dou-color-primary);
-}
-
-.pulse-feed-dot.is-success {
-  background: var(--dou-color-success);
-}
-
-.pulse-feed-dot.is-warning {
-  background: var(--dou-color-warning);
-}
-
-.pulse-feed-dot.is-danger {
-  background: var(--dou-color-danger);
-}
-
-.pulse-feed-dot.is-review {
-  background: var(--dou-color-chart-6);
-}
-
-.pulse-feed-dot.is-ci {
-  background: var(--dou-color-chart-4);
+  margin-top: 2px;
 }
 
 .pulse-feed-body {
@@ -1481,119 +1460,14 @@ const showCardsEmpty = computed(
   font-size: 12.5px;
   font-weight: 500;
   color: var(--dou-color-text);
-  line-height: 1.4;
   word-break: break-word;
 }
 
 .pulse-feed-meta {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--dou-color-text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.pulse-narrow-empty {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-  padding: 28px 16px;
-}
-
-/* Badges & dots */
-.pulse-badge {
-  display: inline-flex;
-  align-items: center;
-  flex: none;
-  padding: 1px 6px;
-  border-radius: 9999px;
-  font-size: 10.5px;
-  font-weight: 600;
-  line-height: 1.45;
-}
-
-.pulse-badge.is-primary {
-  background: var(--dou-color-primary-soft);
-  color: var(--dou-color-primary-text);
-}
-
-.pulse-badge.is-warning {
-  background: var(--dou-color-warning-soft);
-  color: var(--dou-color-warning-text);
-}
-
-.pulse-badge.is-danger {
-  background: var(--dou-color-danger-soft);
-  color: var(--dou-color-danger-text);
-}
-
-.pulse-badge.is-success {
-  background: var(--dou-color-success-soft);
-  color: var(--dou-color-success-text);
-}
-
-.pulse-badge.is-neutral {
-  background: var(--dou-color-bg-muted);
-  color: var(--dou-color-text-secondary);
-}
-
-.pulse-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 9999px;
-  flex: none;
-  display: inline-block;
-}
-
-.pulse-dot.is-primary {
-  background: var(--dou-color-primary);
-  color: var(--dou-color-primary);
-}
-
-.pulse-dot.is-review {
-  background: var(--dou-color-chart-6);
-  color: var(--dou-color-chart-6);
-}
-
-.pulse-dot.is-ci {
-  background: var(--dou-color-chart-4);
-}
-
-.pulse-dot.is-warning {
-  background: var(--dou-color-warning);
-}
-
-.pulse-dot.is-danger {
-  background: var(--dou-color-danger);
-}
-
-.pulse-dot.is-success {
-  background: var(--dou-color-success);
-}
-
-.pulse-dot.is-neutral {
-  background: var(--dou-color-text-tertiary);
-}
-
-.pulse-dot.is-pulse {
-  animation: pulse-narrow-dot-ring 1.8s ease-out infinite;
-}
-
-@keyframes pulse-narrow-dot-ring {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 50%, transparent);
-  }
-  70% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 0%, transparent);
-  }
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 0%, transparent);
-  }
-}
-
-.pulse-mono {
-  font-family: var(--dou-font-family-mono);
-  font-variant-numeric: tabular-nums;
 }
 </style>
