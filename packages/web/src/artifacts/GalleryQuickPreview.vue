@@ -218,20 +218,44 @@ function openMarkdownInnerLink(href: string, event: MouseEvent) {
 
         <div class="quick-meta-grid">
           <div class="meta-row">
-            <DouText size="sm" variant="tertiary">{{ t('gallery.quickView.project') }}</DouText>
-            <DouText size="sm" weight="medium" truncate>{{ item.projectName }}</DouText>
+            <DouText size="sm" variant="tertiary" class="meta-label">{{
+              t('gallery.quickView.project')
+            }}</DouText>
+            <DouText
+              size="sm"
+              weight="medium"
+              truncate
+              class="meta-value"
+              :title="item.projectName"
+            >
+              {{ item.projectName }}
+            </DouText>
           </div>
           <div v-if="item.nodeTitle" class="meta-row">
-            <DouText size="sm" variant="tertiary">{{ t('gallery.quickView.planNode') }}</DouText>
-            <DouText size="sm" truncate>{{ item.nodeTitle }}</DouText>
+            <DouText size="sm" variant="tertiary" class="meta-label">{{
+              t('gallery.quickView.planNode')
+            }}</DouText>
+            <DouText size="sm" truncate class="meta-value" :title="item.nodeTitle">{{
+              item.nodeTitle
+            }}</DouText>
           </div>
           <div class="meta-row">
-            <DouText size="sm" variant="tertiary">{{ t('gallery.quickView.updatedBy') }}</DouText>
-            <DouText size="sm" truncate>{{ updaterLabel }} · {{ updatedLabel }}</DouText>
+            <DouText size="sm" variant="tertiary" class="meta-label">{{
+              t('gallery.quickView.updatedBy')
+            }}</DouText>
+            <span class="meta-value meta-value-inline">
+              <DouText size="sm" truncate class="meta-value-text" :title="updaterLabel">{{
+                updaterLabel
+              }}</DouText>
+              <span class="meta-sep" aria-hidden="true">·</span>
+              <DouText size="sm" class="meta-value-fixed">{{ updatedLabel }}</DouText>
+            </span>
           </div>
           <div v-if="artifact.openComments > 0" class="meta-row">
-            <DouText size="sm" variant="tertiary">{{ t('gallery.quickView.comments') }}</DouText>
-            <DouText size="sm">{{
+            <DouText size="sm" variant="tertiary" class="meta-label">{{
+              t('gallery.quickView.comments')
+            }}</DouText>
+            <DouText size="sm" truncate class="meta-value">{{
               t('gallery.meta.comments', { count: artifact.openComments })
             }}</DouText>
           </div>
@@ -418,20 +442,42 @@ function openMarkdownInnerLink(href: string, event: MouseEvent) {
         }}</DouText>
         <div class="quick-meta-grid">
           <div class="meta-row">
-            <DouText size="sm" variant="tertiary">{{ t('gallery.quickView.project') }}</DouText>
-            <DouText size="sm" weight="medium" truncate>{{ item.projectName }}</DouText>
+            <DouText size="sm" variant="tertiary" class="meta-label">{{
+              t('gallery.quickView.project')
+            }}</DouText>
+            <DouText
+              size="sm"
+              weight="medium"
+              truncate
+              class="meta-value"
+              :title="item.projectName"
+            >
+              {{ item.projectName }}
+            </DouText>
           </div>
           <div v-if="item.nodeTitle" class="meta-row">
-            <DouText size="sm" variant="tertiary">{{ t('gallery.quickView.planNode') }}</DouText>
-            <DouText size="sm" truncate>{{ item.nodeTitle }}</DouText>
+            <DouText size="sm" variant="tertiary" class="meta-label">{{
+              t('gallery.quickView.planNode')
+            }}</DouText>
+            <DouText size="sm" truncate class="meta-value" :title="item.nodeTitle">{{
+              item.nodeTitle
+            }}</DouText>
           </div>
           <div class="meta-row">
-            <DouText size="sm" variant="tertiary">{{ t('gallery.quickView.updatedBy') }}</DouText>
-            <DouText size="sm" truncate>{{ updaterLabel }}</DouText>
+            <DouText size="sm" variant="tertiary" class="meta-label">{{
+              t('gallery.quickView.updatedBy')
+            }}</DouText>
+            <DouText size="sm" truncate class="meta-value" :title="updaterLabel">{{
+              updaterLabel
+            }}</DouText>
           </div>
           <div class="meta-row">
-            <DouText size="sm" variant="tertiary">{{ t('gallery.quickView.updatedAt') }}</DouText>
-            <DouText size="sm">{{ updatedLabel }}</DouText>
+            <DouText size="sm" variant="tertiary" class="meta-label">{{
+              t('gallery.quickView.updatedAt')
+            }}</DouText>
+            <DouText size="sm" truncate class="meta-value" :title="updatedLabel">{{
+              updatedLabel
+            }}</DouText>
           </div>
         </div>
       </div>
@@ -511,10 +557,12 @@ function openMarkdownInnerLink(href: string, event: MouseEvent) {
         <div v-if="versions.length" class="quick-versions">
           <div v-for="ver in versions.slice(0, 5)" :key="ver.version" class="version-row">
             <div class="version-top">
-              <DouTag size="sm" variant="soft" tone="neutral" round>
+              <DouTag size="sm" variant="soft" tone="neutral" round class="version-tag">
                 {{ t('gallery.meta.version', { version: ver.version }) }}
               </DouTag>
-              <DouText size="sm" variant="tertiary">{{ formatVersionTime(ver.createdAt) }}</DouText>
+              <DouText size="sm" variant="tertiary" class="version-time">{{
+                formatVersionTime(ver.createdAt)
+              }}</DouText>
             </div>
             <DouText v-if="ver.reason" size="sm" variant="secondary" class="version-reason">
               {{ ver.reason }}
@@ -643,6 +691,37 @@ function openMarkdownInnerLink(href: string, event: MouseEvent) {
   min-width: 0;
 }
 
+.meta-label {
+  flex: none;
+  white-space: nowrap;
+}
+
+.meta-value {
+  min-width: 0;
+}
+
+.meta-value-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.meta-value-text {
+  min-width: 0;
+}
+
+.meta-sep {
+  flex: none;
+  color: var(--dou-color-text-tertiary);
+  font-size: var(--dou-font-size-sm);
+}
+
+.meta-value-fixed {
+  flex: none;
+  white-space: nowrap;
+}
+
 .quick-loading {
   display: flex;
   justify-content: center;
@@ -702,6 +781,12 @@ function openMarkdownInnerLink(href: string, event: MouseEvent) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.version-tag,
+.version-time {
+  flex: none;
+  white-space: nowrap;
 }
 
 .version-reason {
