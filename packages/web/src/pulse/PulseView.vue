@@ -28,7 +28,6 @@ import {
 import type { WorkspaceLayoutMode } from '../workspace-layout'
 import PulseCanvas from './PulseCanvas.vue'
 import PulseInspector from './PulseInspector.vue'
-import PulseLegend from './PulseLegend.vue'
 import PulseNarrowView from './PulseNarrowView.vue'
 import PulseToolbar from './PulseToolbar.vue'
 import {
@@ -49,10 +48,7 @@ import {
   resolveLaneThreadSummary,
   WINDOW_DURATION_MS,
   zoomViewport,
-  type PulseDensity,
   type PulseFilter,
-  type PulseGroupBy,
-  type PulseLaneLines,
   type PulseNarrowTab,
   type PulseNodeMeta,
   type PulseScope,
@@ -72,12 +68,6 @@ const PAN_REFETCH_MS = 220
 const PREFS_KEY = 'ariadne.pulse.prefs.v2'
 
 interface PulsePrefs {
-  density?: PulseDensity
-  laneLines?: PulseLaneLines
-  showConcurrency?: boolean
-  showHandoffs?: boolean
-  showReturnLine?: boolean
-  showLegend?: boolean
   labelWidth?: number
 }
 
@@ -105,20 +95,7 @@ const initialPrefs = readPrefs()
 const scope = ref<PulseScope>('project')
 const narrowTab = ref<PulseNarrowTab>('cards')
 const filter = ref<PulseFilter>('all')
-const groupBy = ref<PulseGroupBy>('stage')
 const windowKey = ref<PulseWindowKey>('1h')
-const density = ref<PulseDensity>(initialPrefs.density === 'compact' ? 'compact' : 'comfortable')
-const laneLines = ref<PulseLaneLines>(
-  density.value === 'compact'
-    ? 'single'
-    : initialPrefs.laneLines === 'double'
-      ? 'double'
-      : 'single',
-)
-const showConcurrency = ref(initialPrefs.showConcurrency ?? false)
-const showHandoffs = ref(initialPrefs.showHandoffs ?? false)
-const showReturnLine = ref(initialPrefs.showReturnLine ?? true)
-const showLegend = ref(initialPrefs.showLegend ?? false)
 const labelWidth = ref(
   typeof initialPrefs.labelWidth === 'number' && Number.isFinite(initialPrefs.labelWidth)
     ? Math.round(clamp(initialPrefs.labelWidth, MIN_LABEL_COL_WIDTH, MAX_LABEL_COL_WIDTH))
@@ -154,20 +131,9 @@ const drawerMode = computed<'docked' | 'right' | 'bottom'>(() => {
   return 'docked'
 })
 
-watch(
-  [density, laneLines, showConcurrency, showHandoffs, showReturnLine, showLegend, labelWidth],
-  () => {
-    writePrefs({
-      density: density.value,
-      laneLines: laneLines.value,
-      showConcurrency: showConcurrency.value,
-      showHandoffs: showHandoffs.value,
-      showReturnLine: showReturnLine.value,
-      showLegend: showLegend.value,
-      labelWidth: labelWidth.value,
-    })
-  },
-)
+watch(labelWidth, () => {
+  writePrefs({ labelWidth: labelWidth.value })
+})
 
 const currentProjectName = computed(
   () => state.projects.find((project) => project.id === state.currentId)?.name ?? null,
@@ -190,7 +156,7 @@ const partitioned = computed(() =>
   filterAndPartitionLanes(
     snapshot.value?.lanes ?? [],
     filter.value,
-    groupBy.value,
+    'stage',
     threadNodes.value,
     scope.value,
     state.currentId,
@@ -642,14 +608,7 @@ onUnmounted(() => {
       v-if="!isNarrow"
       v-model:scope="scope"
       v-model:filter="filter"
-      v-model:group-by="groupBy"
       v-model:window-key="windowKey"
-      v-model:density="density"
-      v-model:lane-lines="laneLines"
-      v-model:show-concurrency="showConcurrency"
-      v-model:show-handoffs="showHandoffs"
-      v-model:show-return-line="showReturnLine"
-      v-model:show-legend="showLegend"
       :project-name="currentProjectName"
       :counts="partitioned.counts"
       :following="following"
@@ -751,17 +710,11 @@ onUnmounted(() => {
             :now-ms="nowMs"
             :view-start="viewport.viewStart"
             :view-end="viewport.viewEnd"
-            :density="density"
-            :lane-lines="laneLines"
-            :show-concurrency="showConcurrency"
-            :show-handoffs="showHandoffs"
-            :show-return-line="showReturnLine"
             :selected-lane-id="selectedLaneId"
             :selected-span-id="selectedSpanId"
             :scope="scope"
             :threads="threadsById"
             :live-commands="state.live"
-            @toggle-concurrency="showConcurrency = !showConcurrency"
             @select="handleSelect"
             @open-lane="handleOpenLane"
             @zoom="handleZoom"
@@ -854,8 +807,6 @@ onUnmounted(() => {
         @mutated="handleMutated"
       />
     </div>
-
-    <PulseLegend v-if="!isNarrow && showLegend" />
   </section>
 </template>
 

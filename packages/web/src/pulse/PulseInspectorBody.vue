@@ -9,7 +9,7 @@ import type {
   PulseSpan,
   ThreadView,
 } from '@ariadne/core'
-import { PlayIcon, RotateCwIcon } from '@dou-ui/icons'
+import { PlayIcon, RotateCwIcon, TerminalIcon } from '@dou-ui/icons'
 import {
   DouAlert,
   DouButton,
@@ -19,7 +19,6 @@ import {
   DouDescriptionsItem,
   DouLink,
   DouSpinner,
-  DouStatusDot,
   DouText,
   DouTimeline,
   DouTimelineItem,
@@ -414,7 +413,9 @@ function handleCancelWait() {
     <DouCard v-if="liveCmdText" padding="sm" data-pulse-live-cmd>
       <template #header>
         <div class="pulse-live-head">
-          <DouStatusDot tone="primary" size="sm" ripple aria-hidden="true" />
+          <DouText tone="primary" class="pulse-live-icon">
+            <TerminalIcon :size="14" aria-hidden="true" />
+          </DouText>
           <DouText size="sm" weight="medium">{{ t('pulse.inspector.liveCommand') }}</DouText>
         </div>
       </template>
@@ -455,7 +456,7 @@ function handleCancelWait() {
           </DouLink>
         </DouDescriptionsItem>
         <DouDescriptionsItem v-if="thread?.pullRequest" :label="t('pulse.inspector.pullRequest')">
-          <PullRequestTag :thread="thread" pill />
+          <PullRequestTag :thread="thread" />
         </DouDescriptionsItem>
         <DouDescriptionsItem v-if="changes" :label="t('pulse.inspector.diff')">
           <ChangeTotals :totals="changes" :thread-id="lane.conversationId" />
@@ -524,8 +525,14 @@ function handleCancelWait() {
 .pulse-live-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+}
+
+.pulse-live-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
 }
 
 .pulse-descriptions {

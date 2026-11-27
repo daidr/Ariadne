@@ -10,12 +10,13 @@ import type {
   ThreadView,
 } from '@ariadne/core'
 import { CloseIcon, FileDiffIcon, ListTreeIcon, MessagesIcon } from '@dou-ui/icons'
-import { DouButton, DouDrawer, DouStatusDot } from 'dou-ui'
+import { DouButton, DouDrawer } from 'dou-ui'
 import { computed, ref, watch } from 'vue'
+import StageIcon from '../components/StageIcon.vue'
 import { t } from '../i18n'
 import { branchChanges } from '../review/merge-offered'
 import PulseInspectorBody from './PulseInspectorBody.vue'
-import { resolveLaneStatusDot, type PulseNodeMeta } from './model'
+import { resolveLaneStage, type PulseNodeMeta } from './model'
 
 const props = defineProps<{
   open: boolean
@@ -53,9 +54,7 @@ const displayTitle = computed(() => {
   return lane.title || lane.conversationId
 })
 
-const statusDot = computed(() =>
-  props.lane ? resolveLaneStatusDot(props.lane) : { tone: 'neutral' as const, ripple: false },
-)
+const laneStage = computed(() => (props.lane ? resolveLaneStage(props.lane) : 'idle'))
 
 const hasDiff = computed(() => Boolean(props.thread && branchChanges(props.thread)))
 
@@ -89,12 +88,7 @@ const openActionLabel = computed(() =>
   >
     <template v-if="lane" #title>
       <div class="pulse-insp-heading">
-        <DouStatusDot
-          :tone="statusDot.tone"
-          :ripple="statusDot.ripple"
-          size="sm"
-          aria-hidden="true"
-        />
+        <StageIcon :stage="laneStage" :pull-request-state="thread?.pullRequest?.state" />
         <button
           type="button"
           class="pulse-insp-title-btn"
@@ -173,12 +167,7 @@ const openActionLabel = computed(() =>
   >
     <div class="pulse-insp-header">
       <div class="pulse-insp-heading">
-        <DouStatusDot
-          :tone="statusDot.tone"
-          :ripple="statusDot.ripple"
-          size="sm"
-          aria-hidden="true"
-        />
+        <StageIcon :stage="laneStage" :pull-request-state="thread?.pullRequest?.state" />
         <button
           type="button"
           class="pulse-insp-title-btn"

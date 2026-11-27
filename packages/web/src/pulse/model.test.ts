@@ -28,7 +28,7 @@ import {
   needsRefetch,
   panViewport,
   resolveLaneAttentions,
-  resolveLaneStatusDot,
+  resolveLaneStage,
   resolveLaneThreadSummary,
   resolveSpanToneGroup,
   resolveSpanVisualKind,
@@ -398,7 +398,7 @@ describe('buildConcurrencyBars and axis ticks', () => {
     expect(needsOnly.groups[0]!.rows.map((r) => r.lane.conversationId)).toEqual(['thr_other_needs'])
   })
 
-  test('classifies silent and stopped lanes as needing attention with distinct dots', () => {
+  test('classifies silent, stopped and coordinator lanes into canonical ThreadStage values', () => {
     const silent = lane({ conversationId: 'thr_silent', stage: 'silent' })
     const stopped = lane({ conversationId: 'thr_stopped', stage: 'stopped' })
     const haltedCoord = lane({
@@ -406,18 +406,27 @@ describe('buildConcurrencyBars and axis ticks', () => {
       role: 'coordinator',
       stage: 'halted',
     })
+    const waitingCoord = lane({
+      conversationId: 'crd_wait',
+      role: 'coordinator',
+      stage: 'waiting',
+    })
 
     expect(isNeedsLane(silent)).toBe(true)
     expect(isNeedsLane(stopped)).toBe(true)
     expect(isNeedsLane(haltedCoord)).toBe(true)
 
-    expect(resolveLaneStatusDot(silent)).toEqual({ tone: 'danger', ripple: false })
-    expect(resolveLaneStatusDot(stopped)).toEqual({ tone: 'warning', ripple: false })
-    expect(resolveLaneStatusDot(haltedCoord)).toEqual({ tone: 'danger', ripple: false })
-    expect(resolveLaneStatusDot(lane({ conversationId: 'thr_work', stage: 'working' }))).toEqual({
-      tone: 'primary',
-      ripple: true,
-    })
+    expect(resolveLaneStage(silent)).toBe('silent')
+    expect(resolveLaneStage(stopped)).toBe('stopped')
+    expect(resolveLaneStage(haltedCoord)).toBe('halted')
+    expect(resolveLaneStage(waitingCoord)).toBe('queued')
+    expect(resolveLaneStage(lane({ conversationId: 'thr_work', stage: 'working' }))).toBe('working')
+    expect(
+      resolveLaneStage(lane({ conversationId: 'thr_att', stage: 'idle', attentionId: 'att_1' })),
+    ).toBe('answer')
+    expect(
+      resolveLaneStage(lane({ conversationId: 'thr_done', stage: 'idle', completed: true })),
+    ).toBe('done')
   })
 
   test('maps span visual kinds to 4 soft tone groups and marker tones to DouUI tones', () => {

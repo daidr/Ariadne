@@ -11,6 +11,7 @@ import type {
   PulseLaneRole,
   PulseMarker,
   PulseSpan,
+  ThreadStage,
   ThreadView,
 } from '@ariadne/core'
 
@@ -20,8 +21,6 @@ export type PulseWindowKey = (typeof PULSE_WINDOW_KEYS)[number]
 export type PulseScope = 'project' | 'all'
 export type PulseFilter = 'all' | 'needs' | 'active'
 export type PulseGroupBy = 'stage' | 'node'
-export type PulseDensity = 'comfortable' | 'compact'
-export type PulseLaneLines = 'single' | 'double'
 export type PulseNarrowTab = 'cards' | 'feed'
 
 export type PulseSpanVisualKind =
@@ -36,15 +35,10 @@ export type PulseSpanVisualKind =
   | 'aside'
   | 'coord'
 
-/** Restrained 4-group semantic palette shared by desktop bars, narrow mini-strips and legend. */
+/** Restrained 4-group semantic palette shared by desktop bars and narrow mini-strips. */
 export type PulseSpanToneGroup = 'active' | 'attention' | 'danger' | 'passive'
 
 export type PulseDouTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger'
-
-export interface PulseStatusDotSpec {
-  tone: PulseDouTone
-  ripple: boolean
-}
 
 export const DEFAULT_LABEL_COL_WIDTH = 248
 export const MIN_LABEL_COL_WIDTH = 192
@@ -887,27 +881,27 @@ export function isPulseRelevantEvent(type: AnyStoredEvent['type']): boolean {
   return PULSE_RELEVANT_PREFIXES.has(prefix)
 }
 
-export function resolveLaneStatusDot(
-  lane: Pick<PulseLane, 'role' | 'stage' | 'attentionId' | 'completed'>,
-): PulseStatusDotSpec {
-  if (lane.role === 'coordinator') {
-    if (lane.attentionId !== null || lane.stage === 'answer') {
-      return { tone: 'warning', ripple: false }
-    }
-    if (lane.stage === 'halted') return { tone: 'danger', ripple: false }
-    if (lane.stage === 'working') return { tone: 'primary', ripple: true }
-    return { tone: 'neutral', ripple: false }
-  }
-  if (lane.stage === 'answer' || lane.stage === 'stopped' || lane.attentionId !== null) {
-    return { tone: 'warning', ripple: false }
-  }
-  if (lane.stage === 'blocked' || lane.stage === 'halted' || lane.stage === 'silent') {
-    return { tone: 'danger', ripple: false }
-  }
-  if (lane.completed || lane.stage === 'done') return { tone: 'success', ripple: false }
-  if (lane.stage === 'working') return { tone: 'primary', ripple: true }
-  if (lane.stage === 'review') return { tone: 'primary', ripple: false }
-  return { tone: 'neutral', ripple: false }
+const KNOWN_THREAD_STAGES: ReadonlySet<ThreadStage> = new Set([
+  'answer',
+  'stopped',
+  'halted',
+  'silent',
+  'working',
+  'blocked',
+  'review',
+  'done',
+  'queued',
+  'idle',
+])
+
+export function resolveLaneStage(
+  lane: Pick<PulseLane, 'stage' | 'attentionId' | 'completed'>,
+): ThreadStage {
+  if (lane.attentionId !== null || lane.stage === 'answer') return 'answer'
+  if (lane.stage === 'waiting') return 'queued'
+  if (lane.completed) return 'done'
+  if (KNOWN_THREAD_STAGES.has(lane.stage as ThreadStage)) return lane.stage as ThreadStage
+  return 'idle'
 }
 
 export function liveCommandLabel(

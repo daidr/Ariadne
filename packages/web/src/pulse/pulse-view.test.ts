@@ -250,18 +250,10 @@ function mountPulse(layoutMode: WorkspaceLayoutMode = 'wide') {
   return wrapper
 }
 
-async function openViewMenu(wrapper: VueWrapper) {
-  const trigger = wrapper.get('[data-pulse-view-menu]')
-  if (trigger.attributes('aria-expanded') !== 'true') {
-    await trigger.trigger('click')
-    await nextTick()
-  }
-}
-
-function clickMenuOption(selector: string) {
-  const el = document.querySelector<HTMLElement>(selector)
-  expect(el, `expected menu option ${selector}`).not.toBeNull()
-  el!.click()
+async function selectFilter(wrapper: VueWrapper, value: 'all' | 'needs' | 'active') {
+  const radio = wrapper.get(`[data-pulse-filters] input[type="radio"][value="${value}"]`)
+  await radio.setValue(true)
+  await nextTick()
 }
 
 describe('PulseView', () => {
@@ -342,26 +334,29 @@ describe('PulseView', () => {
     vi.useRealTimers()
   })
 
-  test('renders minimal default canvas, toggles ribbon via slot badge, and expands completed section', async () => {
+  test('renders concurrency ribbon by default without view options or pill clutter, and expands completed section', async () => {
     const getPulse = vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
     const wrapper = mountPulse()
     await flushPromises()
     await nextTick()
 
     expect(getPulse).toHaveBeenCalledTimes(1)
-    // Minimal default: concurrency ribbon, handoff arcs and legend are hidden; slot badge is shown in header.
-    expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(false)
-    expect(wrapper.find('[data-pulse-handoff-svg]').exists()).toBe(false)
+    // Concurrency watermark ribbon, handoff arcs and return marker render directly; no view menu or legend.
+    expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(true)
+    expect(wrapper.findAll('.pulse-ribbon-bar').length).toBeGreaterThan(0)
+    expect(wrapper.find('[data-pulse-view-menu]').exists()).toBe(false)
     expect(wrapper.find('[data-pulse-legend]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-pulse-handoff-arc]')).toHaveLength(1)
     expect(wrapper.get('[data-pulse-slot-badge]').text().trim()).toBe('1 / 3')
     expect(wrapper.find('[data-pulse-return-badge]').exists()).toBe(true)
     expect(wrapper.find('[data-pulse-return-band]').exists()).toBe(true)
     expect(wrapper.find('[data-pulse-now-line]').exists()).toBe(true)
 
-    // Clicking the compact slot badge toggles the concurrency watermark ribbon.
-    await wrapper.get('[data-pulse-slot-badge]').trigger('click')
-    await nextTick()
-    expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(true)
+    // No capsule pill tags or stray status dots outside actively working StageIcon rows.
+    expect(wrapper.find('.dou-tag.is-round, .dou-check-tag.is-round').exists()).toBe(false)
+    expect(wrapper.find('[data-lane-id="thr_reviewer"] .dou-status-dot').exists()).toBe(true)
+    expect(wrapper.find('[data-lane-id="thr_needs"] .dou-status-dot').exists()).toBe(false)
+    expect(wrapper.find('[data-lane-id="thr_author"] .dou-status-dot').exists()).toBe(false)
 
     // Active lanes visible, reviewer nested under author, completed folded by default.
     expect(wrapper.find('[data-lane-id="crd_1"]').exists()).toBe(true)
@@ -380,80 +375,29 @@ describe('PulseView', () => {
     expect(wrapper.find('[data-lane-id="thr_done"]').exists()).toBe(true)
   })
 
-  test('supports status filtering, view menu controls, column resize and pan/snap-to-now follow state', async () => {
+  test('supports status filtering via segmented control, column resize and pan/snap-to-now follow state', async () => {
     vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
     const wrapper = mountPulse()
     await flushPromises()
     await nextTick()
 
-    // Unselected colored filter tags show leading status dots; selected tag hides same-color dot.
-    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(true)
-    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(true)
-
     // Filter to needs-only.
-    await wrapper.get('[data-pulse-filter="needs"]').trigger('click')
-    await nextTick()
-    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(false)
-    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(true)
+    await selectFilter(wrapper, 'needs')
     expect(wrapper.find('[data-lane-id="thr_needs"]').exists()).toBe(true)
     expect(wrapper.find('[data-lane-id="thr_author"]').exists()).toBe(false)
 
     // Filter to active-only.
-    await wrapper.get('[data-pulse-filter="active"]').trigger('click')
-    await nextTick()
-    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(true)
-    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(false)
-
-    // Filter back to all.
-    await wrapper.get('[data-pulse-filter="all"]').trigger('click')
-    await nextTick()
-    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(true)
-    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(true)
+    await selectFilter(wrapper, 'active')
+    expect(wrapper.find('[data-lane-id="thr_needs"]').exists()).toBe(false)
     expect(wrapper.find('[data-lane-id="thr_author"]').exists()).toBe(true)
 
-    // Default comfortable single-line (38px) -> double-line (46px) -> compact (32px, resets laneLines to single).
+    // Filter back to all.
+    await selectFilter(wrapper, 'all')
+    expect(wrapper.find('[data-lane-id="thr_needs"]').exists()).toBe(true)
+    expect(wrapper.find('[data-lane-id="thr_author"]').exists()).toBe(true)
+
+    // Fixed comfortable single-line lane height and resizable left column width.
     expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 38px')
-    expect(wrapper.find('[data-lane-id="thr_author"] .pulse-lane-meta').exists()).toBe(false)
-
-    await openViewMenu(wrapper)
-    clickMenuOption('[data-pulse-lane-lines="double"]')
-    await nextTick()
-    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 46px')
-    expect(wrapper.find('[data-lane-id="thr_author"] .pulse-lane-meta').exists()).toBe(true)
-
-    clickMenuOption('[data-pulse-density-option="compact"]')
-    await nextTick()
-    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 32px')
-    expect(wrapper.find('[data-lane-id="thr_author"] .pulse-lane-meta').exists()).toBe(false)
-    expect(
-      document.querySelector('[data-pulse-lane-lines="single"]')?.getAttribute('aria-checked'),
-    ).toBe('true')
-    expect(
-      document.querySelector('[data-pulse-lane-lines="double"]')?.getAttribute('aria-checked'),
-    ).toBe('false')
-
-    // Picking double-line from compact automatically restores comfortable density.
-    clickMenuOption('[data-pulse-lane-lines="double"]')
-    await nextTick()
-    expect(
-      document
-        .querySelector('[data-pulse-density-option="comfortable"]')
-        ?.getAttribute('aria-checked'),
-    ).toBe('true')
-    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 46px')
-    expect(wrapper.find('[data-lane-id="thr_author"] .pulse-lane-meta').exists()).toBe(true)
-
-    // Display layer toggles inside view menu.
-    clickMenuOption('[data-pulse-layer-toggle="concurrency"]')
-    clickMenuOption('[data-pulse-layer-toggle="handoffs"]')
-    clickMenuOption('[data-pulse-layer-toggle="legend"]')
-    clickMenuOption('[data-pulse-layer-toggle="returnLine"]')
-    await flushPromises()
-    await nextTick()
-    expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(true)
-    expect(wrapper.findAll('[data-pulse-handoff-arc]')).toHaveLength(1)
-    expect(wrapper.find('[data-pulse-legend]').exists()).toBe(true)
-    expect(wrapper.find('[data-pulse-return-band]').exists()).toBe(false)
 
     // Keyboard resize on left-column divider updates --pulse-label-w.
     await wrapper.get('[data-pulse-col-divider]').trigger('keydown', { key: 'ArrowRight' })
@@ -486,20 +430,6 @@ describe('PulseView', () => {
     await followBtn.trigger('click')
     await nextTick()
     expect(followBtn.text()).toContain('实时跟随')
-  })
-
-  test('groups active lanes by plan node when switching groupBy to node', async () => {
-    vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
-    const wrapper = mountPulse()
-    await flushPromises()
-    await nextTick()
-
-    await openViewMenu(wrapper)
-    clickMenuOption('[data-pulse-group-option="node"]')
-    await nextTick()
-
-    expect(wrapper.find('[data-pulse-group="node:node_b"]').exists()).toBe(true)
-    expect(wrapper.find('[data-pulse-group="node:unlinked"]').exists()).toBe(true)
   })
 
   test('opens a worker thread and exits pulse when clicking the lane title', async () => {
@@ -557,8 +487,7 @@ describe('PulseView', () => {
     await flushPromises()
     await nextTick()
 
-    await wrapper.get('[data-pulse-filter="needs"]').trigger('click')
-    await nextTick()
+    await selectFilter(wrapper, 'needs')
     expect(wrapper.find('[data-pulse-inline-empty]').exists()).toBe(true)
 
     await wrapper.get('[data-pulse-inline-empty] button').trigger('click')
@@ -571,11 +500,6 @@ describe('PulseView', () => {
     vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
     const wrapper = mountPulse()
     await flushPromises()
-    await nextTick()
-
-    // Enable handoff arcs from the view menu.
-    await openViewMenu(wrapper)
-    clickMenuOption('[data-pulse-layer-toggle="handoffs"]')
     await nextTick()
 
     const inner = wrapper.get('.pulse-lanes-inner').element as HTMLElement
@@ -1168,28 +1092,21 @@ describe('PulseView', () => {
     await flushPromises()
     await nextTick()
 
-    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(true)
-    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(true)
+    expect(wrapper.find('.dou-tag.is-round, .dou-check-tag.is-round').exists()).toBe(false)
 
-    await wrapper.get('[data-pulse-filter="active"]').trigger('click')
-    await nextTick()
-    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(false)
-    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(true)
+    await selectFilter(wrapper, 'active')
     expect(wrapper.find('[data-lane-id="crd_1"]').exists()).toBe(true)
     expect(wrapper.find('[data-pulse-inline-empty]').exists()).toBe(false)
 
-    await wrapper.get('[data-pulse-filter="needs"]').trigger('click')
-    await nextTick()
-    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(false)
-    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(true)
+    await selectFilter(wrapper, 'needs')
     expect(wrapper.find('[data-lane-id="crd_1"]').exists()).toBe(false)
     expect(wrapper.find('[data-pulse-inline-empty]').exists()).toBe(true)
   })
 
-  test('normalizes persisted compact + double-line prefs to single-line on mount', async () => {
+  test('restores clamped labelWidth from persisted prefs and ignores obsolete view fields', async () => {
     localStorage.setItem(
       'ariadne.pulse.prefs.v2',
-      JSON.stringify({ density: 'compact', laneLines: 'double' }),
+      JSON.stringify({ density: 'compact', laneLines: 'double', labelWidth: 312 }),
     )
     vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
 
@@ -1197,18 +1114,8 @@ describe('PulseView', () => {
     await flushPromises()
     await nextTick()
 
-    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 32px')
-    expect(wrapper.find('[data-lane-id="thr_author"] .pulse-lane-meta').exists()).toBe(false)
-
-    await openViewMenu(wrapper)
-    expect(
-      document.querySelector('[data-pulse-density-option="compact"]')?.getAttribute('aria-checked'),
-    ).toBe('true')
-    expect(
-      document.querySelector('[data-pulse-lane-lines="single"]')?.getAttribute('aria-checked'),
-    ).toBe('true')
-    expect(
-      document.querySelector('[data-pulse-lane-lines="double"]')?.getAttribute('aria-checked'),
-    ).toBe('false')
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 38px')
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-label-w: 312px')
+    expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(true)
   })
 })

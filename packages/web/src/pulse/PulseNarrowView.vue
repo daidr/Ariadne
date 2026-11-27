@@ -10,34 +10,31 @@ import type {
   PulseLane,
   PulseMarker,
   PulseSpan,
+  ThreadPullRequest,
+  ThreadStage,
   ThreadView,
 } from '@ariadne/core'
 import {
+  AlertCircleIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CornerDownRightIcon,
+  EyeIcon,
+  FileTextIcon,
   FolderIcon,
+  GitMergeIcon,
+  GitPullRequestIcon,
+  HelpCircleIcon,
   ListTreeIcon,
   PlayIcon,
   RotateCwIcon,
 } from '@dou-ui/icons'
-import {
-  DouButton,
-  DouCard,
-  DouCheckTag,
-  DouCheckTagGroup,
-  DouDivider,
-  DouEmpty,
-  DouSegmentedControl,
-  DouStatusDot,
-  DouTag,
-  DouText,
-  type CheckTagValue,
-} from 'dou-ui'
-import { computed, ref } from 'vue'
+import { DouButton, DouCard, DouDivider, DouEmpty, DouSegmentedControl, DouText } from 'dou-ui'
+import { computed, ref, type Component } from 'vue'
 import AskBlock from '../blocks/AskBlock.vue'
 import ChangeTotals from '../components/ChangeTotals.vue'
+import StageIcon from '../components/StageIcon.vue'
 import { locale, t } from '../i18n'
 import { branchChanges } from '../review/merge-offered'
 import { endAside, endWait, resumeThread, retryTurn } from '../store'
@@ -52,7 +49,7 @@ import {
   percentOf,
   PULSE_WINDOW_KEYS,
   resolveLaneAttentions,
-  resolveLaneStatusDot,
+  resolveLaneStage,
   resolveLaneThreadSummary,
   resolveSpanToneGroup,
   resolveSpanVisualKind,
@@ -115,6 +112,12 @@ const tabOptions = computed(() => [
   { value: 'feed' satisfies PulseNarrowTab, label: t('pulse.narrow.tabFeed') },
 ])
 
+const filterOptions = computed(() => [
+  { value: 'all' satisfies PulseFilter, label: t('pulse.filter.all') },
+  { value: 'needs' satisfies PulseFilter, label: t('pulse.filter.needs') },
+  { value: 'active' satisfies PulseFilter, label: t('pulse.filter.active') },
+])
+
 const windowOptions = computed(() =>
   PULSE_WINDOW_KEYS.map((key) => ({
     value: key,
@@ -122,10 +125,10 @@ const windowOptions = computed(() =>
   })),
 )
 
-function onFilterChange(value: CheckTagValue | CheckTagValue[] | null) {
-  if (value === 'all' || value === 'needs' || value === 'active') {
-    filter.value = value
-  }
+function filterCount(value: unknown): number {
+  if (value === 'needs') return props.partitioned.counts.needs
+  if (value === 'active') return props.partitioned.counts.active
+  return props.partitioned.counts.all
 }
 
 const liveActiveSlots = computed(() => {
@@ -192,8 +195,13 @@ function laneTitle(lane: PulseLane): string {
   return lane.title || lane.conversationId
 }
 
-function laneDot(lane: PulseLane) {
-  return resolveLaneStatusDot(lane)
+function laneStage(lane: PulseLane): ThreadStage {
+  return resolveLaneStage(lane)
+}
+
+function lanePullRequestState(lane: PulseLane): ThreadPullRequest['state'] | undefined {
+  if (lane.role === 'coordinator') return undefined
+  return props.threads.get(lane.conversationId)?.pullRequest?.state
 }
 
 function latestSpanOf(lane: PulseLane): PulseSpan | null {
@@ -230,37 +238,35 @@ function laneStageSummary(lane: PulseLane): { label: string; duration: string | 
   }
 }
 
-function laneBadge(
-  lane: PulseLane,
-): { tone: 'warning' | 'danger' | 'primary' | 'success' | 'neutral'; text: string } | null {
+function laneAlertBadge(lane: PulseLane): { tone: 'warning' | 'danger'; text: string } | null {
   if (lane.stage === 'answer' || lane.attentionId !== null) {
     const latest = latestSpanOf(lane)
     const since = latest?.endedAt === null ? latest.startedAt : lane.activeAt
     return { tone: 'warning', text: formatDurationCompact(Math.max(0, props.nowMs - since)) }
   }
-  if (lane.stage === 'stopped') {
-    return { tone: 'warning', text: t('thread.stage.stopped') }
-  }
   if (lane.stage === 'blocked' || lane.stage === 'halted' || lane.stage === 'silent') {
     const failures = props.threads.get(lane.conversationId)?.pullRequest?.checks.failed.length ?? 0
-    return { tone: 'danger', text: failures > 0 ? `×${failures}` : '!' }
-  }
-  if (lane.completed || lane.stage === 'done') {
-    return { tone: 'success', text: t('thread.stage.done') }
-  }
-  if (lane.stage === 'working') {
-    return {
-      tone: 'primary',
-      text: t(lane.role === 'reviewer' ? 'pulse.stage.reviewing' : 'pulse.stage.working'),
-    }
-  }
-  if (lane.stage === 'queued') {
-    return { tone: 'neutral', text: t('pulse.stage.queued') }
-  }
-  if (lane.stage === 'review') {
-    return { tone: 'neutral', text: t('pulse.stage.waiting_review') }
+    if (failures > 0) return { tone: 'danger', text: `×${failures}` }
   }
   return null
+}
+
+function feedIcon(kind: PulseFeedItem['kind']): Component {
+  switch (kind) {
+    case 'review_handoff':
+    case 'review_submitted':
+      return EyeIcon
+    case 'pr_opened':
+      return GitPullRequestIcon
+    case 'pr_merged':
+      return GitMergeIcon
+    case 'ci_failed':
+      return AlertCircleIcon
+    case 'attention_opened':
+      return HelpCircleIcon
+    default:
+      return FileTextIcon
+  }
 }
 
 function laneMeta(lane: PulseLane): {
@@ -410,23 +416,13 @@ const showCardsEmpty = computed(
           </DouButton>
           <DouText weight="medium" truncate>{{ t('pulse.title') }}</DouText>
         </div>
-        <DouTag
-          size="sm"
-          round
-          :tone="isSlotsFull ? 'warning' : 'primary'"
-          class="pulse-mono"
+        <span
+          class="pulse-narrow-slots pulse-mono"
+          :class="{ 'is-full': isSlotsFull }"
           data-pulse-narrow-slots
         >
-          <template v-if="liveActiveSlots > 0" #leading>
-            <DouStatusDot
-              :tone="isSlotsFull ? 'warning' : 'primary'"
-              size="sm"
-              ripple
-              aria-hidden="true"
-            />
-          </template>
-          {{ slotPillText }}
-        </DouTag>
+          {{ t('pulse.ribbon.label') }} {{ slotPillText }}
+        </span>
       </div>
 
       <div class="pulse-narrow-controls">
@@ -450,33 +446,26 @@ const showCardsEmpty = computed(
         />
       </div>
 
-      <DouCheckTagGroup
+      <DouSegmentedControl
         v-if="tab === 'cards'"
-        :model-value="filter"
+        v-model="filter"
+        :options="filterOptions"
         size="sm"
-        round
-        class="pulse-narrow-filters"
-        @update:model-value="onFilterChange"
+        block
+        data-pulse-filters
       >
-        <DouCheckTag value="all" tone="primary" data-pulse-filter="all">
-          <span>{{ t('pulse.filter.all') }}</span>
-          <span class="pulse-filter-count">{{ partitioned.counts.all }}</span>
-        </DouCheckTag>
-        <DouCheckTag value="needs" tone="warning" data-pulse-filter="needs">
-          <template v-if="filter !== 'needs'" #leading>
-            <DouStatusDot tone="warning" size="sm" aria-hidden="true" />
-          </template>
-          <span>{{ t('pulse.filter.needs') }}</span>
-          <span class="pulse-filter-count">{{ partitioned.counts.needs }}</span>
-        </DouCheckTag>
-        <DouCheckTag value="active" tone="primary" data-pulse-filter="active">
-          <template v-if="filter !== 'active'" #leading>
-            <DouStatusDot tone="primary" size="sm" aria-hidden="true" />
-          </template>
-          <span>{{ t('pulse.filter.active') }}</span>
-          <span class="pulse-filter-count">{{ partitioned.counts.active }}</span>
-        </DouCheckTag>
-      </DouCheckTagGroup>
+        <template #option="{ option }">
+          <span class="pulse-filter-option" :data-pulse-filter="option.value">
+            <span>{{ option.label }}</span>
+            <span
+              class="pulse-filter-count"
+              :class="{ 'is-needs': option.value === 'needs' && partitioned.counts.needs > 0 }"
+            >
+              {{ filterCount(option.value) }}
+            </span>
+          </span>
+        </template>
+      </DouSegmentedControl>
     </div>
 
     <!-- Tab 1: Pulse cards -->
@@ -501,12 +490,7 @@ const showCardsEmpty = computed(
       >
         <div class="pulse-card-stack">
           <div class="pulse-card-head">
-            <DouStatusDot
-              :tone="laneDot(partitioned.coordinator).tone"
-              :ripple="laneDot(partitioned.coordinator).ripple"
-              size="sm"
-              aria-hidden="true"
-            />
+            <StageIcon :stage="laneStage(partitioned.coordinator)" />
             <button
               type="button"
               class="pulse-card-title-btn"
@@ -514,15 +498,13 @@ const showCardsEmpty = computed(
             >
               {{ laneTitle(partitioned.coordinator) }}
             </button>
-            <DouTag
-              v-if="laneBadge(partitioned.coordinator)"
-              size="sm"
-              round
-              :tone="laneBadge(partitioned.coordinator)!.tone"
-              class="pulse-mono"
+            <span
+              v-if="laneAlertBadge(partitioned.coordinator)"
+              class="pulse-card-alert pulse-mono"
+              :class="`is-${laneAlertBadge(partitioned.coordinator)!.tone}`"
             >
-              {{ laneBadge(partitioned.coordinator)!.text }}
-            </DouTag>
+              {{ laneAlertBadge(partitioned.coordinator)!.text }}
+            </span>
           </div>
           <div class="pulse-mini-strip" aria-hidden="true">
             <div
@@ -659,26 +641,13 @@ const showCardsEmpty = computed(
       >
         <div class="pulse-narrow-group-head">
           <FolderIcon v-if="group.kind === 'project'" class="pulse-group-icon" aria-hidden="true" />
-          <DouStatusDot
-            v-else-if="group.kind === 'needs' || group.kind === 'active'"
-            :tone="group.kind === 'needs' ? 'warning' : 'primary'"
-            size="sm"
-            aria-hidden="true"
-          />
-          <span class="pulse-group-title">{{ groupHeaderTitle(group) }}</span>
-          <DouTag v-if="group.kind === 'project' && group.isCurrent" size="sm" round tone="primary">
+          <span class="pulse-group-title" :class="group.kind === 'needs' ? 'is-needs' : undefined">
+            {{ groupHeaderTitle(group) }}
+          </span>
+          <span v-if="group.kind === 'project' && group.isCurrent" class="pulse-group-current">
             {{ t('pulse.group.projectCurrent') }}
-          </DouTag>
-          <DouTag
-            size="sm"
-            round
-            class="pulse-mono"
-            :tone="
-              group.kind === 'needs' ? 'warning' : group.kind === 'active' ? 'primary' : 'neutral'
-            "
-          >
-            {{ group.rows.length }}
-          </DouTag>
+          </span>
+          <span class="pulse-group-count pulse-mono">{{ group.rows.length }}</span>
         </div>
 
         <DouCard
@@ -712,11 +681,9 @@ const showCardsEmpty = computed(
                 class="pulse-nested-prefix"
                 aria-hidden="true"
               />
-              <DouStatusDot
-                :tone="laneDot(row.lane).tone"
-                :ripple="laneDot(row.lane).ripple"
-                size="sm"
-                aria-hidden="true"
+              <StageIcon
+                :stage="laneStage(row.lane)"
+                :pull-request-state="lanePullRequestState(row.lane)"
               />
               <button
                 type="button"
@@ -725,18 +692,13 @@ const showCardsEmpty = computed(
               >
                 {{ laneTitle(row.lane) }}
               </button>
-              <DouTag v-if="row.lane.role === 'reviewer'" size="sm" round tone="primary">
-                {{ t('pulse.narrow.reviewerTag') }}
-              </DouTag>
-              <DouTag
-                v-if="laneBadge(row.lane)"
-                size="sm"
-                round
-                :tone="laneBadge(row.lane)!.tone"
-                class="pulse-mono"
+              <span
+                v-if="laneAlertBadge(row.lane)"
+                class="pulse-card-alert pulse-mono"
+                :class="`is-${laneAlertBadge(row.lane)!.tone}`"
               >
-                {{ laneBadge(row.lane)!.text }}
-              </DouTag>
+                {{ laneAlertBadge(row.lane)!.text }}
+              </span>
             </div>
 
             <div
@@ -958,11 +920,9 @@ const showCardsEmpty = computed(
                   class="pulse-nested-prefix"
                   aria-hidden="true"
                 />
-                <DouStatusDot
-                  :tone="laneDot(row.lane).tone"
-                  :ripple="laneDot(row.lane).ripple"
-                  size="sm"
-                  aria-hidden="true"
+                <StageIcon
+                  :stage="laneStage(row.lane)"
+                  :pull-request-state="lanePullRequestState(row.lane)"
                 />
                 <button
                   type="button"
@@ -971,9 +931,9 @@ const showCardsEmpty = computed(
                 >
                   {{ laneTitle(row.lane) }}
                 </button>
-                <DouTag v-if="laneMeta(row.lane).project" size="sm" round tone="neutral">
+                <span v-if="laneMeta(row.lane).project" class="pulse-card-project">
                   {{ laneMeta(row.lane).project }}
-                </DouTag>
+                </span>
               </div>
               <div class="pulse-mini-strip" aria-hidden="true">
                 <div
@@ -1025,12 +985,9 @@ const showCardsEmpty = computed(
           >
             <span class="pulse-feed-row-inner">
               <span class="pulse-feed-time pulse-mono">{{ formatFeedTime(item.at) }}</span>
-              <DouStatusDot
-                :tone="markerToneToDouTone(item.tone)"
-                size="sm"
-                class="pulse-feed-dot"
-                aria-hidden="true"
-              />
+              <DouText :tone="markerToneToDouTone(item.tone)" class="pulse-feed-icon">
+                <component :is="feedIcon(item.kind)" :size="14" aria-hidden="true" />
+              </DouText>
               <span class="pulse-feed-body">
                 <span class="pulse-feed-title">{{ feedText(item) }}</span>
                 <span class="pulse-feed-meta">
@@ -1097,6 +1054,18 @@ const showCardsEmpty = computed(
   min-width: 0;
 }
 
+.pulse-narrow-slots {
+  flex: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dou-color-text-secondary);
+  white-space: nowrap;
+}
+
+.pulse-narrow-slots.is-full {
+  color: var(--dou-color-warning-text);
+}
+
 .pulse-narrow-controls {
   display: flex;
   flex-wrap: wrap;
@@ -1113,15 +1082,20 @@ const showCardsEmpty = computed(
   display: flex;
 }
 
-.pulse-narrow-filters {
-  display: flex;
-  flex-wrap: wrap;
+.pulse-filter-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .pulse-filter-count {
-  margin-left: 4px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  opacity: 0.85;
+  color: var(--dou-color-text-tertiary);
+}
+
+.pulse-filter-count.is-needs {
+  color: var(--dou-color-warning-text);
 }
 
 .pulse-mono {
@@ -1167,6 +1141,24 @@ const showCardsEmpty = computed(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pulse-group-title.is-needs {
+  color: var(--dou-color-warning-text);
+}
+
+.pulse-group-current {
+  flex: none;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dou-color-primary-text);
+}
+
+.pulse-group-count {
+  flex: none;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dou-color-text-tertiary);
 }
 
 .pulse-card-item {
@@ -1246,6 +1238,31 @@ const showCardsEmpty = computed(
   color: var(--dou-color-text-tertiary);
 }
 
+.pulse-card-alert {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pulse-card-alert.is-warning {
+  color: var(--dou-color-warning-text);
+}
+
+.pulse-card-alert.is-danger {
+  color: var(--dou-color-danger-text);
+}
+
+.pulse-card-project {
+  flex: none;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--dou-color-text-tertiary);
+}
+
 .pulse-card-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1297,16 +1314,24 @@ const showCardsEmpty = computed(
   border-color: var(--dou-color-border-strong);
 }
 
-.pulse-mini-seg.is-running::after {
-  content: '';
-  position: absolute;
-  top: 1px;
-  bottom: 1px;
-  right: 1px;
-  width: 2.5px;
-  border-radius: 2px;
-  background: var(--dou-color-primary);
-  opacity: 0.8;
+.pulse-mini-seg.is-running {
+  animation: pulse-mini-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes pulse-mini-breathe {
+  0%,
+  100% {
+    opacity: 0.82;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-mini-seg.is-running {
+    animation: none;
+  }
 }
 
 .pulse-mini-return {
@@ -1416,8 +1441,11 @@ const showCardsEmpty = computed(
   line-height: 1.5;
 }
 
-.pulse-feed-dot {
-  margin-top: 5px;
+.pulse-feed-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  margin-top: 2px;
 }
 
 .pulse-feed-body {

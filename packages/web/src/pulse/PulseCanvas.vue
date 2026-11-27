@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import type {
-  ChangeTotals as ChangeTotalsData,
   LiveCommand,
   PulseConcurrency,
   PulseHandoff,
   PulseLane,
   PulseMarker,
   PulseSpan,
+  ThreadPullRequest,
+  ThreadStage,
   ThreadView,
 } from '@ariadne/core'
 import { ChevronDownIcon, ChevronRightIcon, CornerDownRightIcon, FolderIcon } from '@dou-ui/icons'
-import { DouButton, DouStatusDot, DouTag, DouTooltip } from 'dou-ui'
+import { DouButton, DouTooltip } from 'dou-ui'
 import {
   computed,
   nextTick,
@@ -21,9 +22,8 @@ import {
   useTemplateRef,
   watch,
 } from 'vue'
-import ChangeTotals from '../components/ChangeTotals.vue'
+import StageIcon from '../components/StageIcon.vue'
 import { locale, t } from '../i18n'
-import { branchChanges } from '../review/merge-offered'
 import {
   buildAxisTicks,
   buildConcurrencyBars,
@@ -40,13 +40,11 @@ import {
   MAX_LABEL_COL_WIDTH,
   MIN_LABEL_COL_WIDTH,
   percentOf,
-  resolveLaneStatusDot,
+  resolveLaneStage,
   resolveSpanToneGroup,
   resolveSpanVisualKind,
   spansMultipleDays,
-  type PulseDensity,
   type PulseHandoffTone,
-  type PulseLaneLines,
   type PulseLaneRow,
   type PulsePartitionedLanes,
   type PulseRibbonBar,
@@ -56,41 +54,32 @@ import {
 } from './model'
 
 const FALLBACK_TRACK_WIDTH = 800
+const LANE_HEIGHT_PX = 38
+const SPAN_HEIGHT_PX = 20
 
-const props = withDefaults(
-  defineProps<{
-    partitioned: PulsePartitionedLanes
-    spansByConversation: ReadonlyMap<string, PulseSpan[]>
-    markersByConversation: ReadonlyMap<string, PulseMarker[]>
-    handoffs: readonly PulseHandoff[]
-    concurrency: PulseConcurrency
-    allSpans: readonly PulseSpan[]
-    lastReturnedAt: number | null
-    nowMs: number
-    viewStart: number
-    viewEnd: number
-    density: PulseDensity
-    laneLines?: PulseLaneLines
-    showConcurrency: boolean
-    showHandoffs: boolean
-    showReturnLine: boolean
-    showCompleted: boolean
-    selectedLaneId: string | null
-    selectedSpanId: number | null
-    scope?: PulseScope
-    threads: ReadonlyMap<string, ThreadView>
-    liveCommands: Readonly<Record<string, LiveCommand>>
-  }>(),
-  {
-    laneLines: 'single',
-  },
-)
+const props = defineProps<{
+  partitioned: PulsePartitionedLanes
+  spansByConversation: ReadonlyMap<string, PulseSpan[]>
+  markersByConversation: ReadonlyMap<string, PulseMarker[]>
+  handoffs: readonly PulseHandoff[]
+  concurrency: PulseConcurrency
+  allSpans: readonly PulseSpan[]
+  lastReturnedAt: number | null
+  nowMs: number
+  viewStart: number
+  viewEnd: number
+  showCompleted: boolean
+  selectedLaneId: string | null
+  selectedSpanId: number | null
+  scope?: PulseScope
+  threads: ReadonlyMap<string, ThreadView>
+  liveCommands: Readonly<Record<string, LiveCommand>>
+}>()
 
 const labelWidth = defineModel<number>('labelWidth', { default: DEFAULT_LABEL_COL_WIDTH })
 
 const emit = defineEmits<{
   'update:showCompleted': [value: boolean]
-  toggleConcurrency: []
   select: [laneId: string, spanId: number | null]
   openLane: [lane: PulseLane]
   zoom: [anchorRatio: number, factor: number]
@@ -103,27 +92,17 @@ const scrollEl = useTemplateRef<HTMLDivElement>('scrollEl')
 const axisTrackEl = useTemplateRef<HTMLDivElement>('axisTrackEl')
 const lanesInnerEl = useTemplateRef<HTMLDivElement>('lanesInnerEl')
 
-const isCompact = computed(() => props.density === 'compact')
-const showLaneMeta = computed(() => !isCompact.value && props.laneLines === 'double')
-const laneHeightPx = computed(() => {
-  if (isCompact.value) return 32
-  return showLaneMeta.value ? 46 : 38
-})
-const spanHeightPx = computed(() => (isCompact.value ? 16 : 20))
-
 const trackWidthPx = ref(FALLBACK_TRACK_WIDTH)
 
 const ribbonBars = computed(() =>
-  props.showConcurrency
-    ? buildConcurrencyBars(
-        props.concurrency,
-        props.allSpans,
-        props.viewStart,
-        props.viewEnd,
-        props.nowMs,
-        48,
-      )
-    : [],
+  buildConcurrencyBars(
+    props.concurrency,
+    props.allSpans,
+    props.viewStart,
+    props.viewEnd,
+    props.nowMs,
+    48,
+  ),
 )
 
 const liveSlotActive = computed(() => {
@@ -149,7 +128,7 @@ const nowPct = computed(() => percentOf(props.nowMs, props.viewStart, props.view
 const showNowLine = computed(() => nowPct.value >= 0 && nowPct.value <= 100)
 
 const returnGeometry = computed(() => {
-  if (!props.showReturnLine || props.lastReturnedAt === null) return null
+  if (props.lastReturnedAt === null) return null
   const retPct = percentOf(props.lastReturnedAt, props.viewStart, props.viewEnd)
   const endPct = Math.min(100, Math.max(retPct, nowPct.value))
   if (endPct <= 0 || retPct >= 100) return null
@@ -267,41 +246,13 @@ function laneTitle(lane: PulseLane): string {
   return lane.title || lane.conversationId
 }
 
-function laneDot(lane: PulseLane) {
-  return resolveLaneStatusDot(lane)
+function laneStage(lane: PulseLane): ThreadStage {
+  return resolveLaneStage(lane)
 }
 
-interface LaneMetaSummary {
-  project: string | null
-  pr: string | null
-  diff: ChangeTotalsData | null
-  progress: string | null
-  fallback: string | null
-}
-
-function laneMeta(lane: PulseLane): LaneMetaSummary {
-  const liveCmd = liveCommandText(lane)
-  const project =
-    props.scope === 'all' && lane.completed && lane.projectName ? lane.projectName : null
-  if (lane.role === 'coordinator') {
-    return {
-      project,
-      pr: null,
-      diff: null,
-      progress: null,
-      fallback: liveCmd ? `$ ${liveCmd}` : (lane.lastHeadline ?? t('pulse.stage.coord')),
-    }
-  }
-  const thread = props.threads.get(lane.conversationId)
-  const pr = thread?.pullRequest?.number ? `#${thread.pullRequest.number}` : null
-  const diff = thread ? branchChanges(thread) : null
-  const progress =
-    thread?.progress && thread.progress.total > 0 && thread.progress.done < thread.progress.total
-      ? `${thread.progress.done}/${thread.progress.total}`
-      : null
-  const fallback =
-    pr || diff || progress ? null : liveCmd ? `$ ${liveCmd}` : (lane.lastHeadline ?? null)
-  return { project, pr, diff, progress, fallback }
+function lanePullRequestState(lane: PulseLane): ThreadPullRequest['state'] | undefined {
+  if (lane.role === 'coordinator') return undefined
+  return props.threads.get(lane.conversationId)?.pullRequest?.state
 }
 
 function laneAlertBadge(lane: PulseLane): { tone: 'warning' | 'danger'; text: string } | null {
@@ -311,12 +262,9 @@ function laneAlertBadge(lane: PulseLane): { tone: 'warning' | 'danger'; text: st
     const since = openSpan?.startedAt ?? lane.activeAt
     return { tone: 'warning', text: formatDurationCompact(Math.max(0, props.nowMs - since)) }
   }
-  if (lane.stage === 'stopped') {
-    return { tone: 'warning', text: t('thread.stage.stopped') }
-  }
   if (lane.stage === 'blocked' || lane.stage === 'halted' || lane.stage === 'silent') {
     const failures = props.threads.get(lane.conversationId)?.pullRequest?.checks.failed.length ?? 0
-    return { tone: 'danger', text: failures > 0 ? `×${failures}` : '!' }
+    if (failures > 0) return { tone: 'danger', text: `×${failures}` }
   }
   return null
 }
@@ -393,7 +341,7 @@ function updateTrackWidth() {
 function computeHandoffArcsNow() {
   handoffFrame = null
   updateTrackWidth()
-  if (!props.showHandoffs || !props.handoffs.length) {
+  if (!props.handoffs.length) {
     handoffArcs.value = []
     return
   }
@@ -433,7 +381,7 @@ function computeHandoffArcsNow() {
 
   // Deterministic fallback for headless DOM environments without layout geometry.
   if (laneCenters.size === 0 && visibleOrder.length > 0) {
-    const stride = laneHeightPx.value
+    const stride = LANE_HEIGHT_PX
     visibleOrder.forEach((id, idx) => {
       laneCenters.set(id, idx * stride + stride / 2)
     })
@@ -480,10 +428,7 @@ watch(
   [
     () => props.handoffs,
     () => props.partitioned,
-    () => props.density,
-    () => props.laneLines,
     () => props.showCompleted,
-    () => props.showHandoffs,
     () => props.viewStart,
     () => props.viewEnd,
     labelWidth,
@@ -674,8 +619,8 @@ onBeforeUnmount(() => {
     :class="{ 'is-panning': panning, 'is-resizing-col': resizingCol }"
     :style="{
       '--pulse-label-w': `${labelWidth}px`,
-      '--pulse-lane-h': `${laneHeightPx}px`,
-      '--pulse-span-h': `${spanHeightPx}px`,
+      '--pulse-lane-h': `${LANE_HEIGHT_PX}px`,
+      '--pulse-span-h': `${SPAN_HEIGHT_PX}px`,
     }"
   >
     <div
@@ -686,26 +631,17 @@ onBeforeUnmount(() => {
       @pointerleave="onScrollPointerLeave"
     >
       <div class="pulse-sticky-head">
-        <!-- Optional concurrency watermark ribbon -->
-        <div v-if="showConcurrency" class="pulse-grid-row pulse-ribbon-row" data-pulse-ribbon>
+        <!-- Concurrency watermark ribbon -->
+        <div class="pulse-grid-row pulse-ribbon-row" data-pulse-ribbon>
           <div class="pulse-label-col pulse-ribbon-label">
             <span class="pulse-axis-title">{{ t('pulse.ribbon.label') }}</span>
-            <button
-              type="button"
-              class="pulse-slot-trigger"
-              :title="t('pulse.ribbon.badgeTitle', { usage: slotBadgeText })"
-              @click="emit('toggleConcurrency')"
+            <span
+              class="pulse-slot-value pulse-mono"
+              :class="{ 'is-full': slotFull }"
+              data-pulse-slot-badge
             >
-              <DouTag
-                size="sm"
-                round
-                :tone="slotFull ? 'warning' : 'primary'"
-                class="pulse-mono"
-                data-pulse-slot-badge
-              >
-                {{ slotBadgeText }}
-              </DouTag>
-            </button>
+              {{ slotBadgeText }}
+            </span>
           </div>
           <div class="pulse-track-col pulse-ribbon-track">
             <DouTooltip
@@ -740,31 +676,6 @@ onBeforeUnmount(() => {
         <div class="pulse-grid-row pulse-axis-row">
           <div class="pulse-label-col pulse-axis-label">
             <span class="pulse-axis-title">{{ t('pulse.axis.lanes') }}</span>
-            <button
-              v-if="!showConcurrency"
-              type="button"
-              class="pulse-slot-trigger"
-              :title="t('pulse.ribbon.badgeTitle', { usage: slotBadgeText })"
-              @click="emit('toggleConcurrency')"
-            >
-              <DouTag
-                size="sm"
-                round
-                :tone="slotFull ? 'warning' : 'primary'"
-                class="pulse-mono"
-                data-pulse-slot-badge
-              >
-                <template v-if="liveSlotActive > 0" #leading>
-                  <DouStatusDot
-                    :tone="slotFull ? 'warning' : 'primary'"
-                    size="sm"
-                    :ripple="!slotFull"
-                    aria-hidden="true"
-                  />
-                </template>
-                {{ slotBadgeText }}
-              </DouTag>
-            </button>
           </div>
           <div
             ref="axisTrackEl"
@@ -835,9 +746,9 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <!-- Optional author <-> reviewer handoff Bezier arcs -->
+        <!-- Author <-> reviewer handoff Bezier arcs -->
         <svg
-          v-if="showHandoffs && handoffArcs.length"
+          v-if="handoffArcs.length"
           class="pulse-handoff-svg"
           data-pulse-handoff-svg
           :viewBox="`0 0 ${handoffSvgSize.width} ${handoffSvgSize.height}`"
@@ -883,12 +794,7 @@ onBeforeUnmount(() => {
             @click="emit('select', partitioned.coordinator.conversationId, null)"
           >
             <div class="pulse-lane-head">
-              <DouStatusDot
-                :tone="laneDot(partitioned.coordinator).tone"
-                :ripple="laneDot(partitioned.coordinator).ripple"
-                size="sm"
-                aria-hidden="true"
-              />
+              <StageIcon :stage="laneStage(partitioned.coordinator)" class="pulse-lane-stage" />
               <button
                 type="button"
                 class="pulse-lane-title"
@@ -897,19 +803,12 @@ onBeforeUnmount(() => {
               >
                 {{ laneTitle(partitioned.coordinator) }}
               </button>
-              <DouTag
+              <span
                 v-if="laneAlertBadge(partitioned.coordinator)"
-                size="sm"
-                round
-                :tone="laneAlertBadge(partitioned.coordinator)!.tone"
-                class="pulse-mono"
+                class="pulse-lane-alert pulse-mono"
+                :class="`is-${laneAlertBadge(partitioned.coordinator)!.tone}`"
               >
                 {{ laneAlertBadge(partitioned.coordinator)!.text }}
-              </DouTag>
-            </div>
-            <div v-if="showLaneMeta" class="pulse-lane-meta">
-              <span v-if="laneMeta(partitioned.coordinator).fallback" class="pulse-meta-fallback">
-                {{ laneMeta(partitioned.coordinator).fallback }}
               </span>
             </div>
           </div>
@@ -996,35 +895,16 @@ onBeforeUnmount(() => {
                 class="pulse-group-icon"
                 aria-hidden="true"
               />
-              <DouStatusDot
-                v-else-if="group.kind === 'needs' || group.kind === 'active'"
-                :tone="group.kind === 'needs' ? 'warning' : 'primary'"
-                size="sm"
-                aria-hidden="true"
-              />
-              <span class="pulse-group-title">{{ groupHeaderTitle(group) }}</span>
-              <DouTag
-                v-if="group.kind === 'project' && group.isCurrent"
-                size="sm"
-                round
-                tone="primary"
+              <span
+                class="pulse-group-title"
+                :class="group.kind === 'needs' ? 'is-needs' : undefined"
               >
+                {{ groupHeaderTitle(group) }}
+              </span>
+              <span v-if="group.kind === 'project' && group.isCurrent" class="pulse-group-current">
                 {{ t('pulse.group.projectCurrent') }}
-              </DouTag>
-              <DouTag
-                size="sm"
-                round
-                class="pulse-mono"
-                :tone="
-                  group.kind === 'needs'
-                    ? 'warning'
-                    : group.kind === 'active'
-                      ? 'primary'
-                      : 'neutral'
-                "
-              >
-                {{ group.rows.length }}
-              </DouTag>
+              </span>
+              <span class="pulse-group-count pulse-mono">{{ group.rows.length }}</span>
             </div>
             <div class="pulse-track-col pulse-group-track" aria-hidden="true" />
           </div>
@@ -1048,11 +928,10 @@ onBeforeUnmount(() => {
                   class="pulse-nested-prefix"
                   aria-hidden="true"
                 />
-                <DouStatusDot
-                  :tone="laneDot(row.lane).tone"
-                  :ripple="laneDot(row.lane).ripple"
-                  size="sm"
-                  aria-hidden="true"
+                <StageIcon
+                  :stage="laneStage(row.lane)"
+                  :pull-request-state="lanePullRequestState(row.lane)"
+                  class="pulse-lane-stage"
                 />
                 <button
                   type="button"
@@ -1066,27 +945,13 @@ onBeforeUnmount(() => {
                 >
                   {{ laneTitle(row.lane) }}
                 </button>
-                <DouTag
+                <span
                   v-if="laneAlertBadge(row.lane)"
-                  size="sm"
-                  round
-                  :tone="laneAlertBadge(row.lane)!.tone"
-                  class="pulse-mono"
+                  class="pulse-lane-alert pulse-mono"
+                  :class="`is-${laneAlertBadge(row.lane)!.tone}`"
                 >
                   {{ laneAlertBadge(row.lane)!.text }}
-                </DouTag>
-              </div>
-              <div v-if="showLaneMeta" class="pulse-lane-meta">
-                <template v-for="meta in [laneMeta(row.lane)]" :key="row.lane.conversationId">
-                  <span v-if="meta.pr" class="pulse-mono">{{ meta.pr }}</span>
-                  <ChangeTotals
-                    v-if="meta.diff"
-                    :totals="meta.diff"
-                    :thread-id="row.lane.conversationId"
-                  />
-                  <span v-if="meta.progress" class="pulse-mono">{{ meta.progress }}</span>
-                  <span v-if="meta.fallback" class="pulse-meta-fallback">{{ meta.fallback }}</span>
-                </template>
+                </span>
               </div>
             </div>
             <div
@@ -1211,11 +1076,10 @@ onBeforeUnmount(() => {
                     class="pulse-nested-prefix"
                     aria-hidden="true"
                   />
-                  <DouStatusDot
-                    :tone="laneDot(row.lane).tone"
-                    :ripple="laneDot(row.lane).ripple"
-                    size="sm"
-                    aria-hidden="true"
+                  <StageIcon
+                    :stage="laneStage(row.lane)"
+                    :pull-request-state="lanePullRequestState(row.lane)"
+                    class="pulse-lane-stage"
                   />
                   <button
                     type="button"
@@ -1225,20 +1089,9 @@ onBeforeUnmount(() => {
                   >
                     {{ laneTitle(row.lane) }}
                   </button>
-                </div>
-                <div v-if="showLaneMeta" class="pulse-lane-meta">
-                  <template v-for="meta in [laneMeta(row.lane)]" :key="row.lane.conversationId">
-                    <span v-if="meta.project" class="pulse-meta-project">{{ meta.project }}</span>
-                    <span v-if="meta.pr" class="pulse-mono">{{ meta.pr }}</span>
-                    <ChangeTotals
-                      v-if="meta.diff"
-                      :totals="meta.diff"
-                      :thread-id="row.lane.conversationId"
-                    />
-                    <span v-if="meta.fallback" class="pulse-meta-fallback">{{
-                      meta.fallback
-                    }}</span>
-                  </template>
+                  <span v-if="scope === 'all' && row.lane.projectName" class="pulse-lane-project">
+                    {{ row.lane.projectName }}
+                  </span>
                 </div>
               </div>
               <div
@@ -1438,22 +1291,6 @@ onBeforeUnmount(() => {
   outline: none;
 }
 
-.pulse-slot-trigger {
-  display: inline-flex;
-  align-items: center;
-  flex: none;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  border-radius: 9999px;
-}
-
-.pulse-slot-trigger:focus-visible {
-  outline: 2px solid var(--dou-color-focus);
-  outline-offset: 2px;
-}
-
 /* Concurrency Ribbon */
 .pulse-ribbon-row {
   height: 28px;
@@ -1474,6 +1311,17 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.pulse-slot-value {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--dou-color-text-secondary);
+}
+
+.pulse-slot-value.is-full {
+  color: var(--dou-color-warning-text);
+}
+
 .pulse-ribbon-track {
   height: 100%;
   background: var(--dou-color-bg-canvas);
@@ -1483,15 +1331,25 @@ onBeforeUnmount(() => {
   position: absolute;
   bottom: 3px;
   border-radius: 2px 2px 0 0;
-  transition: height 0.2s ease;
+  transition:
+    height 0.2s ease,
+    background-color 0.12s ease;
 }
 
 .pulse-ribbon-bar.is-normal {
-  background: color-mix(in srgb, var(--dou-color-primary) 34%, transparent);
+  background: color-mix(in srgb, var(--dou-color-primary) 38%, transparent);
+}
+
+.pulse-ribbon-bar.is-normal:hover {
+  background: color-mix(in srgb, var(--dou-color-primary) 56%, transparent);
 }
 
 .pulse-ribbon-bar.is-full {
-  background: color-mix(in srgb, var(--dou-color-warning) 44%, transparent);
+  background: color-mix(in srgb, var(--dou-color-warning) 50%, transparent);
+}
+
+.pulse-ribbon-bar.is-full:hover {
+  background: color-mix(in srgb, var(--dou-color-warning) 68%, transparent);
 }
 
 /* Axis Header: zero wrap, collision-free ticks & badges */
@@ -1751,6 +1609,24 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.pulse-group-title.is-needs {
+  color: var(--dou-color-warning-text);
+}
+
+.pulse-group-current {
+  flex: none;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dou-color-primary-text);
+}
+
+.pulse-group-count {
+  flex: none;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dou-color-text-tertiary);
+}
+
 .pulse-group-track {
   min-width: 0;
 }
@@ -1859,34 +1735,33 @@ onBeforeUnmount(() => {
   color: var(--dou-color-text-tertiary);
 }
 
-.pulse-lane-row.is-nested .pulse-lane-meta {
-  padding-left: 33px;
+.pulse-lane-stage {
+  flex: none;
 }
 
-.pulse-lane-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-left: 14px;
+.pulse-lane-alert {
+  flex: none;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pulse-lane-alert.is-warning {
+  color: var(--dou-color-warning-text);
+}
+
+.pulse-lane-alert.is-danger {
+  color: var(--dou-color-danger-text);
+}
+
+.pulse-lane-project {
+  flex: none;
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--dou-color-text-tertiary);
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.pulse-meta-project {
-  flex: none;
-  max-width: 96px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--dou-color-text-secondary);
-}
-
-.pulse-meta-fallback {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .pulse-lane-track {
@@ -1962,28 +1837,18 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--dou-color-focus) 32%, transparent);
 }
 
-/* Calm right-edge breathing indicator for running spans */
-.pulse-span-running::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  right: 2px;
-  width: 3px;
-  border-radius: 2px;
-  background: currentColor;
-  opacity: 0.65;
-  pointer-events: none;
-  animation: pulse-edge-breathe 1.6s ease-in-out infinite;
+/* Subtle breathing cadence for currently running spans */
+.pulse-span-running {
+  animation: pulse-span-breathe 2.2s ease-in-out infinite;
 }
 
-@keyframes pulse-edge-breathe {
+@keyframes pulse-span-breathe {
   0%,
   100% {
-    opacity: 0.3;
+    opacity: 0.86;
   }
   50% {
-    opacity: 0.85;
+    opacity: 1;
   }
 }
 
@@ -2097,7 +1962,7 @@ onBeforeUnmount(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pulse-span-running::after {
+  .pulse-span-running {
     animation: none;
   }
 }
