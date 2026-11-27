@@ -794,7 +794,7 @@ onBeforeUnmount(() => {
             @click="emit('select', partitioned.coordinator.conversationId, null)"
           >
             <div class="pulse-lane-head">
-              <StageIcon :stage="laneStage(partitioned.coordinator)" class="pulse-lane-stage" />
+              <StageIcon :stage="laneStage(partitioned.coordinator)" />
               <button
                 type="button"
                 class="pulse-lane-title"
@@ -931,7 +931,6 @@ onBeforeUnmount(() => {
                 <StageIcon
                   :stage="laneStage(row.lane)"
                   :pull-request-state="lanePullRequestState(row.lane)"
-                  class="pulse-lane-stage"
                 />
                 <button
                   type="button"
@@ -1079,7 +1078,6 @@ onBeforeUnmount(() => {
                   <StageIcon
                     :stage="laneStage(row.lane)"
                     :pull-request-state="lanePullRequestState(row.lane)"
-                    class="pulse-lane-stage"
                   />
                   <button
                     type="button"
@@ -1733,10 +1731,6 @@ onBeforeUnmount(() => {
 .pulse-nested-prefix {
   flex: none;
   color: var(--dou-color-text-tertiary);
-}
-
-.pulse-lane-stage {
-  flex: none;
 }
 
 .pulse-lane-alert {

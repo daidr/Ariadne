@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowRightIcon, ChevronLeftIcon, RadioIcon } from '@dou-ui/icons'
+import { ArrowRightIcon, BroadcastIcon, ChevronLeftIcon } from '@dou-ui/icons'
 import { DouButton, DouDivider, DouSegmentedControl, DouText } from 'dou-ui'
 import { computed } from 'vue'
 import { t } from '../i18n'
@@ -115,7 +115,7 @@ function filterCount(value: unknown): number {
         @click="emit('snapToNow')"
       >
         <template v-if="following" #leading>
-          <RadioIcon aria-hidden="true" />
+          <BroadcastIcon aria-hidden="true" />
         </template>
         {{ following ? t('pulse.follow.live') : t('pulse.follow.backToNow') }}
         <template v-if="!following" #trailing>
