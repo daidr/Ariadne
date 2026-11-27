@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -145,6 +146,118 @@ var boardSizes = map[string][2]float64{
 	"rect": {160, 90}, "ellipse": {160, 90}, "diamond": {160, 110}, "sticky": {160, 160}, "text": {200, 40}, "pending": {160, 90}, "image": {320, 240}, "prototype": {480, 336},
 }
 
+var (
+	whiteboardPaletteColors = []string{"gray", "red", "orange", "yellow", "green", "blue", "purple", "pink"}
+	whiteboardTones         = []string{"neutral", "primary", "success", "warning", "danger"}
+
+	cssColorHex        = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
+	cssColorLegacyRGB  = regexp.MustCompile(`(?i)^rgba?\(\s*[\d.+%-]+\s*,\s*[\d.+%-]+\s*,\s*[\d.+%-]+(?:\s*,\s*[\d.+%-]+)?\s*\)$`)
+	cssColorModernRGB  = regexp.MustCompile(`(?i)^rgba?\(\s*(?:[\d.+%-]+|none)\s+(?:[\d.+%-]+|none)\s+(?:[\d.+%-]+|none)(?:\s*/\s*(?:[\d.+%-]+|none))?\s*\)$`)
+	cssColorWide       = regexp.MustCompile(`(?i)^(?:inherit|initial|unset|revert|revert-layer)$`)
+	cssColorSafeChars  = regexp.MustCompile(`^[a-zA-Z0-9#(),.%/+\-\s]+$`)
+	cssColorUnsafeFunc = regexp.MustCompile(`(?i)\b(?:url|expression)\s*\(`)
+	cssColorFunc       = regexp.MustCompile(`(?i)^(?:hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\((.*)\)$`)
+	cssColorVarFunc    = regexp.MustCompile(`(?i)^var\(\s*--[a-zA-Z0-9_-]+(?:\s*,.*)?\)$`)
+	cssColorNamed      = regexp.MustCompile(`^[a-zA-Z]+$`)
+)
+
+func hasBalancedParens(value string) bool {
+	depth := 0
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth < 0 {
+				return false
+			}
+			if depth == 0 && i != len(value)-1 {
+				return false
+			}
+		}
+	}
+	return depth == 0
+}
+
+func isSafeCSSColor(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || strings.EqualFold(trimmed, "none") || cssColorWide.MatchString(trimmed) {
+		return false
+	}
+	if !cssColorSafeChars.MatchString(trimmed) || cssColorUnsafeFunc.MatchString(trimmed) || !hasBalancedParens(trimmed) {
+		return false
+	}
+	if strings.HasPrefix(trimmed, "#") {
+		return cssColorHex.MatchString(trimmed)
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "rgb(") || strings.HasPrefix(lower, "rgba(") {
+		return cssColorLegacyRGB.MatchString(trimmed) || cssColorModernRGB.MatchString(trimmed)
+	}
+	if cssColorVarFunc.MatchString(trimmed) || cssColorFunc.MatchString(trimmed) {
+		return true
+	}
+	return cssColorNamed.MatchString(trimmed)
+}
+
+func normalizeBoardColor(raw string, allowNone bool) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", nil
+	}
+	lower := strings.ToLower(trimmed)
+	if lower == "none" || lower == "transparent" {
+		if allowNone {
+			return "none", nil
+		}
+		return "", fmt.Errorf("color %q is not allowed here (use \"\" to reset to default)", raw)
+	}
+	if slices.Contains(whiteboardPaletteColors, lower) || slices.Contains(whiteboardTones, lower) {
+		return lower, nil
+	}
+	if isSafeCSSColor(trimmed) {
+		return trimmed, nil
+	}
+	return "", fmt.Errorf("invalid color %q", raw)
+}
+
+func optionalBoardColor(input args, key string, allowNone bool) (string, bool, error) {
+	raw, exists := input[key]
+	if !exists || raw == nil {
+		return "", false, nil
+	}
+	str, ok := raw.(string)
+	if !ok {
+		return "", false, fmt.Errorf("%s must be a string", key)
+	}
+	value, err := normalizeBoardColor(str, allowNone)
+	if err != nil {
+		return "", false, fmt.Errorf("%s: %w", key, err)
+	}
+	return value, true, nil
+}
+
+func optionalBoardTone(input args) (string, bool, error) {
+	raw, exists := input["tone"]
+	if !exists || raw == nil {
+		return "", false, nil
+	}
+	str, ok := raw.(string)
+	if !ok {
+		return "", false, errors.New("tone must be a string")
+	}
+	trimmed := strings.TrimSpace(str)
+	if trimmed == "" {
+		return "", true, nil
+	}
+	lower := strings.ToLower(trimmed)
+	if !slices.Contains(whiteboardTones, lower) {
+		return "", false, fmt.Errorf("unknown item tone %q", str)
+	}
+	return lower, true, nil
+}
+
 func boardItems(values []args) map[string]args {
 	result := make(map[string]args, len(values))
 	for _, value := range values {
@@ -188,7 +301,16 @@ func applyBoardItem(node, input args, resolvedImages map[string]boardPicture, re
 	}
 	size, supported := boardSizes[kind]
 	if _, editable := boardSizes[before]; before != "" && !editable {
-		if input["kind"] != nil || input["text"] != nil || input["tone"] != nil {
+		if before == "ink" {
+			invalidKind := false
+			if rawKind, hasKind := input["kind"]; hasKind && rawKind != nil {
+				ks, ok := rawKind.(string)
+				invalidKind = !ok || (ks != "" && ks != "ink" && ks != "drawing")
+			}
+			if invalidKind || input["text"] != nil || input["fill"] != nil || input["stroke"] != nil || input["textColor"] != nil {
+				return errors.New("a user-drawn item can be moved, recolored or removed")
+			}
+		} else if input["kind"] != nil || input["text"] != nil || input["tone"] != nil || input["fill"] != nil || input["stroke"] != nil || input["textColor"] != nil || input["color"] != nil {
 			return errors.New("a user-drawn item can be moved or removed")
 		}
 	} else if !supported {
@@ -200,6 +322,40 @@ func applyBoardItem(node, input args, resolvedImages map[string]boardPicture, re
 		}
 	}
 	if !supported {
+		if before == "ink" {
+			color, hasColor, err := optionalBoardColor(input, "color", false)
+			if err != nil {
+				return err
+			}
+			tone, hasTone, err := optionalBoardTone(input)
+			if err != nil {
+				return err
+			}
+			if hasColor || hasTone {
+				data := objectField(node, "data")
+				if hasTone {
+					if tone == "" {
+						delete(data, "tone")
+					} else {
+						data["tone"] = tone
+						if !hasColor {
+							delete(data, "color")
+						}
+					}
+				}
+				if hasColor {
+					if color == "" {
+						delete(data, "color")
+					} else {
+						data["color"] = color
+					}
+					if !hasTone || tone == "" || color != "" {
+						delete(data, "tone")
+					}
+				}
+				node["data"] = data
+			}
+		}
 		return nil
 	}
 	data := objectField(node, "data")
@@ -255,6 +411,10 @@ func applyBoardItem(node, input args, resolvedImages map[string]boardPicture, re
 	if kind == "image" {
 		delete(data, "shape")
 		delete(data, "tone")
+		delete(data, "fill")
+		delete(data, "stroke")
+		delete(data, "textColor")
+		delete(data, "color")
 		id := text(node, "id")
 		if pic, hasPic := resolvedImages[id]; hasPic {
 			data["src"] = pic.src
@@ -306,14 +466,127 @@ func applyBoardItem(node, input args, resolvedImages map[string]boardPicture, re
 	if label, ok := input["text"].(string); ok {
 		data["text"] = label
 	}
-	if tone := text(input, "tone"); tone != "" {
-		if !slices.Contains([]string{"neutral", "primary", "success", "warning", "danger"}, tone) {
-			return fmt.Errorf("unknown item tone %q", tone)
-		}
-		data["tone"] = tone
+	tone, hasTone, err := optionalBoardTone(input)
+	if err != nil {
+		return err
 	}
-	if kind == "pending" || kind == "text" {
+	fill, hasFill, err := optionalBoardColor(input, "fill", true)
+	if err != nil {
+		return err
+	}
+	stroke, hasStroke, err := optionalBoardColor(input, "stroke", true)
+	if err != nil {
+		return err
+	}
+	textColor, hasTextColor, err := optionalBoardColor(input, "textColor", false)
+	if err != nil {
+		return err
+	}
+	color, hasColor, err := optionalBoardColor(input, "color", false)
+	if err != nil {
+		return err
+	}
+	switch kind {
+	case "rect", "ellipse", "diamond":
+		oldTone := text(data, "tone")
+		if hasTone {
+			if tone == "" {
+				delete(data, "tone")
+			} else {
+				data["tone"] = tone
+			}
+		} else if (hasFill || hasStroke) && oldTone != "" {
+			if oldTone != "neutral" {
+				if hasFill && !hasStroke && text(data, "stroke") == "" {
+					data["stroke"] = oldTone
+				}
+				if hasStroke && !hasFill && text(data, "fill") == "" {
+					data["fill"] = oldTone
+				}
+			}
+			delete(data, "tone")
+		}
+		if hasFill {
+			if fill == "" {
+				delete(data, "fill")
+			} else {
+				data["fill"] = fill
+			}
+		}
+		if hasStroke {
+			if stroke == "" {
+				delete(data, "stroke")
+			} else {
+				data["stroke"] = stroke
+			}
+		}
+		if !hasTextColor && hasColor && before == "text" {
+			textColor, hasTextColor = color, true
+		}
+		if hasTextColor {
+			if textColor == "" {
+				delete(data, "textColor")
+			} else {
+				data["textColor"] = textColor
+			}
+		} else if before == "text" && text(data, "textColor") == "" && text(data, "color") != "" {
+			data["textColor"] = text(data, "color")
+		}
+		delete(data, "color")
+	case "sticky":
+		if hasTone {
+			if tone == "" {
+				delete(data, "tone")
+			} else {
+				data["tone"] = tone
+			}
+		} else if hasFill {
+			delete(data, "tone")
+		}
+		if hasFill {
+			if fill == "" {
+				delete(data, "fill")
+			} else {
+				data["fill"] = fill
+			}
+		}
+		if !hasTextColor && hasColor && before == "text" {
+			textColor, hasTextColor = color, true
+		}
+		if hasTextColor {
+			if textColor == "" {
+				delete(data, "textColor")
+			} else {
+				data["textColor"] = textColor
+			}
+		} else if before == "text" && text(data, "textColor") == "" && text(data, "color") != "" {
+			data["textColor"] = text(data, "color")
+		}
+		delete(data, "stroke")
+		delete(data, "color")
+	case "text":
+		if !hasColor && hasTextColor {
+			color, hasColor = textColor, true
+		}
+		if hasColor {
+			if color == "" {
+				delete(data, "color")
+			} else {
+				data["color"] = color
+			}
+		} else if before != "" && before != "text" && text(data, "color") == "" && text(data, "textColor") != "" {
+			data["color"] = text(data, "textColor")
+		}
 		delete(data, "tone")
+		delete(data, "fill")
+		delete(data, "stroke")
+		delete(data, "textColor")
+	default:
+		delete(data, "tone")
+		delete(data, "fill")
+		delete(data, "stroke")
+		delete(data, "textColor")
+		delete(data, "color")
 	}
 	width := asNumber(node["width"])
 	_, widthSpecified := input["width"].(float64)
@@ -411,6 +684,18 @@ func (board *whiteboard) change(items, connectors []args, removeItems, removeEdg
 				}
 				data[key] = value
 			}
+		}
+		color, hasColor, err := optionalBoardColor(input, "color", false)
+		if err != nil {
+			return fmt.Errorf("connector %q: %w", id, err)
+		}
+		if hasColor {
+			if color == "" {
+				delete(data, "color")
+			} else {
+				data["color"] = color
+			}
+			delete(data, "tone")
 		}
 		edge["data"] = data
 		touched[id] = true

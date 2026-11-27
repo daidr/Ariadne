@@ -73,7 +73,7 @@ func (board whiteboard) summary(positions bool) (items, connectors []args) {
 		if parent := text(node, "parent"); parent != "" {
 			item["in"] = parent
 		}
-		for _, key := range []string{"text", "tone"} {
+		for _, key := range []string{"text", "tone", "fill", "stroke", "textColor", "color"} {
 			if value := text(data, key); value != "" {
 				item[key] = value
 			}
@@ -145,7 +145,7 @@ func (board whiteboard) summary(positions bool) (items, connectors []args) {
 			connector["label"] = label
 		}
 		data := objectField(edge, "data")
-		for _, key := range []string{"route", "dash", "arrow", "tone"} {
+		for _, key := range []string{"route", "dash", "arrow", "color"} {
 			if value := text(data, key); value != "" {
 				connector[key] = value
 			}
@@ -381,9 +381,36 @@ func rewriteEmbeddedBoard(stored embeddedBoard, spec boardFenceSpec) (string, er
 		id := text(item, "id")
 		keepItems[id] = true
 		if old := before[id]; old != nil {
-			if _, writable := boardSizes[boardKind(old)]; !writable {
-				spec.Items[i] = args{"id": id, "x": item["x"], "y": item["y"]}
+			oldKind := boardKind(old)
+			if _, writable := boardSizes[oldKind]; !writable {
+				rewritten := args{"id": id, "x": item["x"], "y": item["y"]}
+				if oldKind == "ink" {
+					if raw, exists := item["color"]; exists {
+						if raw == nil {
+							rewritten["color"] = ""
+						} else {
+							rewritten["color"] = raw
+						}
+					} else if rawTone, hasTone := item["tone"]; hasTone {
+						if rawTone == nil {
+							rewritten["color"] = ""
+						} else {
+							rewritten["tone"] = rawTone
+						}
+					} else {
+						rewritten["color"] = ""
+					}
+				}
+				spec.Items[i] = rewritten
 				continue
+			}
+			// Embedded fences carry the full summary styling of each node, so
+			// removing a color/border field in the fence clears it on the node.
+			if data := objectField(old, "data"); len(data) > 0 {
+				for _, key := range []string{"tone", "fill", "stroke", "textColor", "color"} {
+					delete(data, key)
+				}
+				old["data"] = data
 			}
 		}
 		if kind := text(item, "kind"); kind != "" {
@@ -392,12 +419,29 @@ func rewriteEmbeddedBoard(stored embeddedBoard, spec boardFenceSpec) (string, er
 			}
 		}
 	}
+	beforeEdges := boardItems(board.Edges)
 	keepEdges, pairs := map[string]bool{}, map[[2]string]bool{}
 	for _, edge := range spec.Connectors {
+		var existing args
 		if id := text(edge, "id"); id != "" {
 			keepEdges[id] = true
+			existing = beforeEdges[id]
 		} else {
-			pairs[[2]string{text(edge, "from"), text(edge, "to")}] = true
+			from, to := text(edge, "from"), text(edge, "to")
+			pairs[[2]string{from, to}] = true
+			for _, candidate := range board.Edges {
+				if boardEndpoint(candidate, "source") == from && boardEndpoint(candidate, "target") == to {
+					existing = candidate
+					break
+				}
+			}
+		}
+		if existing != nil {
+			if data := objectField(existing, "data"); len(data) > 0 {
+				delete(data, "color")
+				delete(data, "tone")
+				existing["data"] = data
+			}
 		}
 	}
 	var removeItems, removeEdges []string
