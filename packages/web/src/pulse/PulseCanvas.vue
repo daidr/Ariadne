@@ -9,7 +9,7 @@ import type {
   PulseSpan,
   ThreadView,
 } from '@ariadne/core'
-import { ChevronDownIcon, ChevronRightIcon, FolderIcon } from '@dou-ui/icons'
+import { ChevronDownIcon, ChevronRightIcon, CornerDownRightIcon, FolderIcon } from '@dou-ui/icons'
 import { DouButton, DouStatusDot, DouTag, DouTooltip } from 'dou-ui'
 import {
   computed,
@@ -1042,6 +1042,12 @@ onBeforeUnmount(() => {
               @click="emit('select', row.lane.conversationId, null)"
             >
               <div class="pulse-lane-head">
+                <CornerDownRightIcon
+                  v-if="row.nested"
+                  :size="13"
+                  class="pulse-nested-prefix"
+                  aria-hidden="true"
+                />
                 <DouStatusDot
                   :tone="laneDot(row.lane).tone"
                   :ripple="laneDot(row.lane).ripple"
@@ -1058,7 +1064,6 @@ onBeforeUnmount(() => {
                   "
                   @click.stop="onLaneOpenClick(row.lane)"
                 >
-                  <span v-if="row.nested" class="pulse-nested-prefix" aria-hidden="true">↳</span>
                   {{ laneTitle(row.lane) }}
                 </button>
                 <DouTag
@@ -1200,6 +1205,12 @@ onBeforeUnmount(() => {
                 @click="emit('select', row.lane.conversationId, null)"
               >
                 <div class="pulse-lane-head">
+                  <CornerDownRightIcon
+                    v-if="row.nested"
+                    :size="13"
+                    class="pulse-nested-prefix"
+                    aria-hidden="true"
+                  />
                   <DouStatusDot
                     :tone="laneDot(row.lane).tone"
                     :ripple="laneDot(row.lane).ripple"
@@ -1212,7 +1223,6 @@ onBeforeUnmount(() => {
                     :title="t('pulse.openThread', { title: laneTitle(row.lane) })"
                     @click.stop="onLaneOpenClick(row.lane)"
                   >
-                    <span v-if="row.nested" class="pulse-nested-prefix" aria-hidden="true">↳</span>
                     {{ laneTitle(row.lane) }}
                   </button>
                 </div>
@@ -1793,7 +1803,7 @@ onBeforeUnmount(() => {
 }
 
 .pulse-lane-row.is-nested .pulse-lane-label {
-  padding-left: 26px;
+  padding-left: 18px;
 }
 
 .pulse-lane-head {
@@ -1839,8 +1849,12 @@ onBeforeUnmount(() => {
 }
 
 .pulse-nested-prefix {
-  margin-right: 3px;
+  flex: none;
   color: var(--dou-color-text-tertiary);
+}
+
+.pulse-lane-row.is-nested .pulse-lane-meta {
+  padding-left: 33px;
 }
 
 .pulse-lane-meta {

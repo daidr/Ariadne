@@ -368,6 +368,10 @@ describe('PulseView', () => {
     expect(wrapper.find('[data-lane-id="thr_needs"]').exists()).toBe(true)
     expect(wrapper.find('[data-lane-id="thr_author"]').exists()).toBe(true)
     expect(wrapper.find('[data-lane-id="thr_reviewer"]').classes()).toContain('is-nested')
+    expect(wrapper.find('[data-lane-id="thr_reviewer"] svg.pulse-nested-prefix').exists()).toBe(
+      true,
+    )
+    expect(wrapper.find('[data-lane-id="thr_reviewer"]').text()).not.toContain('↳')
     expect(wrapper.find('[data-lane-completed="true"]').exists()).toBe(false)
 
     // Expand completed section -> completed lane renders.

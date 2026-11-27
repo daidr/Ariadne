@@ -16,6 +16,7 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CornerDownRightIcon,
   FolderIcon,
   ListTreeIcon,
   PlayIcon,
@@ -705,6 +706,12 @@ const showCardsEmpty = computed(
         >
           <div class="pulse-card-stack">
             <div class="pulse-card-head">
+              <CornerDownRightIcon
+                v-if="row.nested"
+                :size="13"
+                class="pulse-nested-prefix"
+                aria-hidden="true"
+              />
               <DouStatusDot
                 :tone="laneDot(row.lane).tone"
                 :ripple="laneDot(row.lane).ripple"
@@ -716,7 +723,6 @@ const showCardsEmpty = computed(
                 class="pulse-card-title-btn"
                 @click.stop="emit('openLane', row.lane)"
               >
-                <span v-if="row.nested" class="pulse-nested-prefix" aria-hidden="true">↳</span>
                 {{ laneTitle(row.lane) }}
               </button>
               <DouTag v-if="row.lane.role === 'reviewer'" size="sm" round tone="primary">
@@ -946,6 +952,12 @@ const showCardsEmpty = computed(
           >
             <div class="pulse-card-stack">
               <div class="pulse-card-head">
+                <CornerDownRightIcon
+                  v-if="row.nested"
+                  :size="13"
+                  class="pulse-nested-prefix"
+                  aria-hidden="true"
+                />
                 <DouStatusDot
                   :tone="laneDot(row.lane).tone"
                   :ripple="laneDot(row.lane).ripple"
@@ -1219,7 +1231,7 @@ const showCardsEmpty = computed(
 }
 
 .pulse-nested-prefix {
-  margin-right: 3px;
+  flex: none;
   color: var(--dou-color-text-tertiary);
 }
 
