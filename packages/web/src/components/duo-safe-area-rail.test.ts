@@ -227,4 +227,50 @@ describe('DuoSafeAreaRail', () => {
     showWorkspace('projects')
     await nextTick()
   })
+
+  test('opens gallery and pulse views from the quick menu with active state indicators', async () => {
+    const { wrapper } = mountRail({ layoutMode: 'narrow' })
+
+    await wrapper.get('[data-duo-rail-menu]').trigger('click')
+    await flushPromises()
+
+    const galleryItem = document.querySelector<HTMLButtonElement>('[data-duo-rail-gallery]')!
+    const pulseItem = document.querySelector<HTMLButtonElement>('[data-duo-rail-pulse]')!
+    expect(galleryItem.getAttribute('aria-current')).toBeNull()
+    expect(pulseItem.getAttribute('aria-current')).toBeNull()
+
+    galleryItem.click()
+    await flushPromises()
+    expect(state.main).toEqual({ kind: 'gallery' })
+
+    await wrapper.get('[data-duo-rail-menu]').trigger('click')
+    await flushPromises()
+    expect(
+      document
+        .querySelector<HTMLButtonElement>('[data-duo-rail-gallery]')
+        ?.getAttribute('aria-current'),
+    ).toBe('page')
+    expect(
+      document
+        .querySelector<HTMLButtonElement>('[data-duo-rail-pulse]')
+        ?.getAttribute('aria-current'),
+    ).toBeNull()
+
+    document.querySelector<HTMLButtonElement>('[data-duo-rail-pulse]')!.click()
+    await flushPromises()
+    expect(state.main).toEqual({ kind: 'pulse' })
+
+    await wrapper.get('[data-duo-rail-menu]').trigger('click')
+    await flushPromises()
+    expect(
+      document
+        .querySelector<HTMLButtonElement>('[data-duo-rail-pulse]')
+        ?.getAttribute('aria-current'),
+    ).toBe('page')
+    expect(
+      document
+        .querySelector<HTMLButtonElement>('[data-duo-rail-gallery]')
+        ?.getAttribute('aria-current'),
+    ).toBeNull()
+  })
 })

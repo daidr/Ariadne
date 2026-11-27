@@ -1,17 +1,29 @@
 <script setup lang="ts">
 import {
+  ActivityIcon,
+  CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   FolderCogIcon,
+  LayoutGridIcon,
   PanelLeftIcon,
   PanelRightIcon,
   SettingsIcon,
 } from '@dou-ui/icons'
-import { DouBadge, DouButton, DouDivider, DouLayoutHeader, DouPopover, DouText } from 'dou-ui'
-import { computed, watch } from 'vue'
+import {
+  DouBadge,
+  DouButton,
+  DouDivider,
+  DouDropdown,
+  DouDropdownItem,
+  DouLayoutHeader,
+  DouPopover,
+  DouText,
+} from 'dou-ui'
+import { computed, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { useSourceStatus } from '../source-status'
-import { openProjectSettings, showWorkspace, state } from '../store'
+import { openGallery, openProjectSettings, openPulse, showWorkspace, state } from '../store'
 import { hasUpdateIndicator, updateIndicatorLabel, updateIndicatorTone } from '../update-restart'
 import type { WorkspaceLayoutMode } from '../workspace-layout'
 import AriadneLogo from './AriadneLogo.vue'
@@ -20,7 +32,6 @@ import AutopilotSwitch from './AutopilotSwitch.vue'
 import type { SettingsTab } from './ModelSettings.vue'
 import ProjectList from './ProjectList.vue'
 import ProjectSearch from './ProjectSearch.vue'
-import PulseActivityPill from './PulseActivityPill.vue'
 import UpdateStatusIndicator from './UpdateStatusIndicator.vue'
 
 const props = defineProps<{
@@ -36,6 +47,7 @@ const emit = defineEmits<{
   openSettings: [tab?: SettingsTab]
 }>()
 const projectsPopoverOpen = defineModel<boolean>('projectsPopoverOpen', { default: false })
+const logoMenuOpen = ref(false)
 
 const { summary } = useSourceStatus()
 const isNarrow = computed(() => props.layoutMode === 'narrow')
@@ -52,6 +64,14 @@ const mediumSideLabel = computed(() =>
 const atProjects = computed(() => state.workspaceLevel === 'projects')
 const atSide = computed(() => state.workspaceLevel === 'side')
 const isGallery = computed(() => state.main.kind === 'gallery')
+const isPulse = computed(() => state.main.kind === 'pulse')
+const isGalleryActive = computed(
+  () => isGallery.value && !state.starting && (!isNarrow.value || !atProjects.value),
+)
+const isPulseActive = computed(
+  () => isPulse.value && !state.starting && (!isNarrow.value || !atProjects.value),
+)
+const canOpenPulse = computed(() => Boolean(state.currentId || state.projects.length))
 const backLabel = computed(() => t(atSide.value ? 'nav.backToCoordinator' : 'nav.backToProjects'))
 const currentProjectName = computed(
   () => state.projects.find((project) => project.id === state.currentId)?.name ?? null,
@@ -79,6 +99,9 @@ const otherNeedsMe = computed(() =>
 const showMediumProjectPopover = computed(
   () => !props.unauthorized && isMedium.value && state.main.kind !== 'trace',
 )
+const showLogoBrandLabel = computed(
+  () => !showMediumProjectPopover.value && (!isNarrow.value || atProjects.value),
+)
 const hasSidePane = computed(
   () =>
     !!state.currentId &&
@@ -105,6 +128,30 @@ const updateIndicatorCompact = computed(
 watch(showMediumProjectPopover, (allowed) => {
   if (!allowed) projectsPopoverOpen.value = false
 })
+
+watch(logoMenuOpen, (open) => {
+  if (open) projectsPopoverOpen.value = false
+})
+
+watch(projectsPopoverOpen, (open) => {
+  if (open) logoMenuOpen.value = false
+})
+
+watch(
+  () => [props.layoutMode, props.unauthorized],
+  () => {
+    logoMenuOpen.value = false
+  },
+)
+
+function handleOpenGallery() {
+  openGallery()
+}
+
+function handleOpenPulse() {
+  if (!canOpenPulse.value) return
+  void openPulse()
+}
 </script>
 
 <template>
@@ -133,7 +180,71 @@ watch(showMediumProjectPopover, (allowed) => {
         >
           <PanelLeftIcon aria-hidden="true" />
         </DouButton>
-        <AriadneLogo v-if="unauthorized || !isNarrow || atProjects" class="header-logo" />
+        <DouDropdown
+          v-if="!unauthorized"
+          v-model:open="logoMenuOpen"
+          placement="bottom-start"
+          :aria-label="t('nav.appMenu')"
+        >
+          <DouButton
+            variant="ghost"
+            size="sm"
+            class="header-logo-trigger"
+            :class="{
+              'header-logo-trigger-branded': showLogoBrandLabel,
+              'is-open': logoMenuOpen,
+            }"
+            data-logo-menu-trigger
+            :aria-label="t('nav.appMenu')"
+            :title="t('nav.appMenu')"
+          >
+            <template v-if="showLogoBrandLabel" #leading>
+              <AriadneLogo class="header-logo" />
+            </template>
+            <span v-if="showLogoBrandLabel" class="header-logo-name">{{ t('app.name') }}</span>
+            <AriadneLogo v-else class="header-logo" />
+            <template v-if="showLogoBrandLabel" #trailing>
+              <ChevronDownIcon class="header-logo-chevron" aria-hidden="true" />
+            </template>
+          </DouButton>
+          <template #menu>
+            <DouDropdownItem
+              value="gallery"
+              :class="{ 'logo-menu-item-active': isGalleryActive }"
+              :aria-current="isGalleryActive ? 'page' : undefined"
+              data-logo-menu-item="gallery"
+              @click="handleOpenGallery"
+            >
+              <template #prefix>
+                <LayoutGridIcon aria-hidden="true" />
+              </template>
+              {{ t('gallery.title') }}
+              <template v-if="isGalleryActive" #suffix>
+                <CheckIcon class="logo-menu-check" aria-hidden="true" />
+              </template>
+            </DouDropdownItem>
+            <DouDropdownItem
+              value="pulse"
+              :disabled="!canOpenPulse"
+              :class="{ 'logo-menu-item-active': isPulseActive }"
+              :aria-current="isPulseActive ? 'page' : undefined"
+              data-logo-menu-item="pulse"
+              @click="handleOpenPulse"
+            >
+              <template #prefix>
+                <ActivityIcon aria-hidden="true" />
+              </template>
+              {{ t('pulse.title') }}
+              <template v-if="isPulseActive" #suffix>
+                <CheckIcon class="logo-menu-check" aria-hidden="true" />
+              </template>
+            </DouDropdownItem>
+          </template>
+        </DouDropdown>
+        <div v-else class="header-brand-static">
+          <AriadneLogo class="header-logo" />
+          <DouText weight="medium" truncate>{{ t('app.name') }}</DouText>
+        </div>
         <DouPopover
           v-if="showMediumProjectPopover"
           v-model:open="projectsPopoverOpen"
@@ -174,13 +285,14 @@ watch(showMediumProjectPopover, (allowed) => {
             />
           </template>
         </DouPopover>
-        <DouText v-else weight="medium" truncate>{{ title }}</DouText>
+        <DouText v-else-if="!unauthorized && !showLogoBrandLabel" weight="medium" truncate>{{
+          title
+        }}</DouText>
       </div>
       <div v-if="!unauthorized" class="header-actions">
         <ProjectSearch />
         <AttentionBar :compact="actionsCompact" />
         <template v-if="state.detail && !isGallery && (!isNarrow || !atProjects)">
-          <PulseActivityPill :compact="actionsCompact" />
           <AutopilotSwitch :compact="actionsCompact" />
           <DouButton
             variant="ghost"
@@ -266,12 +378,65 @@ watch(showMediumProjectPopover, (allowed) => {
 .header-brand {
   display: flex;
   align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.header-brand-static {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
 .header-logo {
   flex: none;
+}
+
+.header-logo-trigger {
+  flex: none;
+}
+
+.header-logo-trigger.is-open {
+  background-color: var(--dou-button-bg-active);
+}
+
+.header-logo-trigger-branded {
+  --dou-button-font-size: var(--dou-font-size-md);
+  --dou-button-gap: 6px;
+  --dou-button-padding-icon: 6px;
+}
+
+.header-logo-chevron {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--dou-color-text-tertiary);
+  transition: transform var(--dou-motion-duration-fast) var(--dou-motion-easing);
+}
+
+.header-logo-trigger.is-open .header-logo-chevron {
+  transform: rotate(180deg);
+}
+
+.logo-menu-item-active {
+  background-color: color-mix(in oklab, var(--dou-color-primary) 8%, transparent);
+  color: var(--dou-color-primary-text);
+  font-weight: var(--dou-font-weight-medium);
+}
+
+.logo-menu-item-active:focus {
+  background-color: color-mix(in oklab, var(--dou-color-primary) 14%, transparent);
+}
+
+.logo-menu-item-active :deep(.dou-dropdown__prefix),
+.logo-menu-item-active :deep(.dou-dropdown__suffix) {
+  color: var(--dou-color-primary-text);
+}
+
+.logo-menu-check {
+  width: 14px;
+  height: 14px;
 }
 
 .header-project-trigger {
@@ -310,6 +475,10 @@ watch(showMediumProjectPopover, (allowed) => {
 .workspace-header-compact .header-brand,
 .workspace-header-compact .header-actions {
   gap: 2px;
+}
+
+.workspace-header-compact .header-logo-trigger {
+  --dou-button-height: 36px;
 }
 
 .header-navigation {

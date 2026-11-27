@@ -409,4 +409,16 @@ describe('ProjectList activity popover behavior', () => {
     expect(visiblePopovers()).toHaveLength(0)
     expect(document.querySelectorAll('.dou-popover .dou-skeleton')).toHaveLength(0)
   })
+
+  test('omits the pinned gallery entry while clearing active project state in gallery view', async () => {
+    const { wrapper } = mountProjectList({ compact: false, active: true })
+    expect(wrapper.find('[data-gallery-entry]').exists()).toBe(false)
+    expect(wrapper.find('button[data-project-id="prj_1"]').attributes('aria-current')).toBe('page')
+
+    state.main = { kind: 'gallery' }
+    await nextTick()
+    expect(
+      wrapper.find('button[data-project-id="prj_1"]').attributes('aria-current'),
+    ).toBeUndefined()
+  })
 })

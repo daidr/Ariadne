@@ -1330,6 +1330,16 @@ export function openGallery() {
   openMain({ kind: 'gallery' })
 }
 
+export async function openPulse(projectId?: string) {
+  const targetId = projectId ?? state.currentId ?? state.projects[0]?.id ?? null
+  if (!targetId) return
+  if (targetId !== state.currentId || !state.detail) {
+    if (!(await ensureProjectOpen(targetId))) return
+  }
+  setFull(null)
+  openMain({ kind: 'pulse' })
+}
+
 function resetMain() {
   mainTrail = []
   state.main = { kind: 'conversation' }

@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import {
+  ActivityIcon,
+  CheckIcon,
   ChevronLeftIcon,
   FolderCogIcon,
   FolderIcon,
+  LayoutGridIcon,
   MenuIcon,
   PanelLeftIcon,
   PanelRightIcon,
@@ -14,7 +17,15 @@ import { DouBadge, DouButton, DouDivider, DouPopover } from 'dou-ui'
 import { computed, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { resolveDuoBackAction } from '../pwa'
-import { backMain, openProjectSettings, showWorkspace, startNewProject, state } from '../store'
+import {
+  backMain,
+  openGallery,
+  openProjectSettings,
+  openPulse,
+  showWorkspace,
+  startNewProject,
+  state,
+} from '../store'
 import type { WorkspaceLayoutMode } from '../workspace-layout'
 
 const props = defineProps<{
@@ -39,6 +50,13 @@ const isMedium = computed(() => props.layoutMode === 'medium')
 const isWide = computed(() => props.layoutMode === 'wide')
 const atProjects = computed(() => state.workspaceLevel === 'projects')
 const atSide = computed(() => state.workspaceLevel === 'side')
+const isGalleryActive = computed(
+  () => state.main.kind === 'gallery' && !state.starting && (!isNarrow.value || !atProjects.value),
+)
+const isPulseActive = computed(
+  () => state.main.kind === 'pulse' && !state.starting && (!isNarrow.value || !atProjects.value),
+)
+const canOpenPulse = computed(() => Boolean(state.currentId || state.projects.length))
 
 const hasSidePane = computed(
   () =>
@@ -119,6 +137,17 @@ function handleProjectsAction() {
 function handleSearch() {
   menuOpen.value = false
   state.searchOpen = true
+}
+
+function handleGallery() {
+  menuOpen.value = false
+  openGallery()
+}
+
+function handlePulse() {
+  if (!canOpenPulse.value) return
+  menuOpen.value = false
+  void openPulse()
 }
 
 function handleProjectSettings() {
@@ -215,6 +244,42 @@ watch(
                 <SearchIcon aria-hidden="true" />
               </template>
               <span class="duo-rail-menu-label">{{ t('search.open') }}</span>
+            </DouButton>
+            <DouDivider />
+            <DouButton
+              variant="ghost"
+              size="sm"
+              class="duo-rail-menu-item"
+              :class="{ 'is-active': isGalleryActive }"
+              :aria-current="isGalleryActive ? 'page' : undefined"
+              data-duo-rail-gallery
+              @click="handleGallery"
+            >
+              <template #leading>
+                <LayoutGridIcon aria-hidden="true" />
+              </template>
+              <span class="duo-rail-menu-label">{{ t('gallery.title') }}</span>
+              <template v-if="isGalleryActive" #trailing>
+                <CheckIcon class="duo-rail-menu-check" aria-hidden="true" />
+              </template>
+            </DouButton>
+            <DouButton
+              variant="ghost"
+              size="sm"
+              class="duo-rail-menu-item"
+              :class="{ 'is-active': isPulseActive }"
+              :disabled="!canOpenPulse"
+              :aria-current="isPulseActive ? 'page' : undefined"
+              data-duo-rail-pulse
+              @click="handlePulse"
+            >
+              <template #leading>
+                <ActivityIcon aria-hidden="true" />
+              </template>
+              <span class="duo-rail-menu-label">{{ t('pulse.title') }}</span>
+              <template v-if="isPulseActive" #trailing>
+                <CheckIcon class="duo-rail-menu-check" aria-hidden="true" />
+              </template>
             </DouButton>
             <DouDivider />
             <DouButton
@@ -363,6 +428,16 @@ watch(
   justify-content: flex-start;
   width: 100%;
   min-height: 36px;
+}
+
+.duo-rail-menu-item.is-active {
+  background-color: color-mix(in oklab, var(--dou-color-primary) 8%, transparent);
+  color: var(--dou-color-primary-text);
+}
+
+.duo-rail-menu-check {
+  width: 14px;
+  height: 14px;
 }
 
 .duo-rail-menu-label {
