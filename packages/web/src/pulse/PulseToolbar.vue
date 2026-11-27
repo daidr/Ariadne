@@ -17,6 +17,7 @@ import {
   type PulseFilter,
   type PulseGroupBy,
   type PulseLaneCounts,
+  type PulseScope,
   type PulseWindowKey,
 } from './model'
 
@@ -31,6 +32,7 @@ const emit = defineEmits<{
   snapToNow: []
 }>()
 
+const scope = defineModel<PulseScope>('scope', { default: 'project' })
 const filter = defineModel<PulseFilter>('filter', { required: true })
 const groupBy = defineModel<PulseGroupBy>('groupBy', { required: true })
 const windowKey = defineModel<PulseWindowKey>('windowKey', { required: true })
@@ -40,6 +42,11 @@ const showHandoffs = defineModel<boolean>('showHandoffs', { required: true })
 const showReturnLine = defineModel<boolean>('showReturnLine', { required: true })
 
 const layersOpen = ref(false)
+
+const scopeOptions = computed(() => [
+  { value: 'project' satisfies PulseScope, label: t('pulse.scope.project') },
+  { value: 'all' satisfies PulseScope, label: t('pulse.scope.all') },
+])
 
 const groupOptions = computed(() => [
   { value: 'stage' satisfies PulseGroupBy, label: t('pulse.group.stage') },
@@ -74,7 +81,7 @@ function toggleDensity() {
       <div class="pulse-toolbar-heading">
         <DouText weight="medium">{{ t('pulse.title') }}</DouText>
         <DouText
-          v-if="projectName"
+          v-if="scope === 'project' && projectName"
           size="sm"
           variant="tertiary"
           truncate
@@ -83,6 +90,13 @@ function toggleDensity() {
           {{ projectName }}
         </DouText>
       </div>
+      <DouSegmentedControl
+        v-model="scope"
+        :options="scopeOptions"
+        size="sm"
+        data-pulse-scope
+        :aria-label="t('pulse.scope.aria')"
+      />
       <DouDivider direction="vertical" class="pulse-toolbar-divider" />
       <div class="pulse-filters" role="group" :aria-label="t('pulse.title')">
         <button
@@ -124,7 +138,12 @@ function toggleDensity() {
     </div>
 
     <div class="pulse-toolbar-right">
-      <DouSegmentedControl v-model="groupBy" :options="groupOptions" size="sm" />
+      <DouSegmentedControl
+        v-if="scope === 'project'"
+        v-model="groupBy"
+        :options="groupOptions"
+        size="sm"
+      />
       <DouSegmentedControl v-model="windowKey" :options="windowOptions" size="sm" />
       <DouButton
         size="sm"

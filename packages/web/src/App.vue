@@ -297,7 +297,7 @@ onScopeDispose(
                 <PlanMain />
               </div>
               <div v-else-if="state.main.kind === 'pulse'" class="pane">
-                <PulseView />
+                <PulseView :layout-mode="layoutMode" />
               </div>
               <DouSplitter
                 v-else

@@ -1064,6 +1064,27 @@ export async function openProjectConversation(projectId: string) {
   openMain({ kind: 'conversation' })
 }
 
+/** Open a conversation's trace in any project, switching projects first when needed. */
+export async function openProjectTrace(projectId: string, conversationId: string) {
+  if (projectId && (projectId !== state.currentId || state.starting || !state.detail)) {
+    if (!(await ensureProjectOpen(projectId))) return
+  }
+  if (state.full) setFull(null)
+  openMain({ kind: 'trace', conversationId })
+}
+
+/** Open a thread's workspace changes in any project, switching projects first when needed. */
+export async function openProjectChanges(projectId: string, threadId: string) {
+  if (projectId && (projectId !== state.currentId || state.starting || !state.detail)) {
+    if (!(await ensureProjectOpen(projectId))) return
+  }
+  if (state.full) setFull(null)
+  if (state.main.kind === 'trace' || state.main.kind === 'pulse' || state.main.kind === 'gallery') {
+    openMain({ kind: 'conversation' })
+  }
+  await openView({ kind: 'changes', threadId })
+}
+
 /** Open an artifact in any project, switching projects first when needed. */
 export async function openProjectArtifact(projectId: string, artifactId: string) {
   if (projectId !== state.currentId || state.starting || !state.detail) {
