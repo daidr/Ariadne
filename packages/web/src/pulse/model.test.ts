@@ -14,20 +14,23 @@ import {
   buildPulseFeed,
   classifyHandoffTone,
   classifyMarkerTone,
+  computeAxisHeaderLayout,
   computeFetchBounds,
   computeLiveViewport,
   filterAndPartitionLanes,
   formatDurationCompact,
   isNeedsLane,
   isPulseRelevantEvent,
-  laneStatusDotClass,
+  markerToneToDouTone,
   MAX_RETENTION_MS,
   MAX_VIEW_SPAN_MS,
   MIN_VIEW_SPAN_MS,
   needsRefetch,
   panViewport,
   resolveLaneAttentions,
+  resolveLaneStatusDot,
   resolveLaneThreadSummary,
+  resolveSpanToneGroup,
   resolveSpanVisualKind,
   WINDOW_DURATION_MS,
   zoomViewport,
@@ -408,9 +411,78 @@ describe('buildConcurrencyBars and axis ticks', () => {
     expect(isNeedsLane(stopped)).toBe(true)
     expect(isNeedsLane(haltedCoord)).toBe(true)
 
-    expect(laneStatusDotClass(silent)).toBe('is-danger')
-    expect(laneStatusDotClass(stopped)).toBe('is-warning')
-    expect(laneStatusDotClass(haltedCoord)).toBe('is-danger')
+    expect(resolveLaneStatusDot(silent)).toEqual({ tone: 'danger', ripple: false })
+    expect(resolveLaneStatusDot(stopped)).toEqual({ tone: 'warning', ripple: false })
+    expect(resolveLaneStatusDot(haltedCoord)).toEqual({ tone: 'danger', ripple: false })
+    expect(resolveLaneStatusDot(lane({ conversationId: 'thr_work', stage: 'working' }))).toEqual({
+      tone: 'primary',
+      ripple: true,
+    })
+  })
+
+  test('maps span visual kinds to 4 soft tone groups and marker tones to DouUI tones', () => {
+    expect(resolveSpanToneGroup('working')).toBe('active')
+    expect(resolveSpanToneGroup('reviewing')).toBe('active')
+    expect(resolveSpanToneGroup('waiting_user')).toBe('attention')
+    expect(resolveSpanToneGroup('blocked')).toBe('danger')
+    expect(resolveSpanToneGroup('waiting_ci')).toBe('passive')
+    expect(resolveSpanToneGroup('waiting')).toBe('passive')
+    expect(resolveSpanToneGroup('waiting_review')).toBe('passive')
+    expect(resolveSpanToneGroup('queued')).toBe('passive')
+    expect(resolveSpanToneGroup('coord')).toBe('passive')
+    expect(resolveSpanToneGroup('aside')).toBe('passive')
+
+    expect(markerToneToDouTone('primary')).toBe('primary')
+    expect(markerToneToDouTone('review')).toBe('primary')
+    expect(markerToneToDouTone('ci')).toBe('neutral')
+    expect(markerToneToDouTone('success')).toBe('success')
+    expect(markerToneToDouTone('warning')).toBe('warning')
+    expect(markerToneToDouTone('danger')).toBe('danger')
+  })
+
+  test('computeAxisHeaderLayout hides ticks colliding with now/return badges and keeps badges separated', () => {
+    const ticks = [
+      { at: 1, pct: 10 },
+      { at: 2, pct: 30 },
+      { at: 3, pct: 55 },
+      { at: 4, pct: 75 },
+      { at: 5, pct: 95 },
+    ]
+    const layout = computeAxisHeaderLayout({
+      ticks,
+      trackWidthPx: 800,
+      nowPct: 96,
+      returnPct: 56,
+      spansDays: false,
+    })
+    expect(layout.nowAlign).toBe('right')
+    expect(layout.showReturnBadge).toBe(true)
+    expect(layout.returnAlign).toBe('left')
+    expect(layout.visibleLabelTicks.map((item) => item.at)).not.toContain(3)
+    expect(layout.visibleLabelTicks.map((item) => item.at)).not.toContain(5)
+    expect(layout.visibleLabelTicks.map((item) => item.at)).toContain(1)
+
+    // When return line is close to the now badge, away badge flips to the left of its line.
+    const flipped = computeAxisHeaderLayout({
+      ticks,
+      trackWidthPx: 800,
+      nowPct: 96,
+      returnPct: 80,
+      spansDays: false,
+    })
+    expect(flipped.nowAlign).toBe('right')
+    expect(flipped.showReturnBadge).toBe(true)
+    expect(flipped.returnAlign).toBe('right')
+
+    // When return line sits inside the now badge footprint, away badge is suppressed cleanly.
+    const crowded = computeAxisHeaderLayout({
+      ticks,
+      trackWidthPx: 800,
+      nowPct: 96,
+      returnPct: 93,
+      spansDays: false,
+    })
+    expect(crowded.showReturnBadge).toBe(false)
   })
 
   test('resolveLaneAttentions and resolveLaneThreadSummary ignore stale allNeedsMe for current project', () => {

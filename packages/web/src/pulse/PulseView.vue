@@ -6,7 +6,7 @@ import type {
   PulseSnapshot,
   PulseSpan,
 } from '@ariadne/core'
-import { DouAlert, DouButton, DouEmpty, DouSpinner } from 'dou-ui'
+import { DouAlert, DouButton, DouEmpty, DouSpinner, DouSplitter } from 'dou-ui'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { coalescedRefresh } from '../coalesced-refresh'
@@ -33,12 +33,16 @@ import PulseNarrowView from './PulseNarrowView.vue'
 import PulseToolbar from './PulseToolbar.vue'
 import {
   buildPulseFeed,
+  clamp,
   computeFetchBounds,
   computeLiveViewport,
+  DEFAULT_LABEL_COL_WIDTH,
   filterAndPartitionLanes,
   isActiveLane,
   isNeedsLane,
   isPulseRelevantEvent,
+  MAX_LABEL_COL_WIDTH,
+  MIN_LABEL_COL_WIDTH,
   needsRefetch,
   panViewport,
   resolveLaneAttentions,
@@ -48,6 +52,7 @@ import {
   type PulseDensity,
   type PulseFilter,
   type PulseGroupBy,
+  type PulseLaneLines,
   type PulseNarrowTab,
   type PulseNodeMeta,
   type PulseScope,
@@ -64,13 +69,16 @@ const props = withDefaults(
 
 const LIVE_REFRESH_MS = 450
 const PAN_REFETCH_MS = 220
-const PREFS_KEY = 'ariadne.pulse.prefs'
+const PREFS_KEY = 'ariadne.pulse.prefs.v2'
 
 interface PulsePrefs {
   density?: PulseDensity
+  laneLines?: PulseLaneLines
   showConcurrency?: boolean
   showHandoffs?: boolean
   showReturnLine?: boolean
+  showLegend?: boolean
+  labelWidth?: number
 }
 
 function readPrefs(): PulsePrefs {
@@ -100,9 +108,17 @@ const filter = ref<PulseFilter>('all')
 const groupBy = ref<PulseGroupBy>('stage')
 const windowKey = ref<PulseWindowKey>('1h')
 const density = ref<PulseDensity>(initialPrefs.density === 'compact' ? 'compact' : 'comfortable')
-const showConcurrency = ref(initialPrefs.showConcurrency ?? true)
-const showHandoffs = ref(initialPrefs.showHandoffs ?? true)
+const laneLines = ref<PulseLaneLines>(initialPrefs.laneLines === 'double' ? 'double' : 'single')
+const showConcurrency = ref(initialPrefs.showConcurrency ?? false)
+const showHandoffs = ref(initialPrefs.showHandoffs ?? false)
 const showReturnLine = ref(initialPrefs.showReturnLine ?? true)
+const showLegend = ref(initialPrefs.showLegend ?? false)
+const labelWidth = ref(
+  typeof initialPrefs.labelWidth === 'number' && Number.isFinite(initialPrefs.labelWidth)
+    ? Math.round(clamp(initialPrefs.labelWidth, MIN_LABEL_COL_WIDTH, MAX_LABEL_COL_WIDTH))
+    : DEFAULT_LABEL_COL_WIDTH,
+)
+const inspectorSplit = ref(72)
 const showCompleted = ref(false)
 const following = ref(true)
 const hovering = ref(false)
@@ -132,14 +148,20 @@ const drawerMode = computed<'docked' | 'right' | 'bottom'>(() => {
   return 'docked'
 })
 
-watch([density, showConcurrency, showHandoffs, showReturnLine], () => {
-  writePrefs({
-    density: density.value,
-    showConcurrency: showConcurrency.value,
-    showHandoffs: showHandoffs.value,
-    showReturnLine: showReturnLine.value,
-  })
-})
+watch(
+  [density, laneLines, showConcurrency, showHandoffs, showReturnLine, showLegend, labelWidth],
+  () => {
+    writePrefs({
+      density: density.value,
+      laneLines: laneLines.value,
+      showConcurrency: showConcurrency.value,
+      showHandoffs: showHandoffs.value,
+      showReturnLine: showReturnLine.value,
+      showLegend: showLegend.value,
+      labelWidth: labelWidth.value,
+    })
+  },
+)
 
 const currentProjectName = computed(
   () => state.projects.find((project) => project.id === state.currentId)?.name ?? null,
@@ -617,9 +639,11 @@ onUnmounted(() => {
       v-model:group-by="groupBy"
       v-model:window-key="windowKey"
       v-model:density="density"
+      v-model:lane-lines="laneLines"
       v-model:show-concurrency="showConcurrency"
       v-model:show-handoffs="showHandoffs"
       v-model:show-return-line="showReturnLine"
+      v-model:show-legend="showLegend"
       :project-name="currentProjectName"
       :counts="partitioned.counts"
       :following="following"
@@ -699,54 +723,106 @@ onUnmounted(() => {
         @expand-window="expandTo24h"
       />
 
-      <PulseCanvas
+      <DouSplitter
         v-else
-        v-model:show-completed="showCompleted"
-        :partitioned="partitioned"
-        :spans-by-conversation="spansByConversation"
-        :markers-by-conversation="markersByConversation"
-        :handoffs="snapshot.handoffs"
-        :concurrency="snapshot.concurrency ?? emptyConcurrency"
-        :all-spans="snapshot.spans"
-        :last-returned-at="snapshot.lastReturnedAt"
-        :now-ms="nowMs"
-        :view-start="viewport.viewStart"
-        :view-end="viewport.viewEnd"
-        :density="density"
-        :show-concurrency="showConcurrency"
-        :show-handoffs="showHandoffs"
-        :show-return-line="showReturnLine"
-        :selected-lane-id="selectedLaneId"
-        :selected-span-id="selectedSpanId"
-        :scope="scope"
-        :threads="threadsById"
-        :live-commands="state.live"
-        @select="handleSelect"
-        @open-lane="handleOpenLane"
-        @zoom="handleZoom"
-        @pan="handlePan"
-        @reset-window="snapToNow"
-        @hovering-change="hovering = $event"
+        v-model="inspectorSplit"
+        :min="45"
+        :max="selectedLane && drawerMode === 'docked' ? 82 : 100"
+        :single-pane="selectedLane && drawerMode === 'docked' ? null : 'start'"
+        class="pulse-splitter"
       >
-        <template #empty>
-          <div v-if="showFilteredEmpty" class="pulse-inline-empty" data-pulse-inline-empty>
-            <DouEmpty :description="t('pulse.empty.filtered')">
-              <DouButton size="sm" variant="soft" @click="filter = 'all'">
-                {{ t('pulse.empty.resetFilter') }}
-              </DouButton>
-            </DouEmpty>
-          </div>
-          <div v-else-if="showQuietWindowHint" class="pulse-inline-empty" data-pulse-inline-empty>
-            <DouEmpty :description="t('pulse.empty.window')">
-              <DouButton v-if="windowKey !== '24h'" size="sm" variant="soft" @click="expandTo24h">
-                {{ t('pulse.empty.expandWindow') }}
-              </DouButton>
-            </DouEmpty>
-          </div>
+        <template #start>
+          <PulseCanvas
+            v-model:show-completed="showCompleted"
+            v-model:label-width="labelWidth"
+            :partitioned="partitioned"
+            :spans-by-conversation="spansByConversation"
+            :markers-by-conversation="markersByConversation"
+            :handoffs="snapshot.handoffs"
+            :concurrency="snapshot.concurrency ?? emptyConcurrency"
+            :all-spans="snapshot.spans"
+            :last-returned-at="snapshot.lastReturnedAt"
+            :now-ms="nowMs"
+            :view-start="viewport.viewStart"
+            :view-end="viewport.viewEnd"
+            :density="density"
+            :lane-lines="laneLines"
+            :show-concurrency="showConcurrency"
+            :show-handoffs="showHandoffs"
+            :show-return-line="showReturnLine"
+            :selected-lane-id="selectedLaneId"
+            :selected-span-id="selectedSpanId"
+            :scope="scope"
+            :threads="threadsById"
+            :live-commands="state.live"
+            @toggle-concurrency="showConcurrency = !showConcurrency"
+            @select="handleSelect"
+            @open-lane="handleOpenLane"
+            @zoom="handleZoom"
+            @pan="handlePan"
+            @reset-window="snapToNow"
+            @hovering-change="hovering = $event"
+          >
+            <template #empty>
+              <div v-if="showFilteredEmpty" class="pulse-inline-empty" data-pulse-inline-empty>
+                <DouEmpty :description="t('pulse.empty.filtered')">
+                  <DouButton size="sm" variant="soft" @click="filter = 'all'">
+                    {{ t('pulse.empty.resetFilter') }}
+                  </DouButton>
+                </DouEmpty>
+              </div>
+              <div
+                v-else-if="showQuietWindowHint"
+                class="pulse-inline-empty"
+                data-pulse-inline-empty
+              >
+                <DouEmpty :description="t('pulse.empty.window')">
+                  <DouButton
+                    v-if="windowKey !== '24h'"
+                    size="sm"
+                    variant="soft"
+                    @click="expandTo24h"
+                  >
+                    {{ t('pulse.empty.expandWindow') }}
+                  </DouButton>
+                </DouEmpty>
+              </div>
+            </template>
+          </PulseCanvas>
         </template>
-      </PulseCanvas>
+
+        <template #end>
+          <PulseInspector
+            v-if="drawerMode === 'docked'"
+            :open="Boolean(selectedLane)"
+            drawer-mode="docked"
+            :lane="selectedLane"
+            :spans="selectedSpans"
+            :markers="selectedMarkers"
+            :selected-span-id="selectedSpanId"
+            :view-start="viewport.viewStart"
+            :view-end="viewport.viewEnd"
+            :now-ms="nowMs"
+            :attentions="selectedAttentions"
+            :attentions-loading="selectedAttentionsLoading"
+            :thread="selectedThread"
+            :thread-summary="selectedThreadSummary"
+            :node-meta="selectedNodeMeta"
+            :review-target="selectedReviewTarget"
+            :live-command="selectedLiveCommand"
+            :live-wait="selectedLiveWait"
+            @close="clearSelection"
+            @open-lane="handleOpenLane"
+            @open-diff="handleOpenDiff"
+            @open-trace="handleOpenTrace"
+            @select-lane="handleSelectLaneOnly"
+            @mutated="handleMutated"
+          />
+        </template>
+      </DouSplitter>
 
       <PulseInspector
+        v-if="drawerMode !== 'docked'"
         :open="Boolean(selectedLane)"
         :drawer-mode="drawerMode"
         :lane="selectedLane"
@@ -773,7 +849,7 @@ onUnmounted(() => {
       />
     </div>
 
-    <PulseLegend v-if="!isNarrow" />
+    <PulseLegend v-if="!isNarrow && showLegend" />
   </section>
 </template>
 
@@ -793,6 +869,19 @@ onUnmounted(() => {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.pulse-splitter {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pulse-splitter :deep(.dou-splitter__pane) {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 
 .pulse-error-banner {

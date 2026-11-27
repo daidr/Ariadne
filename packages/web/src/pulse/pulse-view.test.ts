@@ -250,6 +250,20 @@ function mountPulse(layoutMode: WorkspaceLayoutMode = 'wide') {
   return wrapper
 }
 
+async function openViewMenu(wrapper: VueWrapper) {
+  const trigger = wrapper.get('[data-pulse-view-menu]')
+  if (trigger.attributes('aria-expanded') !== 'true') {
+    await trigger.trigger('click')
+    await nextTick()
+  }
+}
+
+function clickMenuOption(selector: string) {
+  const el = document.querySelector<HTMLElement>(selector)
+  expect(el, `expected menu option ${selector}`).not.toBeNull()
+  el!.click()
+}
+
 describe('PulseView', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -328,19 +342,26 @@ describe('PulseView', () => {
     vi.useRealTimers()
   })
 
-  test('renders ribbon, axis, return line, grouped lanes, handoff arcs and collapsible completed section', async () => {
+  test('renders minimal default canvas, toggles ribbon via slot badge, and expands completed section', async () => {
     const getPulse = vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
     const wrapper = mountPulse()
     await flushPromises()
     await nextTick()
 
     expect(getPulse).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(true)
-    expect(wrapper.get('[data-pulse-slot-badge]').text()).toBe('1 / 3')
+    // Minimal default: concurrency ribbon, handoff arcs and legend are hidden; slot badge is shown in header.
+    expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(false)
+    expect(wrapper.find('[data-pulse-handoff-svg]').exists()).toBe(false)
+    expect(wrapper.find('[data-pulse-legend]').exists()).toBe(false)
+    expect(wrapper.get('[data-pulse-slot-badge]').text().trim()).toBe('1 / 3')
     expect(wrapper.find('[data-pulse-return-badge]').exists()).toBe(true)
     expect(wrapper.find('[data-pulse-return-band]').exists()).toBe(true)
     expect(wrapper.find('[data-pulse-now-line]').exists()).toBe(true)
-    expect(wrapper.findAll('[data-pulse-handoff-arc]')).toHaveLength(1)
+
+    // Clicking the compact slot badge toggles the concurrency watermark ribbon.
+    await wrapper.get('[data-pulse-slot-badge]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(true)
 
     // Active lanes visible, reviewer nested under author, completed folded by default.
     expect(wrapper.find('[data-lane-id="crd_1"]').exists()).toBe(true)
@@ -355,7 +376,7 @@ describe('PulseView', () => {
     expect(wrapper.find('[data-lane-id="thr_done"]').exists()).toBe(true)
   })
 
-  test('supports status filtering, density toggle, layer toggles and pan/snap-to-now follow state', async () => {
+  test('supports status filtering, view menu controls, column resize and pan/snap-to-now follow state', async () => {
     vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
     const wrapper = mountPulse()
     await flushPromises()
@@ -372,11 +393,36 @@ describe('PulseView', () => {
     await nextTick()
     expect(wrapper.find('[data-lane-id="thr_author"]').exists()).toBe(true)
 
-    // Toggle density from comfortable (44px) to compact (34px).
-    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 44px')
-    await wrapper.get('[data-pulse-density]').trigger('click')
+    // Default comfortable single-line (38px) -> double-line (46px) -> compact (32px).
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 38px')
+    expect(wrapper.find('[data-lane-id="thr_author"] .pulse-lane-meta').exists()).toBe(false)
+
+    await openViewMenu(wrapper)
+    clickMenuOption('[data-pulse-lane-lines="double"]')
     await nextTick()
-    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 34px')
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 46px')
+    expect(wrapper.find('[data-lane-id="thr_author"] .pulse-lane-meta').exists()).toBe(true)
+
+    clickMenuOption('[data-pulse-density-option="compact"]')
+    await nextTick()
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 32px')
+
+    // Display layer toggles inside view menu.
+    clickMenuOption('[data-pulse-layer-toggle="concurrency"]')
+    clickMenuOption('[data-pulse-layer-toggle="handoffs"]')
+    clickMenuOption('[data-pulse-layer-toggle="legend"]')
+    clickMenuOption('[data-pulse-layer-toggle="returnLine"]')
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-pulse-handoff-arc]')).toHaveLength(1)
+    expect(wrapper.find('[data-pulse-legend]').exists()).toBe(true)
+    expect(wrapper.find('[data-pulse-return-band]').exists()).toBe(false)
+
+    // Keyboard resize on left-column divider updates --pulse-label-w.
+    await wrapper.get('[data-pulse-col-divider]').trigger('keydown', { key: 'ArrowRight' })
+    await nextTick()
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-label-w: 260px')
 
     // Sideways wheel pans the timeline and switches follow button from live to back-to-now.
     const followBtn = wrapper.get('[data-pulse-follow]')
@@ -384,13 +430,13 @@ describe('PulseView', () => {
     const scrollEl = wrapper.get('.pulse-lanes-scroll')
     const axisTrack = wrapper.get('.pulse-axis-track').element as HTMLElement
     vi.spyOn(axisTrack, 'getBoundingClientRect').mockReturnValue({
-      left: 258,
+      left: 264,
       top: 0,
-      right: 1058,
+      right: 1064,
       bottom: 30,
       width: 800,
       height: 30,
-      x: 258,
+      x: 264,
       y: 0,
       toJSON: () => ({}),
     })
@@ -404,19 +450,6 @@ describe('PulseView', () => {
     await followBtn.trigger('click')
     await nextTick()
     expect(followBtn.text()).toContain('实时跟随')
-
-    // Layer toggles hide concurrency ribbon, handoff arcs and return line.
-    await wrapper.get('[data-pulse-layers]').trigger('click')
-    await nextTick()
-    const layerSwitches = [
-      ...document.querySelectorAll<HTMLButtonElement>('.pulse-layers-list [role="switch"]'),
-    ]
-    expect(layerSwitches).toHaveLength(3)
-    for (const sw of layerSwitches) sw.click()
-    await nextTick()
-    expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(false)
-    expect(wrapper.find('[data-pulse-handoff-svg]').exists()).toBe(false)
-    expect(wrapper.find('[data-pulse-return-band]').exists()).toBe(false)
   })
 
   test('groups active lanes by plan node when switching groupBy to node', async () => {
@@ -425,13 +458,8 @@ describe('PulseView', () => {
     await flushPromises()
     await nextTick()
 
-    const nodeOption = wrapper
-      .findAll('.dou-segmented-control label, .dou-segmented-control button')
-      .find((el) => el.text().includes('按计划节点'))
-    expect(nodeOption).toBeDefined()
-    const radio = nodeOption!.find('input[type="radio"]')
-    if (radio.exists()) await radio.setValue(true)
-    else await nodeOption!.trigger('click')
+    await openViewMenu(wrapper)
+    clickMenuOption('[data-pulse-group-option="node"]')
     await nextTick()
 
     expect(wrapper.find('[data-pulse-group="node:node_b"]').exists()).toBe(true)
@@ -509,10 +537,15 @@ describe('PulseView', () => {
     await flushPromises()
     await nextTick()
 
+    // Enable handoff arcs from the view menu.
+    await openViewMenu(wrapper)
+    clickMenuOption('[data-pulse-layer-toggle="handoffs"]')
+    await nextTick()
+
     const inner = wrapper.get('.pulse-lanes-inner').element as HTMLElement
     let flowHeight = 620
     const staleScrollHeight = 620
-    Object.defineProperty(inner, 'clientWidth', { configurable: true, get: () => 1058 })
+    Object.defineProperty(inner, 'clientWidth', { configurable: true, get: () => 1048 })
     Object.defineProperty(inner, 'offsetHeight', { configurable: true, get: () => flowHeight })
     Object.defineProperty(inner, 'scrollHeight', {
       configurable: true,
@@ -522,9 +555,9 @@ describe('PulseView', () => {
     const authorEl = wrapper.get('[data-lane-id="thr_author"]').element as HTMLElement
     const reviewerEl = wrapper.get('[data-lane-id="thr_reviewer"]').element as HTMLElement
     Object.defineProperty(authorEl, 'offsetTop', { configurable: true, get: () => 88 })
-    Object.defineProperty(authorEl, 'offsetHeight', { configurable: true, get: () => 44 })
-    Object.defineProperty(reviewerEl, 'offsetTop', { configurable: true, get: () => 132 })
-    Object.defineProperty(reviewerEl, 'offsetHeight', { configurable: true, get: () => 44 })
+    Object.defineProperty(authorEl, 'offsetHeight', { configurable: true, get: () => 38 })
+    Object.defineProperty(reviewerEl, 'offsetTop', { configurable: true, get: () => 126 })
+    Object.defineProperty(reviewerEl, 'offsetHeight', { configurable: true, get: () => 38 })
 
     // Expand completed section at taller flow height -> SVG grows to 620px.
     await wrapper.get('[data-pulse-completed-toggle]').trigger('click')

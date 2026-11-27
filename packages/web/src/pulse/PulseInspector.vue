@@ -10,12 +10,12 @@ import type {
   ThreadView,
 } from '@ariadne/core'
 import { CloseIcon, FileDiffIcon, ListTreeIcon, MessagesIcon } from '@dou-ui/icons'
-import { DouButton, DouDrawer } from 'dou-ui'
+import { DouButton, DouDrawer, DouStatusDot } from 'dou-ui'
 import { computed, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { branchChanges } from '../review/merge-offered'
 import PulseInspectorBody from './PulseInspectorBody.vue'
-import { laneStatusDotClass, type PulseNodeMeta } from './model'
+import { resolveLaneStatusDot, type PulseNodeMeta } from './model'
 
 const props = defineProps<{
   open: boolean
@@ -53,7 +53,9 @@ const displayTitle = computed(() => {
   return lane.title || lane.conversationId
 })
 
-const dotClass = computed(() => (props.lane ? laneStatusDotClass(props.lane) : 'is-neutral'))
+const statusDot = computed(() =>
+  props.lane ? resolveLaneStatusDot(props.lane) : { tone: 'neutral' as const, ripple: false },
+)
 
 const hasDiff = computed(() => Boolean(props.thread && branchChanges(props.thread)))
 
@@ -87,7 +89,12 @@ const openActionLabel = computed(() =>
   >
     <template v-if="lane" #title>
       <div class="pulse-insp-heading">
-        <span class="pulse-dot" :class="dotClass" aria-hidden="true" />
+        <DouStatusDot
+          :tone="statusDot.tone"
+          :ripple="statusDot.ripple"
+          size="sm"
+          aria-hidden="true"
+        />
         <button
           type="button"
           class="pulse-insp-title-btn"
@@ -157,7 +164,7 @@ const openActionLabel = computed(() =>
     </template>
   </DouDrawer>
 
-  <!-- Desktop wide: non-blocking docked right-side inspector -->
+  <!-- Desktop wide: docked inspector pane hosted inside DouSplitter -->
   <aside
     v-else-if="open && lane"
     class="pulse-inspector"
@@ -166,7 +173,12 @@ const openActionLabel = computed(() =>
   >
     <div class="pulse-insp-header">
       <div class="pulse-insp-heading">
-        <span class="pulse-dot" :class="dotClass" aria-hidden="true" />
+        <DouStatusDot
+          :tone="statusDot.tone"
+          :ripple="statusDot.ripple"
+          size="sm"
+          aria-hidden="true"
+        />
         <button
           type="button"
           class="pulse-insp-title-btn"
@@ -245,12 +257,11 @@ const openActionLabel = computed(() =>
 <style scoped>
 .pulse-inspector {
   display: flex;
-  flex: none;
   flex-direction: column;
-  width: min(360px, 38%);
-  min-width: 300px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
   min-height: 0;
-  border-left: 1px solid var(--dou-color-border);
   background: var(--dou-color-bg-surface);
 }
 
@@ -260,8 +271,8 @@ const openActionLabel = computed(() =>
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 10px 10px 14px;
-  border-bottom: 1px solid var(--dou-color-border-subtle);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--dou-color-border);
 }
 
 .pulse-insp-heading {
@@ -278,12 +289,12 @@ const openActionLabel = computed(() =>
   background: transparent;
   color: var(--dou-color-text);
   font: inherit;
-  font-size: var(--dou-font-size-sm);
-  font-weight: var(--dou-font-weight-medium);
+  font-size: 13.5px;
+  font-weight: 600;
   text-align: left;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -293,91 +304,40 @@ const openActionLabel = computed(() =>
   text-underline-offset: 2px;
 }
 
+.pulse-insp-title-btn:focus-visible {
+  outline: 2px solid var(--dou-color-focus);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
 .pulse-insp-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px;
+  padding: 12px 14px;
 }
 
 .pulse-drawer-content {
-  padding-bottom: 8px;
-}
-
-.pulse-sheet-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
+  min-width: 0;
 }
 
 .pulse-insp-footer {
   display: flex;
   flex: none;
   flex-wrap: wrap;
-  align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  border-top: 1px solid var(--dou-color-border-subtle);
-  background: var(--dou-color-bg-surface);
+  border-top: 1px solid var(--dou-color-border);
+}
+
+.pulse-sheet-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
 }
 
 .pulse-insp-primary-btn {
   flex: 1 1 auto;
-}
-
-.pulse-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 9999px;
-  flex: none;
-  display: inline-block;
-}
-
-.pulse-dot.is-primary {
-  background: var(--dou-color-primary);
-  color: var(--dou-color-primary);
-}
-
-.pulse-dot.is-review {
-  background: var(--dou-color-chart-6);
-  color: var(--dou-color-chart-6);
-}
-
-.pulse-dot.is-ci {
-  background: var(--dou-color-chart-4);
-}
-
-.pulse-dot.is-warning {
-  background: var(--dou-color-warning);
-}
-
-.pulse-dot.is-danger {
-  background: var(--dou-color-danger);
-}
-
-.pulse-dot.is-success {
-  background: var(--dou-color-success);
-}
-
-.pulse-dot.is-neutral {
-  background: var(--dou-color-text-tertiary);
-}
-
-.pulse-dot.is-pulse {
-  animation: pulse-insp-header-ring 1.8s ease-out infinite;
-}
-
-@keyframes pulse-insp-header-ring {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 50%, transparent);
-  }
-  70% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 0%, transparent);
-  }
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 0%, transparent);
-  }
 }
 </style>

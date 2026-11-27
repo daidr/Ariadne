@@ -3,31 +3,23 @@ import { t } from '../i18n'
 </script>
 
 <template>
-  <footer class="pulse-legend">
+  <footer class="pulse-legend" data-pulse-legend>
     <div class="pulse-legend-items">
       <span class="pulse-legend-item">
-        <span class="pulse-swatch is-working" aria-hidden="true" />
-        {{ t('pulse.stage.working') }}
+        <span class="pulse-swatch is-active" aria-hidden="true" />
+        {{ t('pulse.legend.active') }}
       </span>
       <span class="pulse-legend-item">
-        <span class="pulse-swatch is-reviewing" aria-hidden="true" />
-        {{ t('pulse.stage.reviewing') }}
+        <span class="pulse-swatch is-attention" aria-hidden="true" />
+        {{ t('pulse.legend.attention') }}
       </span>
       <span class="pulse-legend-item">
-        <span class="pulse-swatch is-ci" aria-hidden="true" />
-        {{ t('pulse.stage.waiting_ci') }}
+        <span class="pulse-swatch is-danger" aria-hidden="true" />
+        {{ t('pulse.legend.danger') }}
       </span>
       <span class="pulse-legend-item">
-        <span class="pulse-swatch is-waiting-user" aria-hidden="true" />
-        {{ t('pulse.stage.waiting_user') }}
-      </span>
-      <span class="pulse-legend-item">
-        <span class="pulse-swatch is-blocked" aria-hidden="true" />
-        {{ t('pulse.stage.blocked') }}
-      </span>
-      <span class="pulse-legend-item">
-        <span class="pulse-swatch is-queued" aria-hidden="true" />
-        {{ t('pulse.stage.queued') }}
+        <span class="pulse-swatch is-passive" aria-hidden="true" />
+        {{ t('pulse.legend.passive') }}
       </span>
       <span class="pulse-legend-item">
         <span class="pulse-swatch-diamond" aria-hidden="true" />
@@ -49,7 +41,7 @@ import { t } from '../i18n'
   align-items: center;
   justify-content: space-between;
   gap: 8px 16px;
-  min-height: 34px;
+  min-height: 32px;
   padding: 4px 14px;
   background: var(--dou-color-bg-surface);
   border-top: 1px solid var(--dou-color-border);
@@ -67,40 +59,34 @@ import { t } from '../i18n'
 .pulse-legend-item {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   white-space: nowrap;
 }
 
 .pulse-swatch {
   display: inline-block;
-  width: 12px;
-  height: 8px;
-  border-radius: 2px;
+  width: 14px;
+  height: 9px;
+  border-radius: 3px;
+  border: 1px solid transparent;
 }
 
-.pulse-swatch.is-working {
-  background: var(--dou-color-primary);
+.pulse-swatch.is-active {
+  background: var(--dou-color-primary-soft);
+  border-color: color-mix(in srgb, var(--dou-color-primary) 42%, transparent);
 }
 
-.pulse-swatch.is-reviewing {
-  background: var(--dou-color-chart-6);
-}
-
-.pulse-swatch.is-ci {
-  background: color-mix(in srgb, var(--dou-color-chart-4) 14%, var(--dou-color-bg-surface));
-  border: 1px dashed var(--dou-color-chart-4);
-}
-
-.pulse-swatch.is-waiting-user {
+.pulse-swatch.is-attention {
   background: var(--dou-color-warning-soft);
-  border: 1px solid var(--dou-color-warning);
+  border-color: color-mix(in srgb, var(--dou-color-warning) 48%, transparent);
 }
 
-.pulse-swatch.is-blocked {
-  background: var(--dou-color-danger);
+.pulse-swatch.is-danger {
+  background: var(--dou-color-danger-soft);
+  border-color: color-mix(in srgb, var(--dou-color-danger) 48%, transparent);
 }
 
-.pulse-swatch.is-queued {
+.pulse-swatch.is-passive {
   background: var(--dou-color-bg-muted);
   border: 1px dashed var(--dou-color-border-strong);
 }
@@ -109,7 +95,7 @@ import { t } from '../i18n'
   display: inline-block;
   width: 7px;
   height: 7px;
-  border-radius: 1px;
+  border-radius: 1.5px;
   background: var(--dou-color-success);
   transform: rotate(45deg);
 }

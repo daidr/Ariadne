@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { ArrowRightIcon, ChevronLeftIcon, LayersIcon, LayoutRowsIcon } from '@dou-ui/icons'
+import { ArrowRightIcon, ChevronLeftIcon, SlidersIcon } from '@dou-ui/icons'
 import {
   DouButton,
+  DouCheckTag,
+  DouCheckTagGroup,
   DouDivider,
-  DouPopover,
+  DouDropdown,
+  DouDropdownGroup,
+  DouDropdownItem,
+  DouDropdownRadioGroup,
   DouSegmentedControl,
   DouStatusDot,
-  DouSwitch,
   DouText,
+  type CheckTagValue,
+  type DropdownValue,
 } from 'dou-ui'
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
@@ -17,11 +23,12 @@ import {
   type PulseFilter,
   type PulseGroupBy,
   type PulseLaneCounts,
+  type PulseLaneLines,
   type PulseScope,
   type PulseWindowKey,
 } from './model'
 
-const props = defineProps<{
+defineProps<{
   projectName: string | null
   counts: PulseLaneCounts
   following: boolean
@@ -37,20 +44,17 @@ const filter = defineModel<PulseFilter>('filter', { required: true })
 const groupBy = defineModel<PulseGroupBy>('groupBy', { required: true })
 const windowKey = defineModel<PulseWindowKey>('windowKey', { required: true })
 const density = defineModel<PulseDensity>('density', { required: true })
+const laneLines = defineModel<PulseLaneLines>('laneLines', { required: true })
 const showConcurrency = defineModel<boolean>('showConcurrency', { required: true })
 const showHandoffs = defineModel<boolean>('showHandoffs', { required: true })
 const showReturnLine = defineModel<boolean>('showReturnLine', { required: true })
+const showLegend = defineModel<boolean>('showLegend', { required: true })
 
-const layersOpen = ref(false)
+const viewMenuOpen = ref(false)
 
 const scopeOptions = computed(() => [
   { value: 'project' satisfies PulseScope, label: t('pulse.scope.project') },
   { value: 'all' satisfies PulseScope, label: t('pulse.scope.all') },
-])
-
-const groupOptions = computed(() => [
-  { value: 'stage' satisfies PulseGroupBy, label: t('pulse.group.stage') },
-  { value: 'node' satisfies PulseGroupBy, label: t('pulse.group.node') },
 ])
 
 const windowOptions = computed(() =>
@@ -60,26 +64,40 @@ const windowOptions = computed(() =>
   })),
 )
 
-const densityLabel = computed(() =>
-  t(density.value === 'compact' ? 'pulse.density.compact' : 'pulse.density.comfortable'),
-)
+function onFilterChange(value: CheckTagValue | CheckTagValue[] | null) {
+  if (value === 'all' || value === 'needs' || value === 'active') {
+    filter.value = value
+  }
+}
 
-const densityTooltip = computed(() => t('pulse.density.toggle', { mode: densityLabel.value }))
+function onGroupByChange(value: DropdownValue | undefined) {
+  if (value === 'stage' || value === 'node') {
+    groupBy.value = value
+  }
+}
 
-function toggleDensity() {
-  density.value = density.value === 'compact' ? 'comfortable' : 'compact'
+function onDensityChange(value: DropdownValue | undefined) {
+  if (value === 'comfortable' || value === 'compact') {
+    density.value = value
+  }
+}
+
+function onLaneLinesChange(value: DropdownValue | undefined) {
+  if (value === 'single' || value === 'double') {
+    laneLines.value = value
+  }
 }
 </script>
 
 <template>
-  <div class="pulse-toolbar">
+  <header class="pulse-toolbar">
     <div class="pulse-toolbar-left">
       <DouButton variant="ghost" size="sm" @click="emit('back')">
         <template #leading><ChevronLeftIcon aria-hidden="true" /></template>
         {{ t('view.back') }}
       </DouButton>
       <div class="pulse-toolbar-heading">
-        <DouText weight="medium">{{ t('pulse.title') }}</DouText>
+        <DouText weight="medium" class="pulse-toolbar-title">{{ t('pulse.title') }}</DouText>
         <DouText
           v-if="scope === 'project' && projectName"
           size="sm"
@@ -98,99 +116,110 @@ function toggleDensity() {
         :aria-label="t('pulse.scope.aria')"
       />
       <DouDivider direction="vertical" class="pulse-toolbar-divider" />
-      <div class="pulse-filters" role="group" :aria-label="t('pulse.title')">
-        <button
-          type="button"
-          class="pulse-filter-pill"
-          :class="{ 'is-active': filter === 'all' }"
-          data-pulse-filter="all"
-          :aria-pressed="filter === 'all'"
-          @click="filter = 'all'"
-        >
+      <DouCheckTagGroup
+        :model-value="filter"
+        size="sm"
+        round
+        class="pulse-filters"
+        :aria-label="t('pulse.title')"
+        @update:model-value="onFilterChange"
+      >
+        <DouCheckTag value="all" tone="primary" data-pulse-filter="all">
           <span>{{ t('pulse.filter.all') }}</span>
-          <span class="pulse-mono">{{ counts.all }}</span>
-        </button>
-        <button
-          type="button"
-          class="pulse-filter-pill"
-          :class="{ 'is-active-warning': filter === 'needs' }"
-          data-pulse-filter="needs"
-          :aria-pressed="filter === 'needs'"
-          @click="filter = 'needs'"
-        >
-          <span class="pulse-dot pulse-dot-warning" aria-hidden="true" />
+          <span class="pulse-filter-count">{{ counts.all }}</span>
+        </DouCheckTag>
+        <DouCheckTag value="needs" tone="warning" data-pulse-filter="needs">
+          <template #leading>
+            <DouStatusDot tone="warning" size="sm" aria-hidden="true" />
+          </template>
           <span>{{ t('pulse.filter.needs') }}</span>
-          <span class="pulse-mono">{{ counts.needs }}</span>
-        </button>
-        <button
-          type="button"
-          class="pulse-filter-pill"
-          :class="{ 'is-active': filter === 'active' }"
-          data-pulse-filter="active"
-          :aria-pressed="filter === 'active'"
-          @click="filter = 'active'"
-        >
-          <span class="pulse-dot pulse-dot-primary" aria-hidden="true" />
+          <span class="pulse-filter-count">{{ counts.needs }}</span>
+        </DouCheckTag>
+        <DouCheckTag value="active" tone="primary" data-pulse-filter="active">
+          <template #leading>
+            <DouStatusDot tone="primary" size="sm" aria-hidden="true" />
+          </template>
           <span>{{ t('pulse.filter.active') }}</span>
-          <span class="pulse-mono">{{ counts.active }}</span>
-        </button>
-      </div>
+          <span class="pulse-filter-count">{{ counts.active }}</span>
+        </DouCheckTag>
+      </DouCheckTagGroup>
     </div>
 
     <div class="pulse-toolbar-right">
-      <DouSegmentedControl
-        v-if="scope === 'project'"
-        v-model="groupBy"
-        :options="groupOptions"
-        size="sm"
-      />
       <DouSegmentedControl v-model="windowKey" :options="windowOptions" size="sm" />
-      <DouButton
-        size="sm"
-        :variant="density === 'compact' ? 'soft' : 'ghost'"
-        data-pulse-density
-        :aria-pressed="density === 'compact'"
-        :aria-label="densityTooltip"
-        :title="densityTooltip"
-        @click="toggleDensity"
-      >
-        <template #leading><LayoutRowsIcon aria-hidden="true" /></template>
-        {{ densityLabel }}
-      </DouButton>
-      <DouPopover
-        v-model:open="layersOpen"
-        trigger="click"
-        placement="bottom-end"
-        :width="236"
-        :title="t('pulse.layers')"
-      >
+      <DouDropdown v-model:open="viewMenuOpen" placement="bottom-end" :hide-on-select="false">
         <DouButton
           size="sm"
           variant="ghost"
-          data-pulse-layers
-          :aria-label="t('pulse.layers')"
-          :title="t('pulse.layers')"
-          :aria-expanded="layersOpen"
+          data-pulse-view-menu
+          :aria-label="t('pulse.viewMenu.button')"
+          :aria-expanded="viewMenuOpen"
         >
-          <LayersIcon aria-hidden="true" />
+          <template #leading><SlidersIcon aria-hidden="true" /></template>
+          {{ t('pulse.viewMenu.button') }}
         </DouButton>
-        <template #content>
-          <div class="pulse-layers-list">
-            <label class="pulse-layer-row">
-              <DouText size="sm">{{ t('pulse.layer.concurrency') }}</DouText>
-              <DouSwitch v-model="showConcurrency" size="sm" />
-            </label>
-            <label class="pulse-layer-row">
-              <DouText size="sm">{{ t('pulse.layer.handoffs') }}</DouText>
-              <DouSwitch v-model="showHandoffs" size="sm" />
-            </label>
-            <label class="pulse-layer-row">
-              <DouText size="sm">{{ t('pulse.layer.returnLine') }}</DouText>
-              <DouSwitch v-model="showReturnLine" size="sm" />
-            </label>
-          </div>
+        <template #menu>
+          <DouDropdownRadioGroup
+            v-if="scope === 'project'"
+            :model-value="groupBy"
+            :label="t('pulse.viewMenu.groupBy')"
+            @update:model-value="onGroupByChange"
+          >
+            <DouDropdownItem value="stage" data-pulse-group-option="stage">
+              {{ t('pulse.group.stage') }}
+            </DouDropdownItem>
+            <DouDropdownItem value="node" data-pulse-group-option="node">
+              {{ t('pulse.group.node') }}
+            </DouDropdownItem>
+          </DouDropdownRadioGroup>
+
+          <DouDropdownRadioGroup
+            :model-value="density"
+            :label="t('pulse.viewMenu.density')"
+            :divided="scope === 'project'"
+            @update:model-value="onDensityChange"
+          >
+            <DouDropdownItem value="comfortable" data-pulse-density-option="comfortable">
+              {{ t('pulse.density.comfortable') }}
+            </DouDropdownItem>
+            <DouDropdownItem value="compact" data-pulse-density-option="compact">
+              {{ t('pulse.density.compact') }}
+            </DouDropdownItem>
+          </DouDropdownRadioGroup>
+
+          <DouDropdownRadioGroup
+            :model-value="laneLines"
+            :label="t('pulse.viewMenu.laneInfo')"
+            divided
+            @update:model-value="onLaneLinesChange"
+          >
+            <DouDropdownItem value="single" data-pulse-lane-lines="single">
+              {{ t('pulse.viewMenu.singleLine') }}
+            </DouDropdownItem>
+            <DouDropdownItem value="double" data-pulse-lane-lines="double">
+              {{ t('pulse.viewMenu.doubleLine') }}
+            </DouDropdownItem>
+          </DouDropdownRadioGroup>
+
+          <DouDropdownGroup :label="t('pulse.viewMenu.display')" divided>
+            <DouDropdownItem
+              v-model:checked="showConcurrency"
+              data-pulse-layer-toggle="concurrency"
+            >
+              {{ t('pulse.layer.concurrency') }}
+            </DouDropdownItem>
+            <DouDropdownItem v-model:checked="showHandoffs" data-pulse-layer-toggle="handoffs">
+              {{ t('pulse.layer.handoffs') }}
+            </DouDropdownItem>
+            <DouDropdownItem v-model:checked="showReturnLine" data-pulse-layer-toggle="returnLine">
+              {{ t('pulse.layer.returnLine') }}
+            </DouDropdownItem>
+            <DouDropdownItem v-model:checked="showLegend" data-pulse-layer-toggle="legend">
+              {{ t('pulse.layer.legend') }}
+            </DouDropdownItem>
+          </DouDropdownGroup>
         </template>
-      </DouPopover>
+      </DouDropdown>
       <DouButton
         size="sm"
         :variant="following ? 'soft' : 'outline'"
@@ -199,7 +228,7 @@ function toggleDensity() {
         @click="emit('snapToNow')"
       >
         <template #leading>
-          <DouStatusDot v-if="following" tone="primary" ripple aria-hidden="true" />
+          <DouStatusDot v-if="following" tone="primary" size="sm" ripple aria-hidden="true" />
         </template>
         {{ following ? t('pulse.follow.live') : t('pulse.follow.backToNow') }}
         <template v-if="!following" #trailing>
@@ -207,7 +236,7 @@ function toggleDensity() {
         </template>
       </DouButton>
     </div>
-  </div>
+  </header>
 </template>
 
 <style scoped>
@@ -218,6 +247,7 @@ function toggleDensity() {
   align-items: center;
   justify-content: space-between;
   gap: 8px 12px;
+  box-sizing: border-box;
   min-height: 44px;
   padding: 6px 14px;
   background: var(--dou-color-bg-surface);
@@ -227,7 +257,7 @@ function toggleDensity() {
 .pulse-toolbar-left,
 .pulse-toolbar-right {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -240,8 +270,12 @@ function toggleDensity() {
   min-width: 0;
 }
 
+.pulse-toolbar-title {
+  white-space: nowrap;
+}
+
 .pulse-project-name {
-  max-width: 180px;
+  max-width: 150px;
 }
 
 .pulse-toolbar-divider {
@@ -249,84 +283,12 @@ function toggleDensity() {
 }
 
 .pulse-filters {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.pulse-filter-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 9px;
-  border-radius: 9999px;
-  border: 1px solid var(--dou-color-border);
-  background: var(--dou-color-bg-surface);
-  color: var(--dou-color-text-secondary);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    background-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.pulse-filter-pill:hover {
-  border-color: var(--dou-color-border-strong);
-  color: var(--dou-color-text);
-}
-
-.pulse-filter-pill:focus-visible {
-  outline: 2px solid var(--dou-color-focus);
-  outline-offset: 1px;
-}
-
-.pulse-filter-pill.is-active {
-  border-color: var(--dou-color-primary);
-  background: var(--dou-color-primary-soft);
-  color: var(--dou-color-primary-text);
-}
-
-.pulse-filter-pill.is-active-warning {
-  border-color: var(--dou-color-warning);
-  background: var(--dou-color-warning-soft);
-  color: var(--dou-color-warning-text);
-}
-
-.pulse-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 9999px;
   flex: none;
-  display: inline-block;
 }
 
-.pulse-dot-primary {
-  background: var(--dou-color-primary);
-}
-
-.pulse-dot-warning {
-  background: var(--dou-color-warning);
-}
-
-.pulse-mono {
+.pulse-filter-count {
+  margin-left: 4px;
   font-variant-numeric: tabular-nums;
-}
-
-.pulse-layers-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.pulse-layer-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  cursor: pointer;
+  opacity: 0.85;
 }
 </style>
