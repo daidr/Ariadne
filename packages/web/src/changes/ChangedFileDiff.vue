@@ -152,6 +152,8 @@ const { language } = useCodeLanguage(() => props.file.path)
   padding: 0 12px;
   background-color: var(--dou-color-bg-surface);
   border-bottom: 1px solid var(--dou-color-border);
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 @media (pointer: coarse) {
@@ -165,6 +167,8 @@ const { language } = useCodeLanguage(() => props.file.path)
   align-items: center;
   gap: 8px;
   min-width: 0;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .file-diff-loading {

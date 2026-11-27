@@ -450,26 +450,83 @@ onMounted(() => {
   computeHandoffArcsNow()
 })
 
+// --- Shared drag guards (prevent text selection / native HTML5 drag hijacking pointers) ---
+function clearTextSelection() {
+  const selection = typeof window !== 'undefined' ? window.getSelection() : null
+  if (selection && !selection.isCollapsed) {
+    selection.removeAllRanges()
+  }
+}
+
+function preventBrowserDrag(event: Event) {
+  event.preventDefault()
+}
+
+function trySetPointerCapture(element: HTMLElement | null, pointerId: number) {
+  try {
+    element?.setPointerCapture?.(pointerId)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function tryReleasePointerCapture(element: HTMLElement | null, pointerId: number) {
+  try {
+    if (element?.hasPointerCapture?.(pointerId)) {
+      element.releasePointerCapture(pointerId)
+    }
+  } catch {
+    // Ignore already-released or synthetic pointers.
+  }
+}
+
 // --- Draggable label-column divider (aligned with @dou-ui/gantt) ---
 const resizingCol = ref(false)
-let colResizeState: { pointerId: number; startX: number; startWidth: number } | null = null
+let colResizeState: {
+  pointerId: number
+  startX: number
+  startWidth: number
+  captureEl: HTMLElement | null
+} | null = null
+
+function syncGlobalDragging() {
+  if (typeof document === 'undefined') return
+  const active = panning.value || resizingCol.value
+  if (active) document.documentElement.setAttribute('data-ariadne-dragging', '')
+  else document.documentElement.removeAttribute('data-ariadne-dragging')
+}
 
 function onColDividerPointerDown(event: PointerEvent) {
   if (event.button !== 0) return
   event.preventDefault()
+  clearTextSelection()
+  if (colResizeState) stopColResize()
+  const captureEl = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
   colResizeState = {
     pointerId: event.pointerId,
     startX: event.clientX,
     startWidth: labelWidth.value,
+    captureEl,
   }
   resizingCol.value = true
+  syncGlobalDragging()
+  trySetPointerCapture(captureEl, event.pointerId)
+  captureEl?.addEventListener('lostpointercapture', stopColResize)
   window.addEventListener('pointermove', onColDividerMove)
-  window.addEventListener('pointerup', stopColResize)
-  window.addEventListener('pointercancel', stopColResize)
+  window.addEventListener('pointerup', onColDividerStop)
+  window.addEventListener('pointercancel', onColDividerStop)
+  window.addEventListener('blur', stopColResize)
+  window.addEventListener('dragstart', preventBrowserDrag)
+  window.addEventListener('selectstart', preventBrowserDrag)
 }
 
 function onColDividerMove(event: PointerEvent) {
   if (!colResizeState || event.pointerId !== colResizeState.pointerId) return
+  if (event.pointerType === 'mouse' && (event.buttons & 1) === 0) {
+    stopColResize()
+    return
+  }
   const next = Math.round(
     clamp(
       colResizeState.startWidth + (event.clientX - colResizeState.startX),
@@ -480,13 +537,25 @@ function onColDividerMove(event: PointerEvent) {
   if (next !== labelWidth.value) labelWidth.value = next
 }
 
+function onColDividerStop(event: PointerEvent) {
+  if (!colResizeState || event.pointerId !== colResizeState.pointerId) return
+  stopColResize()
+}
+
 function stopColResize() {
   if (!colResizeState) return
+  const { captureEl, pointerId } = colResizeState
   colResizeState = null
   resizingCol.value = false
+  syncGlobalDragging()
+  captureEl?.removeEventListener('lostpointercapture', stopColResize)
+  tryReleasePointerCapture(captureEl, pointerId)
   window.removeEventListener('pointermove', onColDividerMove)
-  window.removeEventListener('pointerup', stopColResize)
-  window.removeEventListener('pointercancel', stopColResize)
+  window.removeEventListener('pointerup', onColDividerStop)
+  window.removeEventListener('pointercancel', onColDividerStop)
+  window.removeEventListener('blur', stopColResize)
+  window.removeEventListener('dragstart', preventBrowserDrag)
+  window.removeEventListener('selectstart', preventBrowserDrag)
 }
 
 function onColDividerKeydown(event: KeyboardEvent) {
@@ -509,6 +578,9 @@ let panState: {
   lastX: number
   width: number
   moved: boolean
+  startedOnItem: boolean
+  captureEl: HTMLElement | null
+  captured: boolean
 } | null = null
 let suppressTrackClickUntil = 0
 const panning = ref(false)
@@ -519,32 +591,61 @@ function getTrackRect(): DOMRect | null {
 
 function onTrackPointerDown(event: PointerEvent) {
   if (event.button !== 0) return
-  if (
-    event.target instanceof Element &&
-    event.target.closest('.pulse-span, .pulse-marker, .pulse-handoff-hit, button, a')
-  ) {
+  if (event.target instanceof Element && event.target.closest('.pulse-handoff-hit, button, a')) {
     return
   }
   const rect = getTrackRect()
   if (!rect) return
+  event.preventDefault()
+  clearTextSelection()
+  if (panState) stopPan()
+  const startedOnItem = Boolean(
+    event.target instanceof Element && event.target.closest('.pulse-span, .pulse-marker'),
+  )
+  const captureEl = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
   panState = {
     pointerId: event.pointerId,
     startX: event.clientX,
     lastX: event.clientX,
     width: Math.max(1, rect.width),
     moved: false,
+    startedOnItem,
+    captureEl,
+    captured: false,
   }
-  panning.value = true
+  if (!startedOnItem) {
+    panning.value = true
+    syncGlobalDragging()
+    panState.captured = trySetPointerCapture(captureEl, event.pointerId)
+    captureEl?.addEventListener('lostpointercapture', stopPan)
+  }
   window.addEventListener('pointermove', onWindowPointerMove)
   window.addEventListener('pointerup', onWindowPointerUp)
   window.addEventListener('pointercancel', onWindowPointerUp)
+  window.addEventListener('blur', stopPan)
+  window.addEventListener('dragstart', preventBrowserDrag)
+  window.addEventListener('selectstart', preventBrowserDrag)
 }
 
 function onWindowPointerMove(event: PointerEvent) {
   if (!panState || event.pointerId !== panState.pointerId) return
+  if (event.pointerType === 'mouse' && (event.buttons & 1) === 0) {
+    stopPan()
+    return
+  }
   const dx = event.clientX - panState.lastX
   if (dx === 0) return
-  if (Math.abs(event.clientX - panState.startX) >= 4) panState.moved = true
+  const crossedThreshold = Math.abs(event.clientX - panState.startX) >= 4
+  if (panState.startedOnItem && !panState.moved) {
+    if (!crossedThreshold) return
+    panState.moved = true
+    panning.value = true
+    syncGlobalDragging()
+    panState.captured = trySetPointerCapture(panState.captureEl, panState.pointerId)
+    panState.captureEl?.addEventListener('lostpointercapture', stopPan)
+  } else if (crossedThreshold) {
+    panState.moved = true
+  }
   panState.lastX = event.clientX
   const deltaMs = -(dx / panState.width) * (props.viewEnd - props.viewStart)
   emit('pan', deltaMs)
@@ -552,12 +653,19 @@ function onWindowPointerMove(event: PointerEvent) {
 
 function stopPan() {
   if (!panState) return
-  if (panState.moved) suppressTrackClickUntil = Date.now() + 250
+  const { moved, captureEl, pointerId, captured } = panState
+  if (moved) suppressTrackClickUntil = Date.now() + 250
   panState = null
   panning.value = false
+  syncGlobalDragging()
+  captureEl?.removeEventListener('lostpointercapture', stopPan)
+  if (captured) tryReleasePointerCapture(captureEl, pointerId)
   window.removeEventListener('pointermove', onWindowPointerMove)
   window.removeEventListener('pointerup', onWindowPointerUp)
   window.removeEventListener('pointercancel', onWindowPointerUp)
+  window.removeEventListener('blur', stopPan)
+  window.removeEventListener('dragstart', preventBrowserDrag)
+  window.removeEventListener('selectstart', preventBrowserDrag)
 }
 
 function onWindowPointerUp(event: PointerEvent) {
@@ -566,6 +674,16 @@ function onWindowPointerUp(event: PointerEvent) {
 }
 
 function onLaneTrackClick(laneId: string) {
+  if (Date.now() < suppressTrackClickUntil) return
+  emit('select', laneId, null)
+}
+
+function onSpanClick(laneId: string, spanId: number) {
+  if (Date.now() < suppressTrackClickUntil) return
+  emit('select', laneId, spanId)
+}
+
+function onMarkerClick(laneId: string) {
   if (Date.now() < suppressTrackClickUntil) return
   emit('select', laneId, null)
 }
@@ -595,6 +713,20 @@ function onScrollWheel(event: WheelEvent) {
   }
 }
 
+function onEmptyAreaPointerDown(event: PointerEvent) {
+  if (event.target !== lanesInnerEl.value) return
+  const rect = getTrackRect()
+  if (!rect || event.clientX < rect.left) return
+  onTrackPointerDown(event)
+}
+
+function onEmptyAreaDblClick(event: MouseEvent) {
+  if (event.target !== lanesInnerEl.value) return
+  const rect = getTrackRect()
+  if (!rect || event.clientX < rect.left) return
+  emit('resetWindow')
+}
+
 function onLaneOpenClick(lane: PulseLane) {
   emit('select', lane.conversationId, null)
   emit('openLane', lane)
@@ -622,6 +754,8 @@ onBeforeUnmount(() => {
       '--pulse-lane-h': `${LANE_HEIGHT_PX}px`,
       '--pulse-span-h': `${SPAN_HEIGHT_PX}px`,
     }"
+    @dragstart.prevent
+    @selectstart.prevent
   >
     <div
       ref="scrollEl"
@@ -643,7 +777,11 @@ onBeforeUnmount(() => {
               {{ slotBadgeText }}
             </span>
           </div>
-          <div class="pulse-track-col pulse-ribbon-track">
+          <div
+            class="pulse-track-col pulse-ribbon-track"
+            @pointerdown="onTrackPointerDown"
+            @dblclick="emit('resetWindow')"
+          >
             <DouTooltip
               v-for="bar in ribbonBars"
               :key="bar.index"
@@ -719,7 +857,12 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div ref="lanesInnerEl" class="pulse-lanes-inner">
+      <div
+        ref="lanesInnerEl"
+        class="pulse-lanes-inner"
+        @pointerdown="onEmptyAreaPointerDown"
+        @dblclick="onEmptyAreaDblClick"
+      >
         <!-- Vertical grid, return band & live now line -->
         <div class="pulse-grid-overlay" aria-hidden="true">
           <div
@@ -837,7 +980,7 @@ onBeforeUnmount(() => {
                 ]"
                 :data-span-id="item.span.id"
                 :style="{ left: `${item.leftPct}%`, width: `${item.widthPct}%` }"
-                @click.stop="emit('select', partitioned.coordinator.conversationId, item.span.id)"
+                @click.stop="onSpanClick(partitioned.coordinator.conversationId, item.span.id)"
               >
                 <span v-if="item.showText" class="pulse-span-text">{{ item.inlineText }}</span>
               </div>
@@ -867,7 +1010,7 @@ onBeforeUnmount(() => {
                 :class="`is-${item.tone}`"
                 :data-marker-kind="item.marker.kind"
                 :style="{ left: `${item.pct}%` }"
-                @click.stop="emit('select', partitioned.coordinator.conversationId, null)"
+                @click.stop="onMarkerClick(partitioned.coordinator.conversationId)"
               />
               <template #content>
                 <div class="pulse-tip-content">
@@ -906,7 +1049,12 @@ onBeforeUnmount(() => {
               </span>
               <span class="pulse-group-count pulse-mono">{{ group.rows.length }}</span>
             </div>
-            <div class="pulse-track-col pulse-group-track" aria-hidden="true" />
+            <div
+              class="pulse-track-col pulse-group-track"
+              aria-hidden="true"
+              @pointerdown="onTrackPointerDown"
+              @dblclick="emit('resetWindow')"
+            />
           </div>
 
           <div
@@ -978,7 +1126,7 @@ onBeforeUnmount(() => {
                   ]"
                   :data-span-id="item.span.id"
                   :style="{ left: `${item.leftPct}%`, width: `${item.widthPct}%` }"
-                  @click.stop="emit('select', row.lane.conversationId, item.span.id)"
+                  @click.stop="onSpanClick(row.lane.conversationId, item.span.id)"
                 >
                   <span v-if="item.showText" class="pulse-span-text">{{ item.inlineText }}</span>
                 </div>
@@ -1007,7 +1155,7 @@ onBeforeUnmount(() => {
                   :class="`is-${item.tone}`"
                   :data-marker-kind="item.marker.kind"
                   :style="{ left: `${item.pct}%` }"
-                  @click.stop="emit('select', row.lane.conversationId, null)"
+                  @click.stop="onMarkerClick(row.lane.conversationId)"
                 />
                 <template #content>
                   <div class="pulse-tip-content">
@@ -1117,7 +1265,7 @@ onBeforeUnmount(() => {
                     ]"
                     :data-span-id="item.span.id"
                     :style="{ left: `${item.leftPct}%`, width: `${item.widthPct}%` }"
-                    @click.stop="emit('select', row.lane.conversationId, item.span.id)"
+                    @click.stop="onSpanClick(row.lane.conversationId, item.span.id)"
                   >
                     <span v-if="item.showText" class="pulse-span-text">{{ item.inlineText }}</span>
                   </div>
@@ -1143,7 +1291,7 @@ onBeforeUnmount(() => {
                     :class="`is-${item.tone}`"
                     :data-marker-kind="item.marker.kind"
                     :style="{ left: `${item.pct}%` }"
-                    @click.stop="emit('select', row.lane.conversationId, null)"
+                    @click.stop="onMarkerClick(row.lane.conversationId)"
                   />
                   <template #content>
                     <div class="pulse-tip-content">
@@ -1200,6 +1348,8 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   background: var(--dou-color-bg-surface);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 :global(html[data-dou-theme='dark'] .pulse-canvas) {
@@ -1266,6 +1416,7 @@ onBeforeUnmount(() => {
   width: 7px;
   margin-left: -4px;
   cursor: col-resize;
+  touch-action: none;
 }
 
 .pulse-col-divider::after {
@@ -1323,6 +1474,12 @@ onBeforeUnmount(() => {
 .pulse-ribbon-track {
   height: 100%;
   background: var(--dou-color-bg-canvas);
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.pulse-ribbon-track:active {
+  cursor: grabbing;
 }
 
 .pulse-ribbon-bar {
@@ -1382,6 +1539,7 @@ onBeforeUnmount(() => {
   height: 100%;
   user-select: none;
   cursor: grab;
+  touch-action: pan-y;
 }
 
 .pulse-axis-track:active {
@@ -1627,6 +1785,12 @@ onBeforeUnmount(() => {
 
 .pulse-group-track {
   min-width: 0;
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.pulse-group-track:active {
+  cursor: grabbing;
 }
 
 /* Lane rows */
@@ -1762,6 +1926,7 @@ onBeforeUnmount(() => {
   height: 100%;
   user-select: none;
   cursor: grab;
+  touch-action: pan-y;
 }
 
 .pulse-lane-track:active {

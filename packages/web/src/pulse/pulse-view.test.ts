@@ -1118,4 +1118,307 @@ describe('PulseView', () => {
     expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-label-w: 312px')
     expect(wrapper.find('[data-pulse-ribbon]').exists()).toBe(true)
   })
+
+  test('supports consecutive pointer drag pans without triggering text selection or native drag', async () => {
+    vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
+    const wrapper = mountPulse('wide')
+    await flushPromises()
+    await nextTick()
+
+    const axisTrack = wrapper.get('.pulse-axis-track').element as HTMLElement
+    vi.spyOn(axisTrack, 'getBoundingClientRect').mockReturnValue({
+      left: 248,
+      top: 0,
+      right: 1048,
+      bottom: 32,
+      width: 800,
+      height: 32,
+      x: 248,
+      y: 0,
+      toJSON: () => ({}),
+    })
+
+    const span = wrapper.get('[data-span-id="2"]')
+    const readSpanLeft = () =>
+      Number.parseFloat(span.attributes('style')?.match(/left:\s*([\d.-]+)%/)?.[1] ?? 'NaN')
+    const initialLeft = readSpanLeft()
+
+    // Simulate an active text selection existing elsewhere on the page before dragging.
+    const removeAllRanges = vi.fn()
+    vi.spyOn(window, 'getSelection').mockReturnValue({
+      isCollapsed: false,
+      removeAllRanges,
+    } as unknown as Selection)
+
+    const laneTrack = wrapper.get('[data-lane-id="thr_needs"] .pulse-lane-track')
+      .element as HTMLElement
+    const firstDown = new PointerEvent('pointerdown', {
+      pointerId: 1,
+      pointerType: 'mouse',
+      button: 0,
+      buttons: 1,
+      clientX: 500,
+      bubbles: true,
+      cancelable: true,
+    })
+    laneTrack.dispatchEvent(firstDown)
+    await nextTick()
+
+    expect(firstDown.defaultPrevented).toBe(true)
+    expect(removeAllRanges).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.pulse-canvas').classes()).toContain('is-panning')
+    expect(document.documentElement.hasAttribute('data-ariadne-dragging')).toBe(true)
+
+    // Native dragstart and selectstart must be blocked while dragging.
+    const dragStart = new Event('dragstart', { bubbles: true, cancelable: true })
+    laneTrack.dispatchEvent(dragStart)
+    expect(dragStart.defaultPrevented).toBe(true)
+
+    const selectStart = new Event('selectstart', { bubbles: true, cancelable: true })
+    laneTrack.dispatchEvent(selectStart)
+    expect(selectStart.defaultPrevented).toBe(true)
+
+    window.dispatchEvent(
+      new PointerEvent('pointermove', {
+        pointerId: 1,
+        pointerType: 'mouse',
+        buttons: 1,
+        clientX: 620,
+      }),
+    )
+    await nextTick()
+    const afterFirstLeft = readSpanLeft()
+    expect(afterFirstLeft).toBeGreaterThan(initialLeft)
+
+    window.dispatchEvent(
+      new PointerEvent('pointerup', {
+        pointerId: 1,
+        pointerType: 'mouse',
+        button: 0,
+        buttons: 0,
+        clientX: 620,
+      }),
+    )
+    await nextTick()
+    expect(wrapper.get('.pulse-canvas').classes()).not.toContain('is-panning')
+    expect(document.documentElement.hasAttribute('data-ariadne-dragging')).toBe(false)
+
+    // Second consecutive drag immediately afterward continues panning smoothly.
+    const secondDown = new PointerEvent('pointerdown', {
+      pointerId: 1,
+      pointerType: 'mouse',
+      button: 0,
+      buttons: 1,
+      clientX: 620,
+      bubbles: true,
+      cancelable: true,
+    })
+    laneTrack.dispatchEvent(secondDown)
+    window.dispatchEvent(
+      new PointerEvent('pointermove', {
+        pointerId: 1,
+        pointerType: 'mouse',
+        buttons: 1,
+        clientX: 740,
+      }),
+    )
+    await nextTick()
+    const afterSecondLeft = readSpanLeft()
+    expect(afterSecondLeft).toBeGreaterThan(afterFirstLeft)
+
+    // Window blur cleanly terminates the drag so a third drag still works.
+    window.dispatchEvent(new Event('blur'))
+    await nextTick()
+    expect(wrapper.get('.pulse-canvas').classes()).not.toContain('is-panning')
+    expect(document.documentElement.hasAttribute('data-ariadne-dragging')).toBe(false)
+
+    const thirdDown = new PointerEvent('pointerdown', {
+      pointerId: 1,
+      pointerType: 'mouse',
+      button: 0,
+      buttons: 1,
+      clientX: 740,
+      bubbles: true,
+      cancelable: true,
+    })
+    laneTrack.dispatchEvent(thirdDown)
+    window.dispatchEvent(
+      new PointerEvent('pointermove', {
+        pointerId: 1,
+        pointerType: 'mouse',
+        buttons: 1,
+        clientX: 660,
+      }),
+    )
+    await nextTick()
+    expect(readSpanLeft()).toBeLessThan(afterSecondLeft)
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { pointerId: 1, pointerType: 'mouse', clientX: 660 }),
+    )
+    await nextTick()
+
+    // Dragging on the empty right-hand grid area below lanes also pans, while the left label side does not.
+    const lanesInner = wrapper.get('.pulse-lanes-inner').element as HTMLElement
+    lanesInner.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        pointerId: 4,
+        pointerType: 'mouse',
+        button: 0,
+        buttons: 1,
+        clientX: 120,
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
+    await nextTick()
+    expect(wrapper.get('.pulse-canvas').classes()).not.toContain('is-panning')
+
+    const beforeEmptyDragLeft = readSpanLeft()
+    lanesInner.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        pointerId: 5,
+        pointerType: 'mouse',
+        button: 0,
+        buttons: 1,
+        clientX: 500,
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
+    window.dispatchEvent(
+      new PointerEvent('pointermove', {
+        pointerId: 5,
+        pointerType: 'mouse',
+        buttons: 1,
+        clientX: 600,
+      }),
+    )
+    await nextTick()
+    expect(wrapper.get('.pulse-canvas').classes()).toContain('is-panning')
+    expect(readSpanLeft()).toBeGreaterThan(beforeEmptyDragLeft)
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { pointerId: 5, pointerType: 'mouse', clientX: 600 }),
+    )
+    await nextTick()
+    expect(wrapper.get('.pulse-canvas').classes()).not.toContain('is-panning')
+  })
+
+  test('pans when dragging from a span bar without opening inspector, while short clicks still select the span', async () => {
+    vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
+    const wrapper = mountPulse('wide')
+    await flushPromises()
+    await nextTick()
+
+    const axisTrack = wrapper.get('.pulse-axis-track').element as HTMLElement
+    vi.spyOn(axisTrack, 'getBoundingClientRect').mockReturnValue({
+      left: 248,
+      top: 0,
+      right: 1048,
+      bottom: 32,
+      width: 800,
+      height: 32,
+      x: 248,
+      y: 0,
+      toJSON: () => ({}),
+    })
+
+    const spanWrapper = wrapper.get('[data-span-id="2"]')
+    const spanEl = spanWrapper.element as HTMLElement
+    const readSpanLeft = () =>
+      Number.parseFloat(spanWrapper.attributes('style')?.match(/left:\s*([\d.-]+)%/)?.[1] ?? 'NaN')
+    const initialLeft = readSpanLeft()
+
+    // Drag starting directly on a span bar (>= 4px) pans the timeline and suppresses click.
+    spanEl.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        pointerId: 2,
+        pointerType: 'mouse',
+        button: 0,
+        buttons: 1,
+        clientX: 400,
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
+    window.dispatchEvent(
+      new PointerEvent('pointermove', {
+        pointerId: 2,
+        pointerType: 'mouse',
+        buttons: 1,
+        clientX: 520,
+      }),
+    )
+    await nextTick()
+    expect(wrapper.get('.pulse-canvas').classes()).toContain('is-panning')
+    expect(readSpanLeft()).toBeGreaterThan(initialLeft)
+
+    window.dispatchEvent(
+      new PointerEvent('pointerup', {
+        pointerId: 2,
+        pointerType: 'mouse',
+        button: 0,
+        buttons: 0,
+        clientX: 520,
+      }),
+    )
+    await spanWrapper.trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-pulse-inspector]').exists()).toBe(false)
+
+    // After the brief post-drag click suppression window, clicking a span selects it normally.
+    vi.useFakeTimers()
+    try {
+      vi.advanceTimersByTime(300)
+      await spanWrapper.trigger('click')
+      await nextTick()
+      expect(wrapper.find('[data-pulse-inspector]').exists()).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('column divider pointer drag resizes label width and cleans up global dragging attribute', async () => {
+    vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
+    const wrapper = mountPulse('wide')
+    await flushPromises()
+    await nextTick()
+
+    const divider = wrapper.get('[data-pulse-col-divider]').element as HTMLElement
+    const down = new PointerEvent('pointerdown', {
+      pointerId: 3,
+      pointerType: 'mouse',
+      button: 0,
+      buttons: 1,
+      clientX: 248,
+      bubbles: true,
+      cancelable: true,
+    })
+    divider.dispatchEvent(down)
+    await nextTick()
+    expect(down.defaultPrevented).toBe(true)
+    expect(document.documentElement.hasAttribute('data-ariadne-dragging')).toBe(true)
+
+    window.dispatchEvent(
+      new PointerEvent('pointermove', {
+        pointerId: 3,
+        pointerType: 'mouse',
+        buttons: 1,
+        clientX: 300,
+      }),
+    )
+    await nextTick()
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-label-w: 300px')
+
+    window.dispatchEvent(
+      new PointerEvent('pointerup', {
+        pointerId: 3,
+        pointerType: 'mouse',
+        button: 0,
+        buttons: 0,
+        clientX: 300,
+      }),
+    )
+    await nextTick()
+    expect(document.documentElement.hasAttribute('data-ariadne-dragging')).toBe(false)
+  })
 })

@@ -148,6 +148,8 @@ async function stop() {
   font-family: var(--dou-font-family-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .background-output {

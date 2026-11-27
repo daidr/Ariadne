@@ -1528,6 +1528,8 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 
 .notice-text {
   overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* A quiet mark after the text; on touch screens it takes taps from 40px around it. */
@@ -1550,6 +1552,8 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .edit-original {
@@ -1697,6 +1701,8 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
   display: block;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .conversation-footer {

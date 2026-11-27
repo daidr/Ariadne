@@ -1,5 +1,6 @@
 import 'dou-ui/style.css'
 import './pwa.css'
+import './selection.css'
 import { createApp } from 'vue'
 import { createWebHistory, RouterView } from 'vue-router'
 import App from './App.vue'

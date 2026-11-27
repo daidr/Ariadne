@@ -254,6 +254,8 @@ function openReferenced() {
   border: 1px solid var(--dou-color-border);
   border-radius: var(--dou-radius-container);
   background: var(--dou-color-bg-muted);
+  user-select: none;
+  -webkit-user-select: none;
   transition: border-color 0.15s ease;
 }
 

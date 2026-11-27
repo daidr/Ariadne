@@ -1166,6 +1166,8 @@ const methodOptions = computed(() => [
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .changes-added {
@@ -1292,6 +1294,8 @@ const methodOptions = computed(() => [
   font-size: 12px;
   color: var(--dou-color-text-tertiary);
   font-family: var(--dou-font-family-mono, monospace);
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .repo-section-branch svg {

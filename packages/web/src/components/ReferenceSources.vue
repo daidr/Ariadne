@@ -242,6 +242,8 @@ async function add() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* Removing shows on the row under the pointer or the keyboard, not on every row. */
@@ -264,6 +266,8 @@ async function add() {
 
 .reference-problem {
   overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .reference-actions {
