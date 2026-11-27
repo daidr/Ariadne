@@ -1,5 +1,20 @@
 # 更新日志
 
+## 0.1.0-alpha.25 (2026-11-27)
+
+- feat(whiteboard): 支持画板与文档内嵌画板编辑颜色与无边框 (#276)
+- feat(pulse): 实现右侧详情抽屉、跨项目切换与窄屏降级视图 (#275)
+- chore(web): 升级 DouUI 至 0.1.0-alpha.30 并适配宽表滚动视口 (#274)
+- feat(pulse): 实现桌面端 Pulse 主视图与实时泳道画布 (#272)
+- feat: support custom env for CLI providers and per-project model overrides (#271)
+- fix(workspaces): 优化无 commit 的 Git 目录与非 Git 目录的工作区处理 (#273)
+- refactor(runner): 移除协调器的 research 工具以保持不阻塞 (#270)
+- feat: add cross-project artifact gallery (/gallery) (#267)
+- feat(pulse): 实现 Pulse 后端事件投影、30 天滚动清理与 GetPulse 接口 (#268)
+- feat(threads): 支持调研讨论串汇报空闲态并优化已完成讨论串的恢复交互 (#264)
+- fix(artifacts): 修复原型参数面板恢复默认按钮显隐导致的标题高度跳变 (#265)
+- Merge pull request #253 from daidr/release/alpha
+
 ## 0.1.0-alpha.24 (2026-11-26)
 
 - chore(web): 升级 DouUI 至 0.1.0-alpha.29 并修复 MCP 工具行分段控件收缩问题 (#263)
