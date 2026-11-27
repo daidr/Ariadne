@@ -462,14 +462,14 @@ const showCardsEmpty = computed(
           <span class="pulse-filter-count">{{ partitioned.counts.all }}</span>
         </DouCheckTag>
         <DouCheckTag value="needs" tone="warning" data-pulse-filter="needs">
-          <template #leading>
+          <template v-if="filter !== 'needs'" #leading>
             <DouStatusDot tone="warning" size="sm" aria-hidden="true" />
           </template>
           <span>{{ t('pulse.filter.needs') }}</span>
           <span class="pulse-filter-count">{{ partitioned.counts.needs }}</span>
         </DouCheckTag>
         <DouCheckTag value="active" tone="primary" data-pulse-filter="active">
-          <template #leading>
+          <template v-if="filter !== 'active'" #leading>
             <DouStatusDot tone="primary" size="sm" aria-hidden="true" />
           </template>
           <span>{{ t('pulse.filter.active') }}</span>

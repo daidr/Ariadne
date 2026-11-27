@@ -108,7 +108,13 @@ const filter = ref<PulseFilter>('all')
 const groupBy = ref<PulseGroupBy>('stage')
 const windowKey = ref<PulseWindowKey>('1h')
 const density = ref<PulseDensity>(initialPrefs.density === 'compact' ? 'compact' : 'comfortable')
-const laneLines = ref<PulseLaneLines>(initialPrefs.laneLines === 'double' ? 'double' : 'single')
+const laneLines = ref<PulseLaneLines>(
+  density.value === 'compact'
+    ? 'single'
+    : initialPrefs.laneLines === 'double'
+      ? 'double'
+      : 'single',
+)
 const showConcurrency = ref(initialPrefs.showConcurrency ?? false)
 const showHandoffs = ref(initialPrefs.showHandoffs ?? false)
 const showReturnLine = ref(initialPrefs.showReturnLine ?? true)
@@ -877,7 +883,7 @@ onUnmounted(() => {
   min-height: 0;
 }
 
-.pulse-splitter :deep(.dou-splitter__pane) {
+.pulse-splitter :deep(.dou-splitter__pane:not([hidden])) {
   display: flex;
   flex-direction: column;
   min-width: 0;

@@ -1357,6 +1357,8 @@ onBeforeUnmount(() => {
 
 .pulse-lanes-scroll {
   position: relative;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -1367,6 +1369,7 @@ onBeforeUnmount(() => {
   position: sticky;
   top: 0;
   z-index: 20;
+  flex: none;
   background: var(--dou-color-bg-canvas);
 }
 
@@ -1611,7 +1614,7 @@ onBeforeUnmount(() => {
 /* Lanes container & background overlays */
 .pulse-lanes-inner {
   position: relative;
-  min-height: calc(100% - 32px);
+  flex: 1 0 auto;
 }
 
 .pulse-grid-overlay {
@@ -1753,6 +1756,10 @@ onBeforeUnmount(() => {
   transition: background-color 0.12s ease;
 }
 
+.pulse-lane-row.is-coordinator .pulse-label-col {
+  background: color-mix(in srgb, var(--dou-color-bg-muted) 40%, var(--dou-color-bg-surface));
+}
+
 .pulse-lane-row:hover .pulse-label-col,
 .pulse-lane-row:hover .pulse-track-col {
   background: color-mix(in srgb, var(--dou-color-bg-muted) 42%, transparent);
@@ -1761,10 +1768,6 @@ onBeforeUnmount(() => {
 .pulse-lane-row.is-selected .pulse-label-col,
 .pulse-lane-row.is-selected .pulse-track-col {
   background: var(--dou-color-primary-soft);
-}
-
-.pulse-lane-row.is-coordinator .pulse-label-col {
-  background: color-mix(in srgb, var(--dou-color-bg-muted) 40%, var(--dou-color-bg-surface));
 }
 
 .pulse-lane-row.is-needs-me .pulse-label-col {
@@ -1898,17 +1901,6 @@ onBeforeUnmount(() => {
     box-shadow 0.12s ease;
 }
 
-.pulse-span:hover {
-  z-index: 6;
-  border-color: var(--dou-color-primary);
-}
-
-.pulse-span.is-selected {
-  z-index: 7;
-  border-color: var(--dou-color-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dou-color-focus) 32%, transparent);
-}
-
 .pulse-span.is-tone-active {
   background: var(--dou-color-primary-soft);
   border-color: color-mix(in srgb, var(--dou-color-primary) 42%, transparent);
@@ -1937,6 +1929,17 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--dou-color-neutral) 7%, var(--dou-color-bg-surface));
   border: 1px solid var(--dou-color-border-strong);
   color: var(--dou-color-text-secondary);
+}
+
+.pulse-span:hover {
+  z-index: 6;
+  border-color: var(--dou-color-primary);
+}
+
+.pulse-span.is-selected {
+  z-index: 7;
+  border-color: var(--dou-color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dou-color-focus) 32%, transparent);
 }
 
 /* Calm right-edge breathing indicator for running spans */

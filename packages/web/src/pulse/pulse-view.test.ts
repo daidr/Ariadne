@@ -382,18 +382,32 @@ describe('PulseView', () => {
     await flushPromises()
     await nextTick()
 
+    // Unselected colored filter tags show leading status dots; selected tag hides same-color dot.
+    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(true)
+    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(true)
+
     // Filter to needs-only.
     await wrapper.get('[data-pulse-filter="needs"]').trigger('click')
     await nextTick()
+    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(false)
+    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(true)
     expect(wrapper.find('[data-lane-id="thr_needs"]').exists()).toBe(true)
     expect(wrapper.find('[data-lane-id="thr_author"]').exists()).toBe(false)
+
+    // Filter to active-only.
+    await wrapper.get('[data-pulse-filter="active"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(true)
+    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(false)
 
     // Filter back to all.
     await wrapper.get('[data-pulse-filter="all"]').trigger('click')
     await nextTick()
+    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(true)
+    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(true)
     expect(wrapper.find('[data-lane-id="thr_author"]').exists()).toBe(true)
 
-    // Default comfortable single-line (38px) -> double-line (46px) -> compact (32px).
+    // Default comfortable single-line (38px) -> double-line (46px) -> compact (32px, resets laneLines to single).
     expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 38px')
     expect(wrapper.find('[data-lane-id="thr_author"] .pulse-lane-meta').exists()).toBe(false)
 
@@ -406,6 +420,24 @@ describe('PulseView', () => {
     clickMenuOption('[data-pulse-density-option="compact"]')
     await nextTick()
     expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 32px')
+    expect(wrapper.find('[data-lane-id="thr_author"] .pulse-lane-meta').exists()).toBe(false)
+    expect(
+      document.querySelector('[data-pulse-lane-lines="single"]')?.getAttribute('aria-checked'),
+    ).toBe('true')
+    expect(
+      document.querySelector('[data-pulse-lane-lines="double"]')?.getAttribute('aria-checked'),
+    ).toBe('false')
+
+    // Picking double-line from compact automatically restores comfortable density.
+    clickMenuOption('[data-pulse-lane-lines="double"]')
+    await nextTick()
+    expect(
+      document
+        .querySelector('[data-pulse-density-option="comfortable"]')
+        ?.getAttribute('aria-checked'),
+    ).toBe('true')
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 46px')
+    expect(wrapper.find('[data-lane-id="thr_author"] .pulse-lane-meta').exists()).toBe(true)
 
     // Display layer toggles inside view menu.
     clickMenuOption('[data-pulse-layer-toggle="concurrency"]')
@@ -1132,14 +1164,47 @@ describe('PulseView', () => {
     await flushPromises()
     await nextTick()
 
+    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(true)
+    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(true)
+
     await wrapper.get('[data-pulse-filter="active"]').trigger('click')
     await nextTick()
+    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(false)
+    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(true)
     expect(wrapper.find('[data-lane-id="crd_1"]').exists()).toBe(true)
     expect(wrapper.find('[data-pulse-inline-empty]').exists()).toBe(false)
 
     await wrapper.get('[data-pulse-filter="needs"]').trigger('click')
     await nextTick()
+    expect(wrapper.find('[data-pulse-filter="needs"] .dou-check-tag__icon').exists()).toBe(false)
+    expect(wrapper.find('[data-pulse-filter="active"] .dou-check-tag__icon').exists()).toBe(true)
     expect(wrapper.find('[data-lane-id="crd_1"]').exists()).toBe(false)
     expect(wrapper.find('[data-pulse-inline-empty]').exists()).toBe(true)
+  })
+
+  test('normalizes persisted compact + double-line prefs to single-line on mount', async () => {
+    localStorage.setItem(
+      'ariadne.pulse.prefs.v2',
+      JSON.stringify({ density: 'compact', laneLines: 'double' }),
+    )
+    vi.spyOn(api, 'getPulse').mockResolvedValue(makeSnapshot())
+
+    const wrapper = mountPulse('wide')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('.pulse-canvas').attributes('style')).toContain('--pulse-lane-h: 32px')
+    expect(wrapper.find('[data-lane-id="thr_author"] .pulse-lane-meta').exists()).toBe(false)
+
+    await openViewMenu(wrapper)
+    expect(
+      document.querySelector('[data-pulse-density-option="compact"]')?.getAttribute('aria-checked'),
+    ).toBe('true')
+    expect(
+      document.querySelector('[data-pulse-lane-lines="single"]')?.getAttribute('aria-checked'),
+    ).toBe('true')
+    expect(
+      document.querySelector('[data-pulse-lane-lines="double"]')?.getAttribute('aria-checked'),
+    ).toBe('false')
   })
 })

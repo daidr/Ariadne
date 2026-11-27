@@ -79,12 +79,18 @@ function onGroupByChange(value: DropdownValue | undefined) {
 function onDensityChange(value: DropdownValue | undefined) {
   if (value === 'comfortable' || value === 'compact') {
     density.value = value
+    if (value === 'compact' && laneLines.value === 'double') {
+      laneLines.value = 'single'
+    }
   }
 }
 
 function onLaneLinesChange(value: DropdownValue | undefined) {
   if (value === 'single' || value === 'double') {
     laneLines.value = value
+    if (value === 'double' && density.value === 'compact') {
+      density.value = 'comfortable'
+    }
   }
 }
 </script>
@@ -129,14 +135,14 @@ function onLaneLinesChange(value: DropdownValue | undefined) {
           <span class="pulse-filter-count">{{ counts.all }}</span>
         </DouCheckTag>
         <DouCheckTag value="needs" tone="warning" data-pulse-filter="needs">
-          <template #leading>
+          <template v-if="filter !== 'needs'" #leading>
             <DouStatusDot tone="warning" size="sm" aria-hidden="true" />
           </template>
           <span>{{ t('pulse.filter.needs') }}</span>
           <span class="pulse-filter-count">{{ counts.needs }}</span>
         </DouCheckTag>
         <DouCheckTag value="active" tone="primary" data-pulse-filter="active">
-          <template #leading>
+          <template v-if="filter !== 'active'" #leading>
             <DouStatusDot tone="primary" size="sm" aria-hidden="true" />
           </template>
           <span>{{ t('pulse.filter.active') }}</span>
