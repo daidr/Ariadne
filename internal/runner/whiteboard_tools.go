@@ -307,7 +307,7 @@ func applyBoardItem(node, input args, resolvedImages map[string]boardPicture, re
 				ks, ok := rawKind.(string)
 				invalidKind = !ok || (ks != "" && ks != "ink" && ks != "drawing")
 			}
-			if invalidKind || input["text"] != nil || input["tone"] != nil || input["fill"] != nil || input["stroke"] != nil || input["textColor"] != nil {
+			if invalidKind || input["text"] != nil || input["fill"] != nil || input["stroke"] != nil || input["textColor"] != nil {
 				return errors.New("a user-drawn item can be moved, recolored or removed")
 			}
 		} else if input["kind"] != nil || input["text"] != nil || input["tone"] != nil || input["fill"] != nil || input["stroke"] != nil || input["textColor"] != nil || input["color"] != nil {
@@ -327,14 +327,32 @@ func applyBoardItem(node, input args, resolvedImages map[string]boardPicture, re
 			if err != nil {
 				return err
 			}
-			if hasColor {
+			tone, hasTone, err := optionalBoardTone(input)
+			if err != nil {
+				return err
+			}
+			if hasColor || hasTone {
 				data := objectField(node, "data")
-				if color == "" {
-					delete(data, "color")
-				} else {
-					data["color"] = color
+				if hasTone {
+					if tone == "" {
+						delete(data, "tone")
+					} else {
+						data["tone"] = tone
+						if !hasColor {
+							delete(data, "color")
+						}
+					}
 				}
-				delete(data, "tone")
+				if hasColor {
+					if color == "" {
+						delete(data, "color")
+					} else {
+						data["color"] = color
+					}
+					if !hasTone || tone == "" || color != "" {
+						delete(data, "tone")
+					}
+				}
 				node["data"] = data
 			}
 		}
@@ -502,6 +520,9 @@ func applyBoardItem(node, input args, resolvedImages map[string]boardPicture, re
 				data["stroke"] = stroke
 			}
 		}
+		if !hasTextColor && hasColor && before == "text" {
+			textColor, hasTextColor = color, true
+		}
 		if hasTextColor {
 			if textColor == "" {
 				delete(data, "textColor")
@@ -528,6 +549,9 @@ func applyBoardItem(node, input args, resolvedImages map[string]boardPicture, re
 			} else {
 				data["fill"] = fill
 			}
+		}
+		if !hasTextColor && hasColor && before == "text" {
+			textColor, hasTextColor = color, true
 		}
 		if hasTextColor {
 			if textColor == "" {

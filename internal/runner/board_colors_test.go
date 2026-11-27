@@ -138,7 +138,16 @@ func TestWhiteboardColorValidationAndInkRecolor(t *testing.T) {
 		Edges: []args{},
 	}
 
-	// Ink node allows recoloring via color (clearing legacy tone), while rejecting shape fill/stroke.
+	// Ink node allows recoloring via color (clearing legacy tone) and clearing/updating legacy tone, while rejecting shape fill/stroke.
+	if err := board.change([]args{{"id": "draw", "tone": ""}}, nil, nil, nil, "", false, nil, nil); err != nil {
+		t.Fatalf("expected ink tone clear to succeed: %v", err)
+	}
+	if data := objectField(boardItems(board.Nodes)["draw"], "data"); text(data, "tone") != "" {
+		t.Fatalf("ink tone was not cleared: %+v", data)
+	}
+	if err := board.change([]args{{"id": "draw", "tone": "primary"}}, nil, nil, nil, "", false, nil, nil); err != nil {
+		t.Fatalf("expected ink tone update to succeed: %v", err)
+	}
 	if err := board.change([]args{{"id": "draw", "color": "purple"}}, nil, nil, nil, "", false, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -148,6 +157,27 @@ func TestWhiteboardColorValidationAndInkRecolor(t *testing.T) {
 	}
 	if err := board.change([]args{{"id": "draw", "fill": "blue"}}, nil, nil, nil, "", false, nil, nil); err == nil {
 		t.Fatal("expected ink fill edit to fail")
+	}
+
+	// Converting a colored shape to a prototype drops stale shape/color fields.
+	protoBoard := whiteboard{
+		Version: 1,
+		Nodes: []args{
+			{"id": "card", "type": "shape", "x": 0, "y": 0, "width": 160, "height": 90, "data": args{"shape": "rect", "text": "Old", "fill": "blue", "stroke": "none", "textColor": "#0369a1"}},
+		},
+		Edges: []args{},
+	}
+	resolved := map[string]boardPrototype{
+		"card": {title: "Preview", html: "<div>hi</div>", viewportWidth: 400, viewportHeight: 300},
+	}
+	if err := protoBoard.change([]args{{"id": "card", "kind": "prototype"}}, nil, nil, nil, "", false, nil, resolved); err != nil {
+		t.Fatal(err)
+	}
+	protoData := objectField(boardItems(protoBoard.Nodes)["card"], "data")
+	for _, stale := range []string{"shape", "tone", "fill", "stroke", "textColor", "color"} {
+		if _, exists := protoData[stale]; exists {
+			t.Fatalf("prototype conversion kept stale field %q: %+v", stale, protoData)
+		}
 	}
 
 	// Reject unsafe CSS colors and "none" on text/connector channels.
@@ -229,5 +259,45 @@ func TestEmbeddedDocumentBoardColorsAndBorderlessRoundTrip(t *testing.T) {
 	}
 	if data := objectField(boardItems(clearedBoard.Board.Edges)["e1"], "data"); text(data, "color") != "" || text(data, "tone") != "" {
 		t.Fatalf("connector color was not cleared: %+v", data)
+	}
+
+	// Embedded board handles ink tone updates, color->tone switches, explicit null clear,
+	// text->shape/sticky color migration, and legacy connector tone cleanup.
+	edgeCasesBase := "# Edge Cases\n\n" + boardFence("dou-whiteboard", `{"height":360,"board":{"version":1,"nodes":[{"id":"t1","type":"text","x":0,"y":0,"width":140,"height":40,"data":{"text":"Title","color":"purple"}},{"id":"t2","type":"text","x":0,"y":80,"width":140,"height":40,"data":{"text":"Memo","color":"#0369a1"}},{"id":"ink1","type":"ink","x":200,"y":0,"data":{"points":[{"x":0,"y":0}],"tone":"danger"}},{"id":"ink2","type":"ink","x":200,"y":80,"data":{"points":[{"x":0,"y":0}],"color":"blue"}},{"id":"ink3","type":"ink","x":200,"y":160,"data":{"points":[{"x":0,"y":0}],"color":"green"}}],"edges":[{"id":"e1","type":"connector","source":{"node":"t1","port":"bottom"},"target":{"node":"t2","port":"top-in"},"data":{"arrow":"end","tone":"warning"}}]}}`)
+	edgeView := documentView(edgeCasesBase)
+	if strings.Contains(edgeView, `"tone":"warning"`) {
+		t.Fatalf("connector summary should not expose unsupported tone field:\n%s", edgeView)
+	}
+	mutatedEdgeView := strings.Replace(edgeView, `"id":"t1","kind":"text"`, `"id":"t1","kind":"rect"`, 1)
+	mutatedEdgeView = strings.Replace(mutatedEdgeView, `"id":"t2","kind":"text"`, `"id":"t2","kind":"sticky"`, 1)
+	mutatedEdgeView = strings.Replace(mutatedEdgeView, `"tone":"danger"`, `"tone":"primary"`, 1)
+	mutatedEdgeView = strings.Replace(mutatedEdgeView, `"color":"blue"`, `"tone":"success"`, 1)
+	mutatedEdgeView = strings.Replace(mutatedEdgeView, `"color":"green"`, `"color":null`, 1)
+	edgeUpdated, err := documentFromView(mutatedEdgeView, edgeCasesBase, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var edgeBoard embeddedBoard
+	if err := json.Unmarshal([]byte(markdownParts(edgeUpdated)[1].body), &edgeBoard); err != nil {
+		t.Fatal(err)
+	}
+	edgeNodes := boardItems(edgeBoard.Board.Nodes)
+	if d := objectField(edgeNodes["t1"], "data"); text(d, "textColor") != "purple" || text(d, "color") != "" {
+		t.Fatalf("embedded text->rect lost color: %+v", d)
+	}
+	if d := objectField(edgeNodes["t2"], "data"); text(d, "textColor") != "#0369a1" || text(d, "color") != "" {
+		t.Fatalf("embedded text->sticky lost color: %+v", d)
+	}
+	if d := objectField(edgeNodes["ink1"], "data"); text(d, "tone") != "primary" || text(d, "color") != "" {
+		t.Fatalf("embedded ink tone update failed: %+v", d)
+	}
+	if d := objectField(edgeNodes["ink2"], "data"); text(d, "tone") != "success" || text(d, "color") != "" {
+		t.Fatalf("embedded ink color->tone switch failed: %+v", d)
+	}
+	if d := objectField(edgeNodes["ink3"], "data"); text(d, "color") != "" || text(d, "tone") != "" {
+		t.Fatalf("embedded ink null clear failed: %+v", d)
+	}
+	if d := objectField(boardItems(edgeBoard.Board.Edges)["e1"], "data"); text(d, "tone") != "" || text(d, "color") != "" {
+		t.Fatalf("legacy connector tone was not cleaned up: %+v", d)
 	}
 }

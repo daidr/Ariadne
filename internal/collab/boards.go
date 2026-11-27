@@ -237,12 +237,20 @@ func syncItems(shared *crdt.YMap, next, before []contentObject, fits func(conten
 			}
 		}
 		if fields != nil {
-			changeFields(fields, old, item, widget)
+			changeItemFields(fields, old, item, widget)
 		}
 	}
 }
 
+func changeItemFields(fields *crdt.YMap, before, after contentObject, widget bool) {
+	changeFieldsWithOptions(fields, before, after, widget, !widget)
+}
+
 func changeFields(fields *crdt.YMap, before, after contentObject, widget bool) {
+	changeFieldsWithOptions(fields, before, after, widget, false)
+}
+
+func changeFieldsWithOptions(fields *crdt.YMap, before, after contentObject, widget, mergeData bool) {
 	for key := range before {
 		if _, keep := after[key]; !keep && key != "id" && (!widget || !strings.HasPrefix(key, "$")) {
 			fields.Delete(key)
@@ -263,6 +271,21 @@ func changeFields(fields *crdt.YMap, before, after contentObject, widget bool) {
 				fields.Set(key, places)
 			}
 			changeFields(places, toObject(previous), toObject(value), false)
+		} else if mergeData && key == "data" {
+			currentData := toObject(normalizeJSON(fields.Get(key)))
+			afterData := toObject(normalizeJSON(value))
+			if currentData != nil && afterData != nil {
+				beforeData := toObject(normalizeJSON(previous))
+				if beforeData == nil {
+					beforeData = contentObject{}
+				}
+				mergeFields(currentData, beforeData, afterData)
+				if !equalJSON(fields.Get(key), currentData) {
+					fields.Set(key, sharedJSON(currentData))
+				}
+				continue
+			}
+			fields.Set(key, sharedJSON(value))
 		} else {
 			fields.Set(key, sharedJSON(value))
 		}

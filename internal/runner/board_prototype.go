@@ -389,6 +389,10 @@ func prototypeNodeData(proto boardPrototype, existing args) args {
 	data := objectField(existing, "data")
 	delete(data, "shape")
 	delete(data, "tone")
+	delete(data, "fill")
+	delete(data, "stroke")
+	delete(data, "textColor")
+	delete(data, "color")
 	if proto.title != "" {
 		data["title"] = proto.title
 	}

@@ -87,6 +87,32 @@ test('whiteboardExtensions renders shape/connector color styles and borderless s
         },
       },
       {
+        id: 'sticky-c',
+        type: 'sticky',
+        x: 240,
+        y: 90,
+        width: 140,
+        height: 90,
+        data: {
+          text: '透明便签',
+          fill: 'none',
+          textColor: 'green',
+        },
+      },
+      {
+        id: 'ink-d',
+        type: 'ink',
+        x: 420,
+        y: 20,
+        width: 80,
+        height: 40,
+        data: {
+          points: [0, 0, 80, 40],
+          box: [80, 40],
+          color: '#ea580c',
+        },
+      },
+      {
         id: 'opt-1',
         type: 'option',
         x: 0,
@@ -143,11 +169,32 @@ test('whiteboardExtensions renders shape/connector color styles and borderless s
     const textNode = wrapper.get('.dou-whiteboard-node.is-text')
     expect(textNode.attributes('style')).toContain('--dou-whiteboard-text-color: #7c3aed')
 
+    const stickyNode = wrapper.get('.dou-whiteboard-node.is-sticky')
+    expect(stickyNode.classes()).toContain('is-transparent')
+    expect(stickyNode.attributes('style')).toContain('--dou-whiteboard-sticky-fill: transparent')
+    expect(stickyNode.attributes('style')).toContain(
+      '--dou-whiteboard-text-color: var(--dou-whiteboard-color-green)',
+    )
+
+    const inkNode = wrapper.get('.dou-whiteboard-node.is-ink')
+    expect(inkNode.attributes('style')).toContain('--dou-whiteboard-ink-color: #ea580c')
+
     const connectorPath = wrapper.get('.dou-flow-editor__edge:not(.is-mark)')
     expect(connectorPath.attributes('style')).toContain('--dou-flow-connector-color: #dc2626')
 
     // Shape selection exposes color toolbar buttons (fill, stroke, text color).
     expect(wrapper.findAll('.dou-flow-toolbar .dou-flow-toolbar__color-bar')).toHaveLength(3)
+
+    // Sticky selection exposes fill and text color controls; ink exposes line color control.
+    selection.value = { nodes: ['sticky-c'], edges: [] }
+    await nextTick()
+    await nextTick()
+    expect(wrapper.findAll('.dou-flow-toolbar .dou-flow-toolbar__color-bar')).toHaveLength(2)
+
+    selection.value = { nodes: ['ink-d'], edges: [] }
+    await nextTick()
+    await nextTick()
+    expect(wrapper.findAll('.dou-flow-toolbar .dou-flow-toolbar__color-bar')).toHaveLength(1)
 
     // Selecting a single connector exposes its color toolbar button and draggable endpoint handles.
     selection.value = { nodes: [], edges: ['edge-ab'] }

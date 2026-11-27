@@ -145,7 +145,7 @@ func (board whiteboard) summary(positions bool) (items, connectors []args) {
 			connector["label"] = label
 		}
 		data := objectField(edge, "data")
-		for _, key := range []string{"route", "dash", "arrow", "tone", "color"} {
+		for _, key := range []string{"route", "dash", "arrow", "color"} {
 			if value := text(data, key); value != "" {
 				connector[key] = value
 			}
@@ -386,12 +386,19 @@ func rewriteEmbeddedBoard(stored embeddedBoard, spec boardFenceSpec) (string, er
 				rewritten := args{"id": id, "x": item["x"], "y": item["y"]}
 				if oldKind == "ink" {
 					if raw, exists := item["color"]; exists {
-						rewritten["color"] = raw
-					} else if _, hasTone := item["tone"]; !hasTone {
+						if raw == nil {
+							rewritten["color"] = ""
+						} else {
+							rewritten["color"] = raw
+						}
+					} else if rawTone, hasTone := item["tone"]; hasTone {
+						if rawTone == nil {
+							rewritten["color"] = ""
+						} else {
+							rewritten["tone"] = rawTone
+						}
+					} else {
 						rewritten["color"] = ""
-					} else if data := objectField(old, "data"); text(data, "color") != "" {
-						delete(data, "color")
-						old["data"] = data
 					}
 				}
 				spec.Items[i] = rewritten
@@ -432,9 +439,7 @@ func rewriteEmbeddedBoard(stored embeddedBoard, spec boardFenceSpec) (string, er
 		if existing != nil {
 			if data := objectField(existing, "data"); len(data) > 0 {
 				delete(data, "color")
-				if _, hasTone := edge["tone"]; !hasTone {
-					delete(data, "tone")
-				}
+				delete(data, "tone")
 				existing["data"] = data
 			}
 		}
