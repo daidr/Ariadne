@@ -516,4 +516,35 @@ describe('WorkspaceHeader medium layout', () => {
     expect(wrapper.find('[data-logo-menu-trigger]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Ariadne')
   })
+
+  test('closes an open logo menu when project, level, main view, or starting state changes externally', async () => {
+    const { wrapper } = mountHeader({ layoutMode: 'narrow' })
+    await nextTick()
+
+    const openMenu = async () => {
+      await wrapper.get<HTMLButtonElement>('[data-logo-menu-trigger]').trigger('click')
+      await nextTick()
+      expect(visibleDropdowns()).toHaveLength(1)
+    }
+
+    await openMenu()
+    state.currentId = 'prj_2'
+    await nextTick()
+    expect(visibleDropdowns()).toHaveLength(0)
+
+    await openMenu()
+    state.workspaceLevel = 'projects'
+    await nextTick()
+    expect(visibleDropdowns()).toHaveLength(0)
+
+    await openMenu()
+    state.main = { kind: 'trace', conversationId: 'crd_prj_2' }
+    await nextTick()
+    expect(visibleDropdowns()).toHaveLength(0)
+
+    await openMenu()
+    state.starting = true
+    await nextTick()
+    expect(visibleDropdowns()).toHaveLength(0)
+  })
 })

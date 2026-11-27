@@ -138,7 +138,14 @@ watch(projectsPopoverOpen, (open) => {
 })
 
 watch(
-  () => [props.layoutMode, props.unauthorized],
+  () => [
+    props.layoutMode,
+    props.unauthorized,
+    state.currentId,
+    state.workspaceLevel,
+    state.main.kind,
+    state.starting,
+  ],
   () => {
     logoMenuOpen.value = false
   },

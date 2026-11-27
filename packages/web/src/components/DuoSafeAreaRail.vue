@@ -430,6 +430,15 @@ watch(
   min-height: 36px;
 }
 
+.duo-rail-menu-item :deep(.dou-button__label) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+}
+
 .duo-rail-menu-item.is-active {
   background-color: color-mix(in oklab, var(--dou-color-primary) 8%, transparent);
   color: var(--dou-color-primary-text);
