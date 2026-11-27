@@ -90,12 +90,9 @@ function onCardClick() {
 
 function onCardKeydown(event: KeyboardEvent) {
   if (event.target !== event.currentTarget) return
-  if (event.key === 'Enter') {
+  if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
     event.preventDefault()
     onCardClick()
-  } else if (event.key === ' ' || event.key === 'Spacebar') {
-    event.preventDefault()
-    emit('quickView', props.item)
   }
 }
 
@@ -389,9 +386,6 @@ function onProjectClick(event: MouseEvent) {
         <DouText v-if="previewStats" size="sm" variant="tertiary">
           {{ previewStats }}
         </DouText>
-        <div class="hover-foot">
-          <DouText size="sm" variant="tertiary">{{ t('gallery.quickView.hint') }}</DouText>
-        </div>
       </div>
     </template>
   </DouPopover>
@@ -743,10 +737,5 @@ function onProjectClick(event: MouseEvent) {
   overflow: hidden;
   line-height: 1.45;
   word-break: break-word;
-}
-
-.hover-foot {
-  padding-top: 6px;
-  border-top: 1px solid var(--dou-color-border-subtle);
 }
 </style>

@@ -705,10 +705,9 @@ onBeforeUnmount(() => {
 
         <div v-else-if="!galleryState.items.length" class="gallery-empty-wrap">
           <DouEmpty
-            :title="
+            :description="
               hasActiveGalleryFilters ? t('gallery.empty.filtered') : t('gallery.empty.title')
             "
-            :description="hasActiveGalleryFilters ? undefined : t('gallery.empty.description')"
           >
             <DouButton
               v-if="hasActiveGalleryFilters"

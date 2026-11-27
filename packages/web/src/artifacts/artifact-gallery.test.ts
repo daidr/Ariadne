@@ -391,7 +391,7 @@ describe('ArtifactGallery interactions', () => {
     vi.restoreAllMocks()
   })
 
-  test('loads cross-project items, opens artifact on card click, and opens quick-view on button or Space', async () => {
+  test('loads cross-project items, opens artifact on card click, and opens quick-view via card button', async () => {
     const openArtifactSpy = vi.spyOn(store, 'openProjectArtifact').mockResolvedValue()
     const wrapper = mountGallery('wide')
     await flushPromises()
@@ -414,11 +414,12 @@ describe('ArtifactGallery interactions', () => {
     expect(wrapper.find('aside.quick-pane').exists()).toBe(true)
     expect(wrapper.find('aside.quick-pane').text()).toContain('画廊交互设计稿')
 
-    // Pressing Space on another card switches quick-view target.
-    await wrapper.find('[data-artifact-id="art_dash"]').trigger('keydown', { key: ' ' })
+    // Clicking quick-view on another card switches quick-view target.
+    await wrapper.find('[data-artifact-id="art_dash"] .quick-view-btn').trigger('click')
     await flushPromises()
     expect(galleryState.quickViewId).toBe('art_dash')
     expect(wrapper.find('aside.quick-pane').text()).toContain('推理延迟看板')
+    expect(wrapper.find('.hover-foot').exists()).toBe(false)
   })
 
   test('virtual prototype tab queries with onlyPrototypes=true and status chips filter cleanly', async () => {
@@ -861,7 +862,7 @@ describe('ArtifactGallery interactions', () => {
     expect(galleryState.quickViewId).toBeNull()
   })
 
-  test('isolates card Enter and Space shortcuts from nested project pill and quick-view buttons', async () => {
+  test('isolates card Enter and Space activation from nested project pill and quick-view buttons', async () => {
     const openArtifactSpy = vi.spyOn(store, 'openProjectArtifact').mockResolvedValue()
     const wrapper = mountGallery('wide')
     await flushPromises()
@@ -870,7 +871,7 @@ describe('ArtifactGallery interactions', () => {
     const projectPill = card.find('button.project-pill')
     const quickBtn = card.find('button.quick-view-btn')
 
-    // Pressing Enter or Space while focused on nested buttons must NOT trigger card shortcuts or preventDefault.
+    // Pressing Enter or Space while focused on nested buttons must NOT trigger card activation or preventDefault.
     for (const btn of [projectPill, quickBtn]) {
       const enterEv = new KeyboardEvent('keydown', {
         key: 'Enter',
@@ -888,15 +889,42 @@ describe('ArtifactGallery interactions', () => {
       })
       btn.element.dispatchEvent(spaceEv)
       expect(spaceEv.defaultPrevented).toBe(false)
+      expect(openArtifactSpy).not.toHaveBeenCalled()
       expect(galleryState.quickViewId).toBeNull()
     }
 
-    // Pressing Enter or Space on the card container itself still triggers open / quickView.
+    // Pressing Enter or Space on the card container itself activates the card (opens artifact).
     await card.trigger('keydown', { key: 'Enter' })
     expect(openArtifactSpy).toHaveBeenCalledWith('prj_a', 'art_doc')
 
+    openArtifactSpy.mockClear()
     await card.trigger('keydown', { key: ' ' })
-    expect(galleryState.quickViewId).toBe('art_doc')
+    expect(openArtifactSpy).toHaveBeenCalledWith('prj_a', 'art_doc')
+    expect(galleryState.quickViewId).toBeNull()
+  })
+
+  test('renders concise empty state without redundant explanatory description', async () => {
+    vi.mocked(api.listGalleryArtifacts).mockResolvedValueOnce({
+      items: [],
+      nextPageToken: '',
+      hasMore: false,
+      counts: {
+        total: 0,
+        documents: 0,
+        whiteboards: 0,
+        prototypes: 0,
+        dashboards: 0,
+        needsMe: 0,
+        feedbackPending: 0,
+        projects: [],
+      },
+    })
+    const wrapper = mountGallery('wide')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('还没有产物')
+    expect(wrapper.text()).not.toContain('汇聚在这里')
+    expect(wrapper.text()).not.toContain('空格键速览')
   })
 })
 
