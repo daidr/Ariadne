@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {
   AttentionView,
+  ConversationView,
   LiveCommand,
   NeedsMeThreadSummary,
   PulseLane,
@@ -10,7 +11,7 @@ import type {
 } from '@ariadne/core'
 import { CloseIcon, FileDiffIcon, ListTreeIcon, MessagesIcon } from '@dou-ui/icons'
 import { DouButton, DouDrawer } from 'dou-ui'
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { branchChanges } from '../review/merge-offered'
 import PulseInspectorBody from './PulseInspectorBody.vue'
@@ -33,6 +34,7 @@ const props = defineProps<{
   nodeMeta: PulseNodeMeta | null
   reviewTarget: PulseLane | null
   liveCommand: LiveCommand | null
+  liveWait: ConversationView['wait']
 }>()
 
 const emit = defineEmits<{
@@ -54,6 +56,15 @@ const displayTitle = computed(() => {
 const dotClass = computed(() => (props.lane ? laneStatusDotClass(props.lane) : 'is-neutral'))
 
 const hasDiff = computed(() => Boolean(props.thread && branchChanges(props.thread)))
+
+const bodyEl = ref<HTMLElement | null>(null)
+
+watch(
+  () => props.lane?.conversationId,
+  () => {
+    if (bodyEl.value) bodyEl.value.scrollTop = 0
+  },
+)
 
 const openActionLabel = computed(() =>
   props.lane?.role === 'coordinator'
@@ -90,6 +101,7 @@ const openActionLabel = computed(() =>
     </template>
     <div v-if="lane" class="pulse-drawer-content" data-pulse-inspector>
       <PulseInspectorBody
+        :key="lane.conversationId"
         :lane="lane"
         :spans="spans"
         :markers="markers"
@@ -104,6 +116,7 @@ const openActionLabel = computed(() =>
         :node-meta="nodeMeta"
         :review-target="reviewTarget"
         :live-command="liveCommand"
+        :live-wait="liveWait"
         @open-lane="emit('openLane', $event)"
         @select-lane="emit('selectLane', $event)"
         @mutated="emit('mutated')"
@@ -176,8 +189,9 @@ const openActionLabel = computed(() =>
       </DouButton>
     </div>
 
-    <div class="pulse-insp-body">
+    <div ref="bodyEl" class="pulse-insp-body">
       <PulseInspectorBody
+        :key="lane.conversationId"
         :lane="lane"
         :spans="spans"
         :markers="markers"
@@ -192,6 +206,7 @@ const openActionLabel = computed(() =>
         :node-meta="nodeMeta"
         :review-target="reviewTarget"
         :live-command="liveCommand"
+        :live-wait="liveWait"
         @open-lane="emit('openLane', $event)"
         @select-lane="emit('selectLane', $event)"
         @mutated="emit('mutated')"

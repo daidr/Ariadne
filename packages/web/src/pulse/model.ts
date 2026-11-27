@@ -282,6 +282,8 @@ export function isNeedsLane(lane: Pick<PulseLane, 'stage' | 'attentionId'>): boo
     lane.stage === 'answer' ||
     lane.stage === 'blocked' ||
     lane.stage === 'halted' ||
+    lane.stage === 'silent' ||
+    lane.stage === 'stopped' ||
     lane.attentionId !== null
   )
 }
@@ -350,11 +352,12 @@ export function filterAndPartitionLanes(
 ): PulsePartitionedLanes {
   const activePool = lanes.filter((lane) => lane.role !== 'coordinator' && !lane.completed)
   const completedPool = lanes.filter((lane) => lane.role !== 'coordinator' && lane.completed)
+  const countPool = scope === 'all' ? lanes.filter((lane) => !lane.completed) : activePool
 
   const counts: PulseLaneCounts = {
-    all: activePool.length,
-    needs: activePool.filter(isNeedsLane).length,
-    active: activePool.filter(isActiveLane).length,
+    all: countPool.length,
+    needs: countPool.filter(isNeedsLane).length,
+    active: countPool.filter(isActiveLane).length,
     completed: completedPool.length,
   }
 
@@ -752,11 +755,16 @@ export function laneStatusDotClass(
 ): string {
   if (lane.role === 'coordinator') {
     if (lane.attentionId !== null || lane.stage === 'answer') return 'is-warning'
+    if (lane.stage === 'halted') return 'is-danger'
     if (lane.stage === 'working') return 'is-primary is-pulse'
     return 'is-neutral'
   }
-  if (lane.stage === 'answer' || lane.attentionId !== null) return 'is-warning'
-  if (lane.stage === 'blocked' || lane.stage === 'halted') return 'is-danger'
+  if (lane.stage === 'answer' || lane.stage === 'stopped' || lane.attentionId !== null) {
+    return 'is-warning'
+  }
+  if (lane.stage === 'blocked' || lane.stage === 'halted' || lane.stage === 'silent') {
+    return 'is-danger'
+  }
   if (lane.completed || lane.stage === 'done') return 'is-success'
   if (lane.stage === 'review') return 'is-ci'
   if (lane.role === 'reviewer' && lane.stage === 'working') return 'is-review is-pulse'
@@ -805,10 +813,11 @@ export function resolveLaneAttentions(
     out.push(attention)
   }
 
-  if (lane.projectId === currentProjectId && currentNeedsMe) {
+  if (lane.projectId === currentProjectId && currentNeedsMe !== undefined) {
     for (const item of currentNeedsMe) {
       if (item.kind === 'attention' && matches(item)) push(item.attention)
     }
+    return out
   }
 
   if (allNeedsMe) {
@@ -822,11 +831,15 @@ export function resolveLaneAttentions(
 }
 
 export function resolveLaneThreadSummary(
-  lane: Pick<PulseLane, 'conversationId' | 'role'>,
+  lane: Pick<PulseLane, 'conversationId' | 'projectId' | 'role'>,
+  currentProjectId: string | null,
   currentThreads: ReadonlyMap<string, ThreadView>,
   allNeedsMe: AllNeedsMeResult | null | undefined,
 ): ThreadView | NeedsMeThreadSummary | null {
   if (lane.role === 'coordinator') return null
+  if (lane.projectId === currentProjectId) {
+    return currentThreads.get(lane.conversationId) ?? null
+  }
   return currentThreads.get(lane.conversationId) ?? allNeedsMe?.threads[lane.conversationId] ?? null
 }
 

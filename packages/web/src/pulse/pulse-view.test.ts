@@ -308,6 +308,7 @@ describe('PulseView', () => {
     } as unknown as PlanView
     openMain({ kind: 'pulse' })
 
+    vi.spyOn(api, 'listAllNeedsMe').mockResolvedValue({ items: [], threads: {} })
     vi.spyOn(api, 'getConversation').mockImplementation(async (id) => ({
       conversation: { id } as ConversationView,
       messages: [],
@@ -878,5 +879,234 @@ describe('PulseView', () => {
     await flushPromises()
     expect(state.main.kind).toBe('conversation')
     expect(state.workspaceLevel).toBe('side')
+  })
+
+  test('supports inspector actions for worker timed wait, set-aside before due, cross-project stopped and single failed CI check', async () => {
+    state.detail!.threads.push({
+      id: 'thr_ci_one',
+      title: '单条 CI 失败待重试',
+      stage: 'review',
+      pullRequest: {
+        number: 276,
+        title: 'fix: pulse',
+        url: 'https://github.com/daidr/Ariadne/pull/276',
+        state: 'open',
+        merged: false,
+        draft: false,
+        checks: { state: 'failing', passed: 4, failed: ['proto'], pending: 0 },
+      },
+    } as unknown as ThreadView)
+
+    const snap = makeSnapshot({
+      lanes: [
+        {
+          conversationId: 'thr_wait',
+          projectId: 'prj_1',
+          projectName: 'Ariadne',
+          title: '等待远端发布',
+          role: 'worker',
+          reviewOf: null,
+          stage: 'idle',
+          completed: false,
+          attentionId: null,
+          liveCommand: null,
+          liveTail: null,
+          lastHeadline: null,
+          activeAt: NOW - MINUTE,
+        },
+        {
+          conversationId: 'thr_aside',
+          projectId: 'prj_1',
+          projectName: 'Ariadne',
+          title: '暂搁需求',
+          role: 'worker',
+          reviewOf: null,
+          stage: 'idle',
+          completed: false,
+          attentionId: null,
+          liveCommand: null,
+          liveTail: null,
+          lastHeadline: null,
+          activeAt: NOW - 2 * MINUTE,
+        },
+        {
+          conversationId: 'thr_stopped_cross',
+          projectId: 'prj_2',
+          projectName: 'DouUI',
+          title: '已暂停的跨项目任务',
+          role: 'worker',
+          reviewOf: null,
+          stage: 'stopped',
+          completed: false,
+          attentionId: null,
+          liveCommand: null,
+          liveTail: null,
+          lastHeadline: null,
+          activeAt: NOW - 3 * MINUTE,
+        },
+        {
+          conversationId: 'thr_ci_one',
+          projectId: 'prj_1',
+          projectName: 'Ariadne',
+          title: '单条 CI 失败待重试',
+          role: 'worker',
+          reviewOf: null,
+          stage: 'review',
+          completed: false,
+          attentionId: null,
+          liveCommand: null,
+          liveTail: null,
+          lastHeadline: null,
+          activeAt: NOW - 4 * MINUTE,
+        },
+      ],
+      spans: [
+        {
+          id: 301,
+          conversationId: 'thr_wait',
+          projectId: 'prj_1',
+          stage: 'waiting',
+          occupiesSlot: false,
+          startedAt: NOW - 10 * MINUTE,
+          endedAt: null,
+          label: '等待构建镜像完成',
+          seqStart: 1,
+          seqEnd: null,
+        },
+        {
+          id: 302,
+          conversationId: 'thr_aside',
+          projectId: 'prj_1',
+          stage: 'aside',
+          occupiesSlot: false,
+          startedAt: NOW - 20 * MINUTE,
+          endedAt: null,
+          label: '等设计评审',
+          seqStart: 2,
+          seqEnd: null,
+        },
+        {
+          id: 303,
+          conversationId: 'thr_stopped_cross',
+          projectId: 'prj_2',
+          stage: 'halted',
+          occupiesSlot: false,
+          startedAt: NOW - 15 * MINUTE,
+          endedAt: null,
+          label: '手动暂停',
+          seqStart: 3,
+          seqEnd: null,
+        },
+        {
+          id: 304,
+          conversationId: 'thr_ci_one',
+          projectId: 'prj_1',
+          stage: 'halted',
+          occupiesSlot: false,
+          startedAt: NOW - 5 * MINUTE,
+          endedAt: null,
+          label: 'PR #276: proto',
+          seqStart: 4,
+          seqEnd: null,
+        },
+      ],
+      markers: [],
+      handoffs: [],
+    })
+
+    vi.spyOn(api, 'getPulse').mockResolvedValue(snap)
+    const wakeSpy = vi.spyOn(api, 'wakeNow').mockResolvedValue({} as never)
+    const asideSpy = vi.spyOn(api, 'endAside').mockResolvedValue({} as never)
+    const resumeSpy = vi.spyOn(api, 'resumeThread').mockResolvedValue({} as never)
+    const retrySpy = vi.spyOn(api, 'retryTurn').mockResolvedValue({} as never)
+
+    const wrapper = mountPulse('wide')
+    await flushPromises()
+    await nextTick()
+
+    // Worker timed wait detected from open waiting span with note.
+    await wrapper.get('[data-span-id="301"]').trigger('click')
+    await nextTick()
+    expect(wrapper.get('[data-pulse-wait-card]').text()).toContain('等待构建镜像完成')
+    await wrapper.get('[data-pulse-wake]').trigger('click')
+    await flushPromises()
+    expect(wakeSpy).toHaveBeenCalledWith('thr_wait')
+
+    // Worker set-aside detected before due from open aside span.
+    await wrapper.get('[data-span-id="302"]').trigger('click')
+    await nextTick()
+    expect(wrapper.get('[data-pulse-aside-card]').text()).toContain('等设计评审')
+    await wrapper.get('[data-pulse-end-aside]').trigger('click')
+    await flushPromises()
+    expect(asideSpy).toHaveBeenCalledWith('thr_aside')
+
+    // Cross-project stopped lane shows resume card even without local ThreadView/allNeedsMe entry.
+    await wrapper.get('[data-span-id="303"]').trigger('click')
+    await nextTick()
+    expect(wrapper.get('[data-pulse-stopped-card]').text()).toContain('手动暂停')
+    await wrapper.get('[data-pulse-resume]').trigger('click')
+    await flushPromises()
+    expect(resumeSpy).toHaveBeenCalledWith('thr_stopped_cross')
+
+    // Single failed CI check on a PR thread in review stage shows CI retry card.
+    await wrapper.get('[data-span-id="304"]').trigger('click')
+    await nextTick()
+    expect(wrapper.get('[data-pulse-retry-card]').text()).toContain('proto')
+    await wrapper.get('[data-pulse-retry]').trigger('click')
+    await flushPromises()
+    expect(retrySpy).toHaveBeenCalledWith('thr_ci_one')
+  })
+
+  test('narrow view shows active coordinator under active filter without rendering duplicate empty state', async () => {
+    const snap = makeSnapshot({
+      lanes: [
+        {
+          conversationId: 'crd_1',
+          projectId: 'prj_1',
+          projectName: 'Ariadne',
+          title: '协调器',
+          role: 'coordinator',
+          reviewOf: null,
+          stage: 'working',
+          completed: false,
+          attentionId: null,
+          liveCommand: null,
+          liveTail: null,
+          lastHeadline: '正在拆分计划节点',
+          activeAt: NOW - MINUTE,
+        },
+      ],
+      spans: [
+        {
+          id: 401,
+          conversationId: 'crd_1',
+          projectId: 'prj_1',
+          stage: 'working',
+          occupiesSlot: false,
+          startedAt: NOW - 5 * MINUTE,
+          endedAt: null,
+          label: '正在规划',
+          seqStart: 1,
+          seqEnd: null,
+        },
+      ],
+      markers: [],
+      handoffs: [],
+    })
+    vi.spyOn(api, 'getPulse').mockResolvedValue(snap)
+
+    const wrapper = mountPulse('narrow')
+    await flushPromises()
+    await nextTick()
+
+    await wrapper.get('[data-pulse-filter="active"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-lane-id="crd_1"]').exists()).toBe(true)
+    expect(wrapper.find('[data-pulse-inline-empty]').exists()).toBe(false)
+
+    await wrapper.get('[data-pulse-filter="needs"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-lane-id="crd_1"]').exists()).toBe(false)
+    expect(wrapper.find('[data-pulse-inline-empty]').exists()).toBe(true)
   })
 })

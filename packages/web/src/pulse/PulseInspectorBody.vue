@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {
   AttentionView,
+  ConversationView,
   LiveCommand,
   NeedsMeThreadSummary,
   PulseLane,
@@ -40,6 +41,7 @@ const props = defineProps<{
   nodeMeta: PulseNodeMeta | null
   reviewTarget: PulseLane | null
   liveCommand: LiveCommand | null
+  liveWait: ConversationView['wait']
 }>()
 
 const emit = defineEmits<{
@@ -94,28 +96,100 @@ const todoProgress = computed(() => {
   return `${progress.done} / ${progress.total}`
 })
 
+const openSpan = computed<PulseSpan | null>(
+  () => props.spans.findLast((span) => span.endedAt === null) ?? null,
+)
+
 const failedChecks = computed(() => props.thread?.pullRequest?.checks.failed ?? [])
 
 const stoppedInfo = computed(() => props.threadSummary?.stopped ?? null)
 
+const isStopped = computed(() => Boolean(stoppedInfo.value) || props.lane.stage === 'stopped')
+
+const stoppedTitle = computed(() => {
+  if (stoppedInfo.value) {
+    return t(
+      stoppedInfo.value.by === 'user' ? 'thread.stoppedByUser' : 'thread.stoppedByCoordinator',
+      { reason: stoppedInfo.value.reason },
+    )
+  }
+  return t('thread.stage.stopped')
+})
+
+const stoppedFallbackReason = computed(() => {
+  if (stoppedInfo.value) return null
+  if (openSpan.value?.stage === 'halted' && openSpan.value.label) return openSpan.value.label
+  return props.lane.lastHeadline
+})
+
 const showRetryCard = computed(
   () =>
     props.attentions.length === 0 &&
-    !stoppedInfo.value &&
+    !isStopped.value &&
     (props.lane.stage === 'halted' ||
       props.lane.stage === 'silent' ||
-      props.lane.stage === 'blocked'),
+      props.lane.stage === 'blocked' ||
+      (failedChecks.value.length > 0 &&
+        props.lane.stage !== 'working' &&
+        props.lane.stage !== 'queued' &&
+        props.lane.stage !== 'aside' &&
+        !props.lane.completed &&
+        openSpan.value?.stage !== 'aside')),
 )
 
+const retryDesc = computed(() => {
+  if (openSpan.value?.stage === 'halted' && openSpan.value.label) return openSpan.value.label
+  return props.lane.lastHeadline
+})
+
 const showWaitCard = computed(
-  () => props.attentions.length === 0 && !stoppedInfo.value && props.lane.stage === 'waiting',
+  () =>
+    props.attentions.length === 0 &&
+    !isStopped.value &&
+    !showRetryCard.value &&
+    (props.lane.stage === 'waiting' ||
+      Boolean(props.liveWait) ||
+      (openSpan.value?.stage === 'waiting' && Boolean(openSpan.value.label))),
+)
+
+const waitTitle = computed(() => {
+  if (props.liveWait?.until) {
+    const time = formatClockShort(
+      props.liveWait.until,
+      props.nowMs,
+      props.liveWait.until,
+      locale.value,
+    )
+    return t('wait.until', { time })
+  }
+  return t('pulse.inspector.waiting')
+})
+
+const waitNote = computed(
+  () =>
+    props.liveWait?.note ||
+    (openSpan.value?.stage === 'waiting' && openSpan.value.label ? openSpan.value.label : null),
 )
 
 const showAsideCard = computed(
   () =>
     props.attentions.length === 0 &&
-    !stoppedInfo.value &&
-    (props.lane.stage === 'aside' || Boolean(props.threadSummary?.aside?.due)),
+    !isStopped.value &&
+    props.lane.role !== 'coordinator' &&
+    (props.lane.stage === 'aside' ||
+      openSpan.value?.stage === 'aside' ||
+      Boolean(props.threadSummary?.aside)),
+)
+
+const asideTitle = computed(() =>
+  props.threadSummary?.aside?.due ? t('aside.due') : t('pulse.inspector.aside'),
+)
+
+const asideReason = computed(
+  () =>
+    props.threadSummary?.aside?.reason ||
+    (openSpan.value?.stage === 'aside' && openSpan.value.label ? openSpan.value.label : null) ||
+    props.lane.lastHeadline,
 )
 
 const liveCmdText = computed(() => {
@@ -230,15 +304,12 @@ function handleCancelWait() {
     </div>
 
     <!-- Stopped thread -->
-    <div v-if="stoppedInfo" class="pulse-card is-warning" data-pulse-stopped-card>
+    <div v-if="isStopped" class="pulse-card is-warning" data-pulse-stopped-card>
       <div class="pulse-card-head">
         <span class="pulse-dot is-warning" aria-hidden="true" />
-        <span class="pulse-card-title">{{
-          t(stoppedInfo.by === 'user' ? 'thread.stoppedByUser' : 'thread.stoppedByCoordinator', {
-            reason: stoppedInfo.reason,
-          })
-        }}</span>
+        <span class="pulse-card-title">{{ stoppedTitle }}</span>
       </div>
+      <div v-if="stoppedFallbackReason" class="pulse-card-desc">{{ stoppedFallbackReason }}</div>
       <div class="pulse-card-actions">
         <DouButton
           size="sm"
@@ -253,7 +324,7 @@ function handleCancelWait() {
       </div>
     </div>
 
-    <!-- Blocked / halted / silent retry card -->
+    <!-- Blocked / halted / silent / CI failed retry card -->
     <div v-if="showRetryCard" class="pulse-card is-danger" data-pulse-retry-card>
       <div class="pulse-card-head">
         <span class="pulse-dot is-danger" aria-hidden="true" />
@@ -268,7 +339,7 @@ function handleCancelWait() {
           {{ check }}
         </li>
       </ul>
-      <div v-if="lane.lastHeadline" class="pulse-card-desc">{{ lane.lastHeadline }}</div>
+      <div v-if="retryDesc" class="pulse-card-desc">{{ retryDesc }}</div>
       <div class="pulse-card-actions">
         <DouButton
           size="sm"
@@ -287,9 +358,9 @@ function handleCancelWait() {
     <div v-if="showWaitCard" class="pulse-card" data-pulse-wait-card>
       <div class="pulse-card-head">
         <span class="pulse-dot is-neutral" aria-hidden="true" />
-        <span class="pulse-card-title">{{ t('pulse.inspector.waiting') }}</span>
+        <span class="pulse-card-title">{{ waitTitle }}</span>
       </div>
-      <div v-if="lane.lastHeadline" class="pulse-card-desc">{{ lane.lastHeadline }}</div>
+      <div v-if="waitNote" class="pulse-card-desc">{{ waitNote }}</div>
       <div class="pulse-card-actions">
         <DouButton
           size="sm"
@@ -316,10 +387,10 @@ function handleCancelWait() {
     <div v-if="showAsideCard" class="pulse-card" data-pulse-aside-card>
       <div class="pulse-card-head">
         <span class="pulse-dot is-neutral" aria-hidden="true" />
-        <span class="pulse-card-title">{{ t('pulse.inspector.aside') }}</span>
+        <span class="pulse-card-title">{{ asideTitle }}</span>
       </div>
-      <div v-if="threadSummary?.aside?.reason || lane.lastHeadline" class="pulse-card-desc">
-        {{ threadSummary?.aside?.reason || lane.lastHeadline }}
+      <div v-if="asideReason" class="pulse-card-desc">
+        {{ asideReason }}
       </div>
       <div class="pulse-card-actions">
         <DouButton

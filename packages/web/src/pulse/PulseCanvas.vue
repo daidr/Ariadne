@@ -289,7 +289,10 @@ function laneAlertBadge(lane: PulseLane): { tone: 'warning' | 'danger'; text: st
     const since = openSpan?.startedAt ?? lane.activeAt
     return { tone: 'warning', text: formatDurationCompact(Math.max(0, props.nowMs - since)) }
   }
-  if (lane.stage === 'blocked' || lane.stage === 'halted') {
+  if (lane.stage === 'stopped') {
+    return { tone: 'warning', text: t('thread.stage.stopped') }
+  }
+  if (lane.stage === 'blocked' || lane.stage === 'halted' || lane.stage === 'silent') {
     const failures = props.threads.get(lane.conversationId)?.pullRequest?.checks.failed.length ?? 0
     return { tone: 'danger', text: failures > 0 ? `×${failures}` : '!' }
   }
@@ -302,8 +305,8 @@ function laneRowClasses(row: PulseLaneRow): Record<string, boolean> {
     'is-compact': isCompact.value,
     'is-coordinator': lane.role === 'coordinator',
     'is-nested': nested,
-    'is-needs-me': lane.stage === 'answer' || lane.attentionId !== null,
-    'is-blocked': lane.stage === 'blocked' || lane.stage === 'halted',
+    'is-needs-me': lane.stage === 'answer' || lane.stage === 'stopped' || lane.attentionId !== null,
+    'is-blocked': lane.stage === 'blocked' || lane.stage === 'halted' || lane.stage === 'silent',
     'is-selected': props.selectedLaneId === lane.conversationId,
   }
 }

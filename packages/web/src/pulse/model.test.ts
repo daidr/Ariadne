@@ -18,13 +18,16 @@ import {
   computeLiveViewport,
   filterAndPartitionLanes,
   formatDurationCompact,
+  isNeedsLane,
   isPulseRelevantEvent,
+  laneStatusDotClass,
   MAX_RETENTION_MS,
   MAX_VIEW_SPAN_MS,
   MIN_VIEW_SPAN_MS,
   needsRefetch,
   panViewport,
   resolveLaneAttentions,
+  resolveLaneThreadSummary,
   resolveSpanVisualKind,
   WINDOW_DURATION_MS,
   zoomViewport,
@@ -384,10 +387,97 @@ describe('buildConcurrencyBars and axis ticks', () => {
       ['thr_cur_author', false],
       ['thr_cur_rev', true],
     ])
+    // In cross-project scope, counts include coordinators rendered inside project groups.
+    expect(all.counts).toEqual({ all: 6, needs: 1, active: 3, completed: 0 })
 
     const needsOnly = filterAndPartitionLanes(lanes, 'needs', 'stage', new Map(), 'all', 'prj_cur')
     expect(needsOnly.groups.map((g) => g.key)).toEqual(['project:prj_other'])
     expect(needsOnly.groups[0]!.rows.map((r) => r.lane.conversationId)).toEqual(['thr_other_needs'])
+  })
+
+  test('classifies silent and stopped lanes as needing attention with distinct dots', () => {
+    const silent = lane({ conversationId: 'thr_silent', stage: 'silent' })
+    const stopped = lane({ conversationId: 'thr_stopped', stage: 'stopped' })
+    const haltedCoord = lane({
+      conversationId: 'crd_err',
+      role: 'coordinator',
+      stage: 'halted',
+    })
+
+    expect(isNeedsLane(silent)).toBe(true)
+    expect(isNeedsLane(stopped)).toBe(true)
+    expect(isNeedsLane(haltedCoord)).toBe(true)
+
+    expect(laneStatusDotClass(silent)).toBe('is-danger')
+    expect(laneStatusDotClass(stopped)).toBe('is-warning')
+    expect(laneStatusDotClass(haltedCoord)).toBe('is-danger')
+  })
+
+  test('resolveLaneAttentions and resolveLaneThreadSummary ignore stale allNeedsMe for current project', () => {
+    const staleAtt = {
+      id: 'att_answered',
+      conversationId: 'thr_1',
+      block: { type: 'confirm', title: '已回答的问题', prompt: '' },
+    } as unknown as AttentionView
+
+    const allNeedsMe: AllNeedsMeResult = {
+      items: [
+        {
+          projectId: 'prj_1',
+          projectName: 'Ariadne',
+          at: NOW,
+          item: {
+            kind: 'attention',
+            attention: staleAtt,
+            threadId: 'thr_1',
+            joinedIds: [],
+          },
+        },
+      ],
+      threads: {
+        thr_1: {
+          id: 'thr_1',
+          projectId: 'prj_1',
+          title: '旧线程',
+          stage: 'stopped',
+          lastHeadline: null,
+          lastArtifacts: [],
+          aside: null,
+          review: null,
+          stopped: { reason: 'stale', by: 'user', at: NOW },
+          autopilotHeld: null,
+        },
+      },
+    }
+
+    // Current project has an authoritative empty needsMe list: must not resurrect stale allNeedsMe.
+    expect(
+      resolveLaneAttentions(
+        { conversationId: 'thr_1', projectId: 'prj_1', role: 'worker', attentionId: null },
+        'prj_1',
+        [],
+        allNeedsMe,
+      ),
+    ).toEqual([])
+
+    expect(
+      resolveLaneThreadSummary(
+        { conversationId: 'thr_1', projectId: 'prj_1', role: 'worker' },
+        'prj_1',
+        new Map(),
+        allNeedsMe,
+      ),
+    ).toBeNull()
+
+    // Cross-project lanes still resolve from allNeedsMe.
+    expect(
+      resolveLaneThreadSummary(
+        { conversationId: 'thr_1', projectId: 'prj_1', role: 'worker' },
+        'prj_other',
+        new Map(),
+        allNeedsMe,
+      )?.stopped?.reason,
+    ).toBe('stale')
   })
 
   test('resolveLaneAttentions matches current and cross-project attentions without duplicates', () => {

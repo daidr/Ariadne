@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import type { PulseLane, PulseMarker, PulseSnapshot, PulseSpan } from '@ariadne/core'
+import type {
+  ConversationView,
+  PulseLane,
+  PulseMarker,
+  PulseSnapshot,
+  PulseSpan,
+} from '@ariadne/core'
 import { DouAlert, DouButton, DouEmpty, DouSpinner } from 'dou-ui'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiError } from '../api'
@@ -30,6 +36,8 @@ import {
   computeFetchBounds,
   computeLiveViewport,
   filterAndPartitionLanes,
+  isActiveLane,
+  isNeedsLane,
   isPulseRelevantEvent,
   needsRefetch,
   panViewport,
@@ -107,7 +115,6 @@ const viewport = ref<PulseViewport>(computeLiveViewport(nowMs.value, WINDOW_DURA
 const snapshot = shallowRef<PulseSnapshot | null>(null)
 const loading = ref(true)
 const problem = ref<string | null>(null)
-const allNeedsMeLoading = ref(false)
 
 let fetchedFrom = 0
 let fetchedTo = 0
@@ -224,7 +231,7 @@ const selectedAttentionsLoading = computed(() =>
     selectedLane.value &&
     (selectedLane.value.attentionId !== null || selectedLane.value.stage === 'answer') &&
     selectedAttentions.value.length === 0 &&
-    allNeedsMeLoading.value,
+    state.allNeedsMeLoading,
   ),
 )
 
@@ -236,7 +243,12 @@ const selectedThread = computed(() => {
 
 const selectedThreadSummary = computed(() =>
   selectedLane.value
-    ? resolveLaneThreadSummary(selectedLane.value, threadsById.value, state.allNeedsMe)
+    ? resolveLaneThreadSummary(
+        selectedLane.value,
+        state.currentId,
+        threadsById.value,
+        state.allNeedsMe,
+      )
     : null,
 )
 
@@ -256,14 +268,39 @@ const selectedLiveCommand = computed(() =>
   selectedLane.value ? (state.live[selectedLane.value.conversationId] ?? null) : null,
 )
 
+const liveWaits = computed(() => {
+  const map = new Map<string, NonNullable<ConversationView['wait']>>()
+  const coordConv = state.coordinator.conversation
+  if (coordConv?.wait) map.set(coordConv.id, coordConv.wait)
+  for (const [id, entry] of Object.entries(state.threads)) {
+    if (entry.conversation?.wait) map.set(id, entry.conversation.wait)
+  }
+  return map
+})
+
+const selectedLiveWait = computed<ConversationView['wait']>(() =>
+  selectedLane.value ? (liveWaits.value.get(selectedLane.value.conversationId) ?? null) : null,
+)
+
 const emptyWindow = computed(() => {
   const data = snapshot.value
   if (!data) return false
   return data.lanes.length === 0 && data.spans.length === 0
 })
 
+const coordinatorMatchesFilter = computed(() => {
+  const coord = partitioned.value.coordinator
+  if (!coord) return false
+  if (filter.value === 'all') return true
+  if (filter.value === 'needs') return isNeedsLane(coord)
+  return isActiveLane(coord)
+})
+
 const showFilteredEmpty = computed(
-  () => filter.value !== 'all' && partitioned.value.groups.length === 0,
+  () =>
+    filter.value !== 'all' &&
+    partitioned.value.groups.length === 0 &&
+    !coordinatorMatchesFilter.value,
 )
 
 const showQuietWindowHint = computed(
@@ -277,13 +314,10 @@ const showQuietWindowHint = computed(
 const emptyConcurrency = { slots: 0, current: 0, peak: 0, points: [] }
 
 async function syncAllNeedsMe() {
-  allNeedsMeLoading.value = true
   try {
     await refreshAllNeedsMe()
   } catch {
     // Store reports or will refresh on the next event.
-  } finally {
-    allNeedsMeLoading.value = false
   }
 }
 
@@ -453,7 +487,12 @@ function handleSelect(laneId: string, spanId: number | null) {
   selectedLaneId.value = laneId
   selectedSpanId.value = spanId
   const lane = snapshot.value?.lanes.find((item) => item.conversationId === laneId)
-  if (lane && lane.projectId !== state.currentId && !state.allNeedsMe) {
+  if (!lane || lane.projectId === state.currentId) return
+  const missingCrossAttention =
+    (lane.attentionId !== null || lane.stage === 'answer') &&
+    resolveLaneAttentions(lane, state.currentId, state.detail?.needsMe, state.allNeedsMe).length ===
+      0
+  if (!state.allNeedsMe || missingCrossAttention) {
     void syncAllNeedsMe()
   }
 }
@@ -648,6 +687,7 @@ onUnmounted(() => {
         :selected-lane-id="selectedLaneId"
         :threads="threadsById"
         :live-commands="state.live"
+        :live-waits="liveWaits"
         :current-project-id="state.currentId"
         :current-needs-me="state.detail?.needsMe"
         :all-needs-me="state.allNeedsMe"
@@ -723,6 +763,7 @@ onUnmounted(() => {
         :node-meta="selectedNodeMeta"
         :review-target="selectedReviewTarget"
         :live-command="selectedLiveCommand"
+        :live-wait="selectedLiveWait"
         @close="clearSelection"
         @open-lane="handleOpenLane"
         @open-diff="handleOpenDiff"

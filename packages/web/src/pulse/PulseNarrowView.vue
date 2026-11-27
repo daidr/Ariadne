@@ -2,6 +2,7 @@
 import type {
   AllNeedsMeResult,
   AttentionView,
+  ConversationView,
   LiveCommand,
   NeedsMeItem,
   PulseConcurrency,
@@ -24,11 +25,12 @@ import { computed, ref } from 'vue'
 import AskBlock from '../blocks/AskBlock.vue'
 import { locale, t } from '../i18n'
 import { branchChanges } from '../review/merge-offered'
-import { endAside, resumeThread, retryTurn } from '../store'
+import { endAside, endWait, resumeThread, retryTurn } from '../store'
 import {
   countLiveSlotOccupancy,
   formatClockShort,
   formatDurationCompact,
+  isActiveLane,
   isNeedsLane,
   laneStatusDotClass,
   liveCommandLabel,
@@ -61,6 +63,7 @@ const props = defineProps<{
   selectedLaneId: string | null
   threads: ReadonlyMap<string, ThreadView>
   liveCommands: Readonly<Record<string, LiveCommand>>
+  liveWaits?: ReadonlyMap<string, NonNullable<ConversationView['wait']>>
   currentProjectId: string | null
   currentNeedsMe: readonly NeedsMeItem[] | undefined
   allNeedsMe: AllNeedsMeResult | null | undefined
@@ -81,7 +84,8 @@ const filter = defineModel<PulseFilter>('filter', { required: true })
 const windowKey = defineModel<PulseWindowKey>('windowKey', { required: true })
 const showCompleted = defineModel<boolean>('showCompleted', { required: true })
 
-const actingLaneId = ref<string | null>(null)
+type CardActionKind = 'resume' | 'retry' | 'aside' | 'wake' | 'cancelWait'
+const acting = ref<{ laneId: string; kind: CardActionKind } | null>(null)
 
 const scopeOptions = computed(() => [
   { value: 'project' satisfies PulseScope, label: t('pulse.scope.project') },
@@ -166,6 +170,11 @@ function latestSpanOf(lane: PulseLane): PulseSpan | null {
   return list.at(-1) ?? null
 }
 
+function openSpanOf(lane: PulseLane): PulseSpan | null {
+  const list = props.spansByConversation.get(lane.conversationId) ?? []
+  return list.findLast((span) => span.endedAt === null) ?? null
+}
+
 function laneStageSummary(lane: PulseLane): { label: string; duration: string | null } {
   const liveCmd = liveCommandLabel(lane, props.liveCommands, 44)
   const latest = latestSpanOf(lane)
@@ -198,7 +207,10 @@ function laneBadge(
     const since = latest?.endedAt === null ? latest.startedAt : lane.activeAt
     return { tone: 'warning', text: formatDurationCompact(Math.max(0, props.nowMs - since)) }
   }
-  if (lane.stage === 'blocked' || lane.stage === 'halted') {
+  if (lane.stage === 'stopped') {
+    return { tone: 'warning', text: t('thread.stage.stopped') }
+  }
+  if (lane.stage === 'blocked' || lane.stage === 'halted' || lane.stage === 'silent') {
     const failures = props.threads.get(lane.conversationId)?.pullRequest?.checks.failed.length ?? 0
     return { tone: 'danger', text: failures > 0 ? `×${failures}` : '!' }
   }
@@ -239,7 +251,45 @@ function laneAttentions(lane: PulseLane): AttentionView[] {
 }
 
 function laneSummary(lane: PulseLane) {
-  return resolveLaneThreadSummary(lane, props.threads, props.allNeedsMe)
+  return resolveLaneThreadSummary(lane, props.currentProjectId, props.threads, props.allNeedsMe)
+}
+
+function isLaneStopped(lane: PulseLane): boolean {
+  return Boolean(laneSummary(lane)?.stopped) || lane.stage === 'stopped'
+}
+
+function needsLaneRetry(lane: PulseLane): boolean {
+  if (isLaneStopped(lane)) return false
+  if (lane.stage === 'halted' || lane.stage === 'silent' || lane.stage === 'blocked') return true
+  const failed = props.threads.get(lane.conversationId)?.pullRequest?.checks.failed.length ?? 0
+  return (
+    failed > 0 &&
+    lane.stage !== 'working' &&
+    lane.stage !== 'queued' &&
+    lane.stage !== 'aside' &&
+    !lane.completed &&
+    openSpanOf(lane)?.stage !== 'aside'
+  )
+}
+
+function isLaneWaiting(lane: PulseLane): boolean {
+  if (isLaneStopped(lane) || needsLaneRetry(lane)) return false
+  if (lane.stage === 'waiting' || props.liveWaits?.has(lane.conversationId)) return true
+  const open = openSpanOf(lane)
+  return open?.stage === 'waiting' && Boolean(open.label)
+}
+
+function isLaneAside(lane: PulseLane): boolean {
+  if (lane.role === 'coordinator' || isLaneStopped(lane)) return false
+  return (
+    lane.stage === 'aside' ||
+    openSpanOf(lane)?.stage === 'aside' ||
+    Boolean(laneSummary(lane)?.aside)
+  )
+}
+
+function isCardActing(laneId: string, kind: CardActionKind): boolean {
+  return acting.value?.laneId === laneId && acting.value?.kind === kind
 }
 
 function groupHeaderTitle(group: PulseLaneGroup): string {
@@ -276,26 +326,36 @@ function feedText(item: PulseFeedItem): string {
   return title
 }
 
-async function runCardAction(laneId: string, fn: () => Promise<unknown>) {
-  if (actingLaneId.value) return
-  actingLaneId.value = laneId
+async function runCardAction(laneId: string, kind: CardActionKind, fn: () => Promise<unknown>) {
+  if (acting.value) return
+  acting.value = { laneId, kind }
   try {
     await fn()
     emit('mutated')
   } finally {
-    actingLaneId.value = null
+    acting.value = null
   }
 }
 
-const showCardsEmpty = computed(
-  () =>
-    props.partitioned.groups.length === 0 &&
-    !props.partitioned.coordinator &&
-    props.partitioned.completed.length === 0,
-)
+const showCoordinatorCard = computed(() => {
+  const coord = props.partitioned.coordinator
+  if (!coord) return false
+  if (filter.value === 'all') return true
+  if (filter.value === 'needs') return isNeedsLane(coord)
+  return isActiveLane(coord)
+})
 
 const showFilteredEmpty = computed(
-  () => filter.value !== 'all' && props.partitioned.groups.length === 0,
+  () =>
+    filter.value !== 'all' && props.partitioned.groups.length === 0 && !showCoordinatorCard.value,
+)
+
+const showCardsEmpty = computed(
+  () =>
+    filter.value === 'all' &&
+    props.partitioned.groups.length === 0 &&
+    props.partitioned.completed.length === 0 &&
+    (!showCoordinatorCard.value || props.allSpans.length === 0),
 )
 </script>
 
@@ -394,18 +454,17 @@ const showFilteredEmpty = computed(
     <div v-if="tab === 'cards'" class="pulse-narrow-scroll" data-pulse-narrow-cards>
       <!-- Pinned coordinator card in single-project mode -->
       <article
-        v-if="
-          partitioned.coordinator &&
-          (filter === 'all' || (filter === 'needs' && isNeedsLane(partitioned.coordinator)))
-        "
+        v-if="showCoordinatorCard && partitioned.coordinator"
         class="pulse-card-item is-coordinator"
         :class="{
           'is-needs':
             partitioned.coordinator.stage === 'answer' ||
             partitioned.coordinator.attentionId !== null,
+          'is-blocked': partitioned.coordinator.stage === 'halted',
           'is-selected': selectedLaneId === partitioned.coordinator.conversationId,
         }"
         :data-lane-id="partitioned.coordinator.conversationId"
+        :data-lane-needs="isNeedsLane(partitioned.coordinator) ? 'true' : undefined"
         @click="emit('select', partitioned.coordinator.conversationId, null)"
       >
         <div class="pulse-card-head">
@@ -421,6 +480,13 @@ const showFilteredEmpty = computed(
           >
             {{ laneTitle(partitioned.coordinator) }}
           </button>
+          <span
+            v-if="laneBadge(partitioned.coordinator)"
+            class="pulse-badge pulse-mono"
+            :class="`is-${laneBadge(partitioned.coordinator)!.tone}`"
+          >
+            {{ laneBadge(partitioned.coordinator)!.text }}
+          </span>
         </div>
         <div class="pulse-mini-strip" aria-hidden="true">
           <div
@@ -444,6 +510,15 @@ const showFilteredEmpty = computed(
           <span v-if="laneStageSummary(partitioned.coordinator).duration" class="pulse-mono">
             {{ laneStageSummary(partitioned.coordinator).duration }}
           </span>
+        </div>
+        <div
+          v-if="
+            partitioned.coordinator.lastHeadline &&
+            !liveCommandLabel(partitioned.coordinator, liveCommands)
+          "
+          class="pulse-card-headline"
+        >
+          {{ partitioned.coordinator.lastHeadline }}
         </div>
         <div
           v-if="laneAttentions(partitioned.coordinator).length"
@@ -470,6 +545,67 @@ const showFilteredEmpty = computed(
               />
             </div>
           </template>
+        </div>
+        <div
+          v-else-if="needsLaneRetry(partitioned.coordinator)"
+          class="pulse-card-quick-row"
+          @click.stop
+        >
+          <DouButton
+            size="sm"
+            variant="outline"
+            data-pulse-retry
+            :loading="isCardActing(partitioned.coordinator.conversationId, 'retry')"
+            @click="
+              runCardAction(partitioned.coordinator.conversationId, 'retry', () =>
+                retryTurn(partitioned.coordinator!.conversationId),
+              )
+            "
+          >
+            <template #leading><RotateCwIcon aria-hidden="true" /></template>
+            {{ t('conversation.retry') }}
+          </DouButton>
+          <DouButton
+            size="sm"
+            variant="ghost"
+            data-pulse-open-trace
+            @click="emit('openTrace', partitioned.coordinator)"
+          >
+            <template #leading><ListTreeIcon aria-hidden="true" /></template>
+            {{ t('pulse.inspector.openTrace') }}
+          </DouButton>
+        </div>
+        <div
+          v-else-if="isLaneWaiting(partitioned.coordinator)"
+          class="pulse-card-quick-row"
+          @click.stop
+        >
+          <DouButton
+            size="sm"
+            variant="outline"
+            data-pulse-wake
+            :loading="isCardActing(partitioned.coordinator.conversationId, 'wake')"
+            @click="
+              runCardAction(partitioned.coordinator.conversationId, 'wake', () =>
+                endWait(partitioned.coordinator!.conversationId, 'now'),
+              )
+            "
+          >
+            {{ t('wait.now') }}
+          </DouButton>
+          <DouButton
+            size="sm"
+            variant="ghost"
+            data-pulse-cancel-wait
+            :loading="isCardActing(partitioned.coordinator.conversationId, 'cancelWait')"
+            @click="
+              runCardAction(partitioned.coordinator.conversationId, 'cancelWait', () =>
+                endWait(partitioned.coordinator!.conversationId, 'cancel'),
+              )
+            "
+          >
+            {{ t('wait.cancel') }}
+          </DouButton>
         </div>
       </article>
 
@@ -512,8 +648,14 @@ const showFilteredEmpty = computed(
           class="pulse-card-item"
           :class="{
             'is-coordinator': row.lane.role === 'coordinator',
-            'is-needs': row.lane.stage === 'answer' || row.lane.attentionId !== null,
-            'is-blocked': row.lane.stage === 'blocked' || row.lane.stage === 'halted',
+            'is-needs':
+              row.lane.stage === 'answer' ||
+              row.lane.stage === 'stopped' ||
+              row.lane.attentionId !== null,
+            'is-blocked':
+              row.lane.stage === 'blocked' ||
+              row.lane.stage === 'halted' ||
+              row.lane.stage === 'silent',
             'is-selected': selectedLaneId === row.lane.conversationId,
           }"
           :data-lane-id="row.lane.conversationId"
@@ -604,36 +746,33 @@ const showFilteredEmpty = computed(
             </template>
           </div>
 
-          <!-- Quick retry / resume / aside action row -->
-          <div v-else-if="laneSummary(row.lane)?.stopped" class="pulse-card-quick-row" @click.stop>
+          <!-- Quick retry / resume / wait / aside action row -->
+          <div v-else-if="isLaneStopped(row.lane)" class="pulse-card-quick-row" @click.stop>
             <DouButton
               size="sm"
               variant="outline"
-              :loading="actingLaneId === row.lane.conversationId"
+              data-pulse-resume
+              :loading="isCardActing(row.lane.conversationId, 'resume')"
               @click="
-                runCardAction(row.lane.conversationId, () => resumeThread(row.lane.conversationId))
+                runCardAction(row.lane.conversationId, 'resume', () =>
+                  resumeThread(row.lane.conversationId),
+                )
               "
             >
               <template #leading><PlayIcon aria-hidden="true" /></template>
               {{ t('thread.resume') }}
             </DouButton>
           </div>
-          <div
-            v-else-if="
-              row.lane.stage === 'halted' ||
-              row.lane.stage === 'silent' ||
-              row.lane.stage === 'blocked'
-            "
-            class="pulse-card-quick-row"
-            @click.stop
-          >
+          <div v-else-if="needsLaneRetry(row.lane)" class="pulse-card-quick-row" @click.stop>
             <DouButton
               size="sm"
               variant="outline"
               data-pulse-retry
-              :loading="actingLaneId === row.lane.conversationId"
+              :loading="isCardActing(row.lane.conversationId, 'retry')"
               @click="
-                runCardAction(row.lane.conversationId, () => retryTurn(row.lane.conversationId))
+                runCardAction(row.lane.conversationId, 'retry', () =>
+                  retryTurn(row.lane.conversationId),
+                )
               "
             >
               <template #leading><RotateCwIcon aria-hidden="true" /></template>
@@ -649,17 +788,44 @@ const showFilteredEmpty = computed(
               {{ t('pulse.inspector.openTrace') }}
             </DouButton>
           </div>
-          <div
-            v-else-if="row.lane.stage === 'aside' || laneSummary(row.lane)?.aside?.due"
-            class="pulse-card-quick-row"
-            @click.stop
-          >
+          <div v-else-if="isLaneWaiting(row.lane)" class="pulse-card-quick-row" @click.stop>
             <DouButton
               size="sm"
               variant="outline"
-              :loading="actingLaneId === row.lane.conversationId"
+              data-pulse-wake
+              :loading="isCardActing(row.lane.conversationId, 'wake')"
               @click="
-                runCardAction(row.lane.conversationId, () => endAside(row.lane.conversationId))
+                runCardAction(row.lane.conversationId, 'wake', () =>
+                  endWait(row.lane.conversationId, 'now'),
+                )
+              "
+            >
+              {{ t('wait.now') }}
+            </DouButton>
+            <DouButton
+              size="sm"
+              variant="ghost"
+              data-pulse-cancel-wait
+              :loading="isCardActing(row.lane.conversationId, 'cancelWait')"
+              @click="
+                runCardAction(row.lane.conversationId, 'cancelWait', () =>
+                  endWait(row.lane.conversationId, 'cancel'),
+                )
+              "
+            >
+              {{ t('wait.cancel') }}
+            </DouButton>
+          </div>
+          <div v-else-if="isLaneAside(row.lane)" class="pulse-card-quick-row" @click.stop>
+            <DouButton
+              size="sm"
+              variant="outline"
+              data-pulse-end-aside
+              :loading="isCardActing(row.lane.conversationId, 'aside')"
+              @click="
+                runCardAction(row.lane.conversationId, 'aside', () =>
+                  endAside(row.lane.conversationId),
+                )
               "
             >
               {{ t('aside.done') }}
