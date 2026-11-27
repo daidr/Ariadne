@@ -17,6 +17,7 @@ import { douLocale, locale } from '../i18n'
 import * as store from '../store'
 import ArtifactGallery from './ArtifactGallery.vue'
 import ArtifactThumb from './ArtifactThumb.vue'
+import GalleryQuickPreview from './GalleryQuickPreview.vue'
 import { clearBoardThumbnails } from './board-thumbnail'
 import { formatGalleryUpdater, groupGalleryItems, resolveGalleryTimeBucket } from './gallery-groups'
 import { galleryState, resetGalleryStateForTests } from './gallery-state'
@@ -896,5 +897,92 @@ describe('ArtifactGallery interactions', () => {
 
     await card.trigger('keydown', { key: ' ' })
     expect(galleryState.quickViewId).toBe('art_doc')
+  })
+})
+
+describe('GalleryQuickPreview metadata rows', () => {
+  beforeEach(() => {
+    locale.value = 'zh-CN'
+    vi.spyOn(api, 'getArtifact').mockResolvedValue({
+      artifact: { ...makeItem('art_meta').artifact, content: '' },
+      versions: [],
+      comments: [],
+      nextVersionPageToken: '',
+      hasMoreVersions: false,
+      askBaseline: null,
+    })
+  })
+
+  afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
+    vi.restoreAllMocks()
+  })
+
+  test('marks every metadata label non-wrapping and preserves titles in both docked and drawer modes', async () => {
+    const longProject = 'Ariadne 跨项目协同工作台与多代理编排主仓库'
+    const longNode = '阶段二：跨项目产物画廊快速预览与元数据展示体验打磨'
+    const longUpdater = '方案调研与设计稿：全项目知识与产物画廊（Gallery）'
+    const item = makeItem('art_meta', {
+      projectName: longProject,
+      nodeTitle: longNode,
+      updatedByLabel: longUpdater,
+      openComments: 3,
+    })
+
+    const mountQuickPreview = (drawerMode: 'docked' | 'bottom') => {
+      const Host = defineComponent({
+        setup() {
+          return () =>
+            h(DouConfigProvider, { locale: douLocale.value }, () =>
+              h(GalleryQuickPreview, {
+                item,
+                open: true,
+                drawerMode,
+                hasPrev: false,
+                hasNext: false,
+              }),
+            )
+        },
+      })
+      const wrapper = mount(Host, { attachTo: document.body })
+      wrappers.push(wrapper)
+      return wrapper
+    }
+
+    // Docked mode: 4 metadata rows (project, planNode, updatedBy, updatedAt)
+    const docked = mountQuickPreview('docked')
+    await flushPromises()
+    const dockedRows = docked.findAll('aside.quick-pane .quick-meta-grid .meta-row')
+    expect(dockedRows).toHaveLength(4)
+    for (const row of dockedRows) {
+      expect(row.find('.meta-label').exists()).toBe(true)
+      const value = row.find('.meta-value')
+      expect(value.exists()).toBe(true)
+      expect(value.classes()).toContain('is-truncate')
+    }
+    expect(dockedRows[0]!.find('.meta-value').attributes('title')).toBe(longProject)
+    expect(dockedRows[1]!.find('.meta-value').attributes('title')).toBe(longNode)
+    expect(dockedRows[2]!.find('.meta-value').attributes('title')).toBe(longUpdater)
+    docked.unmount()
+
+    // Bottom drawer mode: 4 metadata rows (project, planNode, updatedBy + time, openComments)
+    const drawer = mountQuickPreview('bottom')
+    await flushPromises()
+    const drawerRows = [
+      ...document.body.querySelectorAll('.quick-sheet-body .quick-meta-grid .meta-row'),
+    ]
+    expect(drawerRows).toHaveLength(4)
+    for (const row of drawerRows) {
+      expect(row.querySelector('.meta-label')).not.toBeNull()
+      expect(row.querySelector('.meta-value')).not.toBeNull()
+    }
+    const updaterRow = drawerRows[2]!
+    expect(
+      updaterRow.querySelector('.meta-value-inline .meta-value-text')?.getAttribute('title'),
+    ).toBe(longUpdater)
+    expect(
+      updaterRow.querySelector('.meta-value-inline .meta-value-fixed')?.textContent?.trim(),
+    ).toBeTruthy()
+    drawer.unmount()
   })
 })
