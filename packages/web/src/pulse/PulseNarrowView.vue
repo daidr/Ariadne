@@ -1174,19 +1174,30 @@ const showCardsEmpty = computed(
 }
 
 .pulse-card-item.is-coordinator {
-  background: color-mix(in srgb, var(--dou-color-bg-muted) 35%, var(--dou-color-bg-surface));
+  --dou-card-bg: color-mix(in srgb, var(--dou-color-bg-muted) 35%, var(--dou-color-bg-surface));
 }
 
 .pulse-card-item.is-needs {
-  box-shadow: inset 3px 0 0 var(--dou-color-warning);
+  --dou-card-bg: color-mix(in oklab, var(--dou-color-warning) 4%, var(--dou-color-bg-surface));
+  --dou-card-border: color-mix(in oklab, var(--dou-color-warning) 26%, var(--dou-color-border));
+}
+
+.pulse-card-item.is-needs:hover {
+  --dou-card-border: color-mix(in oklab, var(--dou-color-warning) 42%, var(--dou-color-border));
 }
 
 .pulse-card-item.is-blocked {
-  box-shadow: inset 3px 0 0 var(--dou-color-danger);
+  --dou-card-bg: color-mix(in oklab, var(--dou-color-danger) 4%, var(--dou-color-bg-surface));
+  --dou-card-border: color-mix(in oklab, var(--dou-color-danger) 26%, var(--dou-color-border));
 }
 
-.pulse-card-item.is-selected {
-  border-color: var(--dou-color-primary);
+.pulse-card-item.is-blocked:hover {
+  --dou-card-border: color-mix(in oklab, var(--dou-color-danger) 42%, var(--dou-color-border));
+}
+
+.pulse-card-item.is-selected,
+.pulse-card-item.is-selected:hover {
+  --dou-card-border: var(--dou-color-primary);
 }
 
 .pulse-card-item.is-completed {

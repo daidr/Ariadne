@@ -1487,13 +1487,11 @@ onBeforeUnmount(() => {
 }
 
 .pulse-ribbon-bar.is-normal {
-  background: color-mix(in srgb, var(--dou-color-primary) 26%, transparent);
-  border-top: 1.5px solid color-mix(in srgb, var(--dou-color-primary) 68%, transparent);
+  background: color-mix(in srgb, var(--dou-color-primary) 34%, transparent);
 }
 
 .pulse-ribbon-bar.is-full {
-  background: color-mix(in srgb, var(--dou-color-warning) 30%, transparent);
-  border-top: 1.5px solid var(--dou-color-warning);
+  background: color-mix(in srgb, var(--dou-color-warning) 44%, transparent);
 }
 
 /* Axis Header: zero wrap, collision-free ticks & badges */
@@ -1770,6 +1768,22 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--dou-color-bg-muted) 40%, var(--dou-color-bg-surface));
 }
 
+.pulse-lane-row.is-needs-me .pulse-label-col {
+  background: color-mix(in oklab, var(--dou-color-warning) 4%, var(--dou-color-bg-surface));
+}
+
+.pulse-lane-row.is-needs-me .pulse-track-col {
+  background: color-mix(in oklab, var(--dou-color-warning) 3%, transparent);
+}
+
+.pulse-lane-row.is-blocked .pulse-label-col {
+  background: color-mix(in oklab, var(--dou-color-danger) 4%, var(--dou-color-bg-surface));
+}
+
+.pulse-lane-row.is-blocked .pulse-track-col {
+  background: color-mix(in oklab, var(--dou-color-danger) 3%, transparent);
+}
+
 .pulse-lane-row:hover .pulse-label-col,
 .pulse-lane-row:hover .pulse-track-col {
   background: color-mix(in srgb, var(--dou-color-bg-muted) 42%, transparent);
@@ -1778,14 +1792,6 @@ onBeforeUnmount(() => {
 .pulse-lane-row.is-selected .pulse-label-col,
 .pulse-lane-row.is-selected .pulse-track-col {
   background: var(--dou-color-primary-soft);
-}
-
-.pulse-lane-row.is-needs-me .pulse-label-col {
-  box-shadow: inset 3px 0 0 var(--dou-color-warning);
-}
-
-.pulse-lane-row.is-blocked .pulse-label-col {
-  box-shadow: inset 3px 0 0 var(--dou-color-danger);
 }
 
 .pulse-lane-row.is-completed {
