@@ -428,10 +428,7 @@ defineExpose({ save, dirty, reload })
   <div class="notif-settings">
     <template v-if="loaded">
       <div class="notif-master">
-        <div class="notif-heading">
-          <DouText weight="medium">{{ t('notifications.enabled') }}</DouText>
-          <DouText size="sm" variant="secondary">{{ t('notifications.enabledHint') }}</DouText>
-        </div>
+        <DouText weight="medium">{{ t('notifications.enabled') }}</DouText>
         <DouSwitch v-model="enabled" :aria-label="t('notifications.enabled')" />
       </div>
 
@@ -439,12 +436,9 @@ defineExpose({ save, dirty, reload })
       <section class="notif-section">
         <DouCard padding="sm">
           <div class="notif-card-head">
-            <div class="notif-heading">
-              <div class="notif-title-line">
-                <BellIcon class="notif-icon" />
-                <DouText weight="medium">{{ t('notifications.webPush.title') }}</DouText>
-              </div>
-              <DouText size="sm" variant="secondary">{{ t('notifications.webPush.hint') }}</DouText>
+            <div class="notif-title-line">
+              <BellIcon class="notif-icon" />
+              <DouText weight="medium">{{ t('notifications.webPush.title') }}</DouText>
             </div>
             <DouSwitch
               v-model="webPushEnabled"
@@ -556,12 +550,7 @@ defineExpose({ save, dirty, reload })
           />
 
           <div class="notif-local-fallback">
-            <div class="notif-heading">
-              <DouText size="sm">{{ t('notifications.browserLocal') }}</DouText>
-              <DouText size="sm" variant="secondary">
-                {{ t('notifications.browserLocalHint') }}
-              </DouText>
-            </div>
+            <DouText size="sm">{{ t('notifications.browserLocal') }}</DouText>
             <DouSwitch
               :model-value="browserNotifications.enabled"
               :disabled="
@@ -578,10 +567,7 @@ defineExpose({ save, dirty, reload })
       <!-- Channel 2: Generic Webhooks -->
       <section class="notif-section">
         <div class="notif-section-head">
-          <div class="notif-heading">
-            <DouText weight="medium">{{ t('notifications.webhook.title') }}</DouText>
-            <DouText size="sm" variant="secondary">{{ t('notifications.webhook.hint') }}</DouText>
-          </div>
+          <DouText weight="medium">{{ t('notifications.webhook.title') }}</DouText>
           <DouButton size="sm" variant="ghost" @click="addWebhook">
             <template #leading><PlusIcon /></template>
             {{ t('notifications.webhook.add') }}
@@ -668,10 +654,7 @@ defineExpose({ save, dirty, reload })
       <!-- Channel 3: Notifier Plugins (Lua / Built-in) -->
       <section class="notif-section">
         <div class="notif-section-head">
-          <div class="notif-heading">
-            <DouText weight="medium">{{ t('notifications.plugins.title') }}</DouText>
-            <DouText size="sm" variant="secondary">{{ t('notifications.plugins.hint') }}</DouText>
-          </div>
+          <DouText weight="medium">{{ t('notifications.plugins.title') }}</DouText>
           <DouButton size="sm" variant="ghost" @click="emit('openPlugins')">
             <template #leading><PlugIcon /></template>
             {{ t('notifications.plugins.openPlugins') }}
@@ -759,7 +742,7 @@ defineExpose({ save, dirty, reload })
 
 .notif-master {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
@@ -773,7 +756,7 @@ defineExpose({ save, dirty, reload })
 .notif-section-head,
 .notif-card-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }

@@ -105,6 +105,9 @@ describe('NotificationSettings component', () => {
     expect(wrapper.text()).toContain('HTTP 502')
     expect(wrapper.text()).toContain('飞书机器人')
     expect(wrapper.text()).toContain('已就绪')
+    expect(wrapper.text()).not.toContain('发往下方通道')
+    expect(wrapper.text()).not.toContain('HMAC-SHA256')
+    expect(wrapper.text()).not.toContain('通过 Lua 或内置插件扩展')
 
     // Clicking "测试发送" on webhook tests the live draft.
     const testButtons = wrapper.findAll('button').filter((btn) => btn.text().trim() === '测试发送')
