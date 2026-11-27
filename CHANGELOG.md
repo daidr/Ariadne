@@ -1,5 +1,12 @@
 # 更新日志
 
+## 0.1.0-alpha.27 (2026-11-27)
+
+- fix(web): 修复协作时间线拖动选中文字失效并收紧全站文字选中范围 (#284)
+- refactor(web): 清理产物画廊虚假快捷键提示与冗余说明文案 (#283)
+- chore(web): 升级 DouUI 至 0.1.0-alpha.31 (#281)
+- Merge pull request #279 from daidr/release/alpha
+
 ## 0.1.0-alpha.26 (2026-11-27)
 
 - feat(web): 精简顶栏，将产物画廊与协作时间线收纳至 Logo 菜单 (#280)
