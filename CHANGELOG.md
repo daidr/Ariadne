@@ -1,5 +1,12 @@
 # 更新日志
 
+## 0.1.0-alpha.26 (2026-11-27)
+
+- feat(web): 精简顶栏，将产物画廊与协作时间线收纳至 Logo 菜单 (#280)
+- refactor(pulse): 对齐 DouUI 组件并简化协作时间线 UI/UX (#277)
+- fix(web): 修复产物画廊速览信息面板左侧标签换行问题 (#278)
+- Merge pull request #266 from daidr/release/alpha
+
 ## 0.1.0-alpha.25 (2026-11-27)
 
 - feat(whiteboard): 支持画板与文档内嵌画板编辑颜色与无边框 (#276)
