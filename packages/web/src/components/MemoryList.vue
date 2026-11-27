@@ -144,6 +144,8 @@ async function save(id: string | null, text: string | null) {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .memory-actions {

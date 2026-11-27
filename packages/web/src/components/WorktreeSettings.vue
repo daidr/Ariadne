@@ -323,6 +323,8 @@ async function remove(projectId: string, worktree: ProjectWorktrees['worktrees']
   min-width: 0;
   font-family: var(--dou-font-family-mono);
   font-size: calc(var(--dou-font-size-sm) - 1px);
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .worktrees-list {
@@ -384,6 +386,8 @@ async function remove(projectId: string, worktree: ProjectWorktrees['worktrees']
   min-width: 0;
   font-family: var(--dou-font-family-mono);
   font-size: calc(var(--dou-font-size-sm) - 1px);
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .worktree-size {

@@ -167,19 +167,40 @@ const keyAt = (event: PointerEvent) =>
     ? event.target.closest<HTMLElement>('[data-key]')?.dataset.key
     : null) ?? null
 
+function clearTextSelection() {
+  const selection = typeof window !== 'undefined' ? window.getSelection() : null
+  if (selection && !selection.isCollapsed) {
+    selection.removeAllRanges()
+  }
+}
+
+function trySetPointerCapture(pointerId: number) {
+  try {
+    track.value?.setPointerCapture?.(pointerId)
+  } catch {
+    // Ignore synthetic pointers without capture support.
+  }
+}
+
 function onPointerDown(event: PointerEvent) {
   // Right button (or the middle one) drags the view along; left marks out a range.
   if (event.button === 2 || event.button === 1) {
+    event.preventDefault()
+    clearTextSelection()
+    track.value?.focus({ preventScroll: true })
     pan = { pointerId: event.pointerId, x: event.clientX, start: domain.value.start, moved: false }
     panning.value = true
-    track.value?.setPointerCapture(event.pointerId)
+    trySetPointerCapture(event.pointerId)
     return
   }
   if (event.button !== 0) return
+  event.preventDefault()
+  clearTextSelection()
+  track.value?.focus({ preventScroll: true })
   const at = timeAt(event.clientX)
   drag = { pointerId: event.pointerId, x: event.clientX, at, key: keyAt(event) }
   draft.value = { start: at, end: at }
-  track.value?.setPointerCapture(event.pointerId)
+  trySetPointerCapture(event.pointerId)
 }
 
 function draftTo(clientX: number) {
@@ -294,6 +315,9 @@ defineExpose({ reset })
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerCancel"
+      @lostpointercapture="onPointerCancel"
+      @dragstart.prevent
+      @selectstart.prevent
       @contextmenu.prevent
       @dblclick.prevent="reset"
       @keydown.esc.prevent="reset"

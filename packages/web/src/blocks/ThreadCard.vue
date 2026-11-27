@@ -93,6 +93,8 @@ const progress = computed(() =>
   color: var(--dou-color-text);
   font-size: var(--dou-font-size-sm);
   line-height: 20px;
+  user-select: none;
+  -webkit-user-select: none;
   transition:
     border-color var(--dou-motion-duration-fast) var(--dou-motion-easing),
     background-color var(--dou-motion-duration-fast) var(--dou-motion-easing);

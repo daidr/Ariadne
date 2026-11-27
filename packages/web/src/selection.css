@@ -1,0 +1,107 @@
+/*
+ * Desktop-client text selection policy.
+ *
+ * UI chrome (headers, sidebars, toolbars, lists, tabs, canvases, timelines, buttons, tags,
+ * menus, modals chrome) is non-selectable by default so clicking and dragging feel like a
+ * native desktop application rather than a document web page.
+ *
+ * Content surfaces, editable controls, code blocks, structured data values, and diagnostics
+ * explicitly opt back into text selection inside `@layer dou.base`, so `@layer dou.components`
+ * rules in dou-ui (buttons, line numbers, drag handles, table-drag locks, DouCodeEditor's
+ * custom selection surface) and component-scoped styles take precedence naturally.
+ */
+@layer dou.tokens, dou.base, dou.components;
+
+@layer dou.base {
+  html,
+  body {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Native editable controls. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='button']):not(
+      [type='submit']
+    ):not([type='reset']),
+  textarea,
+  [contenteditable=''],
+  [contenteditable='true'],
+  [contenteditable='plaintext-only'] {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Content surfaces: chat messages, markdown, rich documents, code blocks, comments,
+     table/pivot data cells, key-value values, timelines, alerts, toasts, and diagnostics. */
+  pre,
+  code,
+  [role='alert'],
+  .dou-chat-message__content,
+  .dou-markdown,
+  .dou-editor__surface,
+  .dou-code-block__body,
+  .dou-code-block__code,
+  .dou-comment-thread__body,
+  .dou-table__cell,
+  .dou-pivot__cell,
+  .dou-dashboard-text,
+  .dou-descriptions__content,
+  .dou-timeline__content,
+  .dou-timeline__title,
+  .dou-alert__title,
+  .dou-alert__description,
+  .dou-alert__content,
+  .dou-toast__title,
+  .dou-toast__message,
+  .dou-dialog-box__text,
+  .dou-dialog-box__error,
+  .dou-statistic__content,
+  .dou-chat-plan__text,
+  .dou-chat-plan__description,
+  .dou-chat-question__title,
+  .dou-chat-question__description,
+  .dou-chat-question__answer,
+  .dou-chat-confirm__title,
+  .dou-chat-confirm__description,
+  .dou-chat-confirm__detail {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Interactive controls inside selectable content surfaces stay non-selectable. */
+  button,
+  button *,
+  .dou-tag,
+  .dou-badge,
+  .dou-kbd,
+  .dou-tabs__tab,
+  .dou-menu__item,
+  .dou-chat-attachments,
+  .dou-chat-artifact,
+  .dou-chat-plan__header,
+  .dou-chat-message__files,
+  .dou-chat-message__status,
+  .dou-chat-message__loading,
+  .dou-chat-message__toolbar,
+  .dou-chat-message__actions,
+  .dou-chat-message__reactions,
+  .dou-chat-message__versions {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Opt-in helper for copyable app text outside shared dou-ui content containers. */
+  .ariadne-selectable {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+}
+
+/* Global lock while custom pointer drags (such as Gantt pan or column resize) are active,
+   matching dou-ui's dialog/drawer/tabs dragging guards so sweeping over selectable panels
+   never starts a text selection. */
+html[data-ariadne-dragging],
+html[data-ariadne-dragging] * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}

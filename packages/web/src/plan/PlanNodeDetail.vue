@@ -276,6 +276,8 @@ function linkedBy(by: string): string {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .node-detail-kind {
@@ -286,6 +288,8 @@ function linkedBy(by: string): string {
 .node-detail-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .node-detail-head .node-detail-text {

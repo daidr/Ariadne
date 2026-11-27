@@ -171,6 +171,8 @@ async function remove(name: string) {
 .data-path {
   overflow-wrap: anywhere;
   font-family: var(--dou-font-family-mono);
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .data-head {

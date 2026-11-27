@@ -376,6 +376,8 @@ function submit() {
   font-weight: var(--dou-font-weight-medium);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .ask-form.is-withdrawn .ask-form-title {
@@ -386,6 +388,8 @@ function submit() {
   color: var(--dou-color-text-secondary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .ask-form.is-withdrawn .ask-form-description {
@@ -438,6 +442,8 @@ function submit() {
   line-height: 20px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .ask-form-value.is-blank {
